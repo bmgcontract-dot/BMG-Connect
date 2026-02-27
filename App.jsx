@@ -26,12 +26,14 @@ let app, auth, db, appId;
 // 1. นำ Config จาก Firebase Console ของคุณมาวางที่นี่ (สำหรับการ Deploy บน GitHub Pages)
 // หากต้องการให้ข้อมูลออนไลน์แชร์กันทุกคน ไม่ว่าจะล็อกอินจากเครื่องไหน ต้องใช้ Firebase
 const MANUAL_FIREBASE_CONFIG = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+ 
+  apiKey: "AIzaSyAy03rxniCLFDYT4ztY_Ry2zh0ddzdBoPE",
+  authDomain: "bmg-connect-3e99a.firebaseapp.com",
+  projectId: "bmg-connect-3e99a",
+  storageBucket: "bmg-connect-3e99a.firebasestorage.app",
+  messagingSenderId: "707276998308",
+  appId: "1:707276998308:web:1a5364f7a94cfe06c08831",
+  measurementId: "G-4B69L2731M"
 };
 
 try {
