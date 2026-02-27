@@ -22,12 +22,37 @@ import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 
 // --- Firebase Initialization ---
 let app, auth, db, appId;
+
+// 1. นำ Config จาก Firebase Console ของคุณมาวางที่นี่ (สำหรับการ Deploy บน GitHub Pages)
+// หากต้องการให้ข้อมูลออนไลน์แชร์กันทุกคน ไม่ว่าจะล็อกอินจากเครื่องไหน ต้องใช้ Firebase
+const MANUAL_FIREBASE_CONFIG = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_AUTH_DOMAIN",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_STORAGE_BUCKET",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+
 try {
-  const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-  app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app);
-  appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+  let firebaseConfig = null;
+  
+  // ตรวจสอบว่ารันอยู่ใน Canvas หรือรันผ่าน GitHub Pages
+  if (typeof __firebase_config !== 'undefined') {
+     firebaseConfig = JSON.parse(__firebase_config);
+     appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+  } else if (MANUAL_FIREBASE_CONFIG.apiKey && MANUAL_FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY") {
+     firebaseConfig = MANUAL_FIREBASE_CONFIG;
+     appId = "bmg-app-prod"; // ใช้ ID คงที่สำหรับ Production
+  }
+
+  if (firebaseConfig) {
+      app = initializeApp(firebaseConfig);
+      auth = getAuth(app);
+      db = getFirestore(app);
+  } else {
+      console.warn("ไม่พบ Firebase Config: ระบบจะสลับไปใช้ Local Storage (บันทึกข้อมูลเฉพาะในเครื่องนี้เท่านั้น)");
+  }
 } catch (e) {
   console.error("Firebase init failed", e);
 }
@@ -1181,13 +1206,23 @@ const getAllFilesLocally = async () => {
     }
 };
 
-// --- Custom Hook for Persistent Storage (Firebase) ---
+// --- Custom Hook for Persistent Storage (Firebase or LocalStorage Fallback) ---
 function usePersistentState(key, initialValue, fbUser) {
-  const [state, setState] = useState(initialValue);
+  const [state, setState] = useState(() => {
+      // ดึงข้อมูลจาก LocalStorage มาก่อนในกรณีที่ไม่ได้ต่อ Firebase
+      if (!db && typeof window !== 'undefined') {
+          const local = localStorage.getItem(key);
+          if (local) {
+              try { return JSON.parse(local); } catch(e) { return initialValue; }
+          }
+      }
+      return initialValue;
+  });
   const [isSynced, setIsSynced] = useState(false);
 
   useEffect(() => {
-    if (!fbUser || !db || !appId) return;
+    if (!db) return; // ถ้าระบบไม่ได้ต่อ Firebase จะทำงานในโหมด LocalStorage ไป
+    if (!fbUser || !appId) return;
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
     
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
@@ -1196,7 +1231,7 @@ function usePersistentState(key, initialValue, fbUser) {
           setState(JSON.parse(docSnap.data().value));
         } catch(e) { console.error("Parse error", key, e); }
       } else if (!isSynced) {
-        setDoc(docRef, { value: JSON.stringify(initialValue) }).catch(console.error);
+        setDoc(docRef, { value: JSON.stringify(state) }).catch(console.error);
       }
       setIsSynced(true);
     }, (err) => {
@@ -1209,9 +1244,11 @@ function usePersistentState(key, initialValue, fbUser) {
   const setPersistentValue = (newValue) => {
     const valueToStore = typeof newValue === 'function' ? newValue(state) : newValue;
     setState(valueToStore);
-    if (fbUser && db && appId) {
+    if (db && fbUser && appId) {
        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
        setDoc(docRef, { value: JSON.stringify(valueToStore) }).catch(console.error);
+    } else if (!db && typeof window !== 'undefined') {
+       localStorage.setItem(key, JSON.stringify(valueToStore));
     }
   };
 
@@ -1220,11 +1257,20 @@ function usePersistentState(key, initialValue, fbUser) {
 
 // --- NEW: Custom Hook for User Specific Persistent Storage (Theme, UI settings) ---
 function useUserPersistentState(key, initialValue, fbUser) {
-  const [state, setState] = useState(initialValue);
+  const [state, setState] = useState(() => {
+      if (!db && typeof window !== 'undefined') {
+          const local = localStorage.getItem(`user_pref_${key}`);
+          if (local) {
+              try { return JSON.parse(local); } catch(e) { return initialValue; }
+          }
+      }
+      return initialValue;
+  });
   const [isSynced, setIsSynced] = useState(false);
 
   useEffect(() => {
-    if (!fbUser || !db || !appId) return;
+    if (!db) return;
+    if (!fbUser || !appId) return;
     const docRef = doc(db, 'artifacts', appId, 'users', fbUser.uid, 'user_preferences', key);
     
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
@@ -1233,7 +1279,7 @@ function useUserPersistentState(key, initialValue, fbUser) {
           setState(JSON.parse(docSnap.data().value));
         } catch(e) { console.error("Parse error", key, e); }
       } else if (!isSynced) {
-        setDoc(docRef, { value: JSON.stringify(initialValue) }).catch(console.error);
+        setDoc(docRef, { value: JSON.stringify(state) }).catch(console.error);
       }
       setIsSynced(true);
     }, (err) => {
@@ -1246,9 +1292,11 @@ function useUserPersistentState(key, initialValue, fbUser) {
   const setPersistentValue = (newValue) => {
     const valueToStore = typeof newValue === 'function' ? newValue(state) : newValue;
     setState(valueToStore);
-    if (fbUser && db && appId) {
+    if (db && fbUser && appId) {
        const docRef = doc(db, 'artifacts', appId, 'users', fbUser.uid, 'user_preferences', key);
        setDoc(docRef, { value: JSON.stringify(valueToStore) }).catch(console.error);
+    } else if (!db && typeof window !== 'undefined') {
+       localStorage.setItem(`user_pref_${key}`, JSON.stringify(valueToStore));
     }
   };
 
@@ -1261,7 +1309,11 @@ export default function App() {
   const [fbUser, setFbUser] = useState(null);
 
   useEffect(() => {
-    if (!auth) return;
+    if (!auth) {
+        // ถ้าระบบไม่ได้ต่อ Firebase (auth ไม่มี) ให้เซ็ต user จำลอง เพื่อให้ App ใช้งานต่อได้ด้วย LocalStorage
+        setFbUser({ uid: 'local-fallback-user' });
+        return;
+    }
     const initAuth = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -3437,6 +3489,17 @@ export default function App() {
           <p className="text-sm text-gray-400 font-medium tracking-wide mt-1 uppercase">{t('systemMgmt')} - {t('signIn')}</p>
         </div>
         
+        {/* Offline Mode Warning */}
+        {!db && (
+            <div className="bg-orange-900/30 text-orange-400 text-xs p-3 rounded-xl border border-orange-800/50 flex items-start gap-3 mb-6">
+                <AlertTriangle size={24} className="shrink-0 mt-0.5"/> 
+                <div className="text-left">
+                    <strong className="text-sm">ทำงานในโหมด Offline (Local Storage)</strong><br/>
+                    ระบบไม่พบฐานข้อมูล Firebase ข้อมูลที่บันทึกจะอยู่แค่ในเบราว์เซอร์ของคุณคนเดียวเท่านั้น (หากนำลิงก์ไปแชร์ให้ผู้อื่นเปิดจะไม่เห็นข้อมูลเดียวกัน)
+                </div>
+            </div>
+        )}
+
         {/* Login Form */}
         <form onSubmit={handleLogin} className="space-y-5">
           <div>
