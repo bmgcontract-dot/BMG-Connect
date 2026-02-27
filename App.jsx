@@ -21,39 +21,13 @@ import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged }
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 
 // --- Firebase Initialization ---
-// 🔴🔴🔴 ส่วนสำคัญสำหรับการนำไป Deploy บน GitHub Pages 🔴🔴🔴
-// ให้นำ Config จาก Firebase Project ของคุณ (ที่สมัครไว้) มาวางแทนที่ด้านล่างนี้
-// ลบเครื่องหมาย // ออก แล้วใส่ข้อมูลของคุณลงไป
-const userFirebaseConfig = {
- 
-  apiKey: "AIzaSyAy03rxniCLFDYT4ztY_Ry2zh0ddzdBoPE",
-  authDomain: "bmg-connect-3e99a.firebaseapp.com",
-  projectId: "bmg-connect-3e99a",
-  storageBucket: "bmg-connect-3e99a.firebasestorage.app",
-  messagingSenderId: "707276998308",
-  appId: "1:707276998308:web:1a5364f7a94cfe06c08831",
-  measurementId: "G-4B69L2731M"
-};
-
 let app, auth, db, appId;
 try {
-  // ตรวจสอบว่ารันอยู่ในระบบจำลอง หรือ รันบน Server จริง
-  if (typeof __firebase_config !== 'undefined' && __firebase_config !== '{}') {
-    const firebaseConfig = JSON.parse(__firebase_config);
-    app = initializeApp(firebaseConfig);
-    appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-  } else if (Object.keys(userFirebaseConfig).length > 0) {
-    // ใช้การเชื่อมต่อฐานข้อมูลของคุณเองเมื่ออยู่บน GitHub Pages
-    app = initializeApp(userFirebaseConfig);
-    appId = 'bmg-production-app'; // ชื่ออ้างอิงฐานข้อมูล
-  } else {
-    console.warn("⚠️ ยังไม่ได้ตั้งค่า userFirebaseConfig: ข้อมูลจะไม่ถูกบันทึกเข้าฐานข้อมูลกลาง และจะหายไปเมื่อรีเฟรชหน้าจอ");
-  }
-
-  if (app) {
-      auth = getAuth(app);
-      db = getFirestore(app);
-  }
+  const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  db = getFirestore(app);
+  appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 } catch (e) {
   console.error("Firebase init failed", e);
 }
@@ -1207,18 +1181,9 @@ const getAllFilesLocally = async () => {
     }
 };
 
-// --- Custom Hook for Persistent Storage (Firebase + LocalStorage Fallback) ---
+// --- Custom Hook for Persistent Storage (Firebase) ---
 function usePersistentState(key, initialValue, fbUser) {
-  // เพิ่มระบบโหลดจาก LocalStorage เป็นด่านแรก เผื่อเน็ตช้าหรือไม่ได้ต่อ Firebase
-  const getInitial = () => {
-      const local = localStorage.getItem(key);
-      if (local) {
-          try { return JSON.parse(local); } catch(e){}
-      }
-      return initialValue;
-  };
-
-  const [state, setState] = useState(getInitial);
+  const [state, setState] = useState(initialValue);
   const [isSynced, setIsSynced] = useState(false);
 
   useEffect(() => {
@@ -1228,12 +1193,10 @@ function usePersistentState(key, initialValue, fbUser) {
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
         try {
-          const val = JSON.parse(docSnap.data().value);
-          setState(val);
-          localStorage.setItem(key, JSON.stringify(val)); // แบ็คอัพลงเครื่อง
+          setState(JSON.parse(docSnap.data().value));
         } catch(e) { console.error("Parse error", key, e); }
       } else if (!isSynced) {
-        setDoc(docRef, { value: JSON.stringify(state) }).catch(console.error);
+        setDoc(docRef, { value: JSON.stringify(initialValue) }).catch(console.error);
       }
       setIsSynced(true);
     }, (err) => {
@@ -1246,7 +1209,6 @@ function usePersistentState(key, initialValue, fbUser) {
   const setPersistentValue = (newValue) => {
     const valueToStore = typeof newValue === 'function' ? newValue(state) : newValue;
     setState(valueToStore);
-    localStorage.setItem(key, JSON.stringify(valueToStore)); // บันทึกลงเครื่องทันที
     if (fbUser && db && appId) {
        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
        setDoc(docRef, { value: JSON.stringify(valueToStore) }).catch(console.error);
@@ -1256,17 +1218,9 @@ function usePersistentState(key, initialValue, fbUser) {
   return [state, setPersistentValue];
 }
 
-// --- Custom Hook for User Specific Persistent Storage ---
+// --- NEW: Custom Hook for User Specific Persistent Storage (Theme, UI settings) ---
 function useUserPersistentState(key, initialValue, fbUser) {
-  const getInitial = () => {
-      const local = localStorage.getItem(key);
-      if (local) {
-          try { return JSON.parse(local); } catch(e){}
-      }
-      return initialValue;
-  };
-
-  const [state, setState] = useState(getInitial);
+  const [state, setState] = useState(initialValue);
   const [isSynced, setIsSynced] = useState(false);
 
   useEffect(() => {
@@ -1276,12 +1230,10 @@ function useUserPersistentState(key, initialValue, fbUser) {
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
         try {
-          const val = JSON.parse(docSnap.data().value);
-          setState(val);
-          localStorage.setItem(key, JSON.stringify(val));
+          setState(JSON.parse(docSnap.data().value));
         } catch(e) { console.error("Parse error", key, e); }
       } else if (!isSynced) {
-        setDoc(docRef, { value: JSON.stringify(state) }).catch(console.error);
+        setDoc(docRef, { value: JSON.stringify(initialValue) }).catch(console.error);
       }
       setIsSynced(true);
     }, (err) => {
@@ -1294,7 +1246,6 @@ function useUserPersistentState(key, initialValue, fbUser) {
   const setPersistentValue = (newValue) => {
     const valueToStore = typeof newValue === 'function' ? newValue(state) : newValue;
     setState(valueToStore);
-    localStorage.setItem(key, JSON.stringify(valueToStore));
     if (fbUser && db && appId) {
        const docRef = doc(db, 'artifacts', appId, 'users', fbUser.uid, 'user_preferences', key);
        setDoc(docRef, { value: JSON.stringify(valueToStore) }).catch(console.error);
@@ -1310,9 +1261,8 @@ export default function App() {
   const [fbUser, setFbUser] = useState(null);
 
   useEffect(() => {
-    // ถ้าตั้งค่า Firebase ไว้ จะบังคับล็อกอินแบบ Anonymous เพื่อให้สามารถบันทึกข้อมูลส่วนกลางได้
+    if (!auth) return;
     const initAuth = async () => {
-      if (!auth) return;
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
           await signInWithCustomToken(auth, __initial_auth_token);
@@ -1324,10 +1274,8 @@ export default function App() {
       }
     };
     initAuth();
-    if (auth) {
-        const unsubscribe = onAuthStateChanged(auth, setFbUser);
-        return () => unsubscribe();
-    }
+    const unsubscribe = onAuthStateChanged(auth, setFbUser);
+    return () => unsubscribe();
   }, []);
 
   const [currentUser, setCurrentUser] = useState(null);
