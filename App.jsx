@@ -26,13 +26,12 @@ let app, auth, db, appId;
 // 1. นำ Config จาก Firebase Console ของคุณมาวางที่นี่ (สำหรับการ Deploy บน GitHub Pages)
 // หากต้องการให้ข้อมูลออนไลน์แชร์กันทุกคน ไม่ว่าจะล็อกอินจากเครื่องไหน ต้องใช้ Firebase
 const MANUAL_FIREBASE_CONFIG = {
-  apiKey: "AIzaSyAy03rxniCLFDYT4ztY_Ry2zh0ddzdBoPE",
-  authDomain: "bmg-connect-3e99a.firebaseapp.com",
-  projectId: "bmg-connect-3e99a",
-  storageBucket: "bmg-connect-3e99a.firebasestorage.app",
-  messagingSenderId: "707276998308",
-  appId: "1:707276998308:web:1a5364f7a94cfe06c08831",
-  measurementId: "G-4B69L2731M"
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_AUTH_DOMAIN",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_STORAGE_BUCKET",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId: "YOUR_APP_ID"
 };
 
 try {
@@ -1247,9 +1246,17 @@ function usePersistentState(key, initialValue, fbUser) {
     setState(valueToStore);
     if (db && fbUser && appId) {
        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
-       setDoc(docRef, { value: JSON.stringify(valueToStore) }).catch(console.error);
+       setDoc(docRef, { value: JSON.stringify(valueToStore) }).catch(err => {
+           console.error("Firebase Storage Error:", err);
+           alert(`ข้อผิดพลาดการบันทึกข้อมูลข้ามอุปกรณ์: ข้อมูลของคุณ (ส่วน ${key}) อาจมีขนาดใหญ่เกินกว่าที่ระบบจะรองรับได้ กรุณาลดขนาดภาพหรือลบข้อมูลเก่า`);
+       });
     } else if (!db && typeof window !== 'undefined') {
-       localStorage.setItem(key, JSON.stringify(valueToStore));
+       try {
+           localStorage.setItem(key, JSON.stringify(valueToStore));
+       } catch (err) {
+           console.error("Local Storage Error:", err);
+           alert(`พื้นที่จัดเก็บข้อมูลในเครื่องของคุณใกล้เต็ม!\nระบบไม่สามารถบันทึกข้อมูล (ส่วน ${key}) ได้ กรุณาลบข้อมูลเก่าหรือทำการ Export Backup ทันที`);
+       }
     }
   };
 
@@ -1297,7 +1304,11 @@ function useUserPersistentState(key, initialValue, fbUser) {
        const docRef = doc(db, 'artifacts', appId, 'users', fbUser.uid, 'user_preferences', key);
        setDoc(docRef, { value: JSON.stringify(valueToStore) }).catch(console.error);
     } else if (!db && typeof window !== 'undefined') {
-       localStorage.setItem(`user_pref_${key}`, JSON.stringify(valueToStore));
+       try {
+           localStorage.setItem(`user_pref_${key}`, JSON.stringify(valueToStore));
+       } catch (e) {
+           console.error("Storage Error for Pref", e);
+       }
     }
   };
 
@@ -1336,6 +1347,7 @@ export default function App() {
   const [selectedProject, setSelectedProject] = useState(null);
   const [projectTab, setProjectTab] = useState('overview');
   const [contractFilter, setContractFilter] = useState('All'); // NEW: State สำหรับตัวกรองสัญญา
+  const [contractSortOrder, setContractSortOrder] = useState('expiry_asc'); // NEW: State สำหรับเรียงลำดับวันหมดอายุสัญญา
   const [actionPlanFilter, setActionPlanFilter] = useState('All'); // NEW: State สำหรับตัวกรอง Action Plan
   const [repairFilter, setRepairFilter] = useState('All'); // NEW: State สำหรับตัวกรองแจ้งซ่อม
   const [staffViewMode, setStaffViewMode] = useState('list');
@@ -2473,18 +2485,21 @@ export default function App() {
   const handleSaveDailyReport = (e) => {
       e.preventDefault();
       let savedReport;
+      
+      // การใช้ functional update (prev => ...) จะป้องกันปัญหาบันทึกทับไม่ตรงจังหวะ
       if (newDailyReport.id) {
           // Update existing report
           savedReport = { ...newDailyReport };
-          setDailyReports(dailyReports.map(r => r.id === newDailyReport.id ? savedReport : r));
+          setDailyReports(prev => prev.map(r => r.id === newDailyReport.id ? savedReport : r));
       } else {
           // Create new report
           const id = generateId();
           savedReport = { ...newDailyReport, id, projectId: selectedProject.id };
-          setDailyReports([...dailyReports, savedReport]);
+          setDailyReports(prev => [...prev, savedReport]);
       }
       setShowAddDailyReportModal(false);
       setSelectedDailyReport(savedReport); // Open view modal immediately
+      alert('บันทึกรายงานประจำวันเสร็จสมบูรณ์'); // แจ้งเตือนเพื่อให้มั่นใจว่าบันทึกแล้ว
   };
 
   const handleEditDailyReport = (report) => {
@@ -2496,7 +2511,8 @@ export default function App() {
   // Image Upload for Daily Report
   const handleDailyPerformanceImageUpload = async (dept, file) => {
     if (file) {
-        const compressedBase64 = await compressImage(file);
+        // จำกัดขนาดภาพสำหรับ Daily Report เป็น 400x400 (ลดคุณภาพเหลือ 0.4) เพื่อป้องกันพื้นที่เต็ม
+        const compressedBase64 = await compressImage(file, 400, 400, 0.4);
         setNewDailyReport(prev => ({
             ...prev,
             performance: {
@@ -5360,31 +5376,54 @@ export default function App() {
           )}
           
           {projectTab === 'contracts' && (() => { 
-            const filteredContracts = contracts.filter(c => c.projectId === selectedProject.id && (contractFilter === 'All' || c.type === contractFilter));
+            const filteredContracts = contracts
+                .filter(c => c.projectId === selectedProject.id && (contractFilter === 'All' || c.type === contractFilter))
+                .sort((a, b) => {
+                    const daysA = calculateDaysRemaining(a.endDate);
+                    const daysB = calculateDaysRemaining(b.endDate);
+                    if (contractSortOrder === 'expiry_asc') return daysA - daysB;
+                    if (contractSortOrder === 'expiry_desc') return daysB - daysA;
+                    return 0;
+                });
             const totalAmount = filteredContracts.reduce((sum, c) => sum + Number(c.amount || 0), 0);
 
             return (
             <Card>
                 <div className="p-4 border-b flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
-                    <h3 className="font-bold">{t('activeContracts')}</h3>
+                    <h3 className="font-bold shrink-0">{t('activeContracts')}</h3>
                     
-                    {/* Filter Buttons */}
-                    <div className="flex bg-gray-100 p-1 rounded-lg w-full lg:w-auto overflow-x-auto">
-                        <button
-                            onClick={() => setContractFilter('All')}
-                            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all whitespace-nowrap ${contractFilter === 'All' ? 'bg-white shadow text-orange-600' : 'text-gray-500 hover:text-gray-700'}`}
-                        >
-                            ทั้งหมด
-                        </button>
-                        {Object.values(CONTRACT_TYPES).map(type => (
+                    <div className="flex flex-col md:flex-row gap-4 items-start md:items-center w-full lg:w-auto">
+                        {/* Filter Buttons */}
+                        <div className="flex bg-gray-100 p-1 rounded-lg w-full md:w-auto overflow-x-auto">
                             <button
-                                key={type}
-                                onClick={() => setContractFilter(type)}
-                                className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all whitespace-nowrap ${contractFilter === type ? 'bg-white shadow text-orange-600' : 'text-gray-500 hover:text-gray-700'}`}
+                                onClick={() => setContractFilter('All')}
+                                className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all whitespace-nowrap ${contractFilter === 'All' ? 'bg-white shadow text-orange-600' : 'text-gray-500 hover:text-gray-700'}`}
                             >
-                                {type.split(' (')[0]}
+                                ทั้งหมด
                             </button>
-                        ))}
+                            {Object.values(CONTRACT_TYPES).map(type => (
+                                <button
+                                    key={type}
+                                    onClick={() => setContractFilter(type)}
+                                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all whitespace-nowrap ${contractFilter === type ? 'bg-white shadow text-orange-600' : 'text-gray-500 hover:text-gray-700'}`}
+                                >
+                                    {type.split(' (')[0]}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* NEW: Sort Dropdown */}
+                        <div className={`flex items-center gap-2 w-full md:w-auto shrink-0 ${isExporting ? 'hidden' : ''}`}>
+                            <label className="text-xs font-bold text-gray-500 whitespace-nowrap">เรียงลำดับ:</label>
+                            <select 
+                                className="w-full md:w-auto border border-gray-300 rounded-md p-1.5 text-xs focus:ring-2 focus:ring-orange-200 outline-none bg-white transition-colors cursor-pointer"
+                                value={contractSortOrder}
+                                onChange={e => setContractSortOrder(e.target.value)}
+                            >
+                                <option value="expiry_asc">สัญญาใกล้หมด (น้อยไปมาก)</option>
+                                <option value="expiry_desc">สัญญาใกล้หมด (มากไปน้อย)</option>
+                            </select>
+                        </div>
                     </div>
 
                     <div className={`flex gap-2 ${isExporting ? 'hidden' : ''} shrink-0`}>
@@ -7791,17 +7830,22 @@ export default function App() {
                    {dailyReports.filter(r => r.projectId === selectedProject.id).length === 0 ? (
                        <div className="text-center p-8 text-gray-500 bg-white rounded border border-dashed">{t('noData')}</div>
                    ) : (
-                       dailyReports.filter(r => r.projectId === selectedProject.id).map(report => (
+                       dailyReports.filter(r => r.projectId === selectedProject.id).sort((a,b) => new Date(b.date) - new Date(a.date)).map(report => (
                            <Card key={report.id} className="p-4 hover:shadow-md cursor-pointer relative group">
                                <div className="flex justify-between" onClick={() => setSelectedDailyReport(report)}>
-                                   <span className="font-bold">{report.date}</span>
-                                   <span className="text-sm text-gray-500 pr-8">{report.reporter}</span>
+                                   <span className="font-bold text-blue-700">
+                                       รายงานประจำวันที่ {new Date(report.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'})}
+                                   </span>
+                                   <span className="text-sm text-gray-500 pr-8"><User size={12} className="inline mr-1"/>{report.reporter}</span>
                                </div>
-                               <div className="text-sm mt-2 text-gray-600 line-clamp-2" onClick={() => setSelectedDailyReport(report)}>{report.note || 'No additional notes'}</div>
+                               <div className="text-sm mt-2 text-gray-600 line-clamp-2" onClick={() => setSelectedDailyReport(report)}>{report.note || 'คลิกเพื่อดูรายละเอียดผลการปฏิบัติงาน...'}</div>
                                
                                {!isExporting && hasPerm('proj_daily', 'delete') && (
                                    <button 
-                                       onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบรายงานประจำวันที่ ${report.date} ใช่หรือไม่?`, () => setDailyReports(dailyReports.filter(r => r.id !== report.id))); }}
+                                       onClick={(e) => { 
+                                           e.stopPropagation(); 
+                                           showConfirm('ยืนยันการลบ', `คุณต้องการลบรายงานประจำวันที่ ${report.date} ใช่หรือไม่?`, () => setDailyReports(prev => prev.filter(r => r.id !== report.id))); 
+                                       }}
                                        className="absolute top-3 right-3 text-gray-300 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100"
                                        title="ลบรายงาน"
                                    >
@@ -9092,7 +9136,7 @@ export default function App() {
             <form onSubmit={handleSaveProject} className="space-y-6">
               <div className="flex flex-col md:flex-row gap-6">
                 <div className="flex flex-col items-center gap-3">
-                  <div className="w-32 h-32 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden border-2 border-dashed border-gray-300 relative group">{newProject.logo ? <img src={newProject.logo} alt="Project Logo" className="w-full h-full object-cover" /> : <div className="text-center text-gray-400 p-2"><ImageIcon size={32} className="mx-auto mb-1" /><span className="text-xs">{t('projLogo')}</span></div>}<div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><label htmlFor="logo-upload" className="cursor-pointer text-white text-xs font-bold flex flex-col items-center"><Upload size={20} className="mb-1" />{t('uploadLogo')}</label><input id="logo-upload" type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} /></div></div>
+                  <div className="w-32 h-32 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden border-2 border-dashed border-gray-300 relative group">{newProject.logo ? <img src={newProject.logo} alt="Project Logo" className="w-full h-full object-cover" /> : <div className="text-center text-gray-400 p-2"><ImageIcon size={32} className="mx-auto mb-1" /><span className="text-xs">{t('projLogo')}</span></div>}<div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><label htmlFor="logo-upload" className="cursor-pointer text-white text-xs font-bold flex flex-col items-center"><Upload size={20} className="mb-1" />{newProject.logo ? 'เปลี่ยนรูปภาพ' : t('uploadLogo')}</label><input id="logo-upload" type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} /></div></div>
                   {newProject.logo && <button type="button" onClick={() => setNewProject({...newProject, logo: null})} className="text-red-500 text-xs hover:underline">{t('removePhoto')}</button>}
                 </div>
                 <div className="flex-1 space-y-4">
@@ -9119,7 +9163,43 @@ export default function App() {
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-gray-700 border-b pb-2 mb-4">{t('uploadDocs')}</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{[{ key: 'orchor', label: t('doc_orchor') }, { key: 'committee', label: t('doc_committee') }, { key: 'regulations', label: t('doc_regulations') }, { key: 'resident_rules', label: t('doc_resident_rules') }].map((doc) => (<div key={doc.key} className="border rounded-md p-3 flex items-center justify-between bg-gray-50"><div className="flex items-center gap-2 overflow-hidden"><File size={20} className="text-gray-400 flex-shrink-0" /><span className="text-sm truncate font-medium text-gray-700">{doc.label}</span></div><div className="flex items-center gap-2">{newProject.files && newProject.files[doc.key] ? <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle size={12} /> Uploaded</span> : <label className="cursor-pointer bg-white border border-gray-300 text-gray-600 px-2 py-1 rounded text-xs hover:bg-gray-50 transition-colors">Upload<input type="file" className="hidden" onChange={(e) => handleProjectFileUpload(e, doc.key)} /></label>}</div></div>))}</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {[{ key: 'orchor', label: t('doc_orchor') }, { key: 'committee', label: t('doc_committee') }, { key: 'regulations', label: t('doc_regulations') }, { key: 'resident_rules', label: t('doc_resident_rules') }].map((doc) => (
+                    <div key={doc.key} className="border rounded-md p-3 flex items-center justify-between bg-gray-50">
+                        <div className="flex items-center gap-2 overflow-hidden mr-2">
+                            <File size={20} className="text-gray-400 flex-shrink-0" />
+                            <span className="text-sm truncate font-medium text-gray-700" title={doc.label}>{doc.label}</span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                            {newProject.files && newProject.files[doc.key] ? (
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs text-green-600 flex items-center gap-1 max-w-[100px] truncate" title={newProject.files[doc.key].name || 'Uploaded'}>
+                                        <CheckCircle size={12} className="shrink-0" /> 
+                                        <span className="truncate">{newProject.files[doc.key].name || 'Uploaded'}</span>
+                                    </span>
+                                    <label className="cursor-pointer text-blue-500 hover:text-blue-700 hover:bg-blue-50 p-1.5 rounded-md transition-colors" title="เปลี่ยนไฟล์ (Replace)">
+                                        <Edit size={14} />
+                                        <input type="file" accept=".pdf,.doc,.docx,.jpg,.png" className="hidden" onChange={(e) => handleProjectFileUpload(e, doc.key)} />
+                                    </label>
+                                    <button 
+                                        type="button" 
+                                        onClick={() => setNewProject(prev => ({ ...prev, files: { ...prev.files, [doc.key]: null } }))} 
+                                        className="text-red-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-md transition-colors"
+                                        title="ลบไฟล์"
+                                    >
+                                        <Trash2 size={14} />
+                                    </button>
+                                </div>
+                            ) : (
+                                <label className="cursor-pointer bg-white border border-gray-300 text-gray-600 px-3 py-1.5 rounded text-xs hover:bg-gray-50 transition-colors flex items-center gap-1 shadow-sm">
+                                    <Upload size={12} /> อัปโหลด
+                                    <input type="file" accept=".pdf,.doc,.docx,.jpg,.png" className="hidden" onChange={(e) => handleProjectFileUpload(e, doc.key)} />
+                                </label>
+                            )}
+                        </div>
+                    </div>
+                  ))}
+                </div>
               </div>
               <div className="flex justify-end gap-2 pt-4 border-t"><Button variant="secondary" onClick={() => setShowAddProjectModal(false)}>{t('cancel')}</Button><Button type="submit">{t('save')}</Button></div>
             </form>
@@ -9255,12 +9335,15 @@ export default function App() {
 
               <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">แนบไฟล์สัญญา (PDF)</label>
-                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:bg-gray-50 cursor-pointer relative">
-                      <input type="file" accept=".pdf" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleContractFileUpload} />
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:bg-gray-50 cursor-pointer relative transition-colors group">
+                      <input type="file" accept=".pdf" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleContractFileUpload} title="คลิกเพื่ออัปโหลดหรือเปลี่ยนไฟล์" />
                       {newContract.file ? (
-                          <div className="text-green-600 flex items-center justify-center gap-2"><FileCheck size={20}/> {newContract.file.name}</div>
+                          <div className="text-green-600 flex flex-col items-center justify-center gap-1">
+                              <div className="flex items-center gap-2 font-bold"><FileCheck size={20}/> {newContract.file.name}</div>
+                              <span className="text-xs text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity">คลิกเพื่อเปลี่ยนไฟล์ใหม่</span>
+                          </div>
                       ) : (
-                          <div className="text-gray-500 flex flex-col items-center gap-1"><Upload size={24}/><span className="text-xs">คลิกเพื่ออัปโหลดไฟล์</span></div>
+                          <div className="text-gray-500 flex flex-col items-center gap-1"><Upload size={24}/><span className="text-xs font-medium">คลิกเพื่ออัปโหลดไฟล์</span></div>
                       )}
                   </div>
               </div>
@@ -10008,11 +10091,13 @@ export default function App() {
                 <div id="print-daily-report" className="space-y-6">
                     {/* Header */}
                     <div className="text-center border-b pb-4 mb-6">
-                        <h2 className="text-2xl font-bold text-gray-800">{t('dailyReportTitle')}</h2>
+                        <h2 className="text-2xl font-bold text-gray-800">
+                            รายงานประจำวันที่ {new Date(selectedDailyReport.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'})}
+                        </h2>
                         <div className="flex justify-center gap-4 text-sm text-gray-500 mt-2">
                              <span>{t('col_project')}: {projects.find(p => p.id === selectedDailyReport.projectId)?.name}</span>
                              <span>|</span>
-                             <span>{t('col_date')}: {new Date(selectedDailyReport.date).toLocaleDateString('th-TH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'})}</span>
+                             <span>{t('reporter')}: {selectedDailyReport.reporter}</span>
                         </div>
                     </div>
 
