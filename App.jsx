@@ -1471,7 +1471,6 @@ export default function App() {
   const [pmFormIssues, setPmFormIssues] = useState({}); // เพิ่ม State สำหรับเก็บปัญหาที่พบรายข้อ
   const [pmFormRemark, setPmFormRemark] = useState('');
   const [pmFormImages, setPmFormImages] = useState([]); // NEW: State สำหรับเก็บรูปภาพหลายรูปในฟอร์ม PM
-  const [pmHistoryDateFilter, setPmHistoryDateFilter] = useState(''); // NEW: ตัวกรองวันที่สำหรับประวัติ PM
 
   // NEW: Utilities State
   const [meters, setMeters] = usePersistentState('bmg_meters', INITIAL_METERS, fbUser);
@@ -6883,36 +6882,12 @@ export default function App() {
                       </Card>
                   )}
 
-                  {pmSubTab === 'history' && (() => {
-                      const filteredPmHistory = pmHistoryList
-                          .filter(h => h.projectId === selectedProject.id)
-                          .filter(h => {
-                              if (!pmHistoryDateFilter) return true;
-                              const recordDate = h.executedDate || h.date;
-                              return recordDate === pmHistoryDateFilter;
-                          })
-                          .sort((a, b) => new Date(b.executedDate || b.date) - new Date(a.executedDate || a.date)); // เรียงล่าสุดขึ้นก่อน
-
-                      return (
+                  {pmSubTab === 'history' && (
                       <Card className="border-t-4 border-gray-600">
-                          <div className="p-4 border-b flex flex-col md:flex-row justify-between items-start md:items-center bg-white gap-4">
+                          <div className="p-4 border-b flex justify-between items-center bg-white">
                               <h3 className="font-bold flex items-center gap-2 text-gray-800"><History size={20}/> ประวัติการบำรุงรักษา (PM History)</h3>
-                              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-                                  <div className={`flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-md px-3 py-1.5 w-full md:w-auto ${isExporting ? 'hidden' : ''}`}>
-                                      <label className="text-xs font-bold text-gray-500 whitespace-nowrap">กรองวันที่ทำจริง:</label>
-                                      <input 
-                                          type="date" 
-                                          className="text-sm border-none bg-transparent outline-none cursor-pointer text-gray-700 w-full"
-                                          value={pmHistoryDateFilter}
-                                          onChange={e => setPmHistoryDateFilter(e.target.value)}
-                                      />
-                                      {pmHistoryDateFilter && (
-                                          <button onClick={() => setPmHistoryDateFilter('')} className="text-gray-400 hover:text-red-500 flex items-center justify-center p-0.5 bg-gray-200 rounded-full">
-                                              <X size={12} />
-                                          </button>
-                                      )}
-                                  </div>
-                                  <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(filteredPmHistory, 'pm_history_list')}>{t('exportCSV')}</Button>
+                              <div className="flex gap-2">
+                                  <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(pmHistoryList.filter(h => h.projectId === selectedProject.id), 'pm_history_list')}>{t('exportCSV')}</Button>
                               </div>
                           </div>
                           <div className="overflow-x-auto">
@@ -6920,7 +6895,7 @@ export default function App() {
                                   <thead className="bg-gray-100 text-gray-700 uppercase">
                                       <tr>
                                           <th className="p-3 text-center w-12">{t('col_seq')}</th>
-                                          <th className="p-3 text-left w-32">วันที่ทำจริง (Act)</th>
+                                          <th className="p-3 text-left w-32">วันที่บันทึกจริง</th>
                                           <th className="p-3 text-left">เครื่องจักร</th>
                                           <th className="p-3 text-center w-32">ผลการตรวจ</th>
                                           <th className="p-3 text-center w-36">สถานะอนุมัติ</th>
@@ -6929,15 +6904,12 @@ export default function App() {
                                       </tr>
                                   </thead>
                                   <tbody className="divide-y divide-gray-200">
-                                      {filteredPmHistory.length > 0 ? (
-                                          filteredPmHistory.map((hist, index) => (
+                                      {pmHistoryList.filter(h => h.projectId === selectedProject.id).length > 0 ? (
+                                          pmHistoryList.filter(h => h.projectId === selectedProject.id).map((hist, index) => (
                                               <tr key={hist.id} className="hover:bg-gray-50">
                                                   <td className="p-4 text-center text-gray-500 font-medium">{index + 1}</td>
                                                   <td className="p-4">
-                                                      <div className="text-gray-800 font-bold">{new Date(hist.executedDate || hist.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })}</div>
-                                                      {(hist.executedDate && hist.date && hist.executedDate !== hist.date) && (
-                                                          <div className="text-[10px] text-gray-500 mt-0.5">แผน: {new Date(hist.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })}</div>
-                                                      )}
+                                                      <div className="text-gray-700 font-medium">{new Date(hist.executedDate || hist.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })}</div>
                                                       {hist.executionTimingStatus && (
                                                           <div className={`text-[10px] font-bold mt-1 inline-block px-1.5 py-0.5 rounded-md ${
                                                               hist.executionTimingStatus === 'เร็วกว่าแผน' ? 'bg-blue-100 text-blue-700' :
@@ -6991,13 +6963,13 @@ export default function App() {
                                               </tr>
                                           ))
                                       ) : (
-                                          <tr><td colSpan="7" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">ไม่พบประวัติการบันทึก PM {pmHistoryDateFilter ? 'ในวันที่เลือก' : 'สำหรับโครงการนี้'}</td></tr>
+                                          <tr><td colSpan="7" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">ยังไม่มีประวัติการบันทึก PM สำหรับโครงการนี้</td></tr>
                                       )}
                                   </tbody>
                               </table>
                           </div>
                       </Card>
-                  )})}
+                  )}
 
                   {!['registry', 'plan', 'calendar', 'history', 'form'].includes(pmSubTab) && (
                       <div className="flex flex-col items-center justify-center h-64 bg-white rounded-lg border border-dashed text-gray-400">
