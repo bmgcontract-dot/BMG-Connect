@@ -9,7 +9,7 @@ import {
   XCircle, Image as ImageIcon, File, Hourglass, Phone, Mail, LayoutGrid, List, ChevronDown, Save,
   ChevronLeft, ChevronRight, MousePointer2, FileCheck, DollarSign, Camera,
   MapPin, Box, PenTool, Printer as PrinterIcon, History, Folder, Lock,
-  Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2
+  Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2, Bell
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
@@ -1621,6 +1621,51 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useUserPersistentState('bmg_sidebar_open', true, fbUser); // NEW: Sidebar Desktop State (แยกอิสระรายบุคคล)
   const [fullScreenChart, setFullScreenChart] = useState(null); // แก้ไข: ย้าย State สำหรับจัดการ Full Screen Chart ขึ้นมาไว้ตรงนี้
 
+  // --- NEW: Helper function to calculate pending approvals for the current user ---
+  const getPendingApprovalsCount = () => {
+      if (!currentUser) return 0;
+
+      const isChiefUser = currentUser.position.includes('หัวหน้าช่าง');
+      const isManagerUser = currentUser.position.includes('ผู้จัดการ') && !currentUser.position.includes('ผู้ช่วย');
+      const isHRUser = currentUser.position.includes('เจ้าหน้าที่ฝ่ายบุคคล');
+      const isAdminUser = currentUser.username === 'admin' || currentUser.position === 'Super Admin';
+
+      // เช็คสิทธิ์การเข้าถึงโครงการของผู้ใช้
+      const accessibleDeptsStr = currentUser.accessibleDepts || '';
+      const accessibleArray = typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : accessibleDeptsStr;
+      const canAccessAll = accessibleArray.includes('All') || isAdminUser;
+
+      const isProjectAccessible = (projName) => {
+          if (canAccessAll) return true;
+          return projName === currentUser.department || accessibleArray.includes(projName);
+      };
+
+      let pendingCount = 0;
+
+      // 1. นับจำนวนประวัติ PM ที่รออนุมัติ
+      pmHistoryList.forEach(record => {
+          const proj = projects.find(p => p.id === record.projectId);
+          if (proj && isProjectAccessible(proj.name)) {
+              const status = record.approvalStatus;
+              if (status === 'Pending Chief' && (isChiefUser || isAdminUser)) pendingCount++;
+              if (status === 'Pending Manager' && (isManagerUser || isAdminUser)) pendingCount++;
+          }
+      });
+
+      // 2. นับจำนวนตารางงาน (Schedule) ที่รออนุมัติ
+      Object.keys(scheduleApprovals).forEach(key => {
+          const [projectId, month] = key.split('_');
+          const proj = projects.find(p => p.id === projectId);
+          if (proj && isProjectAccessible(proj.name)) {
+              const approval = scheduleApprovals[key];
+              if (approval.status === 'Pending Manager' && (isManagerUser || isAdminUser)) pendingCount++;
+              if (approval.status === 'Pending HR' && (isHRUser || isAdminUser)) pendingCount++;
+          }
+      });
+
+      return pendingCount;
+  };
+
   // NEW: Helper for downloading files safely (especially large base64 PDFs)
   const handleDownloadFile = async (fileObj, defaultName = 'document.pdf') => {
       try {
@@ -2882,7 +2927,7 @@ export default function App() {
           reader.onloadend = async () => {
               const fileId = generateId();
               await saveFileLocally(fileId, reader.result);
-              setNewContract(prev => ({ ...prev, file: { name: file.name, fileId: fileId, isLocal: true } }));
+              setNewContract(prev => ({ ...prev, file: { name: file.name, fileId: fileId, isLocal: true, data: reader.result } }));
           };
           reader.readAsDataURL(file);
       }
@@ -3395,7 +3440,7 @@ export default function App() {
                   ...prev, 
                   files: { 
                       ...(prev.files || {}), 
-                      [key]: { name: file.name, fileId: fileId, isLocal: true } 
+                      [key]: { name: file.name, fileId: fileId, isLocal: true, data: reader.result } 
                   } 
               }));
           };
@@ -3725,6 +3770,9 @@ export default function App() {
   const DashboardView = () => {
       // แก้ไข: ลบ useState(null) ออกจากตรงนี้ เพื่อไม่ให้ผิดกฎของ React Hooks
       const currentMonthStr = new Date().toISOString().slice(0, 7);
+      
+      // ดึงจำนวนรายการที่รอการอนุมัติสำหรับ User ปัจจุบัน
+      const pendingApprovalCount = getPendingApprovalsCount();
 
       // ดึงข้อมูลโครงการเฉพาะที่ผู้ใช้มีสิทธิ์เข้าถึง สำหรับแสดงผลแดชบอร์ดให้สอดคล้องกับสิทธิ์
       const visibleProjectsDashboard = projects.filter(p => {
@@ -3933,10 +3981,48 @@ export default function App() {
           <div className="space-y-6 animate-fade-in relative">
               <ChartGradients />
               <ReportHeader />
+              
+              {/* NEW: Notification Banner for Pending Approvals */}
+              {pendingApprovalCount > 0 && (
+                  <div className="bg-gradient-to-r from-red-50 to-orange-50 border-l-4 border-red-500 p-4 rounded-r-xl shadow-sm flex items-center justify-between mb-4 border border-y-red-100 border-r-red-100">
+                      <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center text-red-600 animate-ring shadow-inner shrink-0">
+                              <Bell size={24} />
+                          </div>
+                          <div>
+                              <h4 className="text-red-800 font-bold text-lg flex items-center gap-2">
+                                  มีรายการรอให้คุณอนุมัติ
+                                  <span className="bg-red-600 text-white text-xs px-2 py-0.5 rounded-full">{pendingApprovalCount} รายการ</span>
+                              </h4>
+                              <p className="text-red-600 text-sm mt-0.5">คุณมีเอกสาร (เช่น ตารางงาน หรือ แผน PM) ที่จำเป็นต้องดำเนินการตรวจสอบ</p>
+                          </div>
+                      </div>
+                      <Button variant="danger" className="shrink-0 hidden md:flex shadow-sm" onClick={() => alert('กรุณาเข้าไปที่โครงการที่เกี่ยวข้อง > เลือกแท็บ "ตารางงาน" หรือ "เครื่องจักร/PM" เพื่อตรวจสอบและกดอนุมัติข้อมูล')}>
+                          ดูวิธีการตรวจสอบ
+                      </Button>
+                  </div>
+              )}
+
               <header className="flex justify-between items-center mb-6">
-                  <div>
-                      <h1 className="text-2xl font-bold text-gray-800">{t('corpDashboard')}</h1>
-                      <p className="text-gray-500">{t('overview')}</p>
+                  <div className="flex items-center gap-4">
+                      <div>
+                          <h1 className="text-2xl font-bold text-gray-800">{t('corpDashboard')}</h1>
+                          <p className="text-gray-500">{t('overview')}</p>
+                      </div>
+                      
+                      {/* Optional: Small Bell icon next to title if banner is missed */}
+                      {pendingApprovalCount > 0 && (
+                          <div 
+                              className="relative flex items-center justify-center w-10 h-10 bg-red-50 rounded-full cursor-pointer hover:bg-red-100 transition-colors shadow-sm border border-red-100 md:hidden"
+                              title="มีรายการรอให้คุณอนุมัติ"
+                              onClick={() => alert(`คุณมีรายการรออนุมัติจำนวน ${pendingApprovalCount} รายการ\nกรุณาตรวจสอบในหน่วยงานที่เกี่ยวข้อง`)}
+                          >
+                              <Bell className="text-red-500 animate-ring" size={20} />
+                              <span className="absolute top-0 right-0 bg-red-600 text-white text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded-full border-2 border-white">
+                                  {pendingApprovalCount > 99 ? '99+' : pendingApprovalCount}
+                              </span>
+                          </div>
+                      )}
                   </div>
                   <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
                       <Button variant="outline" icon={Download} onClick={() => exportToCSV(visibleProjectsDashboard, 'dashboard_summary')}>{t('exportReport')}</Button>
@@ -8742,6 +8828,21 @@ export default function App() {
         .dark-theme .recharts-legend-item-text { color: #e5e7eb !important; }
         .dark-theme .recharts-default-tooltip { background-color: #1f2937 !important; border: 1px solid #374151 !important; color: #f3f4f6 !important; }
         .dark-theme .recharts-tooltip-item-name, .dark-theme .recharts-tooltip-item-value { color: #f3f4f6 !important; }
+
+        /* Animation for Notification Bell */
+        @keyframes ring {
+          0% { transform: rotate(0); }
+          5% { transform: rotate(15deg); }
+          10% { transform: rotate(-10deg); }
+          15% { transform: rotate(15deg); }
+          20% { transform: rotate(-10deg); }
+          25% { transform: rotate(0); }
+          100% { transform: rotate(0); }
+        }
+        .animate-ring {
+          animation: ring 2.5s ease-in-out infinite;
+          transform-origin: top center;
+        }
 
         /* Sweet Theme Global Overrides (Pastel Pink) */
         .sweet-theme { background-color: #FFF5F8 !important; color: #5C434B !important; }
