@@ -1085,34 +1085,14 @@ const INITIAL_READINGS = [
 
 const INITIAL_DAILY_REPORTS = []; const INITIAL_AUDITS = [ { id: 'au1', projectId: 'p1', date: '2025-02-10', category: 'Safety Standards', score: 95, remarks: 'Excellent adherence to safety protocols.', inspector: 'Admin Master', fileUrl: 'audit_safety_feb.pdf' }, { id: 'au2', projectId: 'p1', date: '2025-02-10', category: 'Cleanliness', score: 78, remarks: 'Lobby area needs improved dusting.', inspector: 'Admin Master', fileUrl: 'audit_clean_feb.pdf' }, { id: 'au3', projectId: 'p2', date: '2025-02-12', category: 'Security Guards', score: 88, remarks: 'Guards are attentive but uniform needs check.', inspector: 'Admin Master', fileUrl: 'audit_sec_feb.pdf' }, ]; const INITIAL_TOOLS = []; const INITIAL_UTILITY_READINGS = []; const INITIAL_ACTION_PLANS = [ { id: 'ap1', projectId: 'p1', issue: 'Leaking pipe at 5th floor', details: 'เปลี่ยนซีลยางท่อน้ำทิ้ง', responsible: 'Wichai Khonngan (Technician)', startDate: '2025-02-10', deadline: '2025-02-15', status: 'Pending' }, { id: 'ap2', projectId: 'p1', issue: 'Security gate noise', details: 'หล่อลื่นบานพับและเช็คมอเตอร์', responsible: 'Manop Chang (Technician)', startDate: '2025-02-08', deadline: '2025-02-10', status: 'Completed' }, ]; const INITIAL_SCHEDULES = []; const INITIAL_CONTRACTORS = [ { id: 'c1', name: 'Clean & Clear Service Co.', type: 'Vendor', category: 'งานด้านรักษาความสะอาด (Cleaning)', contact: 'Ms. Yupin', phone: '081-555-6666', email: 'contact@clean.com', status: 'Active' }, { id: 'c2', name: 'SafeGuard Security Ltd.', type: 'Contractor', category: 'งานด้านรักษาความปลอดภัย (Security)', contact: 'Mr. Somchai', phone: '02-999-8888', email: 'sales@safeguard.com', status: 'Active' }, { id: 'c3', name: 'Elevator Maintenance Experts', type: 'Contractor', category: 'บำรุงรักษาลิฟต์ (Elevator Maintenance)', contact: 'Mr. David', phone: '089-111-2222', email: 'service@eme.com', status: 'Active' }, { id: 'c4', name: 'Green Garden Supply', type: 'Vendor', category: 'งานด้านดูแลสวน (Gardening)', contact: 'Mrs. Noi', phone: '086-333-4444', email: 'noi@greengarden.com', status: 'Inactive' }, ];
 
-// --- NEW: Helper for Image Compression ---
-const compressImage = (file, maxWidth = 800, maxHeight = 800, quality = 0.5) => {
+// --- NEW: Helper for Image Processing (ปรับให้รองรับไฟล์ขนาดใหญ่ ไม่จำกัดขนาดและคุณภาพ) ---
+const compressImage = (file) => {
     return new Promise((resolve) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
         reader.onload = (event) => {
-            const img = new Image();
-            img.src = event.target.result;
-            img.onload = () => {
-                let width = img.width;
-                let height = img.height;
-                // ปรับสัดส่วนรูปภาพให้ไม่เกิน Max Width/Height
-                if (width > height) {
-                    if (width > maxWidth) { height = Math.round(height * (maxWidth / width)); width = maxWidth; }
-                } else {
-                    if (height > maxHeight) { width = Math.round(width * (maxHeight / height)); height = maxHeight; }
-                }
-                const canvas = document.createElement('canvas');
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext('2d');
-                // ใส่พื้นหลังสีขาวป้องกันพื้นหลังดำเวลาแปลงจาก PNG
-                ctx.fillStyle = '#FFFFFF';
-                ctx.fillRect(0, 0, width, height);
-                ctx.drawImage(img, 0, 0, width, height);
-                // บังคับแปลงเป็น JPEG เพื่อให้สามารถใช้พารามิเตอร์ quality บีบอัดขนาดได้เต็มที่
-                resolve(canvas.toDataURL('image/jpeg', quality));
-            };
+            // คืนค่า Base64 เป็นไฟล์ต้นฉบับดั้งเดิม (Original) โดยไม่มีการปรับย่อขนาดหรือบีบอัด
+            resolve(event.target.result);
         };
     });
 };
@@ -1210,7 +1190,6 @@ const getAllFilesLocally = async () => {
 // --- Custom Hook for Persistent Storage (Firebase or LocalStorage Fallback) ---
 function usePersistentState(key, initialValue, fbUser) {
   const [state, setState] = useState(() => {
-      // ดึงข้อมูลจาก LocalStorage มาก่อนในกรณีที่ไม่ได้ต่อ Firebase
       if (!db && typeof window !== 'undefined') {
           const local = localStorage.getItem(key);
           if (local) {
@@ -1219,20 +1198,29 @@ function usePersistentState(key, initialValue, fbUser) {
       }
       return initialValue;
   });
+  
+  // FIX: ใช้ useRef เพื่อเก็บค่า State ล่าสุด ป้องกันปัญหา Stale State (ดึงข้อมูลเก่ามาทับ)
+  const stateRef = useRef(state);
   const [isSynced, setIsSynced] = useState(false);
 
   useEffect(() => {
-    if (!db) return; // ถ้าระบบไม่ได้ต่อ Firebase จะทำงานในโหมด LocalStorage ไป
+      stateRef.current = state;
+  }, [state]);
+
+  useEffect(() => {
+    if (!db) return; 
     if (!fbUser || !appId) return;
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
     
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
         try {
-          setState(JSON.parse(docSnap.data().value));
+          const parsedData = JSON.parse(docSnap.data().value);
+          setState(parsedData);
+          stateRef.current = parsedData;
         } catch(e) { console.error("Parse error", key, e); }
       } else if (!isSynced) {
-        setDoc(docRef, { value: JSON.stringify(state) }).catch(console.error);
+        setDoc(docRef, { value: JSON.stringify(stateRef.current) }).catch(console.error);
       }
       setIsSynced(true);
     }, (err) => {
@@ -1243,13 +1231,17 @@ function usePersistentState(key, initialValue, fbUser) {
   }, [fbUser, key]);
 
   const setPersistentValue = (newValue) => {
-    const valueToStore = typeof newValue === 'function' ? newValue(state) : newValue;
+    // FIX: ดึงค่าจาก stateRef.current เสมอ เพื่อรับประกันว่าเป็นข้อมูลชุดล่าสุดจริงๆ
+    const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
     setState(valueToStore);
+    stateRef.current = valueToStore; // อัปเดต Ref ทันทีเพื่อให้คำสั่งถัดไปเห็นค่าใหม่
+
     if (db && fbUser && appId) {
        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
        setDoc(docRef, { value: JSON.stringify(valueToStore) }).catch(err => {
            console.error("Firebase Storage Error:", err);
-           alert(`ข้อผิดพลาดการบันทึกข้อมูลข้ามอุปกรณ์: ข้อมูลของคุณ (ส่วน ${key}) อาจมีขนาดใหญ่เกินกว่าที่ระบบจะรองรับได้ กรุณาลดขนาดภาพหรือลบข้อมูลเก่า`);
+           // แจ้งเตือนชัดเจนเมื่อไฟล์เกิน 1MB
+           alert(`⚠️ ข้อผิดพลาด: ข้อมูลในส่วน [${key}] มีขนาดใหญ่เกิน 1MB (มักเกิดจากการสะสมรูปภาพจำนวนมาก) ระบบไม่สามารถบันทึกลงฐานข้อมูลหลักได้ ข้อมูลอาจสูญหายเมื่อรีเฟรช! แนะนำให้ทำการ Export Backup และลบรายงานเก่าออก`);
        });
     } else if (!db && typeof window !== 'undefined') {
        try {
@@ -1275,7 +1267,14 @@ function useUserPersistentState(key, initialValue, fbUser) {
       }
       return initialValue;
   });
+
+  // FIX: ใช้ useRef เหมือนกัน
+  const stateRef = useRef(state);
   const [isSynced, setIsSynced] = useState(false);
+
+  useEffect(() => {
+      stateRef.current = state;
+  }, [state]);
 
   useEffect(() => {
     if (!db) return;
@@ -1285,10 +1284,12 @@ function useUserPersistentState(key, initialValue, fbUser) {
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
         try {
-          setState(JSON.parse(docSnap.data().value));
+          const parsedData = JSON.parse(docSnap.data().value);
+          setState(parsedData);
+          stateRef.current = parsedData;
         } catch(e) { console.error("Parse error", key, e); }
       } else if (!isSynced) {
-        setDoc(docRef, { value: JSON.stringify(state) }).catch(console.error);
+        setDoc(docRef, { value: JSON.stringify(stateRef.current) }).catch(console.error);
       }
       setIsSynced(true);
     }, (err) => {
@@ -1299,8 +1300,10 @@ function useUserPersistentState(key, initialValue, fbUser) {
   }, [fbUser, key]);
 
   const setPersistentValue = (newValue) => {
-    const valueToStore = typeof newValue === 'function' ? newValue(state) : newValue;
+    const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
     setState(valueToStore);
+    stateRef.current = valueToStore;
+
     if (db && fbUser && appId) {
        const docRef = doc(db, 'artifacts', appId, 'users', fbUser.uid, 'user_preferences', key);
        setDoc(docRef, { value: JSON.stringify(valueToStore) }).catch(console.error);
@@ -1621,6 +1624,67 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useUserPersistentState('bmg_sidebar_open', true, fbUser); // NEW: Sidebar Desktop State (แยกอิสระรายบุคคล)
   const [fullScreenChart, setFullScreenChart] = useState(null); // แก้ไข: ย้าย State สำหรับจัดการ Full Screen Chart ขึ้นมาไว้ตรงนี้
   const [showNotificationModal, setShowNotificationModal] = useState(false); // NEW: State สำหรับแสดง Modal แจ้งเตือน
+
+  // --- NEW: Auto-Sync State (สถานะการซิงค์อัตโนมัติ) ---
+  const [autoSyncMessage, setAutoSyncMessage] = useState('');
+
+  // --- NEW: Helper Function สำหรับ Auto-Sync ไปยัง Google Sheets/Drive ---
+  const triggerAutoSync = (tableName, dataList, files = []) => {
+      // ใช้ URL เดียวกับปุ่ม Backup ในหน้าตั้งค่า
+      const GOOGLE_SCRIPT_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbzmNdR7LVpfUossHkcNH_onBPTG2dw6GuJzh5JilthkMwW-Sdr4s0lFjPKwSsCBTg/exec';
+      const GOOGLE_SCRIPT_DRIVE_URL = 'https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec';
+
+      setAutoSyncMessage(`กำลังซิงค์ ${tableName} ไปยังคลาวด์...`);
+
+      // 1. ซิงค์ข้อความไปที่ Google Sheets (ทำแบบ Background ไม่ใช้ await block)
+      if (GOOGLE_SCRIPT_SHEETS_URL && !GOOGLE_SCRIPT_SHEETS_URL.includes('YOUR_')) {
+          try {
+              // ล้างรูปภาพ Base64 ออกเพื่อไม่ให้เซลล์ใน Google Sheets เต็ม
+              const sanitizedData = dataList.map(item => {
+                  const cleanItem = { ...item };
+                  if (cleanItem.photo) cleanItem.photo = 'Base64 Image';
+                  if (cleanItem.images) cleanItem.images = 'Photos attached';
+                  // จัดการกรณีเป็น Daily Report
+                  if (cleanItem.performance) {
+                      cleanItem.performance = JSON.parse(JSON.stringify(cleanItem.performance));
+                      Object.keys(cleanItem.performance).forEach(dept => {
+                          if (cleanItem.performance[dept].images) cleanItem.performance[dept].images = 'Photos attached';
+                      });
+                  }
+                  return cleanItem;
+              });
+
+              fetch(GOOGLE_SCRIPT_SHEETS_URL, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                  body: JSON.stringify({ [tableName]: sanitizedData })
+              }).catch(err => console.error("Auto-sync sheet error", err));
+          } catch(e) { console.error(e); }
+      }
+
+      // 2. ซิงค์ไฟล์รูปภาพไปที่ Google Drive ทีละไฟล์ (ใน Background)
+      if (files.length > 0 && GOOGLE_SCRIPT_DRIVE_URL && !GOOGLE_SCRIPT_DRIVE_URL.includes('YOUR_')) {
+          const folderName = `AutoSync_${new Date().toISOString().split('T')[0]}`;
+          files.forEach(file => {
+              const match = file.data.match(/^data:(.+);base64,(.+)$/);
+              if (!match) return;
+              const payload = {
+                  filename: file.name,
+                  mimeType: match[1],
+                  data: match[2],
+                  folderName: folderName
+              };
+              fetch(GOOGLE_SCRIPT_DRIVE_URL, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                  body: JSON.stringify(payload)
+              }).catch(err => console.error("Auto-sync drive error", err));
+          });
+      }
+
+      // ปิดข้อความแจ้งเตือนหลังผ่านไป 3 วินาที
+      setTimeout(() => setAutoSyncMessage(''), 3000);
+  };
 
   // --- NEW: Helper function to calculate pending approvals for the current user ---
   const getPendingApprovals = () => {
@@ -2202,8 +2266,21 @@ export default function App() {
           approvals: [] // Track ใครอนุมัติไปแล้วบ้าง
       };
 
+      // FIX: คำนวณค่า nextList ไว้ล่วงหน้า แล้วค่อยสั่ง Update State 
+      const nextHistoryList = [newHistoryRecord, ...pmHistoryList];
+      
       // Add to history state (putting newest first)
-      setPmHistoryList([newHistoryRecord, ...pmHistoryList]);
+      setPmHistoryList(nextHistoryList);
+
+      // --- AUTO SYNC TRIGGER (บันทึกข้อมูล PM พร้อมอัปโหลดรูป) ---
+      let filesToUpload = [];
+      if (newHistoryRecord.images && newHistoryRecord.images.length > 0) {
+          newHistoryRecord.images.forEach((img, idx) => {
+              filesToUpload.push({ name: `PM_${newHistoryRecord.machineCode}_${newHistoryRecord.id}_${idx}.jpg`, data: img });
+          });
+      }
+      // แยกคำสั่งออกนอก setState เพื่อความเสถียร
+      triggerAutoSync('PM_History_ประวัติPM', nextHistoryList, filesToUpload);
 
       // อัปเดตรายการในหน้าต่าง Dashboard ทันทีที่บันทึก
       if (selectedPmStatusDetail && selectedPmStatusDetail.status === 'Not Started') {
@@ -2550,21 +2627,35 @@ export default function App() {
       const { commonFee, lateFee, water, parking, violation, other } = newDailyReport.income;
       return Number(commonFee) + Number(lateFee) + Number(water) + Number(parking) + Number(violation) + Number(other);
   };
+  
   const handleSaveDailyReport = (e) => {
       e.preventDefault();
       let savedReport;
+      let nextList; // สร้างตัวแปรรอรับ List ล่าสุด
       
-      // การใช้ functional update (prev => ...) จะป้องกันปัญหาบันทึกทับไม่ตรงจังหวะ
+      // FIX: ไม่นำ Side Effect ไปใส่ใน setState และคำนวณ State ด้วยตนเองก่อนเซฟ
       if (newDailyReport.id) {
           // Update existing report
           savedReport = { ...newDailyReport };
-          setDailyReports(prev => prev.map(r => r.id === newDailyReport.id ? savedReport : r));
+          nextList = dailyReports.map(r => r.id === newDailyReport.id ? savedReport : r);
       } else {
           // Create new report
           const id = generateId();
           savedReport = { ...newDailyReport, id, projectId: selectedProject.id };
-          setDailyReports(prev => [...prev, savedReport]);
+          nextList = [...dailyReports, savedReport];
       }
+
+      // สั่ง Update State แบบชัดเจน
+      setDailyReports(nextList);
+
+      // --- AUTO SYNC TRIGGER ---
+      let filesToUpload = [];
+      ['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].forEach(dept => {
+          const images = savedReport.performance[dept]?.images || [];
+          images.forEach((img, idx) => { filesToUpload.push({ name: `DailyReport_${savedReport.id}_${dept}_${idx}.jpg`, data: img }); });
+      });
+      triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, filesToUpload);
+
       setShowAddDailyReportModal(false);
       setSelectedDailyReport(savedReport); // Open view modal immediately
       alert('บันทึกรายงานประจำวันเสร็จสมบูรณ์'); // แจ้งเตือนเพื่อให้มั่นใจว่าบันทึกแล้ว
@@ -2579,15 +2670,15 @@ export default function App() {
   // Image Upload for Daily Report
   const handleDailyPerformanceImageUpload = async (dept, file) => {
     if (file) {
-        // จำกัดขนาดภาพสำหรับ Daily Report เป็น 400x400 (ลดคุณภาพเหลือ 0.4) เพื่อป้องกันพื้นที่เต็ม
-        const compressedBase64 = await compressImage(file, 400, 400, 0.4);
+        // ใช้ไฟล์ขนาดต้นฉบับ ไม่บีบอัด (รองรับไฟล์ขนาดใหญ่)
+        const compressedBase64 = await compressImage(file);
         setNewDailyReport(prev => ({
             ...prev,
             performance: {
                 ...prev.performance,
                 [dept]: {
                     ...(prev.performance[dept] || { details: '' }),
-                    images: [...(prev.performance[dept]?.images || []), compressedBase64]
+                    images: [compressedBase64] // บังคับให้เป็น 1 รูปเสมอ (แทนที่รูปเดิมทันที)
                 }
             }
         }));
@@ -2721,18 +2812,24 @@ export default function App() {
   const handleSaveRepair = (e) => {
       e.preventDefault();
       let savedRepair;
+      let nextList;
       const existingIndex = repairs.findIndex(r => r.code === newRepair.code);
       
+      // FIX: คำนวณ State แยกออกมาก่อน แล้วค่อยเรียก triggerAutoSync
       if (newRepair.id || existingIndex >= 0) {
-          // Edit existing repair (ใช้ newRepair.id หรือ fallback ด้วยค่า id เดิมกรณีข้อมูลเก่าชำรุด)
+          // Edit existing repair
           savedRepair = { ...newRepair, id: newRepair.id || repairs[existingIndex].id };
-          setRepairs(repairs.map(r => r.code === newRepair.code ? savedRepair : r));
+          nextList = repairs.map(r => r.code === newRepair.code ? savedRepair : r);
       } else {
           // Add new repair
           const id = generateId();
           savedRepair = { ...newRepair, id, projectId: selectedProject.id, date: new Date().toISOString().split('T')[0] };
-          setRepairs([...repairs, savedRepair]);
+          nextList = [...repairs, savedRepair];
       }
+
+      setRepairs(nextList);
+      triggerAutoSync('Repairs_แจ้งซ่อม', nextList, []);
+
       setShowAddRepairModal(false);
       setNewRepair({ id: null, code: '', roomNo: '', floor: '', requesterName: '', phone: '', issueType: '', issueTypeOther: '', issueDetails: '', inspectionResult: 'รอดำเนินการ', staffDetails: '', cost: '', staffName: '', requesterSignName: '' });
       setSelectedRepairView(savedRepair); // เปิดหน้าพรีวิวให้สั่ง Print ทันทีหลังบันทึก
@@ -5654,7 +5751,6 @@ export default function App() {
                     </div>
                     <div className={`flex gap-2 ${isExporting ? 'hidden' : ''} border-l pl-2 ml-2`}>
                         <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(users.filter(u => u.department === selectedProject.name), 'staff_list')}>{t('exportCSV')}</Button>
-                        {hasPerm('proj_staff', 'save') && <Button size="sm" icon={Plus} onClick={handleAddStaffToProject}>{t('addStaff')}</Button>}
                     </div>
                  </div>
               </div>
@@ -7948,7 +8044,7 @@ export default function App() {
                                    </span>
                                    <span className="text-sm text-gray-500 pr-8"><User size={12} className="inline mr-1"/>{report.reporter}</span>
                                </div>
-                               <div className="text-sm mt-2 text-gray-600 line-clamp-2" onClick={() => setSelectedDailyReport(report)}>{report.note || 'คลิกเพื่อดูรายละเอียดผลการปฏิบัติงาน...'}</div>
+                               <div className="text-sm mt-2 text-gray-600 line-clamp-2 break-words" onClick={() => setSelectedDailyReport(report)}>{report.note || 'คลิกเพื่อดูรายละเอียดผลการปฏิบัติงาน...'}</div>
                                
                                {!isExporting && hasPerm('proj_daily', 'delete') && (
                                    <button 
@@ -9097,6 +9193,14 @@ export default function App() {
         </div>
       </main>
 
+      {/* NEW: Auto Sync Floating Status Toast */}
+      {autoSyncMessage && !isExporting && (
+          <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-gray-900/90 text-white px-5 py-2.5 rounded-full shadow-2xl flex items-center gap-3 z-[9999] animate-fade-in backdrop-blur-sm border border-gray-700">
+              <Cloud size={16} className="text-blue-400 animate-pulse" />
+              <span className="text-sm font-medium tracking-wide">{autoSyncMessage}</span>
+          </div>
+      )}
+
       {/* Global Floating Notification Bell */}
       {!isExporting && currentUser && getPendingApprovals().length > 0 && (
           <div className="fixed bottom-8 right-8 z-[90] animate-fade-in">
@@ -10240,21 +10344,20 @@ export default function App() {
                                     onChange={(e) => handleDailyPerformanceChange(dept, e.target.value)}
                                 ></textarea>
                                 
-                                {/* Tiny Image Preview */}
+                                {/* Large Image Preview (อัปเดตให้รูปขยายใหญ่ขึ้น) */}
                                 {newDailyReport.performance[dept]?.images?.length > 0 && (
-                                    <div className="flex flex-wrap gap-1 mt-auto pt-1 border-t border-dashed">
-                                        {newDailyReport.performance[dept].images.map((img, idx) => (
-                                            <div key={idx} className="relative w-8 h-8 rounded overflow-hidden border group">
-                                                <img src={img} alt="Work" className="w-full h-full object-cover" />
-                                                <button 
-                                                    type="button"
-                                                    onClick={() => removeDailyPerformanceImage(dept, idx)}
-                                                    className="absolute inset-0 bg-red-500 bg-opacity-50 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                                                >
-                                                    <X size={10} />
-                                                </button>
-                                            </div>
-                                        ))}
+                                    <div className="mt-auto pt-2 border-t border-dashed">
+                                        <div className="relative w-full h-32 rounded-lg overflow-hidden border border-gray-200 shadow-sm group">
+                                            <img src={newDailyReport.performance[dept].images[0]} alt="Work" className="w-full h-full object-cover" />
+                                            <button 
+                                                type="button"
+                                                onClick={() => removeDailyPerformanceImage(dept, 0)}
+                                                className="absolute inset-0 bg-red-500 bg-opacity-60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-[1px]"
+                                                title="ลบรูประยะปฏิบัติงาน"
+                                            >
+                                                <X size={24} />
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -10324,9 +10427,9 @@ export default function App() {
                                     </div>
                                 ))}
                                 {selectedDailyReport.manpower.otherLabel && (
-                                    <div className="flex justify-between py-1 border-t border-blue-200 mt-1">
-                                        <span>{selectedDailyReport.manpower.otherLabel}</span>
-                                        <span className="font-bold">{selectedDailyReport.manpower.other || 0}</span>
+                                    <div className="flex justify-between py-1 border-t border-blue-200 mt-1 gap-2">
+                                        <span className="break-words flex-1 leading-tight">{selectedDailyReport.manpower.otherLabel}</span>
+                                        <span className="font-bold shrink-0">{selectedDailyReport.manpower.other || 0}</span>
                                     </div>
                                 )}
                             </div>
@@ -10343,9 +10446,9 @@ export default function App() {
                                     </div>
                                 ))}
                                 {selectedDailyReport.income.otherLabel && (
-                                    <div className="flex justify-between py-1">
-                                        <span>{selectedDailyReport.income.otherLabel}</span>
-                                        <span>{Number(selectedDailyReport.income.other || 0).toLocaleString()}</span>
+                                    <div className="flex justify-between py-1 gap-2">
+                                        <span className="break-words flex-1 leading-tight">{selectedDailyReport.income.otherLabel}</span>
+                                        <span className="shrink-0">{Number(selectedDailyReport.income.other || 0).toLocaleString()}</span>
                                     </div>
                                 )}
                                 <div className="border-t border-green-300 pt-2 mt-2 flex justify-between font-bold text-green-900">
@@ -10369,14 +10472,12 @@ export default function App() {
                                 return (
                                     <div key={dept} className="bg-white p-3 rounded border shadow-sm">
                                         <div className="font-semibold text-xs text-orange-600 mb-1">{t('dept_' + dept)}</div>
-                                        <div className="text-xs text-gray-700 whitespace-pre-wrap mb-2">{deptData.details || '-'}</div>
+                                        <div className="text-xs text-gray-700 whitespace-pre-wrap break-words mb-2">{deptData.details || '-'}</div>
                                         {deptData.images && deptData.images.length > 0 && (
-                                            <div className="flex flex-wrap gap-1">
-                                                {deptData.images.map((img, idx) => (
-                                                    <div key={idx} className="w-12 h-12 rounded overflow-hidden border">
-                                                        <img src={img} className="w-full h-full object-cover" />
-                                                    </div>
-                                                ))}
+                                            <div className="mt-2">
+                                                <div className="w-full h-40 rounded-lg overflow-hidden border border-gray-200 shadow-sm">
+                                                    <img src={deptData.images[0]} className="w-full h-full object-cover" />
+                                                </div>
                                             </div>
                                         )}
                                     </div>
@@ -10389,7 +10490,7 @@ export default function App() {
                     {selectedDailyReport.note && (
                         <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
                              <h3 className="font-bold text-yellow-800 mb-1 text-sm">{t('additionalDetails')}</h3>
-                             <p className="text-xs text-gray-700">{selectedDailyReport.note}</p>
+                             <p className="text-xs text-gray-700 whitespace-pre-wrap break-words">{selectedDailyReport.note}</p>
                         </div>
                     )}
                     
