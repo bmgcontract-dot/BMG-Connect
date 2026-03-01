@@ -1471,6 +1471,7 @@ export default function App() {
   const [pmFormIssues, setPmFormIssues] = useState({}); // เพิ่ม State สำหรับเก็บปัญหาที่พบรายข้อ
   const [pmFormRemark, setPmFormRemark] = useState('');
   const [pmFormImages, setPmFormImages] = useState([]); // NEW: State สำหรับเก็บรูปภาพหลายรูปในฟอร์ม PM
+  const [pmHistoryDateFilter, setPmHistoryDateFilter] = useState(''); // NEW: ตัวกรองวันที่สำหรับประวัติ PM
 
   // NEW: Utilities State
   const [meters, setMeters] = usePersistentState('bmg_meters', INITIAL_METERS, fbUser);
@@ -1620,10 +1621,11 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false); // NEW: Mobile Menu State
   const [isSidebarOpen, setIsSidebarOpen] = useUserPersistentState('bmg_sidebar_open', true, fbUser); // NEW: Sidebar Desktop State (แยกอิสระรายบุคคล)
   const [fullScreenChart, setFullScreenChart] = useState(null); // แก้ไข: ย้าย State สำหรับจัดการ Full Screen Chart ขึ้นมาไว้ตรงนี้
+  const [showNotificationModal, setShowNotificationModal] = useState(false); // NEW: State สำหรับแสดง Modal แจ้งเตือน
 
   // --- NEW: Helper function to calculate pending approvals for the current user ---
-  const getPendingApprovalsCount = () => {
-      if (!currentUser) return 0;
+  const getPendingApprovals = () => {
+      if (!currentUser) return [];
 
       const isChiefUser = currentUser.position.includes('หัวหน้าช่าง');
       const isManagerUser = currentUser.position.includes('ผู้จัดการ') && !currentUser.position.includes('ผู้ช่วย');
@@ -1640,15 +1642,25 @@ export default function App() {
           return projName === currentUser.department || accessibleArray.includes(projName);
       };
 
-      let pendingCount = 0;
+      let pendingItems = [];
 
       // 1. นับจำนวนประวัติ PM ที่รออนุมัติ
       pmHistoryList.forEach(record => {
           const proj = projects.find(p => p.id === record.projectId);
           if (proj && isProjectAccessible(proj.name)) {
               const status = record.approvalStatus;
-              if (status === 'Pending Chief' && (isChiefUser || isAdminUser)) pendingCount++;
-              if (status === 'Pending Manager' && (isManagerUser || isAdminUser)) pendingCount++;
+              if ((status === 'Pending Chief' && (isChiefUser || isAdminUser)) || 
+                  (status === 'Pending Manager' && (isManagerUser || isAdminUser))) {
+                  pendingItems.push({
+                      id: record.id,
+                      type: 'pm',
+                      title: `อนุมัติผล PM: ${record.machineName}`,
+                      project: proj,
+                      date: record.date,
+                      actionText: 'ดูรายละเอียด PM',
+                      record: record
+                  });
+              }
           }
       });
 
@@ -1658,12 +1670,23 @@ export default function App() {
           const proj = projects.find(p => p.id === projectId);
           if (proj && isProjectAccessible(proj.name)) {
               const approval = scheduleApprovals[key];
-              if (approval.status === 'Pending Manager' && (isManagerUser || isAdminUser)) pendingCount++;
-              if (approval.status === 'Pending HR' && (isHRUser || isAdminUser)) pendingCount++;
+              if ((approval.status === 'Pending Manager' && (isManagerUser || isAdminUser)) || 
+                  (approval.status === 'Pending HR' && (isHRUser || isAdminUser))) {
+                  pendingItems.push({
+                      id: key,
+                      type: 'schedule',
+                      title: `อนุมัติตารางงาน เดือน ${month.split('-').reverse().join('/')}`,
+                      project: proj,
+                      date: approval.updatedAt || new Date().toISOString(),
+                      actionText: 'ดูตารางงาน',
+                      month: month
+                  });
+              }
           }
       });
 
-      return pendingCount;
+      // เรียงลำดับจากเก่าไปใหม่ เพื่อให้เคลียร์งานเก่าก่อน
+      return pendingItems.sort((a, b) => new Date(a.date) - new Date(b.date));
   };
 
   // NEW: Helper for downloading files safely (especially large base64 PDFs)
@@ -3772,7 +3795,8 @@ export default function App() {
       const currentMonthStr = new Date().toISOString().slice(0, 7);
       
       // ดึงจำนวนรายการที่รอการอนุมัติสำหรับ User ปัจจุบัน
-      const pendingApprovalCount = getPendingApprovalsCount();
+      const pendingItems = getPendingApprovals();
+      const pendingApprovalCount = pendingItems.length;
 
       // ดึงข้อมูลโครงการเฉพาะที่ผู้ใช้มีสิทธิ์เข้าถึง สำหรับแสดงผลแดชบอร์ดให้สอดคล้องกับสิทธิ์
       const visibleProjectsDashboard = projects.filter(p => {
@@ -3997,8 +4021,8 @@ export default function App() {
                               <p className="text-red-600 text-sm mt-0.5">คุณมีเอกสาร (เช่น ตารางงาน หรือ แผน PM) ที่จำเป็นต้องดำเนินการตรวจสอบ</p>
                           </div>
                       </div>
-                      <Button variant="danger" className="shrink-0 hidden md:flex shadow-sm" onClick={() => alert('กรุณาเข้าไปที่โครงการที่เกี่ยวข้อง > เลือกแท็บ "ตารางงาน" หรือ "เครื่องจักร/PM" เพื่อตรวจสอบและกดอนุมัติข้อมูล')}>
-                          ดูวิธีการตรวจสอบ
+                      <Button variant="danger" className="shrink-0 hidden md:flex shadow-sm" onClick={() => setShowNotificationModal(true)}>
+                          ดูรายการรออนุมัติ
                       </Button>
                   </div>
               )}
@@ -4015,7 +4039,7 @@ export default function App() {
                           <div 
                               className="relative flex items-center justify-center w-10 h-10 bg-red-50 rounded-full cursor-pointer hover:bg-red-100 transition-colors shadow-sm border border-red-100 md:hidden"
                               title="มีรายการรอให้คุณอนุมัติ"
-                              onClick={() => alert(`คุณมีรายการรออนุมัติจำนวน ${pendingApprovalCount} รายการ\nกรุณาตรวจสอบในหน่วยงานที่เกี่ยวข้อง`)}
+                              onClick={() => setShowNotificationModal(true)}
                           >
                               <Bell className="text-red-500 animate-ring" size={20} />
                               <span className="absolute top-0 right-0 bg-red-600 text-white text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded-full border-2 border-white">
@@ -6859,12 +6883,36 @@ export default function App() {
                       </Card>
                   )}
 
-                  {pmSubTab === 'history' && (
+                  {pmSubTab === 'history' && (() => {
+                      const filteredPmHistory = pmHistoryList
+                          .filter(h => h.projectId === selectedProject.id)
+                          .filter(h => {
+                              if (!pmHistoryDateFilter) return true;
+                              const recordDate = h.executedDate || h.date;
+                              return recordDate === pmHistoryDateFilter;
+                          })
+                          .sort((a, b) => new Date(b.executedDate || b.date) - new Date(a.executedDate || a.date)); // เรียงล่าสุดขึ้นก่อน
+
+                      return (
                       <Card className="border-t-4 border-gray-600">
-                          <div className="p-4 border-b flex justify-between items-center bg-white">
+                          <div className="p-4 border-b flex flex-col md:flex-row justify-between items-start md:items-center bg-white gap-4">
                               <h3 className="font-bold flex items-center gap-2 text-gray-800"><History size={20}/> ประวัติการบำรุงรักษา (PM History)</h3>
-                              <div className="flex gap-2">
-                                  <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(pmHistoryList.filter(h => h.projectId === selectedProject.id), 'pm_history_list')}>{t('exportCSV')}</Button>
+                              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                                  <div className={`flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-md px-3 py-1.5 w-full md:w-auto ${isExporting ? 'hidden' : ''}`}>
+                                      <label className="text-xs font-bold text-gray-500 whitespace-nowrap">กรองวันที่ทำจริง:</label>
+                                      <input 
+                                          type="date" 
+                                          className="text-sm border-none bg-transparent outline-none cursor-pointer text-gray-700 w-full"
+                                          value={pmHistoryDateFilter}
+                                          onChange={e => setPmHistoryDateFilter(e.target.value)}
+                                      />
+                                      {pmHistoryDateFilter && (
+                                          <button onClick={() => setPmHistoryDateFilter('')} className="text-gray-400 hover:text-red-500 flex items-center justify-center p-0.5 bg-gray-200 rounded-full">
+                                              <X size={12} />
+                                          </button>
+                                      )}
+                                  </div>
+                                  <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(filteredPmHistory, 'pm_history_list')}>{t('exportCSV')}</Button>
                               </div>
                           </div>
                           <div className="overflow-x-auto">
@@ -6872,7 +6920,7 @@ export default function App() {
                                   <thead className="bg-gray-100 text-gray-700 uppercase">
                                       <tr>
                                           <th className="p-3 text-center w-12">{t('col_seq')}</th>
-                                          <th className="p-3 text-left w-32">วันที่บันทึก (ตามแผน)</th>
+                                          <th className="p-3 text-left w-32">วันที่ทำจริง (Act)</th>
                                           <th className="p-3 text-left">เครื่องจักร</th>
                                           <th className="p-3 text-center w-32">ผลการตรวจ</th>
                                           <th className="p-3 text-center w-36">สถานะอนุมัติ</th>
@@ -6881,12 +6929,15 @@ export default function App() {
                                       </tr>
                                   </thead>
                                   <tbody className="divide-y divide-gray-200">
-                                      {pmHistoryList.filter(h => h.projectId === selectedProject.id).length > 0 ? (
-                                          pmHistoryList.filter(h => h.projectId === selectedProject.id).map((hist, index) => (
+                                      {filteredPmHistory.length > 0 ? (
+                                          filteredPmHistory.map((hist, index) => (
                                               <tr key={hist.id} className="hover:bg-gray-50">
                                                   <td className="p-4 text-center text-gray-500 font-medium">{index + 1}</td>
                                                   <td className="p-4">
-                                                      <div className="text-gray-700 font-medium">{new Date(hist.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })}</div>
+                                                      <div className="text-gray-800 font-bold">{new Date(hist.executedDate || hist.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })}</div>
+                                                      {(hist.executedDate && hist.date && hist.executedDate !== hist.date) && (
+                                                          <div className="text-[10px] text-gray-500 mt-0.5">แผน: {new Date(hist.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })}</div>
+                                                      )}
                                                       {hist.executionTimingStatus && (
                                                           <div className={`text-[10px] font-bold mt-1 inline-block px-1.5 py-0.5 rounded-md ${
                                                               hist.executionTimingStatus === 'เร็วกว่าแผน' ? 'bg-blue-100 text-blue-700' :
@@ -6940,13 +6991,13 @@ export default function App() {
                                               </tr>
                                           ))
                                       ) : (
-                                          <tr><td colSpan="7" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">ยังไม่มีประวัติการบันทึก PM สำหรับโครงการนี้</td></tr>
+                                          <tr><td colSpan="7" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">ไม่พบประวัติการบันทึก PM {pmHistoryDateFilter ? 'ในวันที่เลือก' : 'สำหรับโครงการนี้'}</td></tr>
                                       )}
                                   </tbody>
                               </table>
                           </div>
                       </Card>
-                  )}
+                  )})}
 
                   {!['registry', 'plan', 'calendar', 'history', 'form'].includes(pmSubTab) && (
                       <div className="flex flex-col items-center justify-center h-64 bg-white rounded-lg border border-dashed text-gray-400">
@@ -9073,8 +9124,93 @@ export default function App() {
           )}
         </div>
       </main>
-      
-      {/* ... (Previous Modals) ... */}
+
+      {/* Global Floating Notification Bell */}
+      {!isExporting && currentUser && getPendingApprovals().length > 0 && (
+          <div className="fixed bottom-8 right-8 z-[90] animate-fade-in">
+              <button 
+                  onClick={() => setShowNotificationModal(true)}
+                  className="relative flex items-center justify-center w-16 h-16 bg-red-600 hover:bg-red-700 text-white rounded-full shadow-2xl transition-transform hover:scale-110 border-4 border-white"
+                  title="รายการรออนุมัติ"
+              >
+                  <Bell size={32} className="animate-ring" />
+                  <span className="absolute -top-2 -right-2 bg-white text-red-600 text-sm font-black w-7 h-7 flex items-center justify-center rounded-full shadow-md border-2 border-red-600">
+                      {getPendingApprovals().length > 99 ? '99+' : getPendingApprovals().length}
+                  </span>
+              </button>
+          </div>
+      )}
+
+      {/* Notification List Modal */}
+      {showNotificationModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden border border-gray-200">
+                  <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-red-50 shrink-0">
+                      <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center text-red-600">
+                              <Bell className="animate-ring" size={20}/>
+                          </div>
+                          <div>
+                              <h2 className="text-xl font-black text-red-800">
+                                  รายการรออนุมัติ
+                              </h2>
+                              <p className="text-xs font-bold text-red-600">ทั้งหมด {getPendingApprovals().length} รายการที่ต้องการการตรวจสอบ</p>
+                          </div>
+                      </div>
+                      <button onClick={() => setShowNotificationModal(false)} className="text-gray-400 hover:text-red-600 p-2 rounded-xl hover:bg-red-100 transition-colors">
+                          <X size={24} />
+                      </button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-5 space-y-3 bg-gray-50 custom-scrollbar">
+                      {getPendingApprovals().length > 0 ? getPendingApprovals().map(item => (
+                          <div key={item.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm hover:border-red-300 transition-all hover:shadow-md flex flex-col gap-4 group">
+                              <div className="flex justify-between items-start">
+                                  <div className="flex gap-3">
+                                      <div className={`p-2.5 rounded-xl shrink-0 mt-0.5 ${item.type === 'pm' ? 'bg-orange-50 text-orange-600' : 'bg-blue-50 text-blue-600'}`}>
+                                          {item.type === 'pm' ? <Wrench size={20}/> : <Calendar size={20}/>}
+                                      </div>
+                                      <div>
+                                          <h4 className="font-bold text-gray-800 text-sm group-hover:text-red-600 transition-colors">{item.title}</h4>
+                                          <p className="text-xs text-gray-500 font-medium flex items-center gap-1 mt-1">
+                                              <Building2 size={12} className="text-gray-400"/> {item.project.name}
+                                          </p>
+                                      </div>
+                                  </div>
+                                  <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-md shrink-0">
+                                      {new Date(item.date).toLocaleDateString('th-TH', { month: 'short', day: 'numeric', year: 'numeric'})}
+                                  </span>
+                              </div>
+                              <Button 
+                                  size="sm" 
+                                  variant="outline" 
+                                  className="w-full border-red-200 text-red-600 hover:bg-red-50 font-bold shadow-sm"
+                                  onClick={() => {
+                                      setShowNotificationModal(false);
+                                      setSelectedProject(item.project);
+                                      if (item.type === 'pm') {
+                                          setProjectTab('pm');
+                                          setPmSubTab('history');
+                                          setTimeout(() => setSelectedPmHistory(item.record), 300);
+                                      } else if (item.type === 'schedule') {
+                                          setProjectTab('schedule');
+                                          setCurrentMonth(item.month);
+                                      }
+                                  }}
+                              >
+                                  {item.actionText}
+                              </Button>
+                          </div>
+                      )) : (
+                          <div className="flex flex-col items-center justify-center py-12 text-gray-400">
+                              <CheckCircle size={48} className="mb-3 text-green-500 opacity-50"/>
+                              <p className="font-bold text-gray-500">ยอดเยี่ยม!</p>
+                              <p className="text-sm">ไม่มีรายการรออนุมัติค้างอยู่</p>
+                          </div>
+                      )}
+                  </div>
+              </div>
+          </div>
+      )}
       
       {/* Modals */}
       {showAddUserModal && (
