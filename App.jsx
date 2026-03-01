@@ -1346,7 +1346,17 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  const [currentUser, setCurrentUser] = useState(null);
+  // --- NEW: แก้ไขให้ State อ่านค่าจาก LocalStorage เพื่อจำการล็อกอิน ---
+  const [currentUser, setCurrentUser] = useState(() => {
+      if (typeof window !== 'undefined') {
+          const savedUser = localStorage.getItem('bmg_current_user');
+          if (savedUser) {
+              try { return JSON.parse(savedUser); } catch(e) { return null; }
+          }
+      }
+      return null;
+  });
+  
   const [activeMenu, setActiveMenu] = useState('dashboard');
   const [selectedProject, setSelectedProject] = useState(null);
   const [projectTab, setProjectTab] = useState('overview');
@@ -1624,6 +1634,17 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useUserPersistentState('bmg_sidebar_open', true, fbUser); // NEW: Sidebar Desktop State (แยกอิสระรายบุคคล)
   const [fullScreenChart, setFullScreenChart] = useState(null); // แก้ไข: ย้าย State สำหรับจัดการ Full Screen Chart ขึ้นมาไว้ตรงนี้
   const [showNotificationModal, setShowNotificationModal] = useState(false); // NEW: State สำหรับแสดง Modal แจ้งเตือน
+
+  // --- NEW: Auto-sync Current User (อัปเดตข้อมูลผู้ใช้แบบ Real-time เผื่อมีการเปลี่ยนสิทธิ์) ---
+  useEffect(() => {
+      if (currentUser && users.length > 0) {
+          const freshUser = users.find(u => u.id === currentUser.id);
+          if (freshUser && JSON.stringify(freshUser) !== JSON.stringify(currentUser)) {
+              setCurrentUser(freshUser);
+              localStorage.setItem('bmg_current_user', JSON.stringify(freshUser));
+          }
+      }
+  }, [users]);
 
   // --- NEW: Auto-Sync State (สถานะการซิงค์อัตโนมัติ) ---
   const [autoSyncMessage, setAutoSyncMessage] = useState('');
@@ -2350,7 +2371,11 @@ export default function App() {
       e.preventDefault(); 
       const user = users.find(u => u.username === loginForm.username && u.password === loginForm.password); 
       if (user) { 
-          setCurrentUser(user); 
+          setCurrentUser(user);
+          // NEW: บันทึกข้อมูลลง LocalStorage เพื่อให้จำค่าตอน Refresh
+          if (typeof window !== 'undefined') {
+              localStorage.setItem('bmg_current_user', JSON.stringify(user));
+          }
           setNewDailyReport(prev => ({...prev, reporter: `${user.firstName} ${user.lastName}`})); 
           setLoginError(''); 
           
@@ -2376,7 +2401,18 @@ export default function App() {
           setLoginError('หากไม่สามารถเข้าใช้งานได้ กรุณาติดต่อผู้ดูแลระบบ (Admin)'); 
       } 
   };
-  const handleLogout = () => { setCurrentUser(null); setLoginForm({ username: '', password: '' }); setActiveMenu('dashboard'); setSelectedProject(null); };
+  
+  const handleLogout = () => { 
+      setCurrentUser(null); 
+      // NEW: ลบข้อมูลออกจาก LocalStorage
+      if (typeof window !== 'undefined') {
+          localStorage.removeItem('bmg_current_user');
+      }
+      setLoginForm({ username: '', password: '' }); 
+      setActiveMenu('dashboard'); 
+      setSelectedProject(null); 
+  };
+  
   const getKPIs = () => ({ projects: projects.length, employees: users.length, pendingTasks: 0, pmDue: 0 });
   const exportToCSV = (data, filename) => { if (!data || data.length === 0) return alert('No data to export'); const headers = Object.keys(data[0]); const csvContent = [headers.join(','), ...data.map(row => headers.map(fieldName => `"${row[fieldName] || ''}"`).join(','))].join('\n'); const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' }); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `${filename}.csv`; link.click(); }; 
   
@@ -4002,6 +4038,26 @@ export default function App() {
           };
       }).sort((a, b) => a.daysRemaining - b.daysRemaining);
 
+      // --- NEW: 7. Schedule Submission Status ---
+      const localCurrentMonthStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+      const scheduleStatusTableData = visibleProjectsDashboard.map(p => {
+          const key = `${p.id}_${localCurrentMonthStr}`;
+          const approval = scheduleApprovals[key] || {};
+          return {
+              id: p.id,
+              name: p.name,
+              preparedBy: approval.preparedBy || '-',
+              managerApprovedBy: approval.managerApprovedBy || '-',
+              hrApprovedBy: approval.hrApprovedBy || '-',
+              status: approval.status || 'Not Submitted',
+              isLocked: approval.isLocked || false
+          };
+      }).sort((a, b) => {
+          // Sort by status to group them logically (Not Submitted -> Pending -> Approved)
+          const order = { 'Not Submitted': 0, 'Pending Manager': 1, 'Pending HR': 2, 'Approved': 3 };
+          return order[a.status] - order[b.status];
+      });
+
       // --- Chart Rendering Helpers ---
       const renderCustomizedPieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }) => {
           const RADIAN = Math.PI / 180;
@@ -4235,7 +4291,78 @@ export default function App() {
                   </Card>
               </div>
 
-          {/* 7. Project Contract Expiration List */}
+          {/* NEW: 7. Monthly Schedule Submission Status */}
+          <Card className="p-6">
+              <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                  <Calendar size={20} className="text-pink-500"/> สถานะการนำส่งตารางงานประจำเดือน (เดือนปัจจุบัน)
+              </h3>
+              <div className="overflow-x-auto max-h-[400px] overflow-y-auto custom-scrollbar border border-gray-200 rounded-lg relative">
+                  <table className="w-full text-sm text-left">
+                      <thead className="bg-gray-50 text-gray-600 sticky top-0 z-20 shadow-sm">
+                          <tr>
+                              <th className="p-4 border-b w-16 text-center">ลำดับ</th>
+                              <th className="p-4 border-b">ชื่อโครงการ / หน่วยงาน</th>
+                              <th className="p-4 border-b text-center">ผู้จัดทำ</th>
+                              <th className="p-4 border-b text-center">ผู้จัดการอนุมัติ</th>
+                              <th className="p-4 border-b text-center">ฝ่ายบุคคลอนุมัติ</th>
+                              <th className="p-4 border-b text-center">สถานะ</th>
+                          </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 bg-white">
+                          {scheduleStatusTableData.length > 0 ? scheduleStatusTableData.map((p, index) => {
+                              return (
+                                  <tr 
+                                      key={p.id} 
+                                      className="hover:bg-orange-50 transition-colors cursor-pointer group"
+                                      onClick={() => {
+                                          const proj = projects.find(proj => proj.id === p.id);
+                                          if(proj) {
+                                              setSelectedProject(proj);
+                                              setProjectTab('schedule');
+                                              setCurrentMonth(localCurrentMonthStr); // เปิดตรงเดือนปัจจุบัน
+                                          }
+                                      }}
+                                      title="คลิกเพื่อไปยังหน้าตารางงานของหน่วยงานนี้"
+                                  >
+                                      <td className="p-4 text-center text-gray-500">{index + 1}</td>
+                                      <td className="p-4 font-bold text-gray-800 flex items-center gap-2 group-hover:text-orange-600 transition-colors">
+                                          <Building2 size={16} className="text-gray-400 group-hover:text-orange-500"/>
+                                          {p.name}
+                                      </td>
+                                      <td className="p-4 text-center text-gray-600">
+                                          {p.preparedBy !== '-' ? <div className="text-xs">{p.preparedBy}</div> : <span className="text-gray-300">-</span>}
+                                      </td>
+                                      <td className="p-4 text-center text-gray-600">
+                                          {p.managerApprovedBy !== '-' ? <div className="text-xs text-green-600 font-medium flex items-center justify-center gap-1"><CheckCircle size={12}/> {p.managerApprovedBy}</div> : <span className="text-gray-300">-</span>}
+                                      </td>
+                                      <td className="p-4 text-center text-gray-600">
+                                          {p.hrApprovedBy !== '-' ? <div className="text-xs text-green-600 font-medium flex items-center justify-center gap-1"><CheckCircle size={12}/> {p.hrApprovedBy}</div> : <span className="text-gray-300">-</span>}
+                                      </td>
+                                      <td className="p-4 text-center">
+                                          <span className={`font-bold px-3 py-1.5 rounded-full text-xs flex items-center justify-center gap-1 w-fit mx-auto ${
+                                              p.status === 'Approved' ? 'bg-green-100 text-green-700 border border-green-200' : 
+                                              p.status === 'Pending HR' ? 'bg-blue-100 text-blue-700 border border-blue-200' : 
+                                              p.status === 'Pending Manager' ? 'bg-orange-100 text-orange-700 border border-orange-200' : 
+                                              'bg-gray-100 text-gray-500 border border-gray-200'
+                                          }`}>
+                                              {p.status === 'Approved' ? <CheckCircle size={12}/> : p.status !== 'Not Submitted' ? <Clock size={12}/> : <AlertTriangle size={12}/>}
+                                              {p.status === 'Approved' ? 'อนุมัติสมบูรณ์' : 
+                                               p.status === 'Pending HR' ? 'รอฝ่ายบุคคลอนุมัติ' : 
+                                               p.status === 'Pending Manager' ? 'รอ ผจก. อนุมัติ' : 'ยังไม่ส่ง / ฉบับร่าง'}
+                                          </span>
+                                          {p.isLocked && <div className="text-[10px] text-red-500 font-bold mt-1 flex justify-center items-center gap-1"><Lock size={10}/> ล็อคแล้ว</div>}
+                                      </td>
+                                  </tr>
+                              );
+                          }) : (
+                              <tr><td colSpan="6" className="p-8 text-center text-gray-400">ไม่มีข้อมูลโครงการ</td></tr>
+                          )}
+                      </tbody>
+                  </table>
+              </div>
+          </Card>
+
+          {/* 8. Project Contract Expiration List */}
           <Card className="p-6">
               <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
                   <Hourglass size={20} className="text-red-500"/> ลำดับวันสิ้นสุดสัญญาของหน่วยงาน (จากน้อยไปมาก)
@@ -10376,6 +10503,39 @@ export default function App() {
                      ></textarea>
                 </div>
 
+                {/* NEW: Preview Auto-fetched Utility Readings */}
+                {(() => {
+                    const reportDate = newDailyReport.date;
+                    const projMeters = meters.filter(m => m.projectId === selectedProject.id);
+                    const projMeterIds = projMeters.map(m => m.id);
+                    const dayReadings = utilityReadings.filter(r => r.date === reportDate && projMeterIds.includes(r.meterId));
+
+                    if (dayReadings.length === 0) return null;
+
+                    return (
+                        <div className="mb-6 bg-gray-50 p-4 rounded-lg border border-gray-200 shadow-inner">
+                             <h3 className="font-bold text-gray-700 mb-1 text-sm flex items-center gap-2">
+                                 <Zap size={16} className="text-orange-500"/> ข้อมูลการจดมิเตอร์อัตโนมัติ ประจำวันที่ {new Date(reportDate).toLocaleDateString('th-TH')}
+                             </h3>
+                             <p className="text-[11px] text-gray-500 mb-3">* ระบบจะดึงข้อมูลมิเตอร์ที่ถูกจดในวันนี้ไปแสดงในรายงาน PDF โดยอัตโนมัติ ({dayReadings.length} รายการ)</p>
+                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                                 {dayReadings.map(r => {
+                                     const meter = projMeters.find(m => m.id === r.meterId);
+                                     return (
+                                         <div key={r.id} className="flex justify-between items-center bg-white p-2 border border-gray-200 rounded shadow-sm">
+                                             <div className="flex items-center gap-1.5 truncate pr-2">
+                                                 {meter?.type === 'Water' ? <Droplet size={14} className="text-blue-500 shrink-0"/> : <Zap size={14} className="text-orange-500 shrink-0"/>}
+                                                 <span className="font-medium text-gray-700 truncate" title={meter?.name}>{meter?.name} <span className="text-gray-400 font-normal">({meter?.code})</span></span>
+                                             </div>
+                                             <span className="font-bold text-red-600 shrink-0">+{r.usage.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                                         </div>
+                                     )
+                                 })}
+                             </div>
+                        </div>
+                    );
+                })()}
+
                 <div className="mt-6 flex justify-between items-center border-t pt-4">
                     <div className="flex items-center gap-2 text-sm text-gray-600">
                         <User size={16} /> {t('reporter')}: <span className="font-semibold text-gray-800">{newDailyReport.reporter}</span>
@@ -10493,6 +10653,58 @@ export default function App() {
                              <p className="text-xs text-gray-700 whitespace-pre-wrap break-words">{selectedDailyReport.note}</p>
                         </div>
                     )}
+                    
+                    {/* NEW: Auto-fetched Utility Readings for Print View */}
+                    {(() => {
+                        const reportDate = selectedDailyReport.date;
+                        const projMeters = meters.filter(m => m.projectId === selectedDailyReport.projectId);
+                        const projMeterIds = projMeters.map(m => m.id);
+                        const dayReadings = utilityReadings.filter(r => r.date === reportDate && projMeterIds.includes(r.meterId));
+
+                        if (dayReadings.length === 0) return null;
+
+                        return (
+                            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                                <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
+                                    <Zap size={16} className="text-orange-500"/> 5. สรุปการจดมิเตอร์น้ำ/ไฟประจำวัน (Utility Readings)
+                                </h3>
+                                <div className="w-full">
+                                    <table className="w-full text-xs text-left border-collapse">
+                                        <thead className="bg-gray-100 text-gray-600 border-y border-gray-200">
+                                            <tr>
+                                                <th className="py-2 px-3 font-medium w-24">ประเภท</th>
+                                                <th className="py-2 px-3 font-medium">ชื่อมิเตอร์ (รหัส)</th>
+                                                <th className="py-2 px-3 text-right font-medium w-24">ค่ายกมา</th>
+                                                <th className="py-2 px-3 text-right font-medium w-24">ค่าปัจจุบัน</th>
+                                                <th className="py-2 px-3 text-right font-medium w-24">หน่วยที่ใช้</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-200 bg-white">
+                                            {dayReadings.map(r => {
+                                                const meter = projMeters.find(m => m.id === r.meterId);
+                                                return (
+                                                    <tr key={r.id}>
+                                                        <td className="py-2 px-3">
+                                                            <span className={`inline-flex items-center gap-1 font-bold ${meter?.type === 'Water' ? 'text-blue-600' : 'text-orange-600'}`}>
+                                                                {meter?.type === 'Water' ? <Droplet size={12}/> : <Zap size={12}/>}
+                                                                {meter?.type === 'Water' ? 'น้ำประปา' : 'ไฟฟ้า'}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-2 px-3 font-medium text-gray-800 truncate max-w-[150px]" title={meter?.name}>
+                                                            {meter?.name} <span className="text-gray-500 font-normal">({meter?.code})</span>
+                                                        </td>
+                                                        <td className="py-2 px-3 text-right text-gray-500">{r.prevValue.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                                                        <td className="py-2 px-3 text-right font-bold text-gray-800">{r.value.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                                                        <td className="py-2 px-3 text-right font-bold text-red-600">+{r.usage.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        );
+                    })()}
                     
                     {/* Footer */}
                     <div className="flex justify-between items-end pt-8 mt-4 border-t">
