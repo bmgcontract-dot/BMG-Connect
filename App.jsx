@@ -2617,8 +2617,8 @@ export default function App() {
                   margin: customMargin || [22, 10, 20, 10], // ปรับ Top Margin ค่า Default ลดลงเหลือ 22mm
                   filename: filename, 
                   image: { type: 'jpeg', quality: 0.98 }, 
-                  // เพิ่ม scrollY: 0 และ letterRendering: true เพื่อแก้บัคพื้นที่ว่างและสระ/วรรณยุกต์ภาษาไทยกระโดด
-                  html2canvas: { scale: 2, useCORS: true, scrollY: 0, letterRendering: true }, 
+                  // แก้ไข: นำ letterRendering ออกเพื่อแก้ปัญหาสระและวรรณยุกต์ภาษาไทยกระโดด/ลอยผิดตำแหน่ง
+                  html2canvas: { scale: 2, useCORS: true, scrollY: 0 }, 
                   jsPDF: { unit: 'mm', format: 'a4', orientation: orientation },
                   pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
               }; 
@@ -2680,10 +2680,10 @@ export default function App() {
                   margin: [22, 10, 20, 10], 
                   filename: `Work_Schedule_${selectedProject?.name || 'Project'}_${currentMonth}.pdf`, 
                   image: { type: 'jpeg', quality: 1 }, 
+                  // แก้ไข: นำ letterRendering ออกเพื่อแก้ปัญหาสระและวรรณยุกต์ภาษาไทยกระโดด/ลอยผิดตำแหน่ง
                   html2canvas: { 
-                      scale: 3, // ขยาย Scale เป็น 3 เท่าเพื่อความคมชัดของตัวหนังสือเวลาพิมพ์
+                      scale: 3, 
                       useCORS: true, 
-                      letterRendering: true,
                       scrollY: 0,
                       scrollX: 0
                   }, 
@@ -5601,7 +5601,17 @@ export default function App() {
                   </Button>
               )}
               <Button variant="outline" onClick={() => exportToCSV([selectedProject], 'project_detail')}>{t('exportInfo')}</Button>
-              <Button variant="outline" icon={isExporting ? Loader2 : Printer} onClick={() => handleExportPDF('print-area', 'Project_Overview.pdf', 'portrait')} disabled={isExporting}>{isExporting ? t('downloading') : t('printPDF')}</Button>
+              <Button variant="outline" icon={isExporting ? Loader2 : Printer} onClick={() => {
+                  let orientation = 'portrait';
+                  let filename = 'Project_Overview.pdf';
+                  if (projectTab === 'staff' && staffViewMode === 'chart') {
+                      orientation = 'landscape';
+                      filename = `Organization_Chart_${selectedProject.code}.pdf`;
+                  } else if (projectTab === 'staff') {
+                      filename = `Staff_List_${selectedProject.code}.pdf`;
+                  }
+                  handleExportPDF('print-area', filename, orientation);
+              }} disabled={isExporting}>{isExporting ? t('downloading') : t('printPDF')}</Button>
           </div>
         </div>
         
@@ -6146,6 +6156,9 @@ export default function App() {
                     </div>
                     <div className={`flex gap-2 ${isExporting ? 'hidden' : ''} border-l pl-2 ml-2`}>
                         <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(users.filter(u => u.department === selectedProject.name), 'staff_list')}>{t('exportCSV')}</Button>
+                        <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-area', staffViewMode === 'chart' ? `Org_Chart_${selectedProject.code}.pdf` : `Staff_List_${selectedProject.code}.pdf`, staffViewMode === 'chart' ? 'landscape' : 'portrait')} disabled={isExporting}>
+                            {isExporting ? t('downloading') : t('downloadPDF')}
+                        </Button>
                     </div>
                  </div>
               </div>
@@ -6189,7 +6202,7 @@ export default function App() {
                   </div>
                 </Card>
               ) : (
-                <div className="bg-gray-50 p-8 rounded-xl border border-gray-200 min-h-[500px] overflow-auto">
+                <div className={`bg-gray-50 p-8 rounded-xl border border-gray-200 min-h-[500px] ${isExporting ? 'overflow-visible bg-white border-none' : 'overflow-auto'}`}>
                     {(() => {
                         const { managers, supervisors, staff } = getStaffHierarchy();
                         const hasManagers = managers.length > 0;
@@ -10952,7 +10965,7 @@ export default function App() {
                         </div>
                     )}
                     
-                    {/* NEW: Auto-fetched Utility Readings for Print View */}
+                    {/* NEW: Auto-fetched Utility Readings for Print View (Graph Only) */}
                     {(() => {
                         const reportDate = selectedDailyReport.date;
                         const projMeters = meters.filter(m => m.projectId === selectedDailyReport.projectId);
@@ -10961,44 +10974,63 @@ export default function App() {
 
                         if (dayReadings.length === 0) return null;
 
+                        // แยกข้อมูลน้ำและไฟฟ้าเพื่อสร้างกราฟ
+                        const waterData = dayReadings.filter(r => {
+                            const m = projMeters.find(m => m.id === r.meterId);
+                            return m?.type === 'Water';
+                        }).map(r => ({
+                            name: projMeters.find(m => m.id === r.meterId)?.name || 'Unknown',
+                            usage: r.usage
+                        }));
+
+                        const elecData = dayReadings.filter(r => {
+                            const m = projMeters.find(m => m.id === r.meterId);
+                            return m?.type === 'Electricity';
+                        }).map(r => ({
+                            name: projMeters.find(m => m.id === r.meterId)?.name || 'Unknown',
+                            usage: r.usage
+                        }));
+
                         return (
                             <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
                                 <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
-                                    <Zap size={16} className="text-orange-500"/> 5. สรุปการจดมิเตอร์น้ำ/ไฟประจำวัน (Utility Readings)
+                                    <BarChart3 size={16} className="text-orange-500"/> 5. สรุปการใช้น้ำ/ไฟประจำวัน (Utility Usage)
                                 </h3>
-                                <div className="w-full">
-                                    <table className="w-full text-xs text-left border-collapse">
-                                        <thead className="bg-gray-100 text-gray-600 border-y border-gray-200">
-                                            <tr>
-                                                <th className="py-2 px-3 font-medium w-24">ประเภท</th>
-                                                <th className="py-2 px-3 font-medium">ชื่อมิเตอร์ (รหัส)</th>
-                                                <th className="py-2 px-3 text-right font-medium w-24">ค่ายกมา</th>
-                                                <th className="py-2 px-3 text-right font-medium w-24">ค่าปัจจุบัน</th>
-                                                <th className="py-2 px-3 text-right font-medium w-24">หน่วยที่ใช้</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-gray-200 bg-white">
-                                            {dayReadings.map(r => {
-                                                const meter = projMeters.find(m => m.id === r.meterId);
-                                                return (
-                                                    <tr key={r.id}>
-                                                        <td className="py-2 px-3">
-                                                            <span className={`inline-flex items-center gap-1 font-bold ${meter?.type === 'Water' ? 'text-blue-600' : 'text-orange-600'}`}>
-                                                                {meter?.type === 'Water' ? <Droplet size={12}/> : <Zap size={12}/>}
-                                                                {meter?.type === 'Water' ? 'น้ำประปา' : 'ไฟฟ้า'}
-                                                            </span>
-                                                        </td>
-                                                        <td className="py-2 px-3 font-medium text-gray-800 truncate max-w-[150px]" title={meter?.name}>
-                                                            {meter?.name} <span className="text-gray-500 font-normal">({meter?.code})</span>
-                                                        </td>
-                                                        <td className="py-2 px-3 text-right text-gray-500">{r.prevValue.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                                                        <td className="py-2 px-3 text-right font-bold text-gray-800">{r.value.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                                                        <td className="py-2 px-3 text-right font-bold text-red-600">+{r.usage.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                                                    </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {waterData.length > 0 && (
+                                        <div className="h-48 bg-white border border-blue-100 rounded-lg p-2 shadow-sm">
+                                            <h4 className="text-[11px] font-bold text-blue-700 text-center mb-1 flex justify-center items-center gap-1"><Droplet size={12}/> ปริมาณการใช้น้ำประปา (หน่วย)</h4>
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart data={waterData} margin={{ top: 10, right: 10, left: -25, bottom: 20 }}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                                    <XAxis dataKey="name" tick={{fontSize: 9, fill: '#6b7280'}} interval={0} angle={-15} textAnchor="end" />
+                                                    <YAxis tick={{fontSize: 9, fill: '#6b7280'}} />
+                                                    <Bar dataKey="usage" fill="#3b82f6" radius={[3, 3, 0, 0]} isAnimationActive={false}>
+                                                        {waterData.map((entry, index) => (
+                                                            <Cell key={`cell-${index}`} fill="#3b82f6" />
+                                                        ))}
+                                                    </Bar>
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    )}
+                                    {elecData.length > 0 && (
+                                        <div className="h-48 bg-white border border-orange-100 rounded-lg p-2 shadow-sm">
+                                            <h4 className="text-[11px] font-bold text-orange-600 text-center mb-1 flex justify-center items-center gap-1"><Zap size={12}/> ปริมาณการใช้ไฟฟ้า (หน่วย)</h4>
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart data={elecData} margin={{ top: 10, right: 10, left: -25, bottom: 20 }}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                                    <XAxis dataKey="name" tick={{fontSize: 9, fill: '#6b7280'}} interval={0} angle={-15} textAnchor="end" />
+                                                    <YAxis tick={{fontSize: 9, fill: '#6b7280'}} />
+                                                    <Bar dataKey="usage" fill="#f97316" radius={[3, 3, 0, 0]} isAnimationActive={false}>
+                                                        {elecData.map((entry, index) => (
+                                                            <Cell key={`cell-${index}`} fill="#f97316" />
+                                                        ))}
+                                                    </Bar>
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         );
