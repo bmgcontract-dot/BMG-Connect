@@ -1972,12 +1972,12 @@ export default function App() {
       return false; // ถ้าเป็นพนักงานประจำหน่วยงานปกติ จะถูกล็อค
   };
 
-  // ปรับปรุงการโหลดไลบรารี PDF ให้เสถียรขึ้น (ลบข้อจำกัดเรื่อง Cross-Origin ที่มักทำให้โหลดไม่ขึ้น)
+  // ปรับปรุงการโหลดไลบรารี PDF ให้เสถียรขึ้น และอัปเกรดเป็นเวอร์ชัน 0.10.2
   useEffect(() => { 
       if (!document.getElementById('html2pdf-script')) {
           const script = document.createElement('script'); 
           script.id = 'html2pdf-script';
-          script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"; 
+          script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js"; 
           script.async = true; 
           document.body.appendChild(script); 
       }
@@ -2602,6 +2602,9 @@ export default function App() {
       setIsExporting(true); 
       
       try {
+          // รอให้ฟอนต์โหลดเสร็จก่อนเพื่อไม่ให้ html2canvas คำนวณความกว้างตัวอักษรผิดพลาด (สาเหตุหลักที่ตัวอักษรทับกัน)
+          await document.fonts.ready;
+
           // สร้างไฟล์ภาพหัวกระดาษรอไว้
           const headerImg = await generateHeaderImage(selectedProject, companyInfo, orientation);
           
@@ -2616,9 +2619,25 @@ export default function App() {
               const opt = { 
                   margin: customMargin || [22, 10, 20, 10], // ปรับ Top Margin ค่า Default ลดลงเหลือ 22mm
                   filename: filename, 
-                  image: { type: 'jpeg', quality: 0.98 }, 
-                  // แก้ไข: นำ letterRendering ออกเพื่อแก้ปัญหาสระและวรรณยุกต์ภาษาไทยกระโดด/ลอยผิดตำแหน่ง
-                  html2canvas: { scale: 2, useCORS: true, scrollY: 0 }, 
+                  image: { type: 'jpeg', quality: 1 }, // เพิ่มคุณภาพรูปภาพ
+                  html2canvas: { 
+                      scale: 2, 
+                      useCORS: true, 
+                      scrollY: 0,
+                      // เพิ่ม onclone เพื่อล้างค่า CSS บางตัวที่ทำให้ภาษาไทยกระโดด/ทับกัน
+                      onclone: (clonedDoc) => {
+                          const style = clonedDoc.createElement('style');
+                          style.innerHTML = `
+                              * {
+                                  letter-spacing: normal !important;
+                                  word-spacing: normal !important;
+                                  text-rendering: optimizeLegibility !important;
+                                  font-variant-ligatures: normal !important;
+                              }
+                          `;
+                          clonedDoc.head.appendChild(style);
+                      }
+                  }, 
                   jsPDF: { unit: 'mm', format: 'a4', orientation: orientation },
                   pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
               }; 
@@ -2661,6 +2680,8 @@ export default function App() {
       setIsExporting(true);
       
       try {
+          await document.fonts.ready; // รอฟอนต์โหลด
+
           // ใช้ A4 แนวนอน (Landscape) ขนาด = 297mm x 210mm
           const orientation = 'landscape';
           const headerImg = await generateHeaderImage(selectedProject, companyInfo, orientation);
@@ -2680,12 +2701,22 @@ export default function App() {
                   margin: [22, 10, 20, 10], 
                   filename: `Work_Schedule_${selectedProject?.name || 'Project'}_${currentMonth}.pdf`, 
                   image: { type: 'jpeg', quality: 1 }, 
-                  // แก้ไข: นำ letterRendering ออกเพื่อแก้ปัญหาสระและวรรณยุกต์ภาษาไทยกระโดด/ลอยผิดตำแหน่ง
                   html2canvas: { 
                       scale: 3, 
                       useCORS: true, 
                       scrollY: 0,
-                      scrollX: 0
+                      scrollX: 0,
+                      onclone: (clonedDoc) => {
+                          const style = clonedDoc.createElement('style');
+                          style.innerHTML = `
+                              * {
+                                  letter-spacing: normal !important;
+                                  word-spacing: normal !important;
+                                  text-rendering: optimizeLegibility !important;
+                              }
+                          `;
+                          clonedDoc.head.appendChild(style);
+                      }
                   }, 
                   jsPDF: { unit: 'mm', format: 'a4', orientation: orientation },
                   pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
