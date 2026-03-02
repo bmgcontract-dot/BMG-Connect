@@ -18,7 +18,7 @@ import {
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, onSnapshot, getDoc } from 'firebase/firestore';
 
 // --- Firebase Initialization ---
 let app, auth, db, appId;
@@ -467,6 +467,7 @@ const TRANSLATIONS = {
     col_dept: "สังกัด",
     col_email: "อีเมล",
     col_status: "สถานะ",
+    col_lastLogin: "ใช้งานล่าสุด",
     col_actions: "จัดการ",
     col_seq: "ลำดับ",
     col_photo: "รูปภาพ",
@@ -741,6 +742,7 @@ const TRANSLATIONS = {
     col_dept: "Department",
     col_email: "Email",
     col_status: "Status",
+    col_lastLogin: "Last Login",
     col_actions: "Actions",
     col_seq: "No.",
     col_photo: "Photo",
@@ -1212,15 +1214,34 @@ function usePersistentState(key, initialValue, fbUser) {
     if (!fbUser || !appId) return;
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
     
-    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+    const unsubscribe = onSnapshot(docRef, async (docSnap) => {
       if (docSnap.exists()) {
+        const data = docSnap.data();
         try {
-          const parsedData = JSON.parse(docSnap.data().value);
-          setState(parsedData);
-          stateRef.current = parsedData;
+          if (data.totalChunks !== undefined) {
+              // ประกอบร่างข้อมูลจากหลายๆ Document (รองรับไฟล์ขนาด > 1MB)
+              let fullJson = '';
+              for (let i = 0; i < data.totalChunks; i++) {
+                  const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
+                  const chunkSnap = await getDoc(chunkRef);
+                  if (chunkSnap.exists()) {
+                      fullJson += chunkSnap.data().chunk;
+                  }
+              }
+              if (fullJson) {
+                  const parsedData = JSON.parse(fullJson);
+                  setState(parsedData);
+                  stateRef.current = parsedData;
+              }
+          } else if (data.value) {
+              // รองรับข้อมูลรูปแบบเก่าที่เป็น Document เดียว
+              const parsedData = JSON.parse(data.value);
+              setState(parsedData);
+              stateRef.current = parsedData;
+          }
         } catch(e) { console.error("Parse error", key, e); }
       } else if (!isSynced) {
-        setDoc(docRef, { value: JSON.stringify(stateRef.current) }).catch(console.error);
+         setPersistentValue(stateRef.current);
       }
       setIsSynced(true);
     }, (err) => {
@@ -1230,25 +1251,40 @@ function usePersistentState(key, initialValue, fbUser) {
     return () => unsubscribe();
   }, [fbUser, key]);
 
-  const setPersistentValue = (newValue) => {
+  const setPersistentValue = async (newValue) => {
     // FIX: ดึงค่าจาก stateRef.current เสมอ เพื่อรับประกันว่าเป็นข้อมูลชุดล่าสุดจริงๆ
     const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
     setState(valueToStore);
     stateRef.current = valueToStore; // อัปเดต Ref ทันทีเพื่อให้คำสั่งถัดไปเห็นค่าใหม่
 
     if (db && fbUser && appId) {
-       const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
-       setDoc(docRef, { value: JSON.stringify(valueToStore) }).catch(err => {
+       try {
+           const jsonStr = JSON.stringify(valueToStore);
+           // หั่นไฟล์ข้อมูลที่เกินขีดจำกัดออกเป็นก้อนๆ ขนาด 900KB (หลบเลี่ยงลิมิต 1MB ของ Firebase)
+           const CHUNK_SIZE = 900000; 
+           const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
+           
+           // บันทึกก้อนข้อมูลย่อย
+           for (let i = 0; i < totalChunks; i++) {
+               const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
+               const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+               await setDoc(chunkRef, { chunk: chunkData });
+           }
+           
+           // บันทึกตัวหลักเป็น Metadata แจ้งจำนวน Chunk เพื่อ Trigger การซิงค์ไปเครื่องอื่น
+           const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
+           await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
+           
+       } catch(err) {
            console.error("Firebase Storage Error:", err);
-           // แจ้งเตือนชัดเจนเมื่อไฟล์เกิน 1MB
-           alert(`⚠️ ข้อผิดพลาด: ข้อมูลในส่วน [${key}] มีขนาดใหญ่เกิน 1MB (มักเกิดจากการสะสมรูปภาพจำนวนมาก) ระบบไม่สามารถบันทึกลงฐานข้อมูลหลักได้ ข้อมูลอาจสูญหายเมื่อรีเฟรช! แนะนำให้ทำการ Export Backup และลบรายงานเก่าออก`);
-       });
+           alert(`⚠️ ข้อผิดพลาด: ไม่สามารถบันทึกข้อมูลออนไลน์ได้ (${err.message})`);
+       }
     } else if (!db && typeof window !== 'undefined') {
        try {
            localStorage.setItem(key, JSON.stringify(valueToStore));
        } catch (err) {
            console.error("Local Storage Error:", err);
-           alert(`พื้นที่จัดเก็บข้อมูลในเครื่องของคุณใกล้เต็ม!\nระบบไม่สามารถบันทึกข้อมูล (ส่วน ${key}) ได้ กรุณาลบข้อมูลเก่าหรือทำการ Export Backup ทันที`);
+           alert(`พื้นที่จัดเก็บข้อมูลในเครื่องของคุณเต็ม (Local Storage)!\nระบบไม่สามารถบันทึกไฟล์ขนาดใหญ่ในโหมดออฟไลน์ได้`);
        }
     }
   };
@@ -2382,18 +2418,25 @@ export default function App() {
       e.preventDefault(); 
       const user = users.find(u => u.username === loginForm.username && u.password === loginForm.password); 
       if (user) { 
-          setCurrentUser(user);
+          // อัปเดตเวลาเข้าใช้งานล่าสุด
+          const updatedUser = { ...user, lastLogin: new Date().toISOString() };
+          
+          setCurrentUser(updatedUser);
           // NEW: บันทึกข้อมูลลง LocalStorage เพื่อให้จำค่าตอน Refresh
           if (typeof window !== 'undefined') {
-              localStorage.setItem('bmg_current_user', JSON.stringify(user));
+              localStorage.setItem('bmg_current_user', JSON.stringify(updatedUser));
           }
-          setNewDailyReport(prev => ({...prev, reporter: `${user.firstName} ${user.lastName}`})); 
+          setNewDailyReport(prev => ({...prev, reporter: `${updatedUser.firstName} ${updatedUser.lastName}`})); 
           setLoginError(''); 
+
+          // อัปเดตข้อมูลใน State เพื่อให้เวลาแสดงผลในตาราง
+          const updatedUsers = users.map(u => u.id === updatedUser.id ? updatedUser : u);
+          setUsers(updatedUsers);
           
           // ตรวจสอบหน่วยงานประจำของผู้ใช้
-          if (user.department && user.department !== 'Head Office') {
+          if (updatedUser.department && updatedUser.department !== 'Head Office') {
               // ค้นหาข้อมูลโปรเจกต์จากชื่อ department
-              const assignedProject = projects.find(p => p.name === user.department);
+              const assignedProject = projects.find(p => p.name === updatedUser.department);
               if (assignedProject) {
                   setSelectedProject(assignedProject); // เปิดหน้าโครงการนั้นทันที
                   setActiveMenu('projects');
@@ -4822,6 +4865,7 @@ export default function App() {
                                   <th className="p-4">{t('accessibleDepts')}</th>
                                   <th className="p-4">{t('username')}</th>
                                   <th className="p-4">{t('col_status')}</th>
+                                  <th className="p-4 w-36">{t('col_lastLogin')}</th>
                                   <th className={`p-4 text-center ${isExporting ? 'hidden' : ''}`}>{t('col_actions')}</th>
                               </tr>
                           </thead>
@@ -4864,6 +4908,16 @@ export default function App() {
                                       </td>
                                       <td className="p-4 text-gray-600">{user.username}</td>
                                       <td className="p-4"><Badge status={user.status} /></td>
+                                      <td className="p-4 text-xs text-gray-500">
+                                          {user.lastLogin ? (
+                                              <div className="flex items-center gap-1.5 bg-gray-50 px-2 py-1 rounded-md border border-gray-100 w-fit" title={new Date(user.lastLogin).toLocaleString('th-TH')}>
+                                                  <Clock size={12} className="text-gray-400 shrink-0"/>
+                                                  {new Date(user.lastLogin).toLocaleDateString('th-TH', { year: '2-digit', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} น.
+                                              </div>
+                                          ) : (
+                                              <span className="text-gray-300">-</span>
+                                          )}
+                                      </td>
                                       <td className={`p-4 text-center space-x-1 ${isExporting ? 'hidden' : ''}`}>
                                           {hasPerm('users', 'edit') && <button className="text-gray-400 hover:text-blue-600 transition-colors p-1.5 rounded-md hover:bg-blue-50" onClick={(e) => { e.stopPropagation(); handleEditUser(user); }} title="แก้ไขข้อมูล"><Edit size={16} /></button>}
                                           {hasPerm('users', 'delete') && <button className="text-gray-400 hover:text-red-600 transition-colors p-1.5 rounded-md hover:bg-red-50" onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบผู้ใช้งาน ${user.firstName} ${user.lastName} ใช่หรือไม่?`, () => setUsers(users.filter(u => u.id !== user.id))); }} title="ลบข้อมูล"><Trash2 size={16} /></button>}
