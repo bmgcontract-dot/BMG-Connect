@@ -1837,6 +1837,26 @@ export default function App() {
           }
       });
 
+      // 3. นับจำนวนรายการแจ้งซ่อมที่รอดำเนินการ (สำหรับช่าง)
+      const isTechnicianUser = currentUser.position.includes('ช่าง') || isAdminUser;
+      
+      repairs.forEach(repair => {
+          const proj = projects.find(p => p.id === repair.projectId);
+          if (proj && isProjectAccessible(proj.name)) {
+              if (repair.inspectionResult === 'รอดำเนินการ' && isTechnicianUser) {
+                  pendingItems.push({
+                      id: repair.id,
+                      type: 'repair',
+                      title: `แจ้งซ่อม: ${repair.issueType === 'อื่นๆ (ให้ระบุ)' || repair.issueType === 'อื่นๆ' ? repair.issueTypeOther : repair.issueType}`,
+                      project: proj,
+                      date: repair.date || new Date().toISOString(),
+                      actionText: 'ดูรายการแจ้งซ่อม',
+                      record: repair
+                  });
+              }
+          }
+      });
+
       // เรียงลำดับจากเก่าไปใหม่ เพื่อให้เคลียร์งานเก่าก่อน
       return pendingItems.sort((a, b) => new Date(a.date) - new Date(b.date));
   };
@@ -4443,14 +4463,14 @@ export default function App() {
                           </div>
                           <div>
                               <h4 className="text-red-800 font-bold text-lg flex items-center gap-2">
-                                  มีรายการรอให้คุณอนุมัติ
+                                  มีรายการรอให้คุณดำเนินการ/อนุมัติ
                                   <span className="bg-red-600 text-white text-xs px-2 py-0.5 rounded-full">{pendingApprovalCount} รายการ</span>
                               </h4>
-                              <p className="text-red-600 text-sm mt-0.5">คุณมีเอกสาร (เช่น ตารางงาน หรือ แผน PM) ที่จำเป็นต้องดำเนินการตรวจสอบ</p>
+                              <p className="text-red-600 text-sm mt-0.5">คุณมีรายการ (เช่น ตารางงาน, แผน PM, งานแจ้งซ่อม) ที่จำเป็นต้องดำเนินการ</p>
                           </div>
                       </div>
                       <Button variant="danger" className="shrink-0 hidden md:flex shadow-sm" onClick={() => setShowNotificationModal(true)}>
-                          ดูรายการรออนุมัติ
+                          ดูรายการทั้งหมด
                       </Button>
                   </div>
               )}
@@ -4466,7 +4486,7 @@ export default function App() {
                       {pendingApprovalCount > 0 && (
                           <div 
                               className="relative flex items-center justify-center w-10 h-10 bg-red-50 rounded-full cursor-pointer hover:bg-red-100 transition-colors shadow-sm border border-red-100 md:hidden"
-                              title="มีรายการรอให้คุณอนุมัติ"
+                              title="มีรายการรอให้คุณดำเนินการ/อนุมัติ"
                               onClick={() => setShowNotificationModal(true)}
                           >
                               <Bell className="text-red-500 animate-ring" size={20} />
@@ -9663,7 +9683,7 @@ export default function App() {
               <button 
                   onClick={() => setShowNotificationModal(true)}
                   className="relative flex items-center justify-center w-16 h-16 bg-red-600 hover:bg-red-700 text-white rounded-full shadow-2xl transition-transform hover:scale-110 border-4 border-white"
-                  title="รายการรออนุมัติ"
+                  title="มีรายการรอให้คุณดำเนินการ/อนุมัติ"
               >
                   <Bell size={32} className="animate-ring" />
                   <span className="absolute -top-2 -right-2 bg-white text-red-600 text-sm font-black w-7 h-7 flex items-center justify-center rounded-full shadow-md border-2 border-red-600">
@@ -9684,9 +9704,9 @@ export default function App() {
                           </div>
                           <div>
                               <h2 className="text-xl font-black text-red-800">
-                                  รายการรออนุมัติ
+                                  รายการรอการดำเนินการ
                               </h2>
-                              <p className="text-xs font-bold text-red-600">ทั้งหมด {getPendingApprovals().length} รายการที่ต้องการการตรวจสอบ</p>
+                              <p className="text-xs font-bold text-red-600">ทั้งหมด {getPendingApprovals().length} รายการที่ต้องการตรวจสอบ</p>
                           </div>
                       </div>
                       <button onClick={() => setShowNotificationModal(false)} className="text-gray-400 hover:text-red-600 p-2 rounded-xl hover:bg-red-100 transition-colors">
@@ -9698,8 +9718,8 @@ export default function App() {
                           <div key={item.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm hover:border-red-300 transition-all hover:shadow-md flex flex-col gap-4 group">
                               <div className="flex justify-between items-start">
                                   <div className="flex gap-3">
-                                      <div className={`p-2.5 rounded-xl shrink-0 mt-0.5 ${item.type === 'pm' ? 'bg-orange-50 text-orange-600' : 'bg-blue-50 text-blue-600'}`}>
-                                          {item.type === 'pm' ? <Wrench size={20}/> : <Calendar size={20}/>}
+                                      <div className={`p-2.5 rounded-xl shrink-0 mt-0.5 ${item.type === 'pm' ? 'bg-orange-50 text-orange-600' : item.type === 'repair' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
+                                          {item.type === 'pm' ? <Wrench size={20}/> : item.type === 'repair' ? <Hammer size={20}/> : <Calendar size={20}/>}
                                       </div>
                                       <div>
                                           <h4 className="font-bold text-gray-800 text-sm group-hover:text-red-600 transition-colors">{item.title}</h4>
@@ -9726,6 +9746,10 @@ export default function App() {
                                       } else if (item.type === 'schedule') {
                                           setProjectTab('schedule');
                                           setCurrentMonth(item.month);
+                                      } else if (item.type === 'repair') {
+                                          setProjectTab('repair');
+                                          setRepairFilter('All');
+                                          setTimeout(() => setSelectedRepairView(item.record), 300);
                                       }
                                   }}
                               >
