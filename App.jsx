@@ -1681,11 +1681,34 @@ export default function App() {
       if (currentUser && users.length > 0) {
           const freshUser = users.find(u => u.id === currentUser.id);
           if (freshUser && JSON.stringify(freshUser) !== JSON.stringify(currentUser)) {
-              setCurrentUser(freshUser);
-              localStorage.setItem('bmg_current_user', JSON.stringify(freshUser));
+              // ตรวจสอบว่าไม่ได้เปลี่ยนแค่ lastLogin (ป้องกัน Infinite Loop ในกรณีที่เซ็ต lastLogin)
+              const tempFresh = {...freshUser, lastLogin: ''};
+              const tempCurrent = {...currentUser, lastLogin: ''};
+              if (JSON.stringify(tempFresh) !== JSON.stringify(tempCurrent)) {
+                 setCurrentUser(freshUser);
+                 localStorage.setItem('bmg_current_user', JSON.stringify(freshUser));
+              }
           }
       }
   }, [users]);
+
+  // --- NEW: ตรวจจับและบันทึกเวลาล่าสุดเมื่อเปิดระบบ (Refresh/Auto-login) เพื่อให้ซิงค์ข้ามเครื่อง ---
+  useEffect(() => {
+      if (currentUser && users.length > 0) {
+          const foundUser = users.find(u => u.id === currentUser.id);
+          if (foundUser) {
+              const lastLoginTime = new Date(foundUser.lastLogin || 0).getTime();
+              const nowTime = new Date().getTime();
+              // อัปเดตสถานะ "ออนไลน์" ลงฐานข้อมูลทุกๆ 10 นาทีเพื่อไม่ให้ยิงข้อมูลถี่เกินไป
+              if (nowTime - lastLoginTime > 10 * 60 * 1000) { 
+                  setUsers(prevUsers => prevUsers.map(u => 
+                      u.id === foundUser.id ? { ...u, lastLogin: new Date().toISOString() } : u
+                  ));
+              }
+          }
+      }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, users.length > 0]); // รันเมื่อข้อมูลระบบโหลดเสร็จ
 
   // --- NEW: Auto-Sync State (สถานะการซิงค์อัตโนมัติ) ---
   const [autoSyncMessage, setAutoSyncMessage] = useState('');
@@ -4909,12 +4932,24 @@ export default function App() {
                                       <td className="p-4 text-gray-600">{user.username}</td>
                                       <td className="p-4"><Badge status={user.status} /></td>
                                       <td className="p-4 text-xs text-gray-500">
-                                          {user.lastLogin ? (
-                                              <div className="flex items-center gap-1.5 bg-gray-50 px-2 py-1 rounded-md border border-gray-100 w-fit" title={new Date(user.lastLogin).toLocaleString('th-TH')}>
-                                                  <Clock size={12} className="text-gray-400 shrink-0"/>
-                                                  {new Date(user.lastLogin).toLocaleDateString('th-TH', { year: '2-digit', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} น.
-                                              </div>
-                                          ) : (
+                                          {user.lastLogin ? (() => {
+                                              const lastDate = new Date(user.lastLogin);
+                                              const now = new Date();
+                                              const diffMins = Math.floor((now - lastDate) / 60000);
+                                              // หากมีคนเข้าสู่ระบบภายใน 15 นาที ให้แสดงเป็นสถานะออนไลน์ (จุดเขียว)
+                                              const isOnline = diffMins <= 15; 
+                                              return (
+                                                  <div className="flex flex-col gap-1">
+                                                      <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md border w-fit shadow-sm ${isOnline ? 'bg-green-50 border-green-200 text-green-700' : 'bg-gray-50 border-gray-200 text-gray-600'}`} title={lastDate.toLocaleString('th-TH')}>
+                                                          {isOnline ? <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> : <Clock size={12} className="text-gray-400 shrink-0"/>}
+                                                          <span className="font-bold">{isOnline ? 'ออนไลน์' : 'ออฟไลน์'}</span>
+                                                      </div>
+                                                      <div className="text-[10px] text-gray-400 pl-1">
+                                                          {lastDate.toLocaleDateString('th-TH', { year: '2-digit', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} น.
+                                                      </div>
+                                                  </div>
+                                              );
+                                          })() : (
                                               <span className="text-gray-300">-</span>
                                           )}
                                       </td>
@@ -7661,7 +7696,10 @@ export default function App() {
                                                   <th className="p-3 border-b">เลขมิเตอร์ (Code)</th>
                                                   <th className="p-3 border-b">ชื่อเรียก</th>
                                                   <th className="p-3 border-b">ตำแหน่งติดตั้ง</th>
-                                                  <th className="p-3 text-right border-b">ค่าเริ่มต้น/ปัจจุบัน</th>
+                                                  <th className="p-3 text-right border-b">
+                                                      ค่าปัจจุบัน 
+                                                      <span className="block text-[10px] font-normal text-gray-500 mt-0.5">(วันที่บันทึกล่าสุด)</span>
+                                                  </th>
                                                   <th className={`p-3 text-center border-b w-16 ${isExporting ? 'hidden' : ''}`}>จัดการ</th>
                                               </tr>
                                           </thead>
@@ -7688,8 +7726,15 @@ export default function App() {
                                                               <MapPin size={14} className="text-gray-400"/> {m.location || '-'}
                                                           </div>
                                                       </td>
-                                                      <td className="p-3 text-right font-bold text-gray-800">
-                                                          {m.lastReading.toLocaleString(undefined, {minimumFractionDigits: 2})}
+                                                      <td className="p-3 text-right">
+                                                          <div className="font-bold text-gray-800 text-base">
+                                                              {m.lastReading.toLocaleString(undefined, {minimumFractionDigits: 2})}
+                                                          </div>
+                                                          {m.lastDate && (
+                                                              <div className="text-xs text-gray-500 mt-0.5 flex items-center justify-end gap-1">
+                                                                  <Calendar size={10}/> {new Date(m.lastDate).toLocaleDateString('th-TH')}
+                                                              </div>
+                                                          )}
                                                       </td>
                                                       <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`}>
                                                           {hasPerm('proj_utilities', 'delete') && (
@@ -8064,7 +8109,7 @@ export default function App() {
                               <thead className="bg-gray-50 text-gray-600">
                                   <tr>
                                       <th className="p-3 border-b text-center w-12">{t('col_seq')}</th>
-                                      <th className="p-3 border-b w-32">เลขที่แจ้งซ่อม</th>
+                                      <th className="p-3 border-b w-36">เลขที่แจ้งซ่อม / วันที่</th>
                                       <th className="p-3 border-b">รายละเอียด / สถานที่</th>
                                       <th className="p-3 border-b">ผู้แจ้ง</th>
                                       <th className="p-3 border-b text-center">สถานะ</th>
@@ -8076,9 +8121,16 @@ export default function App() {
                                       repairs.filter(r => r.projectId === selectedProject.id && (repairFilter === 'All' || r.inspectionResult === repairFilter)).map((rep, index) => (
                                           <tr key={rep.id} className="hover:bg-gray-50 transition-colors">
                                               <td className="p-3 text-center text-gray-500">{index + 1}</td>
-                                              <td className="p-3 font-mono font-medium text-orange-600 cursor-pointer group" onClick={() => setSelectedRepairView(rep)}>
-                                                  {rep.code}
-                                                  <FileText size={12} className={`ml-1 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity inline ${isExporting ? 'hidden' : ''}`}/>
+                                              <td className="p-3 cursor-pointer group" onClick={() => setSelectedRepairView(rep)}>
+                                                  <div className="font-mono font-medium text-orange-600 flex items-center">
+                                                      {rep.code}
+                                                      <FileText size={12} className={`ml-1 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity inline ${isExporting ? 'hidden' : ''}`}/>
+                                                  </div>
+                                                  {rep.date && (
+                                                      <div className="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
+                                                          <Calendar size={10} className="text-gray-400"/> {new Date(rep.date).toLocaleDateString('th-TH', { year: '2-digit', month: 'short', day: 'numeric' })}
+                                                      </div>
+                                                  )}
                                               </td>
                                               <td className="p-3 cursor-pointer" onClick={() => setSelectedRepairView(rep)}>
                                                   <div className="font-medium text-gray-800 flex items-center gap-1">
