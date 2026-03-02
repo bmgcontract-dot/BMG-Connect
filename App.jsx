@@ -1369,6 +1369,7 @@ export default function App() {
   const [selectedDailyReport, setSelectedDailyReport] = useState(null); // NEW: Track report to view/print
   const [selectedContractView, setSelectedContractView] = useState(null); // NEW: State สำหรับดูรายละเอียดสัญญา
   const [isEditingContract, setIsEditingContract] = useState(false); // NEW: State สำหรับตรวจสอบว่ากำลังแก้ไขสัญญาหรือไม่
+  const [isSavingContract, setIsSavingContract] = useState(false); // NEW: State สำหรับแสดง Loading ตอนอัปโหลดไฟล์สัญญาเข้า Drive
   const [lang, setLang] = useState('th'); // Set default language to 'th'
   const [isExporting, setIsExporting] = useState(false);
   const [isBackingUp, setIsBackingUp] = useState(false); // NEW: State สำหรับตอนกด Export Backup
@@ -1382,7 +1383,7 @@ export default function App() {
   const [isBackingUpToDrive, setIsBackingUpToDrive] = useState(false); // NEW: State สำหรับสถานะกำลังส่งไฟล์ไป Google Drive
 
   // NEW: State สำหรับ Confirm Modal ป้องกันการลบข้อมูลผิดพลาด
-  const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null });
+  const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null, confirmText: 'ยืนยันการลบ', type: 'danger' });
 
   // NEW: State สำหรับตัวกรองหน้าจัดการผู้ใช้งาน
   const [userDeptFilter, setUserDeptFilter] = useState('');
@@ -1421,6 +1422,7 @@ export default function App() {
   const [showAddAssetModal, setShowAddAssetModal] = useState(false);
   const [selectedAssetView, setSelectedAssetView] = useState(null); // NEW: State สำหรับแสดงรายละเอียดทรัพย์สิน
   const [isEditingAsset, setIsEditingAsset] = useState(false); // NEW: State สำหรับสถานะกำลังแก้ไข
+  const [isSavingAsset, setIsSavingAsset] = useState(false); // NEW: State สำหรับแสดง Loading ตอนอัปโหลดรูปเข้า Drive
   const [newAsset, setNewAsset] = useState({
       code: '',
       name: '',
@@ -1435,6 +1437,7 @@ export default function App() {
   const [showAddToolModal, setShowAddToolModal] = useState(false);
   const [selectedToolView, setSelectedToolView] = useState(null); // NEW: State สำหรับแสดงรายละเอียดเครื่องมือ
   const [isEditingTool, setIsEditingTool] = useState(false); // NEW: State สำหรับสถานะกำลังแก้ไข
+  const [isSavingTool, setIsSavingTool] = useState(false); // NEW: State สำหรับแสดง Loading ตอนอัปโหลดรูปเข้า Drive
   const [newTool, setNewTool] = useState({
       code: '',
       name: '',
@@ -1448,6 +1451,7 @@ export default function App() {
   const [machines, setMachines] = usePersistentState('bmg_machines', INITIAL_MACHINES, fbUser);
   const [showAddMachineModal, setShowAddMachineModal] = useState(false);
   const [isEditingMachine, setIsEditingMachine] = useState(false);
+  const [isSavingMachine, setIsSavingMachine] = useState(false); // NEW: State สำหรับแสดง Loading ตอนอัปโหลดรูปเข้า Drive
   const [pmSubTab, setPmSubTab] = useState('dashboard'); // 'dashboard', 'registry', 'plan', 'calendar', 'form', 'history'
   const [newMachine, setNewMachine] = useState({
       code: '',
@@ -1585,6 +1589,7 @@ export default function App() {
 
   const [showAddProjectModal, setShowAddProjectModal] = useState(false);
   const [isEditingProject, setIsEditingProject] = useState(false);
+  const [isSavingProject, setIsSavingProject] = useState(false); // NEW: State สำหรับแสดง Loading ตอนอัปโหลดรูป/ไฟล์เข้า Drive
   const [newProject, setNewProject] = useState({ logo: null, code: '', name: '', type: 'Condo', address: '', phone: '', taxId: '', contractStartDate: '', contractEndDate: '', contractValue: '', status: 'Active', files: { orchor: null, committee: null, regulations: null, resident_rules: null } });
 
   const [users, setUsers] = usePersistentState('bmg_users', INITIAL_USERS, fbUser);
@@ -1664,7 +1669,9 @@ export default function App() {
               const sanitizedData = dataList.map(item => {
                   const cleanItem = { ...item };
                   if (cleanItem.photo) cleanItem.photo = 'Base64 Image';
+                  if (cleanItem.logo) cleanItem.logo = 'Base64 Image';
                   if (cleanItem.images) cleanItem.images = 'Photos attached';
+                  if (cleanItem.files) cleanItem.files = 'Files attached';
                   // จัดการกรณีเป็น Daily Report
                   if (cleanItem.performance) {
                       cleanItem.performance = JSON.parse(JSON.stringify(cleanItem.performance));
@@ -1677,6 +1684,7 @@ export default function App() {
 
               fetch(GOOGLE_SCRIPT_SHEETS_URL, {
                   method: 'POST',
+                  mode: 'no-cors', // เพิ่ม no-cors เพื่อป้องกันปัญหา Failed to fetch จากนโยบายข้ามโดเมน (CORS)
                   headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                   body: JSON.stringify({ [tableName]: sanitizedData })
               }).catch(err => console.error("Auto-sync sheet error", err));
@@ -1697,6 +1705,7 @@ export default function App() {
               };
               fetch(GOOGLE_SCRIPT_DRIVE_URL, {
                   method: 'POST',
+                  mode: 'no-cors', // เพิ่ม no-cors เพื่อให้เบราว์เซอร์ส่งข้อมูลเบื้องหลังสำเร็จโดยไม่ต้องรออ่าน response
                   headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                   body: JSON.stringify(payload)
               }).catch(err => console.error("Auto-sync drive error", err));
@@ -1860,11 +1869,10 @@ export default function App() {
               }
           } else {
               console.warn(`ไม่พบเนื้อหาไฟล์จริงของ ${fileName}`);
-              // ใช้ showConfirm แทน alert เพื่อแจ้งเตือนแบบสวยงาม
-              showConfirm(
+              // ใช้ showAlert แทน showConfirm เพื่อแจ้งเตือนแบบสวยงามและมีปุ่มตกลงปุ่มเดียว
+              showAlert(
                   'ไม่พบเนื้อหาไฟล์',
-                  `ไม่พบไฟล์ ${fileName} ในเครื่องนี้ และไม่สามารถดึงจาก Google Drive ได้ (โปรดตรวจสอบว่าได้ทำการ Backup ลง Drive จากเครื่องต้นทางแล้ว หรือตั้งค่า URL ถูกต้องหรือไม่)`,
-                  () => {} 
+                  `ไม่พบไฟล์ ${fileName} ในเครื่องนี้ และไม่สามารถดึงจาก Google Drive ได้ (โปรดตรวจสอบว่าได้ทำการ Backup ลง Drive จากเครื่องต้นทางแล้ว หรือตั้งค่า URL ถูกต้องหรือไม่)`
               );
           }
       } catch (error) {
@@ -1873,11 +1881,14 @@ export default function App() {
   };
 
   // NEW: Helper Functions for Confirmation
-  const showConfirm = (title, message, onConfirm) => {
-      setConfirmModal({ isOpen: true, title, message, onConfirm });
+  const showConfirm = (title, message, onConfirm, confirmText = 'ยืนยันการลบ', type = 'danger') => {
+      setConfirmModal({ isOpen: true, title, message, onConfirm, confirmText, type });
+  };
+  const showAlert = (title, message) => {
+      setConfirmModal({ isOpen: true, title, message, onConfirm: null, confirmText: 'ตกลง', type: 'alert' });
   };
   const closeConfirm = () => {
-      setConfirmModal({ isOpen: false, title: '', message: '', onConfirm: null });
+      setConfirmModal({ isOpen: false, title: '', message: '', onConfirm: null, confirmText: 'ยืนยันการลบ', type: 'danger' });
   };
 
   // ฟังก์ชันตรวจสอบสิทธิ์การเข้าถึง (Permission Checker)
@@ -2743,20 +2754,69 @@ export default function App() {
       }
   };
 
-  const handleSaveAsset = (e) => {
+  const handleSaveAsset = async (e) => {
       e.preventDefault();
-      if (isEditingAsset) {
-          setAssets(assets.map(a => a.id === newAsset.id ? { ...newAsset } : a));
-          // ถ้ากำลังเปิดหน้ารายละเอียดค้างไว้อยู่ ให้อัปเดตข้อมูลในนั้นด้วย
-          if (selectedAssetView?.id === newAsset.id) setSelectedAssetView({ ...newAsset });
-      } else {
-          const id = generateId();
-          setAssets([...assets, { id, projectId: selectedProject.id, ...newAsset }]);
+      setIsSavingAsset(true);
+      
+      try {
+          let nextList;
+          let savedAsset;
+          
+          if (isEditingAsset) {
+              savedAsset = { ...newAsset };
+              nextList = assets.map(a => a.id === newAsset.id ? savedAsset : a);
+              // ถ้ากำลังเปิดหน้ารายละเอียดค้างไว้อยู่ ให้อัปเดตข้อมูลในนั้นด้วย
+              if (selectedAssetView?.id === newAsset.id) setSelectedAssetView(savedAsset);
+          } else {
+              const id = generateId();
+              savedAsset = { id, projectId: selectedProject.id, ...newAsset };
+              nextList = [...assets, savedAsset];
+          }
+          
+          setAssets(nextList);
+          
+          // --- อัปโหลดรูปทรัพย์สินเข้า Drive อัตโนมัติ (แบบแสดงสถานะชัดเจน) ---
+          if (savedAsset.photo && savedAsset.photo.startsWith('data:image')) {
+              setAutoSyncMessage('กำลังอัปโหลดรูปลง Google Drive...');
+              const GOOGLE_SCRIPT_DRIVE_URL = 'https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec';
+              
+              const match = savedAsset.photo.match(/^data:(.+);base64,(.+)$/);
+              if (match) {
+                  const payload = {
+                      filename: `Asset_${savedAsset.code}_${savedAsset.id}.jpg`,
+                      mimeType: match[1],
+                      data: match[2],
+                      folderName: `Assets_${selectedProject.code}` // จัดกลุ่มในโฟลเดอร์ Assets ของโครงการ
+                  };
+                  
+                  try {
+                      // ใช้ no-cors เพื่อให้ยิงข้อมูลเบื้องหลังได้โดยไม่ติดปัญหาข้ามโดเมน
+                      await fetch(GOOGLE_SCRIPT_DRIVE_URL, {
+                          method: 'POST',
+                          mode: 'no-cors',
+                          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                          body: JSON.stringify(payload)
+                      });
+                  } catch (err) {
+                      console.error("Auto-upload to Drive failed", err);
+                  }
+              }
+          }
+          
+          // ซิงค์ข้อมูล Text ไปยัง Sheets
+          triggerAutoSync('Assets_ทรัพย์สิน', nextList, []);
+
+          setShowAddAssetModal(false);
+          setIsEditingAsset(false);
+          setNewAsset({ code: '', name: '', qty: 1, location: '', photo: null, details: '' }); // Reset form
+          alert('บันทึกข้อมูลทรัพย์สินและอัปโหลดรูปลง Google Drive อัตโนมัติเรียบร้อยแล้ว');
+      } catch (error) {
+          console.error(error);
+          alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+      } finally {
+          setIsSavingAsset(false);
+          setTimeout(() => setAutoSyncMessage(''), 3000);
       }
-      setShowAddAssetModal(false);
-      setIsEditingAsset(false);
-      setNewAsset({ code: '', name: '', qty: 1, location: '', photo: null, details: '' }); // Reset form
-      alert(t('saveSuccess'));
   };
 
   const handleEditAsset = (asset) => {
@@ -2775,19 +2835,65 @@ export default function App() {
       }
   };
 
-  const handleSaveTool = (e) => {
+  const handleSaveTool = async (e) => {
       e.preventDefault();
-      if (isEditingTool) {
-          setTools(tools.map(t => t.id === newTool.id ? { ...newTool } : t));
-          if (selectedToolView?.id === newTool.id) setSelectedToolView({ ...newTool });
-      } else {
-          const id = generateId();
-          setTools([...tools, { id, projectId: selectedProject.id, ...newTool }]);
+      setIsSavingTool(true);
+      
+      try {
+          let nextList;
+          let savedTool;
+          
+          if (isEditingTool) {
+              savedTool = { ...newTool };
+              nextList = tools.map(t => t.id === newTool.id ? savedTool : t);
+              if (selectedToolView?.id === newTool.id) setSelectedToolView(savedTool);
+          } else {
+              const id = generateId();
+              savedTool = { id, projectId: selectedProject.id, ...newTool };
+              nextList = [...tools, savedTool];
+          }
+          setTools(nextList);
+
+          // --- อัปโหลดรูปเครื่องมือเข้า Drive อัตโนมัติ ---
+          if (savedTool.photo && savedTool.photo.startsWith('data:image')) {
+              setAutoSyncMessage('กำลังอัปโหลดรูปลง Google Drive...');
+              const GOOGLE_SCRIPT_DRIVE_URL = 'https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec';
+              
+              const match = savedTool.photo.match(/^data:(.+);base64,(.+)$/);
+              if (match) {
+                  const payload = {
+                      filename: `Tool_${savedTool.code}_${savedTool.id}.jpg`,
+                      mimeType: match[1],
+                      data: match[2],
+                      folderName: `Tools_${selectedProject.code}`
+                  };
+                  
+                  try {
+                      await fetch(GOOGLE_SCRIPT_DRIVE_URL, {
+                          method: 'POST',
+                          mode: 'no-cors',
+                          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                          body: JSON.stringify(payload)
+                      });
+                  } catch (err) {
+                      console.error("Auto-upload to Drive failed", err);
+                  }
+              }
+          }
+
+          triggerAutoSync('Tools_เครื่องมือ', nextList, []);
+
+          setShowAddToolModal(false);
+          setIsEditingTool(false);
+          setNewTool({ code: '', name: '', qty: 1, location: '', photo: null, details: '' }); // Reset form
+          alert('บันทึกข้อมูลเครื่องมือช่างและอัปโหลดรูปลง Google Drive อัตโนมัติเรียบร้อยแล้ว');
+      } catch (error) {
+          console.error(error);
+          alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+      } finally {
+          setIsSavingTool(false);
+          setTimeout(() => setAutoSyncMessage(''), 3000);
       }
-      setShowAddToolModal(false);
-      setIsEditingTool(false);
-      setNewTool({ code: '', name: '', qty: 1, location: '', photo: null, details: '' }); // Reset form
-      alert(t('saveSuccess'));
   };
 
   const handleEditTool = (tool) => {
@@ -2806,19 +2912,65 @@ export default function App() {
       }
   };
 
-  const handleSaveMachine = (e) => {
+  const handleSaveMachine = async (e) => {
       e.preventDefault();
-      if (isEditingMachine) {
-          setMachines(machines.map(m => m.id === newMachine.id ? { ...newMachine } : m));
-          if (selectedMachineDetails?.id === newMachine.id) setSelectedMachineDetails({ ...newMachine });
-      } else {
-          const id = generateId();
-          setMachines([...machines, { id, projectId: selectedProject.id, ...newMachine }]);
+      setIsSavingMachine(true);
+      
+      try {
+          let nextList;
+          let savedMachine;
+          
+          if (isEditingMachine) {
+              savedMachine = { ...newMachine };
+              nextList = machines.map(m => m.id === newMachine.id ? savedMachine : m);
+              if (selectedMachineDetails?.id === newMachine.id) setSelectedMachineDetails(savedMachine);
+          } else {
+              const id = generateId();
+              savedMachine = { id, projectId: selectedProject.id, ...newMachine };
+              nextList = [...machines, savedMachine];
+          }
+          setMachines(nextList);
+
+          // --- อัปโหลดรูปเครื่องจักรเข้า Drive อัตโนมัติ ---
+          if (savedMachine.photo && savedMachine.photo.startsWith('data:image')) {
+              setAutoSyncMessage('กำลังอัปโหลดรูปลง Google Drive...');
+              const GOOGLE_SCRIPT_DRIVE_URL = 'https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec';
+              
+              const match = savedMachine.photo.match(/^data:(.+);base64,(.+)$/);
+              if (match) {
+                  const payload = {
+                      filename: `Machine_${savedMachine.code}_${savedMachine.id}.jpg`,
+                      mimeType: match[1],
+                      data: match[2],
+                      folderName: `Machines_${selectedProject.code}`
+                  };
+                  
+                  try {
+                      await fetch(GOOGLE_SCRIPT_DRIVE_URL, {
+                          method: 'POST',
+                          mode: 'no-cors',
+                          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                          body: JSON.stringify(payload)
+                      });
+                  } catch (err) {
+                      console.error("Auto-upload to Drive failed", err);
+                  }
+              }
+          }
+
+          triggerAutoSync('Machines_เครื่องจักร', nextList, []);
+
+          setShowAddMachineModal(false);
+          setIsEditingMachine(false);
+          setNewMachine({ code: '', name: '', system: '', qty: 1, location: '', photo: null }); // Reset form
+          alert('บันทึกข้อมูลเครื่องจักรและอัปโหลดรูปลง Google Drive อัตโนมัติเรียบร้อยแล้ว');
+      } catch (error) {
+          console.error(error);
+          alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+      } finally {
+          setIsSavingMachine(false);
+          setTimeout(() => setAutoSyncMessage(''), 3000);
       }
-      setShowAddMachineModal(false);
-      setIsEditingMachine(false);
-      setNewMachine({ code: '', name: '', system: '', qty: 1, location: '', photo: null }); // Reset form
-      alert(t('saveSuccess'));
   };
 
   const handleEditMachine = (machine) => {
@@ -3305,7 +3457,9 @@ export default function App() {
                       } finally {
                           setIsRestoring(false);
                       }
-                  }
+                  },
+                  'ยืนยันการกู้คืน',
+                  'warning'
               );
           } catch (error) {
               console.error("Import error:", error);
@@ -3603,51 +3757,85 @@ export default function App() {
       }
   };
 
-  const handleSaveProject = (e) => {
-      e.preventDefault();
-      if (isEditingProject) {
-          setProjects(projects.map(p => p.id === newProject.id ? { ...newProject } : p));
-          if (selectedProject?.id === newProject.id) setSelectedProject({ ...newProject });
-      } else {
-          setProjects([...projects, { id: generateId(), ...newProject }]);
-      }
-      setShowAddProjectModal(false);
-      alert(t('saveSuccess'));
-  };
-
   const handleEditProjectClick = () => {
       setNewProject({ files: { orchor: null, committee: null, regulations: null, resident_rules: null }, ...selectedProject });
       setIsEditingProject(true);
       setShowAddProjectModal(true);
   };
 
-  const handleSaveContract = (e) => {
+  const handleSaveContract = async (e) => {
       e.preventDefault();
+      setIsSavingContract(true);
       const finalCategory = newContract.category.includes('อื่นๆ') ? newContract.customCategory : newContract.category;
       
-      if (isEditingContract) {
-          // อัปเดตข้อมูลสัญญาเดิม
-          const updatedContract = { ...newContract, category: finalCategory };
-          setContracts(contracts.map(c => c.id === newContract.id ? updatedContract : c));
-          // ถ้าเปิดหน้าจอรายละเอียดค้างไว้ ให้อัปเดตข้อมูลในนั้นด้วย
-          if (selectedContractView?.id === newContract.id) {
-              setSelectedContractView(updatedContract);
+      try {
+          let nextList;
+          let savedContract;
+
+          if (isEditingContract) {
+              // อัปเดตข้อมูลสัญญาเดิม
+              savedContract = { ...newContract, category: finalCategory };
+              nextList = contracts.map(c => c.id === newContract.id ? savedContract : c);
+              // ถ้าเปิดหน้าจอรายละเอียดค้างไว้ ให้อัปเดตข้อมูลในนั้นด้วย
+              if (selectedContractView?.id === newContract.id) {
+                  setSelectedContractView(savedContract);
+              }
+          } else {
+              // เพิ่มสัญญาใหม่
+              const id = generateId();
+              savedContract = { 
+                  id, 
+                  projectId: selectedProject.id, 
+                  status: 'Active', 
+                  ...newContract,
+                  category: finalCategory
+              };
+              nextList = [...contracts, savedContract];
           }
-      } else {
-          // เพิ่มสัญญาใหม่
-          setContracts([...contracts, { 
-              id: generateId(), 
-              projectId: selectedProject.id, 
-              status: 'Active', 
-              ...newContract,
-              category: finalCategory
-          }]);
+          
+          setContracts(nextList);
+
+          // --- อัปโหลดไฟล์สัญญาเข้า Drive อัตโนมัติ ---
+          if (savedContract.file && savedContract.file.data && savedContract.file.data.startsWith('data:')) {
+              setAutoSyncMessage('กำลังอัปโหลดไฟล์สัญญาลง Google Drive...');
+              const GOOGLE_SCRIPT_DRIVE_URL = 'https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec';
+              
+              const match = savedContract.file.data.match(/^data:(.+);base64,(.+)$/);
+              if (match) {
+                  const payload = {
+                      filename: `Contract_${savedContract.id}_${savedContract.file.name}`,
+                      mimeType: match[1],
+                      data: match[2],
+                      folderName: `Contracts_${selectedProject.code}`
+                  };
+                  
+                  try {
+                      await fetch(GOOGLE_SCRIPT_DRIVE_URL, {
+                          method: 'POST',
+                          mode: 'no-cors',
+                          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                          body: JSON.stringify(payload)
+                      });
+                  } catch (err) {
+                      console.error("Auto-upload to Drive failed", err);
+                  }
+              }
+          }
+
+          // ซิงค์ข้อมูล Text ไปยัง Sheets
+          triggerAutoSync('Contracts_สัญญา', nextList, []);
+          
+          setShowAddContractModal(false);
+          setIsEditingContract(false);
+          setNewContract({ type: CONTRACT_TYPES.EXPENSE, category: '', customCategory: '', vendorName: '', contactPerson: '', contactPhone: '', startDate: '', endDate: '', amount: '', paymentCycle: 'Monthly', file: null });
+          alert('บันทึกข้อมูลสัญญาและอัปโหลดไฟล์ลง Google Drive อัตโนมัติเรียบร้อยแล้ว');
+      } catch (error) {
+          console.error(error);
+          alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+      } finally {
+          setIsSavingContract(false);
+          setTimeout(() => setAutoSyncMessage(''), 3000);
       }
-      
-      setShowAddContractModal(false);
-      setIsEditingContract(false);
-      setNewContract({ type: CONTRACT_TYPES.EXPENSE, category: '', customCategory: '', vendorName: '', contactPerson: '', contactPhone: '', startDate: '', endDate: '', amount: '', paymentCycle: 'Monthly', file: null });
-      alert(t('saveSuccess'));
   };
 
   const handleEditContract = (contract) => {
@@ -4546,7 +4734,7 @@ export default function App() {
                       showConfirm('ยืนยันการนำเข้า', `พบข้อมูลพนักงานใหม่ที่ถูกต้อง ${newUsers.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
                           setUsers(prev => [...prev, ...newUsers]);
                           alert('นำเข้าข้อมูลพนักงานสำเร็จแล้ว!');
-                      });
+                      }, 'ยืนยันการนำเข้า', 'info');
                   } else {
                       alert('ไม่พบข้อมูลพนักงานที่ถูกต้องในไฟล์ (กรุณาตรวจสอบว่ามีคอลัมน์ username และ firstName)');
                   }
@@ -6022,17 +6210,17 @@ export default function App() {
                                 const isManager = currentUser?.position.includes('ผู้จัดการอาคาร') || currentUser?.position.includes('ผู้จัดการหมู่บ้าน') || currentUser?.username === 'admin';
 
                                 if (approval.status === 'Pending Manager' && isManager) {
-                                    return <Button size="sm" variant="success" icon={CheckCircle} onClick={() => showConfirm('ยืนยันอนุมัติ', 'คุณตรวจสอบและต้องการอนุมัติตารางงานระดับผู้จัดการใช่หรือไม่?', handleApproveSchedule)}>ผู้จัดการอนุมัติ</Button>;
+                                    return <Button size="sm" variant="success" icon={CheckCircle} onClick={() => showConfirm('ยืนยันอนุมัติ', 'คุณตรวจสอบและต้องการอนุมัติตารางงานระดับผู้จัดการใช่หรือไม่?', handleApproveSchedule, 'ยืนยันอนุมัติ', 'info')}>ผู้จัดการอนุมัติ</Button>;
                                 }
                                 if (approval.status === 'Pending HR' && isHR) {
-                                    return <Button size="sm" variant="success" icon={CheckCircle} onClick={() => showConfirm('ยืนยันอนุมัติ', 'คุณตรวจสอบและต้องการอนุมัติตารางงานระดับฝ่ายบุคคล (HR) ใช่หรือไม่?', handleApproveSchedule)}>ฝ่ายบุคคลอนุมัติ</Button>;
+                                    return <Button size="sm" variant="success" icon={CheckCircle} onClick={() => showConfirm('ยืนยันอนุมัติ', 'คุณตรวจสอบและต้องการอนุมัติตารางงานระดับฝ่ายบุคคล (HR) ใช่หรือไม่?', handleApproveSchedule, 'ยืนยันอนุมัติ', 'info')}>ฝ่ายบุคคลอนุมัติ</Button>;
                                 }
                                 
                                 if (approval.status === 'Approved' && isHR) {
                                     if (approval.isLocked) {
-                                        return <Button size="sm" variant="secondary" icon={Unlock} onClick={() => showConfirm('ยืนยันปลดล็อค', 'ปลดล็อคเพื่อให้สามารถแก้ไขตารางงานได้ใช่หรือไม่?', handleUnlockSchedule)}>ปลดล็อคตาราง</Button>;
+                                        return <Button size="sm" variant="secondary" icon={Unlock} onClick={() => showConfirm('ยืนยันปลดล็อค', 'ปลดล็อคเพื่อให้สามารถแก้ไขตารางงานได้ใช่หรือไม่?', handleUnlockSchedule, 'ปลดล็อคตาราง', 'warning')}>ปลดล็อคตาราง</Button>;
                                     } else {
-                                        return <Button size="sm" variant="danger" icon={Lock} onClick={() => showConfirm('ยืนยันล็อคตาราง', 'เมื่อล็อคแล้ว จะไม่สามารถแก้ไขตาราง Plan และ ACT ได้อีก ยืนยันหรือไม่?', handleLockSchedule)}>ล็อคตาราง (ปิดยอด)</Button>;
+                                        return <Button size="sm" variant="danger" icon={Lock} onClick={() => showConfirm('ยืนยันล็อคตาราง', 'เมื่อล็อคแล้ว จะไม่สามารถแก้ไขตาราง Plan และ ACT ได้อีก ยืนยันหรือไม่?', handleLockSchedule, 'ยืนยันการล็อค', 'warning')}>ล็อคตาราง (ปิดยอด)</Button>;
                                     }
                                 }
 
@@ -9642,7 +9830,12 @@ export default function App() {
                   ))}
                 </div>
               </div>
-              <div className="flex justify-end gap-2 pt-4 border-t"><Button variant="secondary" onClick={() => setShowAddProjectModal(false)}>{t('cancel')}</Button><Button type="submit">{t('save')}</Button></div>
+              <div className="flex justify-end gap-2 pt-4 border-t">
+                  <Button variant="secondary" onClick={() => setShowAddProjectModal(false)}>{t('cancel')}</Button>
+                  <Button type="submit" disabled={isSavingProject}>
+                      {isSavingProject ? <><Loader2 size={16} className="animate-spin" /> กำลังบันทึก...</> : t('save')}
+                  </Button>
+              </div>
             </form>
           </div>
         </div>
@@ -9791,7 +9984,9 @@ export default function App() {
 
               <div className="flex justify-end gap-2 pt-4 border-t">
                 <Button variant="secondary" onClick={() => setShowAddContractModal(false)}>{t('cancel')}</Button>
-                <Button type="submit">{t('save')}</Button>
+                <Button type="submit" disabled={isSavingContract}>
+                    {isSavingContract ? <><Loader2 size={16} className="animate-spin" /> กำลังบันทึก...</> : t('save')}
+                </Button>
               </div>
             </form>
           </div>
@@ -10029,7 +10224,9 @@ export default function App() {
 
                 <div className="flex justify-end gap-2 pt-4 border-t mt-4">
                     <Button variant="secondary" onClick={() => setShowAddAssetModal(false)}>{t('cancel')}</Button>
-                    <Button type="submit">{t('save')}</Button>
+                    <Button type="submit" disabled={isSavingAsset}>
+                        {isSavingAsset ? <><Loader2 size={16} className="animate-spin" /> กำลังบันทึก...</> : t('save')}
+                    </Button>
                 </div>
             </form>
           </div>
@@ -10135,7 +10332,9 @@ export default function App() {
 
                 <div className="flex justify-end gap-2 pt-4 border-t mt-4">
                     <Button variant="secondary" onClick={() => setShowAddToolModal(false)}>{t('cancel')}</Button>
-                    <Button type="submit">{t('save')}</Button>
+                    <Button type="submit" disabled={isSavingTool}>
+                        {isSavingTool ? <><Loader2 size={16} className="animate-spin" /> กำลังบันทึก...</> : t('save')}
+                    </Button>
                 </div>
             </form>
           </div>
@@ -10246,7 +10445,9 @@ export default function App() {
 
                 <div className="flex justify-end gap-2 pt-4 border-t mt-4">
                     <Button variant="secondary" onClick={() => setShowAddMachineModal(false)}>{t('cancel')}</Button>
-                    <Button type="submit">{t('save')}</Button>
+                    <Button type="submit" disabled={isSavingMachine}>
+                        {isSavingMachine ? <><Loader2 size={16} className="animate-spin" /> กำลังบันทึก...</> : t('save')}
+                    </Button>
                 </div>
             </form>
           </div>
@@ -11101,8 +11302,8 @@ export default function App() {
                             if (canApprove && !isExporting) {
                                 return (
                                     <div className="flex gap-2">
-                                        <Button variant="danger" icon={XCircle} onClick={() => showConfirm('ยืนยันไม่อนุมัติ', 'คุณต้องการ ปฏิเสธ (ไม่อนุมัติ) ผลการตรวจสอบนี้ใช่หรือไม่?', () => handleApprovePmAction(selectedPmHistory, 'Rejected'))}>ไม่อนุมัติ</Button>
-                                        <Button variant="success" icon={CheckCircle} onClick={() => showConfirm('ยืนยันอนุมัติ', 'คุณตรวจสอบข้อมูลและต้องการ อนุมัติ ผลการตรวจสอบนี้ใช่หรือไม่?', () => handleApprovePmAction(selectedPmHistory, 'Approved'))}>อนุมัติข้อมูล</Button>
+                                        <Button variant="danger" icon={XCircle} onClick={() => showConfirm('ยืนยันไม่อนุมัติ', 'คุณต้องการ ปฏิเสธ (ไม่อนุมัติ) ผลการตรวจสอบนี้ใช่หรือไม่?', () => handleApprovePmAction(selectedPmHistory, 'Rejected'), 'ไม่อนุมัติ', 'warning')}>ไม่อนุมัติ</Button>
+                                        <Button variant="success" icon={CheckCircle} onClick={() => showConfirm('ยืนยันอนุมัติ', 'คุณตรวจสอบข้อมูลและต้องการ อนุมัติ ผลการตรวจสอบนี้ใช่หรือไม่?', () => handleApprovePmAction(selectedPmHistory, 'Approved'), 'ยืนยันอนุมัติ', 'info')}>อนุมัติข้อมูล</Button>
                                     </div>
                                 );
                             }
@@ -12334,319 +12535,39 @@ export default function App() {
       )}
 
       {/* NEW: Add/Edit Form Item Modal */}
-      {showAddFormModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] overflow-y-auto">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 m-4 animate-fade-in">
-            <div className="flex justify-between items-start mb-6 border-b pb-4">
-              <div>
-                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                    <Folder className="text-orange-500" size={24}/> 
-                    {newFormItem.id ? 'แก้ไขข้อมูลแบบฟอร์ม (Edit Form)' : 'เพิ่มแบบฟอร์มใหม่ (Add Form)'}
-                </h2>
-                <p className="text-sm text-gray-500 mt-1">จัดการรายชื่อแบบฟอร์มมาตรฐาน</p>
-              </div>
-              <button onClick={() => setShowAddFormModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
-            </div>
-            
-            <form onSubmit={handleSaveFormItem} className="space-y-4">
-                <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-1">หมวดหมู่ (Category) <span className="text-red-500">*</span></label>
-                    <select 
-                        required 
-                        className="w-full border border-gray-300 rounded-md p-2.5 focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none text-sm transition-colors bg-white"
-                        value={newFormItem.category}
-                        onChange={e => setNewFormItem({...newFormItem, category: e.target.value})}
-                    >
-                        <option value="งานบริการลูกบ้าน (Resident Services)">งานบริการลูกบ้าน (Resident Services)</option>
-                        <option value="งานผู้รับเหมาและซ่อมบำรุง (Contractor & Maint.)">งานผู้รับเหมาและซ่อมบำรุง (Contractor & Maint.)</option>
-                        <option value="งานบริหารและนิติบุคคล (Juristic & Mgmt.)">งานบริหารและนิติบุคคล (Juristic & Mgmt.)</option>
-                        <option value="งานบุคคลและภายใน (Internal)">งานบุคคลและภายใน (Internal)</option>
-                    </select>
-                </div>
-
-                <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-1">ชื่อแบบฟอร์ม (Form Name) <span className="text-red-500">*</span></label>
-                    <input 
-                        type="text" 
-                        required 
-                        className="w-full border border-gray-300 rounded-md p-2.5 focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none text-sm transition-colors"
-                        value={newFormItem.name}
-                        onChange={e => setNewFormItem({...newFormItem, name: e.target.value})}
-                        placeholder="เช่น แบบฟอร์มขอใช้พื้นที่ส่วนกลาง"
-                    />
-                </div>
-
-                <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-1">คำอธิบาย (Description)</label>
-                    <textarea 
-                        className="w-full border border-gray-300 rounded-md p-2.5 focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none text-sm h-24 resize-none transition-colors"
-                        value={newFormItem.description}
-                        onChange={e => setNewFormItem({...newFormItem, description: e.target.value})}
-                        placeholder="อธิบายวัตถุประสงค์การใช้งานแบบฟอร์ม..."
-                    ></textarea>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">รูปแบบ (Format)</label>
-                        <select 
-                            className="w-full border border-gray-300 rounded-md p-2.5 focus:ring-2 focus:ring-orange-200 outline-none text-sm bg-white"
-                            value={newFormItem.format}
-                            onChange={e => setNewFormItem({...newFormItem, format: e.target.value})}
-                        >
-                            <option value="PDF">PDF</option>
-                            <option value="Excel">Excel</option>
-                            <option value="Word">Word</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">ขนาดไฟล์ (โดยประมาณ)</label>
-                        <input 
-                            type="text" 
-                            className="w-full border border-gray-300 rounded-md p-2.5 focus:ring-2 focus:ring-orange-200 outline-none text-sm bg-white"
-                            value={newFormItem.size}
-                            onChange={e => setNewFormItem({...newFormItem, size: e.target.value})}
-                            placeholder="เช่น 100 KB"
-                        />
-                    </div>
-                </div>
-
-                <div className="flex justify-end gap-3 pt-6 border-t mt-4">
-                    <Button variant="secondary" onClick={() => setShowAddFormModal(false)}>{t('cancel')}</Button>
-                    <Button type="submit" icon={Save}>บันทึกข้อมูล</Button>
-                </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* NEW: Supplier Details Modal */}
-      {selectedSupplierDetails && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl p-8 m-4 max-h-[95vh] overflow-y-auto relative animate-fade-in">
-                <button 
-                    onClick={() => setSelectedSupplierDetails(null)} 
-                    className="absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors"
-                >
-                    <X size={24} />
-                </button>
-
-                <div className="mb-6 border-b pb-4">
-                    <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                        <Building2 className="text-orange-500"/> ข้อมูลผู้ให้บริการ / ผู้รับเหมา
-                    </h2>
-                    <p className="text-sm text-gray-500 mt-1">รายละเอียดและช่องทางการติดต่อ (Supplier Details)</p>
-                </div>
-
-                <div className="space-y-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-y-6 gap-x-4 text-sm bg-gray-50 p-6 rounded-xl border border-gray-200">
-                        <div className="col-span-1 md:col-span-2 flex justify-between items-start">
-                            <div>
-                                <span className="text-gray-500 block text-xs mb-1 font-bold uppercase tracking-wider">ชื่อบริษัท (Company Name)</span>
-                                <span className="font-black text-gray-800 text-xl">{selectedSupplierDetails.name}</span>
-                            </div>
-                            <div className="text-right">
-                                <span className="text-gray-500 block text-xs mb-1 font-bold uppercase tracking-wider">สถานะ (Status)</span>
-                                <Badge status={selectedSupplierDetails.status} />
-                            </div>
-                        </div>
-
-                        <div className="col-span-1 md:col-span-2 border-t border-gray-200 pt-4">
-                            <span className="text-gray-500 block text-xs mb-1 font-bold uppercase tracking-wider">หมวดงานบริการ (Service Category)</span>
-                            <div className="flex gap-2">
-                                <span className="text-gray-700 bg-white px-3 py-1.5 rounded-md inline-block font-bold border border-gray-300 shadow-sm">
-                                    {selectedSupplierDetails.category}
-                                </span>
-                                <span className="text-gray-600 bg-gray-200 px-3 py-1.5 rounded-md inline-block font-medium border border-gray-300">
-                                    {selectedSupplierDetails.type}
-                                </span>
-                            </div>
-                        </div>
-
-                        <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-                            <span className="text-gray-500 block text-xs mb-2 font-bold uppercase tracking-wider">ผู้ติดต่อ (Contact Person)</span>
-                            <span className="text-gray-800 font-bold flex items-center gap-2 text-base">
-                                <User size={18} className="text-orange-500"/> {selectedSupplierDetails.contact || '-'}
-                            </span>
-                        </div>
-
-                        <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm space-y-3">
-                            <div>
-                                <span className="text-gray-500 block text-xs mb-1 font-bold uppercase tracking-wider">เบอร์โทรศัพท์ (Phone)</span>
-                                <a href={`tel:${selectedSupplierDetails.phone}`} className="text-blue-600 hover:text-blue-800 hover:underline font-bold flex items-center gap-2">
-                                    <Phone size={16} className="text-blue-500"/> {selectedSupplierDetails.phone || '-'}
-                                </a>
-                            </div>
-                            <div>
-                                <span className="text-gray-500 block text-xs mb-1 font-bold uppercase tracking-wider">อีเมล (Email)</span>
-                                <a href={`mailto:${selectedSupplierDetails.email}`} className="text-blue-600 hover:text-blue-800 hover:underline font-bold flex items-center gap-2 break-all">
-                                    <Mail size={16} className="text-blue-500"/> {selectedSupplierDetails.email || '-'}
-                                </a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="mt-8 flex justify-end gap-2 pt-4 border-t">
-                    <Button variant="secondary" onClick={() => setSelectedSupplierDetails(null)}>{t('close')}</Button>
-                </div>
-            </div>
-        </div>
-      )}
-
-      {/* NEW: View Selected Contract Modal */}
-      {selectedContractView && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl p-8 m-4 max-h-[95vh] overflow-y-auto relative animate-fade-in">
-                <button 
-                    onClick={() => setSelectedContractView(null)} 
-                    className="absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors"
-                >
-                    <X size={24} />
-                </button>
-
-                <div className="mb-6 border-b pb-4">
-                    <div className="flex justify-between items-start">
-                        <div>
-                            <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                                <Briefcase className="text-orange-500"/> รายละเอียดสัญญา (Contract Details)
-                            </h2>
-                            <p className="text-sm text-gray-500 mt-1">ข้อมูลคู่สัญญาและเงื่อนไขการให้บริการ</p>
-                        </div>
-                        <Badge status={selectedContractView.status} />
-                    </div>
-                </div>
-
-                <div className="space-y-6">
-                    {/* ข้อมูลบริษัทคู่สัญญา */}
-                    <div className="bg-gray-50 p-5 rounded-xl border border-gray-200">
-                        <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2 border-b border-gray-200 pb-2">
-                            <Building2 size={16} className="text-gray-500"/> ข้อมูลผู้รับเหมา / ผู้ให้บริการ
-                        </h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-6 text-sm">
-                            <div className="col-span-1 md:col-span-2">
-                                <span className="text-gray-500 block text-xs mb-1">ชื่อบริษัทคู่สัญญา</span>
-                                <span className="font-bold text-gray-900 text-lg">{selectedContractView.vendorName}</span>
-                            </div>
-                            <div>
-                                <span className="text-gray-500 block text-xs mb-1">ชื่อผู้ติดต่อ</span>
-                                <span className="font-medium text-gray-800 flex items-center gap-1.5"><User size={14} className="text-gray-400"/> {selectedContractView.contactPerson || '-'}</span>
-                            </div>
-                            <div>
-                                <span className="text-gray-500 block text-xs mb-1">เบอร์โทรศัพท์</span>
-                                <span className="font-medium text-gray-800 flex items-center gap-1.5">
-                                    <Phone size={14} className="text-gray-400"/> 
-                                    {selectedContractView.contactPhone ? <a href={`tel:${selectedContractView.contactPhone}`} className="text-blue-600 hover:underline">{selectedContractView.contactPhone}</a> : '-'}
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* รายละเอียดสัญญา */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm space-y-3 text-sm">
-                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">ประเภทและบริการ</h3>
-                            <div>
-                                <span className="text-gray-500 block text-xs">ประเภทสัญญา</span>
-                                <span className={`inline-block mt-1 px-2 py-0.5 rounded text-xs font-bold ${
-                                    selectedContractView.type === CONTRACT_TYPES.INCOME ? 'bg-green-100 text-green-700 border border-green-200' :
-                                    selectedContractView.type === CONTRACT_TYPES.EXPENSE ? 'bg-red-100 text-red-700 border border-red-200' :
-                                    'bg-blue-100 text-blue-700 border border-blue-200'
-                                }`}>
-                                    {selectedContractView.type}
-                                </span>
-                            </div>
-                            <div>
-                                <span className="text-gray-500 block text-xs mb-1">หมวดงานบริการ</span>
-                                <span className="font-medium text-gray-800">{selectedContractView.category}</span>
-                            </div>
-                        </div>
-
-                        <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm space-y-3 text-sm">
-                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">ระยะเวลาสัญญา</h3>
-                            <div>
-                                <span className="text-gray-500 block text-xs mb-1">วันที่เริ่มต้น - สิ้นสุด</span>
-                                <span className="font-medium text-gray-800 flex items-center gap-1.5">
-                                    <Calendar size={14} className="text-gray-400"/> {selectedContractView.startDate} <ArrowRight size={12} className="text-gray-300"/> {selectedContractView.endDate}
-                                </span>
-                            </div>
-                            <div>
-                                <span className="text-gray-500 block text-xs mb-1">สถานะระยะเวลา</span>
-                                {(() => {
-                                    const remDays = calculateDaysRemaining(selectedContractView.endDate);
-                                    return (
-                                        <span className={`font-bold flex items-center gap-1.5 ${remDays < 0 ? 'text-red-600' : remDays < 30 ? 'text-orange-600' : 'text-green-600'}`}>
-                                            <Hourglass size={14}/> {remDays < 0 ? 'หมดอายุสัญญาแล้ว' : `คงเหลือ ${remDays} วัน`}
-                                        </span>
-                                    );
-                                })()}
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* ข้อมูลการเงิน */}
-                    <div className="bg-orange-50 p-5 rounded-xl border border-orange-100 flex items-center justify-between">
-                        <div>
-                            <span className="text-orange-800 block text-sm font-bold mb-1">มูลค่าสัญญา (Contract Amount)</span>
-                            <span className="text-orange-600 text-xs">ก่อนรวมภาษีมูลค่าเพิ่ม (VAT)</span>
-                        </div>
-                        <div className="text-right">
-                            <div className="text-2xl font-black text-orange-700 mb-1">฿ {Number(selectedContractView.amount).toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
-                            <div className="text-xs font-bold bg-white px-2 py-1 rounded-md text-orange-600 border border-orange-200 inline-block">
-                                รอบการจ่าย: {selectedContractView.paymentCycle === 'Monthly' ? 'รายเดือน (Monthly)' : 'รายปี (Yearly)'}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="mt-8 flex justify-between items-center gap-2 pt-4 border-t border-gray-200 bg-white">
-                    <div>
-                        {(selectedContractView.fileUrl || (selectedContractView.file && (selectedContractView.file.data || selectedContractView.file.isLocal))) ? (
-                            <Button 
-                                variant="outline" 
-                                className="border-blue-500 text-blue-600 hover:bg-blue-50 font-bold" 
-                                icon={Download}
-                                onClick={() => handleDownloadFile(selectedContractView.file || { fileUrl: selectedContractView.fileUrl, name: `${selectedContractView.vendorName}_Contract.pdf` })}
-                            >
-                                ดาวน์โหลดไฟล์แนบ
-                            </Button>
-                        ) : (
-                            <span className="text-sm text-gray-400 flex items-center gap-1"><File size={16}/> ไม่มีไฟล์แนบ</span>
-                        )}
-                    </div>
-                    <div className="flex gap-2">
-                        {hasPerm('proj_contracts', 'edit') && (
-                            <Button 
-                                variant="outline" 
-                                className="border-orange-500 text-orange-600 hover:bg-orange-50 font-bold" 
-                                icon={Edit} 
-                                onClick={() => handleEditContract(selectedContractView)}
-                            >
-                                แก้ไขสัญญา
-                            </Button>
-                        )}
-                        <Button variant="secondary" onClick={() => setSelectedContractView(null)}>{t('close')}</Button>
-                    </div>
-                </div>
-            </div>
-        </div>
-      )}
-
-      {/* NEW: Add/Edit Form Item Modal */}
       {/* NEW: Global Confirm Modal */}
       {confirmModal.isOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] animate-fade-in">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 m-4 transform transition-all scale-100 opacity-100">
-            <div className="flex items-center gap-3 mb-4 text-red-600">
-              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center shrink-0">
-                  <AlertTriangle size={24} className="text-red-600" />
+            <div className={`flex items-center gap-3 mb-4 ${
+                confirmModal.type === 'danger' ? 'text-red-600' : 
+                confirmModal.type === 'warning' ? 'text-orange-500' : 
+                confirmModal.type === 'alert' ? 'text-blue-500' : 'text-blue-600'
+            }`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                  confirmModal.type === 'danger' ? 'bg-red-100' : 
+                  confirmModal.type === 'warning' ? 'bg-orange-100' : 
+                  confirmModal.type === 'alert' ? 'bg-blue-100' : 'bg-blue-100'
+              }`}>
+                  {confirmModal.type === 'alert' || confirmModal.type === 'info' ? <Info size={24} /> : <AlertTriangle size={24} />}
               </div>
               <h3 className="text-lg font-bold text-gray-900">{confirmModal.title}</h3>
             </div>
-            <p className="text-gray-600 mb-6 text-sm ml-1">{confirmModal.message}</p>
+            <p className="text-gray-600 mb-6 text-sm ml-1 leading-relaxed">{confirmModal.message}</p>
             <div className="flex justify-end gap-3">
-              <Button variant="secondary" onClick={closeConfirm}>{t('cancel')}</Button>
-              <Button variant="danger" onClick={() => { confirmModal.onConfirm(); closeConfirm(); }} icon={Trash2}>ยืนยันการลบ</Button>
+              {confirmModal.type !== 'alert' && (
+                  <Button variant="secondary" onClick={closeConfirm}>{t('cancel')}</Button>
+              )}
+              <Button 
+                  variant={confirmModal.type === 'danger' ? 'danger' : 'primary'} 
+                  onClick={() => { 
+                      if (confirmModal.onConfirm) confirmModal.onConfirm(); 
+                      closeConfirm(); 
+                  }} 
+                  icon={confirmModal.type === 'danger' ? Trash2 : null}
+              >
+                  {confirmModal.confirmText}
+              </Button>
             </div>
           </div>
         </div>
