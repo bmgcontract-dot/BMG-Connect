@@ -3258,6 +3258,24 @@ export default function App() {
       }, 50);
   };
 
+  const handleDeleteUtilityReading = (readingId, meterId) => {
+      showConfirm('ยืนยันการลบข้อมูล', 'คุณต้องการลบประวัติการจดมิเตอร์นี้ใช่หรือไม่? (ระบบจะคำนวณค่ายกมาล่าสุดของมิเตอร์ให้ใหม่)', () => {
+          // ลบข้อมูลออกจาก State
+          const newReadings = utilityReadings.filter(r => r.id !== readingId);
+          setUtilityReadings(newReadings);
+
+          // อัปเดตค่ายกมาล่าสุดของมิเตอร์ตัวนี้ใหม่
+          const meterReadings = newReadings.filter(r => r.meterId === meterId).sort((a,b) => new Date(b.date) - new Date(a.date));
+          const latest = meterReadings[0];
+          
+          setMeters(meters.map(m => 
+              m.id === meterId 
+                  ? { ...m, lastReading: latest ? latest.value : 0, lastDate: latest ? latest.date : null }
+                  : m
+          ));
+      });
+  };
+
   const handleSaveMeter = (e) => {
       e.preventDefault();
       const initVal = parseFloat(newMeter.initialValue) || 0;
@@ -7935,14 +7953,16 @@ export default function App() {
                                                               <th className="p-3 text-right">เลขปัจจุบัน</th>
                                                               <th className="p-3 text-right">จำนวนหน่วยที่ใช้</th>
                                                               <th className="p-3 text-center">ผู้บันทึก</th>
+                                                              {(currentUser?.username === 'admin' || currentUser?.position?.includes('ผู้จัดการ') || currentUser?.position?.includes('หัวหน้าช่าง')) && (
+                                                                  <th className="p-3 text-center w-20">จัดการ</th>
+                                                              )}
                                                           </tr>
                                                       </thead>
                                                       <tbody className="divide-y divide-gray-100">
                                                           {utilityReadings.filter(r => r.meterId === utilityForm.meterId).sort((a,b) => new Date(b.date) - new Date(a.date)).map(r => (
                                                               <tr key={r.id} className="hover:bg-gray-50 transition-colors">
-                                                                  <td className="p-3 text-blue-600 font-medium cursor-pointer hover:underline flex items-center gap-1 group" onClick={() => handleEditUtilityReading(r)} title="คลิกเพื่อแก้ไขข้อมูล">
+                                                                  <td className="p-3 text-blue-600 font-medium">
                                                                       {new Date(r.date).toLocaleDateString('th-TH')}
-                                                                      <Edit size={12} className="text-gray-400 group-hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"/>
                                                                   </td>
                                                                   <td className="p-3 text-right text-gray-500">{r.prevValue.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
                                                                   <td className="p-3 text-right font-bold text-gray-800">{r.value.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
@@ -7950,6 +7970,18 @@ export default function App() {
                                                                   <td className="p-3 text-center text-gray-500 text-xs">
                                                                       <span className="bg-gray-100 px-2 py-1 rounded border border-gray-200">{r.recorder}</span>
                                                                   </td>
+                                                                  {(currentUser?.username === 'admin' || currentUser?.position?.includes('ผู้จัดการ') || currentUser?.position?.includes('หัวหน้าช่าง')) && (
+                                                                      <td className="p-3 text-center">
+                                                                          <div className="flex justify-center items-center gap-1">
+                                                                              <button onClick={() => handleEditUtilityReading(r)} className="text-gray-400 hover:text-blue-600 p-1.5 rounded-md hover:bg-blue-50 transition-colors" title="แก้ไขข้อมูล">
+                                                                                  <Edit size={14} />
+                                                                              </button>
+                                                                              <button onClick={() => handleDeleteUtilityReading(r.id, r.meterId)} className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors" title="ลบข้อมูล">
+                                                                                  <Trash2 size={14} />
+                                                                              </button>
+                                                                          </div>
+                                                                      </td>
+                                                                  )}
                                                               </tr>
                                                           ))}
                                                       </tbody>
