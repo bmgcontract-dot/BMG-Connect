@@ -3315,6 +3315,77 @@ export default function App() {
   };
   // ----------------------------------------------------
 
+  // --- NEW: Action Plan Import Handler ---
+  const handleImportActionPlanCSV = (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      
+      reader.readAsArrayBuffer(file);
+      
+      reader.onload = (e) => {
+          try {
+              const buffer = e.target.result;
+              let text = '';
+              try {
+                  text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+              } catch (err) {
+                  text = new TextDecoder('windows-874').decode(buffer);
+              }
+
+              const lines = text.split(/\r?\n/);
+              if (lines.length < 2) return alert('ไฟล์ CSV ไม่มีข้อมูล หรือมีแค่หัวตาราง');
+              
+              const parseCSVLine = (line) => {
+                  const regex = /,(?=(?:(?:[^"]*"){2})*[^"]*$)/;
+                  return line.split(regex).map(v => v.trim().replace(/^"|"$/g, ''));
+              };
+
+              const headers = parseCSVLine(lines[0]);
+              const newAPs = [];
+              
+              for (let i = 1; i < lines.length; i++) {
+                  if (!lines[i].trim()) continue;
+                  
+                  const values = parseCSVLine(lines[i]);
+                  const rowObj = {};
+                  headers.forEach((header, index) => {
+                      rowObj[header] = values[index];
+                  });
+                  
+                  // เช็คว่ามีหัวข้องาน (issue) หรือไม่ จึงจะดึงเข้ามา
+                  if (rowObj.issue) {
+                      newAPs.push({
+                          id: generateId(),
+                          projectId: selectedProject.id, // ผูกกับโครงการที่เปิดอยู่
+                          issue: rowObj.issue || '',
+                          details: rowObj.details || '',
+                          responsible: rowObj.responsible || '',
+                          startDate: rowObj.startDate || new Date().toISOString().split('T')[0],
+                          deadline: rowObj.deadline || '',
+                          status: rowObj.status || 'Pending'
+                      });
+                  }
+              }
+              
+              if (newAPs.length > 0) {
+                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูล Action Plan ที่ถูกต้อง ${newAPs.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
+                      const nextList = [...actionPlans, ...newAPs];
+                      setActionPlans(nextList);
+                      triggerAutoSync('ActionPlans_แผนงาน', nextList, []); // แจ้งเตือน Cloud Sync ด้วย
+                      alert('นำเข้าข้อมูลสำเร็จแล้ว!');
+                  }, 'ยืนยันการนำเข้า', 'info');
+              } else {
+                  alert('ไม่พบข้อมูลที่ถูกต้อง (กรุณาตรวจสอบว่ามีคอลัมน์ชื่อ "issue" ในไฟล์ CSV)');
+              }
+          } catch (error) {
+              alert('เกิดข้อผิดพลาดในการอ่านไฟล์ CSV โปรดตรวจสอบรูปแบบไฟล์');
+              console.error(error);
+          }
+      };
+      event.target.value = '';
+  };
+
   const handleSaveActionPlan = (e) => {
       e.preventDefault();
       
@@ -8516,6 +8587,12 @@ export default function App() {
                           </div>
 
                           <div className={`flex gap-2 shrink-0 ${isExporting ? 'hidden' : ''}`}>
+                              {hasPerm('proj_action', 'save') && (
+                                  <label className="cursor-pointer flex items-center justify-center gap-1 px-3 py-1.5 text-xs rounded-md font-medium transition-colors bg-green-600 text-white hover:bg-green-700 shadow-sm" title="นำเข้าข้อมูลจากไฟล์ .csv">
+                                      <Upload size={14} /> นำเข้า CSV
+                                      <input type="file" accept=".csv" className="hidden" onChange={handleImportActionPlanCSV} />
+                                  </label>
+                              )}
                               <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(actionPlans.filter(a => a.projectId === selectedProject.id && (actionPlanFilter === 'All' || a.status === actionPlanFilter)), 'action_plans')}>{t('exportCSV')}</Button>
                               <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-action-plan-area', `Action_Plan_${selectedProject?.code || 'List'}.pdf`, 'landscape')} disabled={isExporting}>
                                   {isExporting ? t('downloading') : t('downloadPDF')}
