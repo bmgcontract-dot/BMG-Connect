@@ -1488,7 +1488,7 @@ export default function App() {
   const [showAddMachineModal, setShowAddMachineModal] = useState(false);
   const [isEditingMachine, setIsEditingMachine] = useState(false);
   const [isSavingMachine, setIsSavingMachine] = useState(false); // NEW: State สำหรับแสดง Loading ตอนอัปโหลดรูปเข้า Drive
-  const [pmSubTab, setPmSubTab] = useState('dashboard'); // 'dashboard', 'registry', 'plan', 'calendar', 'form', 'history'
+  const [pmSubTab, setPmSubTab] = useState('history'); // 'registry', 'plan', 'calendar', 'form', 'history'
   const [newMachine, setNewMachine] = useState({
       code: '',
       name: '',
@@ -1516,6 +1516,12 @@ export default function App() {
   const [selectedMachineDetails, setSelectedMachineDetails] = useState(null); // NEW: State สำหรับเก็บข้อมูลเครื่องจักรที่คลิกดูรายละเอียด
   const [selectedFormSystem, setSelectedFormSystem] = useState(''); // NEW: State สำหรับเลือกระบบที่จะพิมพ์ฟอร์มเปล่า
   const [selectedPmStatusDetail, setSelectedPmStatusDetail] = useState(null); // NEW: State สำหรับดูรายละเอียดสถานะ PM
+
+  // NEW: PM History Filters State
+  const [pmHistoryFilterDate, setPmHistoryFilterDate] = useState('');
+  const [pmHistoryFilterResult, setPmHistoryFilterResult] = useState('');
+  const [pmHistoryFilterMachine, setPmHistoryFilterMachine] = useState('');
+  const [pmHistoryFilterApproval, setPmHistoryFilterApproval] = useState('');
 
   // NEW: PM Form State
   const [showPmFormModal, setShowPmFormModal] = useState(false);
@@ -6781,7 +6787,7 @@ export default function App() {
               <div>
                   {/* PM Sub Tabs */}
                   <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
-                      {['dashboard', 'registry', 'plan', 'calendar', 'form', 'history'].map(sub => (
+                      {['registry', 'plan', 'calendar', 'form', 'history'].map(sub => (
                           <button
                               key={sub}
                               onClick={() => setPmSubTab(sub)}
@@ -6792,7 +6798,7 @@ export default function App() {
                       ))}
                   </div>
 
-                  {pmSubTab === 'dashboard' && (() => {
+                  {pmSubTab === 'history' && (() => {
                       // 1. คำนวณข้อมูล PM สำหรับเดือนปัจจุบัน
                       const [year, month] = pmMonth.split('-').map(Number);
                       const daysInMonth = new Date(year, month, 0).getDate();
@@ -6862,20 +6868,38 @@ export default function App() {
                       return (
                           <div className="space-y-6 animate-fade-in">
                               <ChartGradients />
-                              <Card className="p-6 border-t-4 border-red-500">
+                              <Card id="print-pm-dashboard-area" className={`p-6 border-t-4 border-red-500 ${isExporting ? 'w-[277mm] min-w-[277mm] max-w-[277mm] mx-auto box-border border-none shadow-none bg-white' : ''}`}>
                                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b pb-4 gap-4">
                                       <h3 className="font-bold flex items-center gap-3 text-gray-800">
-                                          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center text-white shadow-md">
+                                          <div className={`w-10 h-10 rounded-xl bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center text-white shadow-md ${isExporting ? 'hidden' : ''}`}>
                                               <BarChart3 size={20} /> 
                                           </div>
                                           ภาพรวมงานบำรุงรักษา (PM Dashboard)
                                       </h3>
-                                      <div className="flex items-center bg-gray-100 rounded-lg p-1">
-                                          <button onClick={() => changePmMonth(-1)} className="p-1 hover:bg-white rounded shadow-sm transition"><ChevronLeft size={18}/></button>
-                                          <span className="px-4 text-sm font-semibold text-gray-700 w-36 text-center">
-                                              {new Date(pmMonth + '-01').toLocaleDateString(lang === 'th' ? 'th-TH' : 'en-US', { month: 'long', year: 'numeric' })}
-                                          </span>
-                                          <button onClick={() => changePmMonth(1)} className="p-1 hover:bg-white rounded shadow-sm transition"><ChevronRight size={18}/></button>
+                                      <div className="flex items-center gap-3">
+                                          <div className={`flex items-center bg-gray-100 rounded-lg p-1 ${isExporting ? 'hidden' : ''}`}>
+                                              <button onClick={() => changePmMonth(-1)} className="p-1 hover:bg-white rounded shadow-sm transition"><ChevronLeft size={18}/></button>
+                                              <span className="px-4 text-sm font-semibold text-gray-700 w-36 text-center">
+                                                  {new Date(pmMonth + '-01').toLocaleDateString(lang === 'th' ? 'th-TH' : 'en-US', { month: 'long', year: 'numeric' })}
+                                              </span>
+                                              <button onClick={() => changePmMonth(1)} className="p-1 hover:bg-white rounded shadow-sm transition"><ChevronRight size={18}/></button>
+                                          </div>
+                                          {isExporting && (
+                                              <div className="text-sm font-bold text-gray-700 bg-gray-100 px-4 py-2 rounded-lg">
+                                                  ประจำเดือน: {new Date(pmMonth + '-01').toLocaleDateString(lang === 'th' ? 'th-TH' : 'en-US', { month: 'long', year: 'numeric' })}
+                                              </div>
+                                          )}
+                                          <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
+                                              <Button 
+                                                  variant="outline" 
+                                                  size="sm" 
+                                                  icon={isExporting ? Loader2 : PrinterIcon} 
+                                                  onClick={() => handleExportPDF('print-pm-dashboard-area', `PM_Dashboard_${selectedProject.code}_${pmMonth}.pdf`, 'landscape')} 
+                                                  disabled={isExporting}
+                                              >
+                                                  {isExporting ? t('downloading') : t('downloadPDF')}
+                                              </Button>
+                                          </div>
                                       </div>
                                   </div>
 
@@ -6885,9 +6909,9 @@ export default function App() {
                                           ไม่มีแผนงาน PM ในเดือนนี้
                                       </div>
                                   ) : (
-                                      <div className="flex flex-col lg:flex-row items-center gap-10">
+                                      <div className="flex flex-col lg:flex-row items-center gap-10" style={isExporting ? { flexDirection: 'row' } : {}}>
                                           {/* Pie Chart */}
-                                          <div className="w-full lg:w-5/12 h-[320px] flex justify-center relative cursor-pointer" title="คลิกที่ส่วนของกราฟเพื่อดูรายละเอียด">
+                                          <div className="w-full lg:w-5/12 h-[320px] flex justify-center relative cursor-pointer" title="คลิกที่ส่วนของกราฟเพื่อดูรายละเอียด" style={isExporting ? { width: '41.666667%' } : {}}>
                                               <div className="absolute top-[15%] bottom-[15%] left-[15%] right-[15%] bg-gradient-to-b from-gray-50 to-gray-200 rounded-full scale-[0.8] opacity-60 blur-xl"></div>
                                               <ResponsiveContainer width="100%" height="100%">
                                                   <PieChart style={{ filter: 'drop-shadow(3px 8px 10px rgba(0,0,0,0.25))' }}>
@@ -6902,7 +6926,8 @@ export default function App() {
                                                           dataKey="value"
                                                           stroke="#ffffff"
                                                           strokeWidth={2}
-                                                          onClick={(data) => setSelectedPmStatusDetail({ status: data.id, label: data.name, tasks: allMonthlyTasks.filter(t => t.status === data.id) })}
+                                                          onClick={(data) => !isExporting && setSelectedPmStatusDetail({ status: data.id, label: data.name, tasks: allMonthlyTasks.filter(t => t.status === data.id) })}
+                                                          isAnimationActive={!isExporting}
                                                       >
                                                           {pieData.map((entry, index) => (
                                                               <Cell key={`cell-${index}`} fill={entry.color} className="hover:opacity-80 transition-opacity outline-none" />
@@ -6918,10 +6943,10 @@ export default function App() {
                                           </div>
                                           
                                           {/* Stats Cards */}
-                                          <div className="w-full lg:w-7/12 grid grid-cols-2 gap-5">
+                                          <div className="w-full lg:w-7/12 grid grid-cols-2 gap-5" style={isExporting ? { width: '58.333333%' } : {}}>
                                               <div 
-                                                  className="relative bg-gradient-to-b from-white to-orange-50 border border-orange-100 p-5 rounded-2xl text-center shadow-sm transform transition-all hover:-translate-y-1 hover:shadow-md cursor-pointer group"
-                                                  onClick={() => setSelectedPmStatusDetail({ status: 'Not Started', label: 'ยังไม่ดำเนินการ', tasks: allMonthlyTasks.filter(t => t.status === 'Not Started') })}
+                                                  className={`relative bg-gradient-to-b from-white to-orange-50 border border-orange-100 p-5 rounded-2xl text-center shadow-sm transform transition-all ${!isExporting ? 'hover:-translate-y-1 hover:shadow-md cursor-pointer group' : ''}`}
+                                                  onClick={() => !isExporting && setSelectedPmStatusDetail({ status: 'Not Started', label: 'ยังไม่ดำเนินการ', tasks: allMonthlyTasks.filter(t => t.status === 'Not Started') })}
                                               >
                                                   <div className="absolute -top-3 -right-3 w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 shadow-sm group-hover:scale-110 transition-transform">
                                                       <Clock size={18}/>
@@ -6932,8 +6957,8 @@ export default function App() {
                                               </div>
                                               
                                               <div 
-                                                  className="relative bg-gradient-to-b from-white to-blue-50 border border-blue-100 p-5 rounded-2xl text-center shadow-sm transform transition-all hover:-translate-y-1 hover:shadow-md cursor-pointer group"
-                                                  onClick={() => setSelectedPmStatusDetail({ status: 'Pending Approval', label: 'รอตรวจสอบ/อนุมัติ', tasks: allMonthlyTasks.filter(t => t.status === 'Pending Approval') })}
+                                                  className={`relative bg-gradient-to-b from-white to-blue-50 border border-blue-100 p-5 rounded-2xl text-center shadow-sm transform transition-all ${!isExporting ? 'hover:-translate-y-1 hover:shadow-md cursor-pointer group' : ''}`}
+                                                  onClick={() => !isExporting && setSelectedPmStatusDetail({ status: 'Pending Approval', label: 'รอตรวจสอบ/อนุมัติ', tasks: allMonthlyTasks.filter(t => t.status === 'Pending Approval') })}
                                               >
                                                   <div className="absolute -top-3 -right-3 w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 shadow-sm group-hover:scale-110 transition-transform">
                                                       <ClipboardList size={18}/>
@@ -6944,8 +6969,8 @@ export default function App() {
                                               </div>
                                               
                                               <div 
-                                                  className="relative bg-gradient-to-b from-white to-green-50 border border-green-100 p-5 rounded-2xl text-center shadow-sm transform transition-all hover:-translate-y-1 hover:shadow-md cursor-pointer group"
-                                                  onClick={() => setSelectedPmStatusDetail({ status: 'Approved', label: 'อนุมัติแล้ว (สำเร็จ)', tasks: allMonthlyTasks.filter(t => t.status === 'Approved') })}
+                                                  className={`relative bg-gradient-to-b from-white to-green-50 border border-green-100 p-5 rounded-2xl text-center shadow-sm transform transition-all ${!isExporting ? 'hover:-translate-y-1 hover:shadow-md cursor-pointer group' : ''}`}
+                                                  onClick={() => !isExporting && setSelectedPmStatusDetail({ status: 'Approved', label: 'อนุมัติแล้ว (สำเร็จ)', tasks: allMonthlyTasks.filter(t => t.status === 'Approved') })}
                                               >
                                                   <div className="absolute -top-3 -right-3 w-10 h-10 bg-green-100 rounded-full flex items-center justify-center text-green-600 shadow-sm group-hover:scale-110 transition-transform">
                                                       <CheckCircle size={18}/>
@@ -6956,8 +6981,8 @@ export default function App() {
                                               </div>
                                               
                                               <div 
-                                                  className="relative bg-gradient-to-b from-white to-red-50 border border-red-100 p-5 rounded-2xl text-center shadow-sm transform transition-all hover:-translate-y-1 hover:shadow-md cursor-pointer group"
-                                                  onClick={() => setSelectedPmStatusDetail({ status: 'Rejected', label: 'ไม่อนุมัติ (ตีกลับ)', tasks: allMonthlyTasks.filter(t => t.status === 'Rejected') })}
+                                                  className={`relative bg-gradient-to-b from-white to-red-50 border border-red-100 p-5 rounded-2xl text-center shadow-sm transform transition-all ${!isExporting ? 'hover:-translate-y-1 hover:shadow-md cursor-pointer group' : ''}`}
+                                                  onClick={() => !isExporting && setSelectedPmStatusDetail({ status: 'Rejected', label: 'ไม่อนุมัติ (ตีกลับ)', tasks: allMonthlyTasks.filter(t => t.status === 'Rejected') })}
                                               >
                                                   <div className="absolute -top-3 -right-3 w-10 h-10 bg-red-100 rounded-full flex items-center justify-center text-red-600 shadow-sm group-hover:scale-110 transition-transform">
                                                       <XCircle size={18}/>
@@ -6969,6 +6994,177 @@ export default function App() {
                                           </div>
                                       </div>
                                   )}
+                              </Card>
+
+                              {/* History Card (Merged) */}
+                              <Card className="border-t-4 border-gray-600 mt-6">
+                                  <div className="p-4 border-b flex justify-between items-center bg-white">
+                                      <h3 className="font-bold flex items-center gap-2 text-gray-800"><History size={20}/> ประวัติการบำรุงรักษา (PM History)</h3>
+                                      <div className="flex gap-2">
+                                          <Button variant="outline" size="sm" icon={Download} onClick={() => {
+                                              const filteredToExport = pmHistoryList.filter(h => {
+                                                  if (h.projectId !== selectedProject.id) return false;
+                                                  if (pmHistoryFilterDate && h.executedDate !== pmHistoryFilterDate && h.date !== pmHistoryFilterDate) return false;
+                                                  if (pmHistoryFilterResult && h.status !== pmHistoryFilterResult) return false;
+                                                  if (pmHistoryFilterMachine && h.machineId !== pmHistoryFilterMachine) return false;
+                                                  if (pmHistoryFilterApproval) {
+                                                      const status = h.approvalStatus || 'Approved';
+                                                      if (status !== pmHistoryFilterApproval) return false;
+                                                  }
+                                                  return true;
+                                              });
+                                              exportToCSV(filteredToExport, 'pm_history_list');
+                                          }}>{t('exportCSV')}</Button>
+                                      </div>
+                                  </div>
+                                  
+                                  {/* Filters Section for PM History */}
+                                  <div className={`p-4 bg-gray-50 border-b border-gray-200 ${isExporting ? 'hidden' : ''}`}>
+                                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                          <div>
+                                              <label className="block text-xs font-bold text-gray-500 mb-2">วันที่ (Date)</label>
+                                              <input 
+                                                  type="date"
+                                                  className="w-full border border-gray-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-gray-200 outline-none bg-white transition-all"
+                                                  value={pmHistoryFilterDate}
+                                                  onChange={(e) => setPmHistoryFilterDate(e.target.value)}
+                                              />
+                                          </div>
+                                          <div>
+                                              <label className="block text-xs font-bold text-gray-500 mb-2">เครื่องจักร (Machine)</label>
+                                              <select 
+                                                  className="w-full border border-gray-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-gray-200 outline-none bg-white transition-all"
+                                                  value={pmHistoryFilterMachine}
+                                                  onChange={(e) => setPmHistoryFilterMachine(e.target.value)}
+                                              >
+                                                  <option value="">-- ทั้งหมด (All) --</option>
+                                                  {machines.filter(m => m.projectId === selectedProject.id).map(m => (
+                                                      <option key={m.id} value={m.id}>{m.name}</option>
+                                                  ))}
+                                              </select>
+                                          </div>
+                                          <div>
+                                              <label className="block text-xs font-bold text-gray-500 mb-2">ผลตรวจ (Result)</label>
+                                              <select 
+                                                  className="w-full border border-gray-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-gray-200 outline-none bg-white transition-all"
+                                                  value={pmHistoryFilterResult}
+                                                  onChange={(e) => setPmHistoryFilterResult(e.target.value)}
+                                              >
+                                                  <option value="">-- ทั้งหมด (All) --</option>
+                                                  <option value="Pass">ผ่านเกณฑ์ / ปกติ (Pass)</option>
+                                                  <option value="Fail">พบปัญหา / ผิดปกติ (Fail)</option>
+                                              </select>
+                                          </div>
+                                          <div>
+                                              <label className="block text-xs font-bold text-gray-500 mb-2">สถานะอนุมัติ (Approval)</label>
+                                              <select 
+                                                  className="w-full border border-gray-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-gray-200 outline-none bg-white transition-all"
+                                                  value={pmHistoryFilterApproval}
+                                                  onChange={(e) => setPmHistoryFilterApproval(e.target.value)}
+                                              >
+                                                  <option value="">-- ทั้งหมด (All) --</option>
+                                                  <option value="Approved">อนุมัติแล้ว</option>
+                                                  <option value="Pending Manager">รอผู้จัดการอนุมัติ</option>
+                                                  <option value="Pending Chief">รอหัวหน้าช่างอนุมัติ</option>
+                                                  <option value="Rejected">ไม่อนุมัติ (ตีกลับ)</option>
+                                              </select>
+                                          </div>
+                                      </div>
+                                  </div>
+
+                                  <div className="overflow-x-auto">
+                                      <table className="w-full text-sm">
+                                          <thead className="bg-gray-100 text-gray-700 uppercase">
+                                              <tr>
+                                                  <th className="p-3 text-center w-12">{t('col_seq')}</th>
+                                                  <th className="p-3 text-left w-32">วันที่บันทึกจริง</th>
+                                                  <th className="p-3 text-left">เครื่องจักร</th>
+                                                  <th className="p-3 text-center w-32">ผลการตรวจ</th>
+                                                  <th className="p-3 text-center w-36">สถานะอนุมัติ</th>
+                                                  <th className="p-3 text-left w-40">ผู้ตรวจสอบ</th>
+                                                  <th className={`p-3 text-center w-16 ${isExporting ? 'hidden' : ''}`}>จัดการ</th>
+                                              </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-gray-200">
+                                              {(() => {
+                                                  // Apply Filters
+                                                  const filteredPmHistory = pmHistoryList.filter(h => {
+                                                      if (h.projectId !== selectedProject.id) return false;
+                                                      if (pmHistoryFilterDate && h.executedDate !== pmHistoryFilterDate && h.date !== pmHistoryFilterDate) return false;
+                                                      if (pmHistoryFilterResult && h.status !== pmHistoryFilterResult) return false;
+                                                      if (pmHistoryFilterMachine && h.machineId !== pmHistoryFilterMachine) return false;
+                                                      if (pmHistoryFilterApproval) {
+                                                          const status = h.approvalStatus || 'Approved';
+                                                          if (status !== pmHistoryFilterApproval) return false;
+                                                      }
+                                                      return true;
+                                                  });
+
+                                                  if (filteredPmHistory.length === 0) {
+                                                      return <tr><td colSpan="7" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">ไม่พบประวัติการบันทึก PM ที่ตรงกับเงื่อนไข</td></tr>;
+                                                  }
+
+                                                  return filteredPmHistory.map((hist, index) => (
+                                                      <tr key={hist.id} className="hover:bg-gray-50">
+                                                          <td className="p-4 text-center text-gray-500 font-medium">{index + 1}</td>
+                                                          <td className="p-4">
+                                                              <div className="text-gray-700 font-medium">{new Date(hist.executedDate || hist.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })}</div>
+                                                              {hist.executionTimingStatus && (
+                                                                  <div className={`text-[10px] font-bold mt-1 inline-block px-1.5 py-0.5 rounded-md ${
+                                                                      hist.executionTimingStatus === 'เร็วกว่าแผน' ? 'bg-blue-100 text-blue-700' :
+                                                                      hist.executionTimingStatus === 'ช้ากว่าแผน' ? 'bg-red-100 text-red-700' :
+                                                                      'bg-green-100 text-green-700'
+                                                                  }`}>
+                                                                      {hist.executionTimingStatus}
+                                                                  </div>
+                                                              )}
+                                                          </td>
+                                                          <td className="p-4 cursor-pointer hover:bg-gray-200 transition-colors group rounded-md" onClick={() => setSelectedPmHistory(hist)}>
+                                                              <div className="font-bold text-gray-800 group-hover:text-blue-700 flex items-center gap-1">
+                                                                  {hist.machineName} <FileText size={14} className="text-gray-400 group-hover:text-blue-500"/>
+                                                              </div>
+                                                              <div className="text-xs text-gray-500 font-mono">{hist.machineCode}</div>
+                                                          </td>
+                                                          <td className="p-4 text-center">
+                                                              {hist.status === 'Pass' ? (
+                                                                  <span className="bg-green-100 text-green-700 border border-green-200 px-2 py-1 rounded text-xs font-bold flex items-center justify-center gap-1 w-fit mx-auto">
+                                                                      <CheckCircle size={12}/> ผ่าน ({hist.passedItems}/{hist.totalItems})
+                                                                  </span>
+                                                              ) : (
+                                                                  <span className="bg-red-100 text-red-700 border border-red-200 px-2 py-1 rounded text-xs font-bold flex items-center justify-center gap-1 w-fit mx-auto">
+                                                                      <AlertTriangle size={12}/> พบปัญหา ({hist.failedItems} จุด)
+                                                                  </span>
+                                                              )}
+                                                          </td>
+                                                          <td className="p-4 text-center">
+                                                              {hist.approvalStatus === 'Approved' || !hist.approvalStatus ? (
+                                                                  <span className="bg-green-100 text-green-700 border border-green-200 px-2 py-1 rounded text-[10px] font-bold">อนุมัติแล้ว</span>
+                                                              ) : hist.approvalStatus === 'Pending Chief' ? (
+                                                                  <span className="bg-orange-100 text-orange-700 border border-orange-200 px-2 py-1 rounded text-[10px] font-bold whitespace-nowrap">รอหัวหน้าช่างอนุมัติ</span>
+                                                              ) : hist.approvalStatus === 'Pending Manager' ? (
+                                                                  <span className="bg-blue-100 text-blue-700 border border-blue-200 px-2 py-1 rounded text-[10px] font-bold whitespace-nowrap">รอผู้จัดการอนุมัติ</span>
+                                                              ) : hist.approvalStatus === 'Rejected' ? (
+                                                                  <span className="bg-red-100 text-red-700 border border-red-200 px-2 py-1 rounded text-[10px] font-bold">ไม่อนุมัติ</span>
+                                                              ) : null}
+                                                          </td>
+                                                          <td className="p-4 text-gray-700 flex items-center gap-2 truncate" title={hist.inspector}><User size={14} className="text-gray-400 shrink-0"/> <span className="truncate">{hist.inspector}</span></td>
+                                                          <td className={`p-4 text-center ${isExporting ? 'hidden' : ''}`}>
+                                                              {hasPerm('proj_pm', 'delete') && (
+                                                                  <button 
+                                                                      onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบประวัติ PM ของ ${hist.machineName} ใช่หรือไม่?`, () => setPmHistoryList(pmHistoryList.filter(h => h.id !== hist.id))); }}
+                                                                      className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
+                                                                      title="ลบประวัติ"
+                                                                  >
+                                                                      <Trash2 size={16} />
+                                                                  </button>
+                                                              )}
+                                                          </td>
+                                                      </tr>
+                                                  ));
+                                              })()}
+                                          </tbody>
+                                      </table>
+                                  </div>
                               </Card>
                           </div>
                       );
@@ -7433,95 +7629,6 @@ export default function App() {
                                       <p className="text-sm">กรุณาเลือกระบบ (System) ด้านบนเพื่อแสดงแบบฟอร์มเปล่าและสั่งพิมพ์</p>
                                   </div>
                               )}
-                          </div>
-                      </Card>
-                  )}
-
-                  {pmSubTab === 'history' && (
-                      <Card className="border-t-4 border-gray-600">
-                          <div className="p-4 border-b flex justify-between items-center bg-white">
-                              <h3 className="font-bold flex items-center gap-2 text-gray-800"><History size={20}/> ประวัติการบำรุงรักษา (PM History)</h3>
-                              <div className="flex gap-2">
-                                  <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(pmHistoryList.filter(h => h.projectId === selectedProject.id), 'pm_history_list')}>{t('exportCSV')}</Button>
-                              </div>
-                          </div>
-                          <div className="overflow-x-auto">
-                              <table className="w-full text-sm">
-                                  <thead className="bg-gray-100 text-gray-700 uppercase">
-                                      <tr>
-                                          <th className="p-3 text-center w-12">{t('col_seq')}</th>
-                                          <th className="p-3 text-left w-32">วันที่บันทึกจริง</th>
-                                          <th className="p-3 text-left">เครื่องจักร</th>
-                                          <th className="p-3 text-center w-32">ผลการตรวจ</th>
-                                          <th className="p-3 text-center w-36">สถานะอนุมัติ</th>
-                                          <th className="p-3 text-left w-40">ผู้ตรวจสอบ</th>
-                                          <th className={`p-3 text-center w-16 ${isExporting ? 'hidden' : ''}`}>จัดการ</th>
-                                      </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-gray-200">
-                                      {pmHistoryList.filter(h => h.projectId === selectedProject.id).length > 0 ? (
-                                          pmHistoryList.filter(h => h.projectId === selectedProject.id).map((hist, index) => (
-                                              <tr key={hist.id} className="hover:bg-gray-50">
-                                                  <td className="p-4 text-center text-gray-500 font-medium">{index + 1}</td>
-                                                  <td className="p-4">
-                                                      <div className="text-gray-700 font-medium">{new Date(hist.executedDate || hist.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })}</div>
-                                                      {hist.executionTimingStatus && (
-                                                          <div className={`text-[10px] font-bold mt-1 inline-block px-1.5 py-0.5 rounded-md ${
-                                                              hist.executionTimingStatus === 'เร็วกว่าแผน' ? 'bg-blue-100 text-blue-700' :
-                                                              hist.executionTimingStatus === 'ช้ากว่าแผน' ? 'bg-red-100 text-red-700' :
-                                                              'bg-green-100 text-green-700'
-                                                          }`}>
-                                                              {hist.executionTimingStatus}
-                                                          </div>
-                                                      )}
-                                                  </td>
-                                                  <td className="p-4 cursor-pointer hover:bg-gray-200 transition-colors group rounded-md" onClick={() => setSelectedPmHistory(hist)}>
-                                                      <div className="font-bold text-gray-800 group-hover:text-blue-700 flex items-center gap-1">
-                                                          {hist.machineName} <FileText size={14} className="text-gray-400 group-hover:text-blue-500"/>
-                                                      </div>
-                                                      <div className="text-xs text-gray-500 font-mono">{hist.machineCode}</div>
-                                                  </td>
-                                                  <td className="p-4 text-center">
-                                                      {hist.status === 'Pass' ? (
-                                                          <span className="bg-green-100 text-green-700 border border-green-200 px-2 py-1 rounded text-xs font-bold flex items-center justify-center gap-1 w-fit mx-auto">
-                                                              <CheckCircle size={12}/> ผ่าน ({hist.passedItems}/{hist.totalItems})
-                                                          </span>
-                                                      ) : (
-                                                          <span className="bg-red-100 text-red-700 border border-red-200 px-2 py-1 rounded text-xs font-bold flex items-center justify-center gap-1 w-fit mx-auto">
-                                                              <AlertTriangle size={12}/> พบปัญหา ({hist.failedItems} จุด)
-                                                          </span>
-                                                      )}
-                                                  </td>
-                                                  <td className="p-4 text-center">
-                                                      {hist.approvalStatus === 'Approved' || !hist.approvalStatus ? (
-                                                          <span className="bg-green-100 text-green-700 border border-green-200 px-2 py-1 rounded text-[10px] font-bold">อนุมัติแล้ว</span>
-                                                      ) : hist.approvalStatus === 'Pending Chief' ? (
-                                                          <span className="bg-orange-100 text-orange-700 border border-orange-200 px-2 py-1 rounded text-[10px] font-bold whitespace-nowrap">รอหัวหน้าช่างอนุมัติ</span>
-                                                      ) : hist.approvalStatus === 'Pending Manager' ? (
-                                                          <span className="bg-blue-100 text-blue-700 border border-blue-200 px-2 py-1 rounded text-[10px] font-bold whitespace-nowrap">รอผู้จัดการอนุมัติ</span>
-                                                      ) : hist.approvalStatus === 'Rejected' ? (
-                                                          <span className="bg-red-100 text-red-700 border border-red-200 px-2 py-1 rounded text-[10px] font-bold">ไม่อนุมัติ</span>
-                                                      ) : null}
-                                                  </td>
-                                                  <td className="p-4 text-gray-700 flex items-center gap-2 truncate" title={hist.inspector}><User size={14} className="text-gray-400 shrink-0"/> <span className="truncate">{hist.inspector}</span></td>
-                                                  <td className={`p-4 text-center ${isExporting ? 'hidden' : ''}`}>
-                                                      {hasPerm('proj_pm', 'delete') && (
-                                                          <button 
-                                                              onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบประวัติ PM ของ ${hist.machineName} ใช่หรือไม่?`, () => setPmHistoryList(pmHistoryList.filter(h => h.id !== hist.id))); }}
-                                                              className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
-                                                              title="ลบประวัติ"
-                                                          >
-                                                              <Trash2 size={16} />
-                                                          </button>
-                                                      )}
-                                                  </td>
-                                              </tr>
-                                          ))
-                                      ) : (
-                                          <tr><td colSpan="7" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">ยังไม่มีประวัติการบันทึก PM สำหรับโครงการนี้</td></tr>
-                                      )}
-                                  </tbody>
-                              </table>
                           </div>
                       </Card>
                   )}
@@ -8172,8 +8279,16 @@ export default function App() {
                                   </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-100 bg-white">
-                                  {repairs.filter(r => r.projectId === selectedProject.id && (repairFilter === 'All' || r.inspectionResult === repairFilter)).length > 0 ? (
-                                      repairs.filter(r => r.projectId === selectedProject.id && (repairFilter === 'All' || r.inspectionResult === repairFilter)).map((rep, index) => (
+                                  {(() => {
+                                      const filteredRepairs = repairs
+                                          .filter(r => r.projectId === selectedProject.id && (repairFilter === 'All' || r.inspectionResult === repairFilter))
+                                          .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0)); // เรียงลำดับจากวันล่าสุดจากบนลงล่าง
+
+                                      if (filteredRepairs.length === 0) {
+                                          return <tr><td colSpan="6" className="p-8 text-center text-gray-400 border-2 border-dashed border-gray-200 m-4 rounded-lg bg-gray-50">ไม่มีข้อมูลการแจ้งซ่อม</td></tr>;
+                                      }
+
+                                      return filteredRepairs.map((rep, index) => (
                                           <tr key={rep.id} className="hover:bg-gray-50 transition-colors">
                                               <td className="p-3 text-center text-gray-500">{index + 1}</td>
                                               <td className="p-3 cursor-pointer group" onClick={() => setSelectedRepairView(rep)}>
@@ -8231,10 +8346,8 @@ export default function App() {
                                                   </div>
                                               </td>
                                           </tr>
-                                      ))
-                                  ) : (
-                                      <tr><td colSpan="6" className="p-8 text-center text-gray-400 border-2 border-dashed border-gray-200 m-4 rounded-lg bg-gray-50">ไม่มีข้อมูลการแจ้งซ่อม</td></tr>
-                                  )}
+                                      ));
+                                  })()}
                               </tbody>
                           </table>
                       </div>
@@ -11020,69 +11133,96 @@ export default function App() {
                         </div>
                     )}
                     
-                    {/* NEW: Auto-fetched Utility Readings for Print View (Graph Only) */}
+                    {/* NEW: Auto-fetched Utility Readings Trend for Print View */}
                     {(() => {
                         const reportDate = selectedDailyReport.date;
                         const projMeters = meters.filter(m => m.projectId === selectedDailyReport.projectId);
+                        const waterMeters = projMeters.filter(m => m.type === 'Water');
+                        const elecMeters = projMeters.filter(m => m.type === 'Electricity');
+
+                        if (waterMeters.length === 0 && elecMeters.length === 0) return null;
+
+                        // คำนวณวันที่ย้อนหลัง 7 วัน (นับจากวันที่ของรายงาน) เพื่อทำกราฟแนวโน้ม
+                        const endDateObj = new Date(reportDate);
+                        const startDateObj = new Date(reportDate);
+                        startDateObj.setDate(startDateObj.getDate() - 6);
+                        
+                        const dateRange = [];
+                        for(let d = new Date(startDateObj); d <= endDateObj; d.setDate(d.getDate() + 1)) {
+                            const yyyy = d.getFullYear();
+                            const mm = String(d.getMonth() + 1).padStart(2, '0');
+                            const dd = String(d.getDate()).padStart(2, '0');
+                            dateRange.push(`${yyyy}-${mm}-${dd}`);
+                        }
+
                         const projMeterIds = projMeters.map(m => m.id);
-                        const dayReadings = utilityReadings.filter(r => r.date === reportDate && projMeterIds.includes(r.meterId));
+                        const trendReadings = utilityReadings.filter(r => projMeterIds.includes(r.meterId) && dateRange.includes(r.date));
 
-                        if (dayReadings.length === 0) return null;
+                        // ถ้าช่วง 7 วันนี้ไม่มีใครจดมิเตอร์เลย จะไม่แสดงกราฟ
+                        if (trendReadings.length === 0) return null;
 
-                        // แยกข้อมูลน้ำและไฟฟ้าเพื่อสร้างกราฟ
-                        const waterData = dayReadings.filter(r => {
-                            const m = projMeters.find(m => m.id === r.meterId);
-                            return m?.type === 'Water';
-                        }).map(r => ({
-                            name: projMeters.find(m => m.id === r.meterId)?.name || 'Unknown',
-                            usage: r.usage
-                        }));
+                        // จัดกลุ่มข้อมูล Water
+                        const waterData = dateRange.map(dateStr => {
+                            const dObj = new Date(dateStr);
+                            const dataPoint = { date: `${dObj.getDate()}/${dObj.getMonth()+1}` }; // Format วัน/เดือน สั้นๆ
+                            waterMeters.forEach(m => {
+                                const reading = trendReadings.find(r => r.meterId === m.id && r.date === dateStr);
+                                dataPoint[`${m.name}`] = reading ? reading.usage : 0;
+                            });
+                            return dataPoint;
+                        });
 
-                        const elecData = dayReadings.filter(r => {
-                            const m = projMeters.find(m => m.id === r.meterId);
-                            return m?.type === 'Electricity';
-                        }).map(r => ({
-                            name: projMeters.find(m => m.id === r.meterId)?.name || 'Unknown',
-                            usage: r.usage
-                        }));
+                        // จัดกลุ่มข้อมูล Elec
+                        const elecData = dateRange.map(dateStr => {
+                            const dObj = new Date(dateStr);
+                            const dataPoint = { date: `${dObj.getDate()}/${dObj.getMonth()+1}` };
+                            elecMeters.forEach(m => {
+                                const reading = trendReadings.find(r => r.meterId === m.id && r.date === dateStr);
+                                dataPoint[`${m.name}`] = reading ? reading.usage : 0;
+                            });
+                            return dataPoint;
+                        });
+                        
+                        const waterColors = ['#3b82f6', '#0ea5e9', '#6366f1', '#06b6d4', '#8b5cf6', '#2563eb'];
+                        const elecColors = ['#f97316', '#f59e0b', '#ef4444', '#eab308', '#f43f5e', '#ea580c'];
 
                         return (
-                            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mt-4" style={{ pageBreakInside: 'avoid' }}>
                                 <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
-                                    <BarChart3 size={16} className="text-orange-500"/> 5. สรุปการใช้น้ำ/ไฟประจำวัน (Utility Usage)
+                                    <BarChart3 size={16} className="text-orange-500"/> 5. แนวโน้มการใช้น้ำประปาและไฟฟ้า (7 วันล่าสุด)
                                 </h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {waterData.length > 0 && (
-                                        <div className="h-48 bg-white border border-blue-100 rounded-lg p-2 shadow-sm">
-                                            <h4 className="text-[11px] font-bold text-blue-700 text-center mb-1 flex justify-center items-center gap-1"><Droplet size={12}/> ปริมาณการใช้น้ำประปา (หน่วย)</h4>
+                                    {waterMeters.length > 0 && (
+                                        <div className="h-56 bg-white border border-blue-100 rounded-lg p-2 shadow-sm">
+                                            <h4 className="text-[11px] font-bold text-blue-700 text-center mb-2 flex justify-center items-center gap-1"><Droplet size={12}/> ปริมาณการใช้น้ำประปา (หน่วย)</h4>
                                             <ResponsiveContainer width="100%" height="100%">
-                                                <BarChart data={waterData} margin={{ top: 10, right: 10, left: -25, bottom: 20 }}>
+                                                <LineChart data={waterData} margin={{ top: 5, right: 10, left: -25, bottom: 0 }}>
                                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                                    <XAxis dataKey="name" tick={{fontSize: 9, fill: '#6b7280'}} interval={0} angle={-15} textAnchor="end" />
-                                                    <YAxis tick={{fontSize: 9, fill: '#6b7280'}} />
-                                                    <Bar dataKey="usage" fill="#3b82f6" radius={[3, 3, 0, 0]} isAnimationActive={false}>
-                                                        {waterData.map((entry, index) => (
-                                                            <Cell key={`cell-${index}`} fill="#3b82f6" />
-                                                        ))}
-                                                    </Bar>
-                                                </BarChart>
+                                                    <XAxis dataKey="date" tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                                    <YAxis tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                                    <RechartsTooltip contentStyle={{ fontSize: '10px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                                    <Legend wrapperStyle={{ fontSize: '9px', paddingTop: '5px' }} />
+                                                    {waterMeters.map((m, idx) => (
+                                                        <Line key={m.id} type="monotone" dataKey={m.name} stroke={waterColors[idx % waterColors.length]} strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false} />
+                                                    ))}
+                                                </LineChart>
                                             </ResponsiveContainer>
                                         </div>
                                     )}
-                                    {elecData.length > 0 && (
-                                        <div className="h-48 bg-white border border-orange-100 rounded-lg p-2 shadow-sm">
-                                            <h4 className="text-[11px] font-bold text-orange-600 text-center mb-1 flex justify-center items-center gap-1"><Zap size={12}/> ปริมาณการใช้ไฟฟ้า (หน่วย)</h4>
+                                    {elecMeters.length > 0 && (
+                                        <div className="h-56 bg-white border border-orange-100 rounded-lg p-2 shadow-sm">
+                                            <h4 className="text-[11px] font-bold text-orange-600 text-center mb-2 flex justify-center items-center gap-1"><Zap size={12}/> ปริมาณการใช้ไฟฟ้า (หน่วย)</h4>
                                             <ResponsiveContainer width="100%" height="100%">
-                                                <BarChart data={elecData} margin={{ top: 10, right: 10, left: -25, bottom: 20 }}>
+                                                <LineChart data={elecData} margin={{ top: 5, right: 10, left: -25, bottom: 0 }}>
                                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                                    <XAxis dataKey="name" tick={{fontSize: 9, fill: '#6b7280'}} interval={0} angle={-15} textAnchor="end" />
-                                                    <YAxis tick={{fontSize: 9, fill: '#6b7280'}} />
-                                                    <Bar dataKey="usage" fill="#f97316" radius={[3, 3, 0, 0]} isAnimationActive={false}>
-                                                        {elecData.map((entry, index) => (
-                                                            <Cell key={`cell-${index}`} fill="#f97316" />
-                                                        ))}
-                                                    </Bar>
-                                                </BarChart>
+                                                    <XAxis dataKey="date" tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                                    <YAxis tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                                    <RechartsTooltip contentStyle={{ fontSize: '10px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                                    <Legend wrapperStyle={{ fontSize: '9px', paddingTop: '5px' }} />
+                                                    {elecMeters.map((m, idx) => (
+                                                        <Line key={m.id} type="monotone" dataKey={m.name} stroke={elecColors[idx % elecColors.length]} strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false} />
+                                                    ))}
+                                                </LineChart>
                                             </ResponsiveContainer>
                                         </div>
                                     )}
