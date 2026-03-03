@@ -3958,6 +3958,57 @@ export default function App() {
       setShowAddProjectModal(true);
   };
 
+  const handleSaveProject = async (e) => {
+      e.preventDefault();
+      setIsSavingProject(true);
+      
+      try {
+          let nextList;
+          let savedProject;
+          
+          if (isEditingProject) {
+              savedProject = { ...newProject };
+              nextList = projects.map(p => p.id === newProject.id ? savedProject : p);
+              // อัปเดตข้อมูลในหน้าต่างที่กำลังเปิดอยู่
+              if (selectedProject?.id === newProject.id) {
+                  setSelectedProject(savedProject);
+              }
+          } else {
+              const id = generateId();
+              savedProject = { ...newProject, id, status: 'Active' };
+              nextList = [...projects, savedProject];
+          }
+          
+          setProjects(nextList);
+
+          // รวบรวมไฟล์สำหรับอัปโหลดขึ้น Drive อัตโนมัติ (โลโก้ และ เอกสารโครงการ)
+          let filesToUpload = [];
+          if (savedProject.logo && savedProject.logo.startsWith('data:image')) {
+              filesToUpload.push({ name: `ProjectLogo_${savedProject.code}.jpg`, data: savedProject.logo });
+          }
+          if (savedProject.files) {
+              Object.keys(savedProject.files).forEach(key => {
+                  const fileObj = savedProject.files[key];
+                  if (fileObj && fileObj.data && fileObj.data.startsWith('data:')) {
+                       filesToUpload.push({ name: `ProjectDoc_${savedProject.code}_${key}.pdf`, data: fileObj.data });
+                  }
+              });
+          }
+
+          triggerAutoSync('Projects_โครงการ', nextList, filesToUpload);
+
+          setShowAddProjectModal(false);
+          setIsEditingProject(false);
+          setNewProject({ logo: null, code: '', name: '', type: 'Condo', address: '', phone: '', taxId: '', contractStartDate: '', contractEndDate: '', contractValue: '', status: 'Active', files: { orchor: null, committee: null, regulations: null, resident_rules: null } });
+          alert('บันทึกข้อมูลโครงการ/หน่วยงาน เรียบร้อยแล้ว');
+      } catch (error) {
+          console.error(error);
+          alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+      } finally {
+          setIsSavingProject(false);
+      }
+  };
+
   const handleSaveContract = async (e) => {
       e.preventDefault();
       setIsSavingContract(true);
