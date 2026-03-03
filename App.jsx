@@ -1399,6 +1399,7 @@ export default function App() {
   const [contractFilter, setContractFilter] = useState('All'); // NEW: State สำหรับตัวกรองสัญญา
   const [contractSortOrder, setContractSortOrder] = useState('expiry_asc'); // NEW: State สำหรับเรียงลำดับวันหมดอายุสัญญา
   const [actionPlanFilter, setActionPlanFilter] = useState('All'); // NEW: State สำหรับตัวกรอง Action Plan
+  const [actionPlanSortOrder, setActionPlanSortOrder] = useState('desc'); // NEW: State สำหรับเรียงลำดับ Action Plan
   const [repairFilter, setRepairFilter] = useState('All'); // NEW: State สำหรับตัวกรองแจ้งซ่อม
   const [staffViewMode, setStaffViewMode] = useState('list');
   const [selectedShift, setSelectedShift] = useState(null);
@@ -8567,23 +8568,39 @@ export default function App() {
                               รายการ Action Plan
                           </h3>
                           
-                          {/* Filter Buttons */}
-                          <div className={`flex bg-gray-100 p-1 rounded-lg w-full md:w-auto overflow-x-auto ${isExporting ? 'hidden' : ''}`}>
-                              {[
-                                  { id: 'All', label: 'ทั้งหมด' },
-                                  { id: 'Pending', label: 'รอดำเนินการ' },
-                                  { id: 'In Progress', label: 'กำลังทำ' },
-                                  { id: 'Completed', label: 'เสร็จสิ้น' },
-                                  { id: 'Cancelled', label: 'ยกเลิก' }
-                              ].map(status => (
-                                  <button
-                                      key={status.id}
-                                      onClick={() => setActionPlanFilter(status.id)}
-                                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all whitespace-nowrap ${actionPlanFilter === status.id ? 'bg-white shadow text-orange-600' : 'text-gray-500 hover:text-gray-700'}`}
+                          {/* Filter & Sort Group */}
+                          <div className={`flex flex-col xl:flex-row gap-4 items-start xl:items-center w-full xl:w-auto ${isExporting ? 'hidden' : ''}`}>
+                              {/* Filter Buttons */}
+                              <div className="flex bg-gray-100 p-1 rounded-lg w-full md:w-auto overflow-x-auto">
+                                  {[
+                                      { id: 'All', label: 'ทั้งหมด' },
+                                      { id: 'Pending', label: 'รอดำเนินการ' },
+                                      { id: 'In Progress', label: 'กำลังทำ' },
+                                      { id: 'Completed', label: 'เสร็จสิ้น' },
+                                      { id: 'Cancelled', label: 'ยกเลิก' }
+                                  ].map(status => (
+                                      <button
+                                          key={status.id}
+                                          onClick={() => setActionPlanFilter(status.id)}
+                                          className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all whitespace-nowrap ${actionPlanFilter === status.id ? 'bg-white shadow text-orange-600' : 'text-gray-500 hover:text-gray-700'}`}
+                                      >
+                                          {status.label}
+                                      </button>
+                                  ))}
+                              </div>
+
+                              {/* Sort Dropdown */}
+                              <div className="flex items-center gap-2 w-full md:w-auto shrink-0">
+                                  <label className="text-xs font-bold text-gray-500 whitespace-nowrap">เรียงวันเริ่ม:</label>
+                                  <select 
+                                      className="w-full md:w-auto border border-gray-300 rounded-md p-1.5 text-xs focus:ring-2 focus:ring-orange-200 outline-none bg-white transition-colors cursor-pointer"
+                                      value={actionPlanSortOrder}
+                                      onChange={e => setActionPlanSortOrder(e.target.value)}
                                   >
-                                      {status.label}
-                                  </button>
-                              ))}
+                                      <option value="desc">ล่าสุด ไป นานสุด</option>
+                                      <option value="asc">นานสุด มา ล่าสุด</option>
+                                  </select>
+                              </div>
                           </div>
 
                           <div className={`flex gap-2 shrink-0 ${isExporting ? 'hidden' : ''}`}>
@@ -8619,7 +8636,13 @@ export default function App() {
                                   {(() => {
                                       const filteredAndSortedAPs = actionPlans
                                           .filter(a => a.projectId === selectedProject.id && (actionPlanFilter === 'All' || a.status === actionPlanFilter))
-                                          .sort((a, b) => new Date(b.startDate || 0) - new Date(a.startDate || 0)); // เรียงลำดับจากวันที่เริ่มล่าสุด
+                                          .sort((a, b) => {
+                                              if (actionPlanSortOrder === 'desc') {
+                                                  return new Date(b.startDate || 0) - new Date(a.startDate || 0);
+                                              } else {
+                                                  return new Date(a.startDate || 0) - new Date(b.startDate || 0);
+                                              }
+                                          });
 
                                       if (filteredAndSortedAPs.length === 0) {
                                           return <tr><td colSpan="6" className="p-8 text-center text-gray-400 border-2 border-dashed border-gray-200 m-4 rounded-lg bg-gray-50">{t('noData')}</td></tr>;
