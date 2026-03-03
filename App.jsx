@@ -8616,8 +8616,16 @@ export default function App() {
                                   </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-100 bg-white">
-                                  {actionPlans.filter(a => a.projectId === selectedProject.id && (actionPlanFilter === 'All' || a.status === actionPlanFilter)).length > 0 ? (
-                                      actionPlans.filter(a => a.projectId === selectedProject.id && (actionPlanFilter === 'All' || a.status === actionPlanFilter)).map((ap, index) => (
+                                  {(() => {
+                                      const filteredAndSortedAPs = actionPlans
+                                          .filter(a => a.projectId === selectedProject.id && (actionPlanFilter === 'All' || a.status === actionPlanFilter))
+                                          .sort((a, b) => new Date(b.startDate || 0) - new Date(a.startDate || 0)); // เรียงลำดับจากวันที่เริ่มล่าสุด
+
+                                      if (filteredAndSortedAPs.length === 0) {
+                                          return <tr><td colSpan="6" className="p-8 text-center text-gray-400 border-2 border-dashed border-gray-200 m-4 rounded-lg bg-gray-50">{t('noData')}</td></tr>;
+                                      }
+
+                                      return filteredAndSortedAPs.map((ap, index) => (
                                           <tr key={ap.id} className="hover:bg-gray-50 transition-colors">
                                               <td className="p-3 text-center text-gray-500">{index + 1}</td>
                                               <td className="p-3 cursor-pointer group" onClick={() => handleEditActionPlan(ap)}>
@@ -8676,10 +8684,8 @@ export default function App() {
                                                   )}
                                               </td>
                                           </tr>
-                                      ))
-                                  ) : (
-                                      <tr><td colSpan="6" className="p-8 text-center text-gray-400 border-2 border-dashed border-gray-200 m-4 rounded-lg bg-gray-50">{t('noData')}</td></tr>
-                                  )}
+                                      ));
+                                  })()}
                               </tbody>
                           </table>
                       </div>
