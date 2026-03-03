@@ -1701,21 +1701,36 @@ export default function App() {
 
   // --- NEW: ตรวจจับและบันทึกเวลาล่าสุดเมื่อเปิดระบบ (Refresh/Auto-login) เพื่อให้ซิงค์ข้ามเครื่อง ---
   useEffect(() => {
-      if (currentUser && users.length > 0) {
-          const foundUser = users.find(u => u.id === currentUser.id);
-          if (foundUser) {
+      if (!currentUser) return;
+
+      // ฟังก์ชันสำหรับอัปเดตเวลาล่าสุด
+      const updatePresence = () => {
+          setUsers(prevUsers => {
+              const foundUser = prevUsers.find(u => u.id === currentUser.id);
+              if (!foundUser) return prevUsers;
+              
               const lastLoginTime = new Date(foundUser.lastLogin || 0).getTime();
               const nowTime = new Date().getTime();
-              // อัปเดตสถานะ "ออนไลน์" ลงฐานข้อมูลทุกๆ 10 นาทีเพื่อไม่ให้ยิงข้อมูลถี่เกินไป
-              if (nowTime - lastLoginTime > 10 * 60 * 1000) { 
-                  setUsers(prevUsers => prevUsers.map(u => 
-                      u.id === foundUser.id ? { ...u, lastLogin: new Date().toISOString() } : u
-                  ));
+              
+              // อัปเดตเวลาลงฐานข้อมูลทุกๆ 5 นาที (300,000 ms) เพื่อให้สถานะไม่หมดอายุ (15 นาที)
+              if (nowTime - lastLoginTime > 5 * 60 * 1000) { 
+                  return prevUsers.map(u => 
+                      u.id === currentUser.id ? { ...u, lastLogin: new Date().toISOString() } : u
+                  );
               }
-          }
-      }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser?.id, users.length > 0]); // รันเมื่อข้อมูลระบบโหลดเสร็จ
+              return prevUsers; // ถ้าสียังไม่ถึง 5 นาที ไม่ต้องสั่งอัปเดต State (ลดการดึงเครือข่าย)
+          });
+      };
+
+      // รันเช็คครั้งแรกเมื่อระบบโหลดเสร็จ
+      updatePresence();
+
+      // ตั้งเวลาเช็คซ้ำทุกๆ 1 นาทีตราบใดที่เปิดหน้าเว็บอยู่
+      const intervalId = setInterval(updatePresence, 60 * 1000);
+
+      // ยกเลิกการตั้งเวลาเมื่อผู้ใช้ออกจากระบบหรือปิดหน้าต่าง
+      return () => clearInterval(intervalId);
+  }, [currentUser?.id]); // ใช้แค่ currentUser.id เป็น dependency
 
   // --- NEW: Auto-Sync State (สถานะการซิงค์อัตโนมัติ) ---
   const [autoSyncMessage, setAutoSyncMessage] = useState('');
