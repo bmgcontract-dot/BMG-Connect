@@ -2650,15 +2650,21 @@ export default function App() {
                       scale: 2, 
                       useCORS: true, 
                       scrollY: 0,
-                      // เพิ่ม onclone เพื่อล้างค่า CSS บางตัวที่ทำให้ภาษาไทยกระโดด/ทับกัน
+                      // เพิ่ม onclone เพื่อล้างค่า CSS บางตัวที่ทำให้ภาษาไทยกระโดด/ทับกัน หรือสระลอยเพี้ยน
                       onclone: (clonedDoc) => {
                           const style = clonedDoc.createElement('style');
                           style.innerHTML = `
                               * {
-                                  letter-spacing: normal !important;
-                                  word-spacing: normal !important;
-                                  text-rendering: optimizeLegibility !important;
-                                  font-variant-ligatures: normal !important;
+                                  letter-spacing: 0px !important;
+                                  word-spacing: 0px !important;
+                                  text-rendering: auto !important;
+                                  font-variant-ligatures: none !important;
+                                  font-feature-settings: "liga" 0 !important;
+                              }
+                              .whitespace-pre-wrap {
+                                  white-space: pre-wrap !important;
+                                  word-break: break-word !important;
+                                  overflow-wrap: break-word !important;
                               }
                           `;
                           clonedDoc.head.appendChild(style);
@@ -2732,13 +2738,16 @@ export default function App() {
                       useCORS: true, 
                       scrollY: 0,
                       scrollX: 0,
+                      // แก้ไขเรื่องสระลอย/เพี้ยนเช่นกัน
                       onclone: (clonedDoc) => {
                           const style = clonedDoc.createElement('style');
                           style.innerHTML = `
                               * {
-                                  letter-spacing: normal !important;
-                                  word-spacing: normal !important;
-                                  text-rendering: optimizeLegibility !important;
+                                  letter-spacing: 0px !important;
+                                  word-spacing: 0px !important;
+                                  text-rendering: auto !important;
+                                  font-variant-ligatures: none !important;
+                                  font-feature-settings: "liga" 0 !important;
                               }
                           `;
                           clonedDoc.head.appendChild(style);
