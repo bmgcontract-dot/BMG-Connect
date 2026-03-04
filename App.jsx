@@ -1855,6 +1855,7 @@ export default function App() {
 
       const isChiefUser = currentUser.position.includes('หัวหน้าช่าง');
       const isManagerUser = currentUser.position.includes('ผู้จัดการ') && !currentUser.position.includes('ผู้ช่วย');
+      const isAreaManagerUser = currentUser.position.includes('ผู้จัดการพื้นที่');
       const isHRUser = currentUser.position.includes('เจ้าหน้าที่ฝ่ายบุคคล');
       const isAdminUser = currentUser.username === 'admin' || currentUser.position === 'Super Admin';
 
@@ -1897,6 +1898,7 @@ export default function App() {
           if (proj && isProjectAccessible(proj.name)) {
               const approval = scheduleApprovals[key];
               if ((approval.status === 'Pending Manager' && (isManagerUser || isAdminUser)) || 
+                  (approval.status === 'Pending Area Manager' && (isAreaManagerUser || isAdminUser)) ||
                   (approval.status === 'Pending HR' && (isHRUser || isAdminUser))) {
                   pendingItems.push({
                       id: key,
@@ -2167,11 +2169,19 @@ export default function App() {
           const currentApproval = scheduleApprovals[approvalKey] || {};
           
           const isManager = currentUser?.position.includes('ผู้จัดการอาคาร') || currentUser?.position.includes('ผู้จัดการหมู่บ้าน');
+          const isAreaManager = currentUser?.position.includes('ผู้จัดการพื้นที่');
           const isAdmin = currentUser?.username === 'admin';
           
-          // ถ้าเป็นผู้จัดการหรือ Admin เป็นคนบันทึก ให้ข้ามสเต็ปไปรอ HR อนุมัติเลย
-          // แต่ถ้าเป็นตำแหน่งอื่น ให้ส่งไปรอผู้จัดการอนุมัติก่อน
-          const nextStatus = (isManager || isAdmin) ? 'Pending HR' : 'Pending Manager';
+          let nextStatus = 'Pending Manager';
+          
+          // ถ้าเป็น Area Manager หรือ Admin ทำเอง ให้ไปรอ HR อนุมัติเลย
+          if (isAreaManager || isAdmin) {
+              nextStatus = 'Pending HR';
+          } 
+          // ถ้าเป็น Manager ทำเอง ให้ส่งไปรอ Area Manager อนุมัติ
+          else if (isManager) {
+              nextStatus = 'Pending Area Manager';
+          }
           
           setScheduleApprovals(prev => ({
               ...prev,
@@ -2180,12 +2190,13 @@ export default function App() {
                   status: nextStatus,
                   preparedBy: `${currentUser.firstName} ${currentUser.lastName}`,
                   preparedByRole: currentUser.position,
-                  managerApprovedBy: (isManager || isAdmin) ? `${currentUser.firstName} ${currentUser.lastName}` : null, // Auto-sign manager if prepared by manager
+                  managerApprovedBy: (isAreaManager || isAdmin) ? `${currentUser.firstName} ${currentUser.lastName}` : null,
+                  managerApprovedByRole: (isAreaManager || isAdmin) ? currentUser.position : null,
                   updatedAt: new Date().toISOString()
               }
           }));
 
-          alert(`บันทึกตารางงานสำเร็จ! ระบบได้ส่งข้อมูลให้ ${(isManager || isAdmin) ? 'เจ้าหน้าที่ฝ่ายบุคคล (HR)' : 'ผู้จัดการ'} อนุมัติตามลำดับแล้ว`); 
+          alert(`บันทึกตารางงานสำเร็จ! ระบบได้ส่งข้อมูลให้ ${nextStatus === 'Pending Area Manager' ? 'ผู้จัดการพื้นที่' : nextStatus === 'Pending HR' ? 'เจ้าหน้าที่ฝ่ายบุคคล (HR)' : 'ผู้จัดการ'} อนุมัติตามลำดับแล้ว`); 
       }
   }; 
 
@@ -2198,14 +2209,23 @@ export default function App() {
 
       const isHR = currentUser?.position.includes('เจ้าหน้าที่ฝ่ายบุคคล') || currentUser?.username === 'admin';
       const isManager = currentUser?.position.includes('ผู้จัดการอาคาร') || currentUser?.position.includes('ผู้จัดการหมู่บ้าน') || currentUser?.username === 'admin';
+      const isAreaManager = currentUser?.position.includes('ผู้จัดการพื้นที่') || currentUser?.username === 'admin';
 
       let nextStatus = currentApproval.status;
       let updates = {};
 
       if (currentApproval.status === 'Pending Manager' && isManager) {
+          // หากคนอนุมัติเป็น Manager ปกติให้ส่งไป HR ได้เลย (กรณีลูกน้องเป็นคนทำ)
           nextStatus = 'Pending HR';
           updates.managerApprovedBy = `${currentUser.firstName} ${currentUser.lastName}`;
+          updates.managerApprovedByRole = currentUser.position;
           alert('อนุมัติตารางงานระดับ "ผู้จัดการ" สำเร็จ! ระบบส่งต่อให้เจ้าหน้าที่ฝ่ายบุคคลตรวจสอบ');
+      } else if (currentApproval.status === 'Pending Area Manager' && isAreaManager) {
+          nextStatus = 'Pending HR';
+          // ลงชื่อในฐานะผู้ตรวจสอบ
+          updates.managerApprovedBy = `${currentUser.firstName} ${currentUser.lastName}`;
+          updates.managerApprovedByRole = currentUser.position;
+          alert('อนุมัติตารางงานระดับ "ผู้จัดการพื้นที่" สำเร็จ! ระบบส่งต่อให้เจ้าหน้าที่ฝ่ายบุคคลตรวจสอบ');
       } else if (currentApproval.status === 'Pending HR' && isHR) {
           nextStatus = 'Approved';
           updates.hrApprovedBy = `${currentUser.firstName} ${currentUser.lastName}`;
@@ -4765,7 +4785,7 @@ export default function App() {
                               <th className="p-4 border-b w-16 text-center">ลำดับ</th>
                               <th className="p-4 border-b">ชื่อโครงการ / หน่วยงาน</th>
                               <th className="p-4 border-b text-center">ผู้จัดทำ</th>
-                              <th className="p-4 border-b text-center">ผู้จัดการอนุมัติ</th>
+                              <th className="p-4 border-b text-center">ผู้ตรวจสอบอนุมัติ</th>
                               <th className="p-4 border-b text-center">ฝ่ายบุคคลอนุมัติ</th>
                               <th className="p-4 border-b text-center">สถานะ</th>
                           </tr>
@@ -4804,12 +4824,14 @@ export default function App() {
                                           <span className={`font-bold px-3 py-1.5 rounded-full text-xs flex items-center justify-center gap-1 w-fit mx-auto ${
                                               p.status === 'Approved' ? 'bg-green-100 text-green-700 border border-green-200' : 
                                               p.status === 'Pending HR' ? 'bg-blue-100 text-blue-700 border border-blue-200' : 
+                                              p.status === 'Pending Area Manager' ? 'bg-purple-100 text-purple-700 border border-purple-200' : 
                                               p.status === 'Pending Manager' ? 'bg-orange-100 text-orange-700 border border-orange-200' : 
                                               'bg-gray-100 text-gray-500 border border-gray-200'
                                           }`}>
                                               {p.status === 'Approved' ? <CheckCircle size={12}/> : p.status !== 'Not Submitted' ? <Clock size={12}/> : <AlertTriangle size={12}/>}
                                               {p.status === 'Approved' ? 'อนุมัติสมบูรณ์' : 
                                                p.status === 'Pending HR' ? 'รอฝ่ายบุคคลอนุมัติ' : 
+                                               p.status === 'Pending Area Manager' ? 'รอ ผจก.พื้นที่ อนุมัติ' : 
                                                p.status === 'Pending Manager' ? 'รอ ผจก. อนุมัติ' : 'ยังไม่ส่ง / ฉบับร่าง'}
                                           </span>
                                           {p.isLocked && <div className="text-[10px] text-red-500 font-bold mt-1 flex justify-center items-center gap-1"><Lock size={10}/> ล็อคแล้ว</div>}
@@ -6531,6 +6553,7 @@ export default function App() {
                             if (!approval.status) return <span className="bg-gray-100 text-gray-500 px-2 py-0.5 rounded text-xs font-bold border">ฉบับร่าง (ยังไม่บันทึก)</span>;
                             if (approval.isLocked) return <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-bold border border-red-200 shadow-sm flex items-center gap-1"><Lock size={12}/> ล็อคตารางแล้ว</span>;
                             if (approval.status === 'Pending Manager') return <span className="bg-orange-100 text-orange-700 px-2 py-0.5 rounded text-xs font-bold border border-orange-200 shadow-sm flex items-center gap-1"><Clock size={12}/> รอผู้จัดการอนุมัติ</span>;
+                            if (approval.status === 'Pending Area Manager') return <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs font-bold border border-purple-200 shadow-sm flex items-center gap-1"><Clock size={12}/> รอผู้จัดการพื้นที่อนุมัติ</span>;
                             if (approval.status === 'Pending HR') return <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-bold border border-blue-200 shadow-sm flex items-center gap-1"><Clock size={12}/> รอฝ่ายบุคคลอนุมัติ</span>;
                             if (approval.status === 'Approved') return <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs font-bold border border-green-200 shadow-sm flex items-center gap-1"><CheckCircle size={12}/> อนุมัติสมบูรณ์</span>;
                             return null;
@@ -6557,9 +6580,13 @@ export default function App() {
                                 
                                 const isHR = currentUser?.position.includes('เจ้าหน้าที่ฝ่ายบุคคล') || currentUser?.username === 'admin';
                                 const isManager = currentUser?.position.includes('ผู้จัดการอาคาร') || currentUser?.position.includes('ผู้จัดการหมู่บ้าน') || currentUser?.username === 'admin';
+                                const isAreaManager = currentUser?.position.includes('ผู้จัดการพื้นที่') || currentUser?.username === 'admin';
 
                                 if (approval.status === 'Pending Manager' && isManager) {
                                     return <Button size="sm" variant="success" icon={CheckCircle} onClick={() => showConfirm('ยืนยันอนุมัติ', 'คุณตรวจสอบและต้องการอนุมัติตารางงานระดับผู้จัดการใช่หรือไม่?', handleApproveSchedule, 'ยืนยันอนุมัติ', 'info')}>ผู้จัดการอนุมัติ</Button>;
+                                }
+                                if (approval.status === 'Pending Area Manager' && isAreaManager) {
+                                    return <Button size="sm" variant="success" icon={CheckCircle} onClick={() => showConfirm('ยืนยันอนุมัติ', 'คุณตรวจสอบและต้องการอนุมัติตารางงานระดับผู้จัดการพื้นที่ (Area Manager) ใช่หรือไม่?', handleApproveSchedule, 'ยืนยันอนุมัติ', 'info')}>ผู้จัดการพื้นที่อนุมัติ</Button>;
                                 }
                                 if (approval.status === 'Pending HR' && isHR) {
                                     return <Button size="sm" variant="success" icon={CheckCircle} onClick={() => showConfirm('ยืนยันอนุมัติ', 'คุณตรวจสอบและต้องการอนุมัติตารางงานระดับฝ่ายบุคคล (HR) ใช่หรือไม่?', handleApproveSchedule, 'ยืนยันอนุมัติ', 'info')}>ฝ่ายบุคคลอนุมัติ</Button>;
@@ -6805,7 +6832,7 @@ export default function App() {
                                         ( {approval.managerApprovedBy || '.......................................................'} )
                                     </div>
                                     <div className={`text-gray-500 mt-1 ${isExporting ? 'text-[10px]' : 'text-sm'}`}>ผู้ตรวจสอบ (Checked By)</div>
-                                    <div className={`text-gray-400 font-medium ${isExporting ? 'text-[9px]' : 'text-xs'}`}>ผู้จัดการอาคาร/หมู่บ้าน</div>
+                                    <div className={`text-gray-400 font-medium ${isExporting ? 'text-[9px]' : 'text-xs'}`}>{approval.managerApprovedByRole || 'ผู้จัดการอาคาร/หมู่บ้าน'}</div>
                                 </div>
                                 <div className="text-center w-1/3 px-2">
                                     <div className="border-b border-gray-400 mb-1.5 h-6 flex items-end justify-center pb-1">
