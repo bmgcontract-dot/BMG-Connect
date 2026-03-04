@@ -2671,8 +2671,9 @@ export default function App() {
                           const style = clonedDoc.createElement('style');
                           style.innerHTML = `
                               * {
-                                  letter-spacing: 0px !important;
-                                  word-spacing: 0px !important;
+                                  font-family: 'Noto Sans Thai', sans-serif !important;
+                                  letter-spacing: normal !important;
+                                  word-spacing: normal !important;
                                   text-rendering: auto !important;
                                   font-variant-ligatures: none !important;
                                   font-feature-settings: "liga" 0 !important;
@@ -2759,8 +2760,9 @@ export default function App() {
                           const style = clonedDoc.createElement('style');
                           style.innerHTML = `
                               * {
-                                  letter-spacing: 0px !important;
-                                  word-spacing: 0px !important;
+                                  font-family: 'Noto Sans Thai', sans-serif !important;
+                                  letter-spacing: normal !important;
+                                  word-spacing: normal !important;
                                   text-rendering: auto !important;
                                   font-variant-ligatures: none !important;
                                   font-feature-settings: "liga" 0 !important;
