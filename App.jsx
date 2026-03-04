@@ -1668,6 +1668,7 @@ export default function App() {
   const [showAddAuditModal, setShowAddAuditModal] = useState(false);
   const [selectedAuditReport, setSelectedAuditReport] = useState(null); // NEW: State สำหรับเก็บข้อมูล Audit ที่ถูกคลิกดูรายละเอียด
   const [showAuditRankingModal, setShowAuditRankingModal] = useState(false); // NEW: State สำหรับเปิด/ปิด Modal จัดอันดับคะแนน Audit
+  const [showReportRankingModal, setShowReportRankingModal] = useState(false); // NEW: State สำหรับเปิด/ปิด Modal จัดอันดับรายงานประจำวัน
   const [newAudit, setNewAudit] = useState({
       projectId: '',
       date: new Date().toISOString().split('T')[0],
@@ -5872,6 +5873,17 @@ export default function App() {
                       const uniqueReportDays = new Set(currentMonthReports.map(r => r.date)).size;
                       const missingReportDays = Math.max(0, daysPassedInMonth - uniqueReportDays);
 
+                      // คำนวณอันดับการส่งรายงานเทียบกับทุกโครงการ
+                      const reportRankDataAll = projects.map(p => {
+                          const pReports = dailyReports.filter(r => r.projectId === p.id && r.date.startsWith(currentMonthStr));
+                          const uniqueDays = new Set(pReports.map(r => r.date)).size;
+                          return { id: p.id, name: p.name, submittedDays: uniqueDays };
+                      }).sort((a, b) => b.submittedDays - a.submittedDays);
+
+                      const reportRankIndex = reportRankDataAll.findIndex(p => p.id === selectedProject.id);
+                      const reportRankStr = reportRankIndex >= 0 ? reportRankIndex + 1 : '-';
+                      const totalProjectsForReportRank = projects.length;
+
                       // --- 4. PM Status Summary ---
                       const activePmPlans = pmPlans.filter(p => p.projectId === selectedProject.id && p.status === 'Active');
                       const pmDoneThisMonth = pmHistoryList.filter(h => h.projectId === selectedProject.id && h.date.startsWith(currentMonthStr));
@@ -5978,26 +5990,48 @@ export default function App() {
                                   </Card>
 
                                   {/* Card: Daily Reports */}
-                                  <Card className="p-5 flex flex-col hover:shadow-sm transition-all">
+                                  <Card className="p-5 flex flex-col hover:shadow-sm transition-all relative overflow-hidden group">
                                       <div 
-                                        className="flex items-center gap-2 text-gray-700 font-bold mb-4 border-b pb-2 cursor-pointer hover:text-purple-600 group transition-colors"
-                                        onClick={() => setProjectTab('daily')}
+                                          className="absolute -right-4 -top-4 text-purple-50 opacity-50 group-hover:scale-110 transition-transform cursor-pointer z-0"
+                                          onClick={() => setProjectTab('daily')}
+                                          title="ไปที่แท็บรายงานประจำวัน"
                                       >
-                                        <FileText size={18} className="text-purple-500 group-hover:scale-110 transition-transform"/> 
-                                        รายงานประจำวัน (เดือนนี้)
-                                        <ArrowRight size={14} className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
+                                          <FileText size={100} />
                                       </div>
-                                      <div className="flex-1 flex flex-col justify-center gap-4">
-                                          <div className="flex justify-between items-center">
-                                              <span className="text-sm text-gray-600">ส่งรายงานแล้ว</span>
-                                              <span className="text-lg font-bold text-green-600 bg-green-50 px-2 rounded">{uniqueReportDays} วัน</span>
+
+                                      <div className="relative z-10 flex flex-col h-full">
+                                          <div 
+                                            className="flex items-center gap-2 text-gray-700 font-bold mb-4 border-b pb-2 cursor-pointer hover:text-purple-600 transition-colors"
+                                            onClick={() => setProjectTab('daily')}
+                                          >
+                                            <FileText size={18} className="text-purple-500 group-hover:scale-110 transition-transform"/> 
+                                            รายงานประจำวัน (เดือนนี้)
+                                            <ArrowRight size={14} className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
                                           </div>
-                                          <div className="flex justify-between items-center">
-                                              <span className="text-sm text-gray-600">ขาดส่ง / ไม่ได้จัดทำ</span>
-                                              <span className={`text-lg font-bold px-2 rounded ${missingReportDays > 0 ? 'text-red-600 bg-red-50' : 'text-gray-400 bg-gray-50'}`}>{missingReportDays} วัน</span>
+                                          <div className="flex-1 flex flex-col justify-center gap-3">
+                                              <div className="flex justify-between items-center">
+                                                  <span className="text-sm text-gray-600">ส่งรายงานแล้ว</span>
+                                                  <span className="text-lg font-bold text-green-600 bg-green-50 px-2 rounded">{uniqueReportDays} วัน</span>
+                                              </div>
+                                              <div className="flex justify-between items-center">
+                                                  <span className="text-sm text-gray-600">ขาดส่ง / ยังไม่จัดทำ</span>
+                                                  <span className={`text-lg font-bold px-2 rounded ${missingReportDays > 0 ? 'text-red-600 bg-red-50' : 'text-gray-400 bg-gray-50'}`}>{missingReportDays} วัน</span>
+                                              </div>
                                           </div>
+                                          
+                                          {/* The Ranking Button */}
+                                          <button 
+                                              onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setShowReportRankingModal(true);
+                                              }}
+                                              className="mt-4 w-full flex justify-center items-center gap-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 hover:text-purple-800 px-3 py-2 rounded-lg text-xs font-bold border border-purple-200 shadow-sm cursor-pointer transition-all hover:shadow"
+                                              title="คลิกเพื่อดูการจัดอันดับการส่งรายงานทั้งหมด"
+                                          >
+                                              <BarChart3 size={16} /> 
+                                              {reportRankStr !== '-' ? `ดูอันดับ (ที่ ${reportRankStr} จาก ${totalProjectsForReportRank})` : 'ดูอันดับทั้งหมด'}
+                                          </button>
                                       </div>
-                                      <div className="text-[10px] text-gray-400 mt-auto pt-2 text-right">*อ้างอิงถึงวันที่ปัจจุบัน ({daysPassedInMonth} วัน)</div>
                                   </Card>
 
                                   {/* Card: Meter Readings */}
@@ -10505,6 +10539,185 @@ export default function App() {
         </div>
       )}
 
+      {/* NEW: Selected Contract Details View Modal */}
+      {selectedContractView && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl p-8 m-4 max-h-[95vh] overflow-y-auto relative animate-fade-in">
+                <button 
+                    onClick={() => setSelectedContractView(null)} 
+                    className="absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors"
+                >
+                    <X size={24} />
+                </button>
+
+                <div className="mb-6 border-b pb-4">
+                    <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                        <Briefcase className="text-orange-500"/> รายละเอียดสัญญา (Contract Details)
+                    </h2>
+                    <p className="text-sm text-gray-500 mt-1">ข้อมูลและรายละเอียดของสัญญา หรือ ผู้ให้บริการ (Vendor)</p>
+                </div>
+
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-y-5 gap-x-4 text-sm bg-gray-50 p-6 rounded-xl border border-gray-100">
+                        <div className="col-span-1 md:col-span-2">
+                            <span className="text-gray-500 block text-xs mb-1">ชื่อบริษัท / คู่สัญญา (Vendor/Contractor)</span>
+                            <span className="font-bold text-gray-800 text-lg">{selectedContractView.vendorName}</span>
+                        </div>
+                        <div>
+                            <span className="text-gray-500 block text-xs mb-2">ประเภทสัญญา (Contract Type)</span>
+                            <span className={`px-3 py-1 rounded-full text-xs font-bold shadow-sm ${
+                                selectedContractView.type === CONTRACT_TYPES.INCOME ? 'bg-green-100 text-green-700 border border-green-200' :
+                                selectedContractView.type === CONTRACT_TYPES.EXPENSE ? 'bg-red-100 text-red-700 border border-red-200' :
+                                'bg-blue-100 text-blue-700 border border-blue-200'
+                            }`}>
+                                {selectedContractView.type.split(' (')[0]}
+                            </span>
+                        </div>
+                        <div>
+                            <span className="text-gray-500 block text-xs mb-1">หมวดงานบริการ (Category)</span>
+                            <span className="text-gray-800 font-medium">{selectedContractView.category}</span>
+                        </div>
+                        <div className="border-t border-gray-200 pt-3">
+                            <span className="text-gray-500 block text-xs mb-1">ผู้ติดต่อ (Contact Person)</span>
+                            <span className="text-gray-800 flex items-center gap-1 font-medium"><User size={14} className="text-gray-400"/> {selectedContractView.contactPerson || '-'}</span>
+                        </div>
+                        <div className="border-t border-gray-200 pt-3">
+                            <span className="text-gray-500 block text-xs mb-1">เบอร์โทรศัพท์ (Phone)</span>
+                            <span className="text-gray-800 flex items-center gap-1 font-medium"><Phone size={14} className="text-gray-400"/> {selectedContractView.contactPhone || '-'}</span>
+                        </div>
+                        <div className="border-t border-gray-200 pt-3">
+                            <span className="text-gray-500 block text-xs mb-1">ระยะเวลาสัญญา (Duration)</span>
+                            <span className="text-gray-800 flex items-center gap-1 font-medium">
+                                <Calendar size={14} className="text-gray-400"/> 
+                                {selectedContractView.startDate} ถึง {selectedContractView.endDate}
+                            </span>
+                        </div>
+                        <div className="border-t border-gray-200 pt-3">
+                            <span className="text-gray-500 block text-xs mb-1">สถานะ / วันคงเหลือ (Status)</span>
+                            <div className="flex items-center gap-2 mt-1">
+                                <Badge status={selectedContractView.status} />
+                                {selectedContractView.endDate && (
+                                    <span className={`text-xs font-bold bg-white px-2 py-0.5 rounded border shadow-sm ${calculateDaysRemaining(selectedContractView.endDate) < 30 ? 'text-red-600 border-red-200' : 'text-green-600 border-green-200'}`}>
+                                        เหลือ {calculateDaysRemaining(selectedContractView.endDate)} วัน
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                        <div className="border-t border-gray-200 pt-3">
+                            <span className="text-gray-500 block text-xs mb-1">มูลค่าสัญญา (Amount)</span>
+                            <span className="text-orange-600 font-bold text-lg">{Number(selectedContractView.amount).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} <span className="text-sm font-medium text-gray-500">บาท</span></span>
+                        </div>
+                        <div className="border-t border-gray-200 pt-3">
+                            <span className="text-gray-500 block text-xs mb-1">งวดการจ่าย (Payment Cycle)</span>
+                            <span className="text-gray-800 font-medium bg-white px-2 py-0.5 rounded border border-gray-200 shadow-sm">{selectedContractView.paymentCycle === 'Monthly' ? 'รายเดือน (Monthly)' : 'รายปี (Yearly)'}</span>
+                        </div>
+                        
+                        {/* ไฟล์แนบ */}
+                        <div className="col-span-1 md:col-span-2 border-t border-gray-200 pt-4 mt-2">
+                            <span className="text-gray-500 block text-xs mb-2">ไฟล์สัญญาแนบ (Attached File)</span>
+                            {(selectedContractView.fileUrl || (selectedContractView.file && (selectedContractView.file.data || selectedContractView.file.isLocal))) ? (
+                                <div className="flex items-center justify-between bg-white border border-gray-200 p-3 rounded-lg shadow-sm hover:border-blue-300 transition-colors">
+                                    <div className="flex items-center gap-2 overflow-hidden pr-2">
+                                        <FileCheck size={20} className="text-green-600 shrink-0"/>
+                                        <span className="truncate text-gray-700 font-medium text-sm">{selectedContractView.file?.name || `${selectedContractView.vendorName}_Contract.pdf`}</span>
+                                    </div>
+                                    <Button 
+                                        size="sm"
+                                        className="shrink-0 flex items-center gap-1.5"
+                                        onClick={() => handleDownloadFile(selectedContractView.file || { fileUrl: selectedContractView.fileUrl, name: `${selectedContractView.vendorName}_Contract.pdf` })}
+                                    >
+                                        <Download size={14} /> <span className="hidden sm:inline">ดาวน์โหลด</span>
+                                    </Button>
+                                </div>
+                            ) : (
+                                <div className="text-gray-400 bg-gray-100 p-4 rounded-lg text-center text-sm border border-dashed border-gray-300 flex flex-col items-center justify-center gap-1">
+                                    <File size={20} className="text-gray-300"/>
+                                    ไม่มีไฟล์แนบในระบบ
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mt-8 flex justify-end gap-2 pt-4 border-t border-gray-200">
+                    {hasPerm('proj_contracts', 'edit') && (
+                        <Button variant="outline" icon={Edit} onClick={() => handleEditContract(selectedContractView)}>
+                            แก้ไขข้อมูล
+                        </Button>
+                    )}
+                    <Button variant="secondary" onClick={() => setSelectedContractView(null)}>{t('close')}</Button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* NEW: Selected Supplier Details View Modal */}
+      {selectedSupplierDetails && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl p-8 m-4 max-h-[95vh] overflow-y-auto relative animate-fade-in">
+                <button 
+                    onClick={() => setSelectedSupplierDetails(null)} 
+                    className="absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors"
+                >
+                    <X size={24} />
+                </button>
+
+                <div className="mb-6 border-b pb-4">
+                    <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                        <Building2 className="text-orange-500"/> รายละเอียดซัพพลายเออร์ (Supplier Details)
+                    </h2>
+                    <p className="text-sm text-gray-500 mt-1">ข้อมูลและรายละเอียดของบริษัทผู้ให้บริการ หรือ ผู้รับเหมา</p>
+                </div>
+
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-y-5 gap-x-4 text-sm bg-gray-50 p-6 rounded-xl border border-gray-100">
+                        <div className="col-span-1 md:col-span-2">
+                            <span className="text-gray-500 block text-xs mb-1">ชื่อบริษัท (Company Name)</span>
+                            <div className="flex items-center gap-2">
+                                <span className="font-bold text-gray-800 text-lg">{selectedSupplierDetails.name}</span>
+                                {selectedSupplierDetails.isAuto && (
+                                    <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded border border-blue-200 cursor-help" title="ข้อมูลนี้ดึงมาจากสัญญาโดยอัตโนมัติ">Auto</span>
+                                )}
+                            </div>
+                        </div>
+                        <div>
+                            <span className="text-gray-500 block text-xs mb-2">ประเภท (Type)</span>
+                            <span className="px-3 py-1 rounded-full text-xs font-bold shadow-sm bg-gray-200 text-gray-700 border border-gray-300">
+                                {selectedSupplierDetails.type || '-'}
+                            </span>
+                        </div>
+                        <div>
+                            <span className="text-gray-500 block text-xs mb-1">หมวดงานบริการ (Category)</span>
+                            <span className="text-gray-800 font-medium">{selectedSupplierDetails.category || '-'}</span>
+                        </div>
+                        <div className="border-t border-gray-200 pt-3">
+                            <span className="text-gray-500 block text-xs mb-1">ผู้ติดต่อ (Contact Person)</span>
+                            <span className="text-gray-800 flex items-center gap-1 font-medium"><User size={14} className="text-gray-400"/> {selectedSupplierDetails.contact || '-'}</span>
+                        </div>
+                        <div className="border-t border-gray-200 pt-3">
+                            <span className="text-gray-500 block text-xs mb-1">เบอร์โทรศัพท์ (Phone)</span>
+                            <span className="text-gray-800 flex items-center gap-1 font-medium"><Phone size={14} className="text-gray-400"/> {selectedSupplierDetails.phone || '-'}</span>
+                        </div>
+                        <div className="border-t border-gray-200 pt-3">
+                            <span className="text-gray-500 block text-xs mb-1">อีเมล (Email)</span>
+                            <span className="text-gray-800 flex items-center gap-1 font-medium"><Mail size={14} className="text-gray-400"/> {selectedSupplierDetails.email || '-'}</span>
+                        </div>
+                        <div className="border-t border-gray-200 pt-3">
+                            <span className="text-gray-500 block text-xs mb-1">สถานะ (Status)</span>
+                            <div className="mt-1">
+                                <Badge status={selectedSupplierDetails.status || 'Active'} />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mt-8 flex justify-end gap-2 pt-4 border-t border-gray-200">
+                    <Button variant="secondary" onClick={() => setSelectedSupplierDetails(null)}>{t('close')}</Button>
+                </div>
+            </div>
+        </div>
+      )}
+
       {/* NEW: Selected Asset Details View Modal */}
       {selectedAssetView && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
@@ -12915,6 +13128,95 @@ export default function App() {
                     const container = document.getElementById('audit-ranking-container');
                     if (container) container.scrollTop = 0;
                     setTimeout(() => handleExportPDF('print-audit-ranking', 'Audit_Ranking_Report.pdf', 'portrait', [22, 15, 20, 15]), 100);
+                }} disabled={isExporting}>
+                    {isExporting ? t('downloading') : 'ดาวน์โหลด PDF'}
+                </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* NEW: Daily Report Ranking Leaderboard Modal */}
+      {showReportRankingModal && (
+        <div className={`fixed inset-0 bg-black bg-opacity-50 flex justify-center z-50 ${isExporting ? 'items-start overflow-visible' : 'items-center overflow-y-auto'}`}>
+          <div id="report-ranking-container" className={`w-full max-w-3xl m-4 relative animate-fade-in ${isExporting ? 'bg-white shadow-none p-4 h-max overflow-visible' : 'bg-white rounded-lg shadow-xl max-h-[90vh] flex flex-col'}`}>
+            <button 
+                onClick={() => setShowReportRankingModal(false)} 
+                className={`absolute top-6 right-6 text-gray-400 hover:text-red-500 transition-colors z-10 ${isExporting ? 'hidden' : ''}`}
+            >
+                <X size={24} />
+            </button>
+            
+            {/* บังคับความกว้าง 180mm (เท่ากับ A4 210mm หักขอบซ้ายขวาด้านละ 15mm) */}
+            <div id="print-report-ranking" className={`bg-white rounded-t-lg ${isExporting ? 'w-[180mm] min-w-[180mm] max-w-[180mm] mx-auto box-border px-[5mm] pt-[5mm] pb-[10mm]' : 'p-8 flex flex-col flex-1 overflow-y-auto custom-scrollbar'}`}>
+                <div className="mb-4 border-b pb-4 shrink-0 pr-8">
+                    <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                        <FileText className="text-purple-600" size={28} />
+                        จัดอันดับการส่งรายงานประจำวัน
+                    </h2>
+                    <p className="text-sm text-gray-500 mt-1">เปรียบเทียบจำนวนวันที่ส่งรายงานของทุกหน่วยงาน (ข้อมูลเดือน {new Date().toLocaleDateString('th-TH', { month: 'long', year: 'numeric'})})</p>
+                </div>
+                
+                <div className={isExporting ? "w-full" : "overflow-y-auto flex-1 custom-scrollbar pr-2"}>
+                    <table className="w-full text-sm text-left table-fixed break-words">
+                        <thead className="bg-purple-50 text-purple-800 sticky top-0 shadow-sm z-10">
+                            <tr>
+                                <th className="p-3 text-center w-[15%] rounded-tl-md">อันดับ</th>
+                                <th className="p-3 w-[60%]">โครงการ / หน่วยงาน</th>
+                                <th className="p-3 text-center w-[25%] rounded-tr-md">จำนวนที่ส่งแล้ว</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                            {(() => {
+                                const currentY = new Date().getFullYear();
+                                const currentM = new Date().getMonth();
+                                const currentMonthStr = `${currentY}-${String(currentM + 1).padStart(2, '0')}`;
+
+                                // คำนวณอันดับ
+                                const rankData = projects.map(p => {
+                                    const pReports = dailyReports.filter(r => r.projectId === p.id && r.date.startsWith(currentMonthStr));
+                                    const uniqueDays = new Set(pReports.map(r => r.date)).size;
+                                    return { id: p.id, name: p.name, type: p.type, submittedDays: uniqueDays };
+                                }).sort((a, b) => b.submittedDays - a.submittedDays);
+
+                                return rankData.map((p, idx) => {
+                                    const isCurrent = selectedProject && p.id === selectedProject.id;
+                                    return (
+                                        <tr key={p.id} className={`transition-colors ${isCurrent ? 'bg-orange-50 font-bold border-l-4 border-orange-500' : 'hover:bg-gray-50'}`}>
+                                            <td className="p-3 text-center font-bold text-gray-600">
+                                                {idx === 0 && p.submittedDays > 0 ? <span className="text-yellow-500 text-xl drop-shadow-sm" title="อันดับที่ 1">🥇</span> : 
+                                                 idx === 1 && p.submittedDays > 0 ? <span className="text-gray-400 text-xl drop-shadow-sm" title="อันดับที่ 2">🥈</span> : 
+                                                 idx === 2 && p.submittedDays > 0 ? <span className="text-amber-600 text-xl drop-shadow-sm" title="อันดับที่ 3">🥉</span> : 
+                                                 idx + 1}
+                                            </td>
+                                            <td className="p-3 break-words whitespace-normal">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <Building2 size={16} className={`shrink-0 ${isCurrent ? "text-orange-500" : "text-gray-400"}`} />
+                                                    <span className={isCurrent ? "text-orange-700" : "text-gray-800"}>{p.name}</span>
+                                                    {isCurrent && <span className="ml-1 text-[10px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full whitespace-nowrap shrink-0">หน่วยงานของคุณ</span>}
+                                                </div>
+                                                <div className="text-[10px] text-gray-400 mt-0.5 ml-6">{p.type}</div>
+                                            </td>
+                                            <td className="p-3 text-center">
+                                                <span className={`px-3 py-1 rounded-md text-xs font-bold whitespace-nowrap ${p.submittedDays >= 20 ? 'bg-green-100 text-green-700 border border-green-200' : p.submittedDays >= 10 ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' : p.submittedDays > 0 ? 'bg-orange-100 text-orange-700 border border-orange-200' : 'bg-gray-100 text-gray-500 border border-gray-200'}`}>
+                                                    {p.submittedDays} วัน
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    );
+                                });
+                            })()}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div className={`px-8 py-4 border-t flex justify-end shrink-0 gap-2 bg-gray-50 rounded-b-lg ${isExporting ? 'hidden' : ''}`}>
+                <Button variant="secondary" onClick={() => setShowReportRankingModal(false)}>{t('close')}</Button>
+                <Button icon={Printer} onClick={() => {
+                    const container = document.getElementById('report-ranking-container');
+                    if (container) container.scrollTop = 0;
+                    setTimeout(() => handleExportPDF('print-report-ranking', 'Daily_Report_Ranking.pdf', 'portrait', [22, 15, 20, 15]), 100);
                 }} disabled={isExporting}>
                     {isExporting ? t('downloading') : 'ดาวน์โหลด PDF'}
                 </Button>
