@@ -1245,8 +1245,13 @@ function usePersistentState(key, initialValue, fbUser) {
     if (!fbUser || !appId) return;
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
     
+    let currentFetchId = 0; // NEW: ป้องกันปัญหาการโหลดข้อมูลซ้อนทับกัน (Race condition)
+
     const unsubscribe = onSnapshot(docRef, async (docSnap) => {
       if (docSnap.exists()) {
+        currentFetchId++;
+        const thisFetchId = currentFetchId;
+
         const data = docSnap.data();
         try {
           if (data.totalChunks !== undefined) {
@@ -1259,12 +1264,16 @@ function usePersistentState(key, initialValue, fbUser) {
                       fullJson += chunkSnap.data().chunk;
                   }
               }
+              
+              if (thisFetchId !== currentFetchId) return; // ยกเลิกหากมีการอัปเดตใหม่กว่าเข้ามาแทรก
+              
               if (fullJson) {
                   const parsedData = JSON.parse(fullJson);
                   setState(parsedData);
                   stateRef.current = parsedData;
               }
           } else if (data.value) {
+              if (thisFetchId !== currentFetchId) return; // ยกเลิกหากมีการอัปเดตใหม่กว่าเข้ามาแทรก
               // รองรับข้อมูลรูปแบบเก่าที่เป็น Document เดียว
               const parsedData = JSON.parse(data.value);
               setState(parsedData);
@@ -1285,6 +1294,10 @@ function usePersistentState(key, initialValue, fbUser) {
   const setPersistentValue = async (newValue) => {
     // FIX: ดึงค่าจาก stateRef.current เสมอ เพื่อรับประกันว่าเป็นข้อมูลชุดล่าสุดจริงๆ
     const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
+    
+    // NEW: ป้องกันการบันทึกทับด้วยข้อมูลเดิม (ลดภาระการเขียนซ้ำซ้อนและป้องกัน State กระตุกรูปหาย)
+    if (valueToStore === stateRef.current) return;
+
     setState(valueToStore);
     stateRef.current = valueToStore; // อัปเดต Ref ทันทีเพื่อให้คำสั่งถัดไปเห็นค่าใหม่
 
@@ -1368,6 +1381,9 @@ function useUserPersistentState(key, initialValue, fbUser) {
 
   const setPersistentValue = (newValue) => {
     const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
+    
+    if (valueToStore === stateRef.current) return;
+
     setState(valueToStore);
     stateRef.current = valueToStore;
 
@@ -3170,7 +3186,8 @@ export default function App() {
       } else {
           // โหมดเพิ่มใหม่
           const id = generateId();
-          setPmPlans([...pmPlans, { id, projectId: selectedProject.id, status: 'Active', ...newPmPlan }]);
+          // แก้ไข: สลับตำแหน่ง ...newPmPlan ไว้ด้านหน้า เพื่อไม่ให้ค่า id: null ไปทับ id ที่สุ่มมาใหม่
+          setPmPlans([...pmPlans, { ...newPmPlan, id, projectId: selectedProject.id, status: 'Active' }]);
       }
       setShowAddPmPlanModal(false);
       setNewPmPlan({ id: null, machineId: '', frequency: 'Monthly', scheduleDetails: { dayOfWeek: '1', date: '1', month: '1' } });
