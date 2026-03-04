@@ -6250,11 +6250,14 @@ export default function App() {
             const totalAmount = filteredContracts.reduce((sum, c) => sum + Number(c.amount || 0), 0);
 
             return (
-            <Card>
-                <div className="p-4 border-b flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
-                    <h3 className="font-bold shrink-0">{t('activeContracts')}</h3>
+            <Card id="print-contracts-area">
+                <div className="p-4 border-b flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white">
+                    <h3 className="font-bold flex items-center gap-2 text-gray-800 shrink-0">
+                        <Briefcase size={20} className="text-blue-600" />
+                        {t('activeContracts')}
+                    </h3>
                     
-                    <div className="flex flex-col md:flex-row gap-4 items-start md:items-center w-full lg:w-auto">
+                    <div className={`flex flex-col md:flex-row gap-4 items-start md:items-center w-full lg:w-auto ${isExporting ? 'hidden' : ''}`}>
                         {/* Filter Buttons */}
                         <div className="flex bg-gray-100 p-1 rounded-lg w-full md:w-auto overflow-x-auto">
                             <button
@@ -6290,12 +6293,15 @@ export default function App() {
 
                     <div className={`flex gap-2 ${isExporting ? 'hidden' : ''} shrink-0`}>
                         <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(filteredContracts, 'contracts_list')}>{t('exportCSV')}</Button>
+                        <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-contracts-area', `Contracts_${selectedProject?.code || 'List'}.pdf`, 'landscape')} disabled={isExporting}>
+                            {isExporting ? t('downloading') : t('downloadPDF')}
+                        </Button>
                         {hasPerm('proj_contracts', 'save') && <Button size="sm" icon={Plus} onClick={() => { setIsEditingContract(false); setNewContract({ type: CONTRACT_TYPES.EXPENSE, category: '', customCategory: '', vendorName: '', contactPerson: '', contactPhone: '', startDate: '', endDate: '', amount: '', paymentCycle: 'Monthly', file: null }); setShowAddContractModal(true); }}>{t('addContract')}</Button>}
                     </div>
                 </div>
-                <div className="overflow-x-auto">
+                <div className={isExporting ? "pb-4" : "overflow-x-auto"}>
                     <table className="w-full text-sm">
-                        <thead className="bg-gray-50">
+                        <thead className="bg-gray-50 text-gray-600">
                             <tr>
                                 <th className="p-3 text-center w-12">{t('col_seq')}</th>
                                 <th className="p-3 text-left">{t('col_vendor')}</th>
@@ -6304,10 +6310,10 @@ export default function App() {
                                 <th className="p-3 text-left">{t('col_duration')}</th>
                                 <th className="p-3 text-right">{t('col_amount')}</th>
                                 <th className="p-3 text-left">{t('col_status')}</th>
-                                <th className="p-3 text-center w-28">จัดการ</th>
+                                <th className={`p-3 text-center w-28 ${isExporting ? 'hidden' : ''}`}>จัดการ</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y">
+                        <tbody className="divide-y divide-gray-100 bg-white">
                             {filteredContracts.length > 0 ? (
                                 filteredContracts.map((c, index) => {
                                     const remDays = calculateDaysRemaining(c.endDate);
@@ -6317,15 +6323,15 @@ export default function App() {
                                             <td className="p-3 cursor-pointer group" onClick={() => setSelectedContractView(c)}>
                                                 <div className="font-bold text-gray-800 group-hover:text-orange-600 transition-colors flex items-center gap-1.5">
                                                     {c.vendorName}
-                                                    <Search size={14} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                    <Search size={14} className={`text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity ${isExporting ? 'hidden' : ''}`} />
                                                 </div>
                                                 <div className="text-xs text-gray-500 mt-0.5">{c.contactPerson} <span className="text-gray-400 ml-1">({c.contactPhone})</span></div>
                                             </td>
                                             <td className="p-3 text-xs">
                                                 <span className={`px-2 py-1 rounded-full ${
-                                                    c.type === CONTRACT_TYPES.INCOME ? 'bg-green-100 text-green-700' :
-                                                    c.type === CONTRACT_TYPES.EXPENSE ? 'bg-red-100 text-red-700' :
-                                                    'bg-blue-100 text-blue-700'
+                                                    c.type === CONTRACT_TYPES.INCOME ? 'bg-green-100 text-green-700 border border-green-200' :
+                                                    c.type === CONTRACT_TYPES.EXPENSE ? 'bg-red-100 text-red-700 border border-red-200' :
+                                                    'bg-blue-100 text-blue-700 border border-blue-200'
                                                 }`}>
                                                     {c.type.split(' (')[0]}
                                                 </span>
@@ -6334,15 +6340,15 @@ export default function App() {
                                             <td className="p-3 text-xs">
                                                 <div>{c.startDate} - {c.endDate}</div>
                                                 <div className={`font-bold mt-1 ${remDays < 30 ? 'text-red-600' : remDays < 90 ? 'text-orange-500' : 'text-green-600'}`}>
-                                                    {remDays} {t('daysRemaining')}
+                                                    {remDays <= 0 ? t('expired') : `${remDays} ${t('daysRemaining')}`}
                                                 </div>
                                             </td>
                                             <td className="p-3 text-right">
-                                                <div className="font-medium">{Number(c.amount).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} บาท</div>
-                                                <div className="text-[10px] text-gray-400">{c.paymentCycle === 'Monthly' ? t('monthly') : t('yearly')}</div>
+                                                <div className="font-medium text-gray-800">{Number(c.amount).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} บาท</div>
+                                                <div className="text-[10px] text-gray-400 mt-0.5">{c.paymentCycle === 'Monthly' ? t('monthly') : t('yearly')}</div>
                                             </td>
                                             <td className="p-3"><Badge status={c.status} /></td>
-                                            <td className="p-3 text-center">
+                                            <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`}>
                                                 <div className="flex justify-center items-center gap-1">
                                                     {(c.fileUrl || (c.file && (c.file.data || c.file.isLocal))) ? (
                                                         <button 
@@ -6358,7 +6364,7 @@ export default function App() {
                                                     ) : (
                                                         <span className="text-gray-300 px-2">-</span>
                                                     )}
-                                                    {!isExporting && hasPerm('proj_contracts', 'delete') && (
+                                                    {hasPerm('proj_contracts', 'delete') && (
                                                         <button 
                                                             onClick={() => showConfirm('ยืนยันการลบ', `คุณต้องการลบสัญญา ${c.vendorName} ใช่หรือไม่?`, () => setContracts(contracts.filter(contract => contract.id !== c.id)))}
                                                             className="text-red-500 hover:text-red-700 p-1.5 bg-red-50 hover:bg-red-100 rounded-md transition-colors"
@@ -6385,7 +6391,7 @@ export default function App() {
                                     <td className="p-4 text-right text-orange-700 text-base whitespace-nowrap">
                                         {totalAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} บาท
                                     </td>
-                                    <td colSpan="2"></td>
+                                    <td colSpan={isExporting ? "1" : "2"}></td>
                                 </tr>
                             </tfoot>
                         )}
@@ -6823,15 +6829,18 @@ export default function App() {
 
           {/* Tab for Asset Management */}
           {projectTab === 'assets' && (
-            <Card>
-                <div className="p-4 border-b flex justify-between items-center">
-                    <h3 className="font-bold flex items-center gap-2"><Shield size={20}/> {t('regAssets')}</h3>
-                    <div className="flex gap-2">
-                        {hasPerm('proj_assets', 'save') && <Button size="sm" icon={Plus} onClick={() => { setIsEditingAsset(false); setNewAsset({ code: '', name: '', qty: 1, location: '', photo: null, details: '' }); setShowAddAssetModal(true); }}>{t('registerAsset')}</Button>}
+            <Card id="print-assets-area">
+                <div className="p-4 border-b flex justify-between items-center bg-white">
+                    <h3 className="font-bold flex items-center gap-2"><Shield size={20} className="text-orange-500" /> {t('regAssets')}</h3>
+                    <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
                         <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(assets.filter(a => a.projectId === selectedProject.id), 'asset_list')}>{t('exportCSV')}</Button>
+                        <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-assets-area', `Assets_${selectedProject?.code || 'List'}.pdf`, 'landscape')} disabled={isExporting}>
+                            {isExporting ? t('downloading') : t('downloadPDF')}
+                        </Button>
+                        {hasPerm('proj_assets', 'save') && <Button size="sm" icon={Plus} onClick={() => { setIsEditingAsset(false); setNewAsset({ code: '', name: '', qty: 1, location: '', photo: null, details: '' }); setShowAddAssetModal(true); }}>{t('registerAsset')}</Button>}
                     </div>
                 </div>
-                <div className="overflow-x-auto">
+                <div className={isExporting ? "pb-4" : "overflow-x-auto"}>
                     <table className="w-full text-sm">
                         <thead className="bg-gray-50 text-gray-600 uppercase">
                             <tr>
@@ -6845,7 +6854,7 @@ export default function App() {
                                 <th className={`p-3 text-center w-16 ${isExporting ? 'hidden' : ''}`}>จัดการ</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100">
+                        <tbody className="divide-y divide-gray-100 bg-white">
                             {assets.filter(a => a.projectId === selectedProject.id).length > 0 ? (
                                 assets.filter(a => a.projectId === selectedProject.id).map((asset, index) => (
                                     <tr key={asset.id} className="hover:bg-gray-50">
@@ -6858,11 +6867,11 @@ export default function App() {
                                         <td className="p-3 font-mono font-medium text-orange-600">{asset.code}</td>
                                         <td className="p-3 cursor-pointer group hover:bg-gray-200 transition-colors rounded-md" onClick={() => setSelectedAssetView(asset)}>
                                             <div className="font-bold text-gray-800 group-hover:text-orange-600 flex items-center gap-1">
-                                                {asset.name} <Search size={14} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                {asset.name} <Search size={14} className={`text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity ${isExporting ? 'hidden' : ''}`} />
                                             </div>
-                                            <div className="text-[10px] text-gray-400 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">คลิกเพื่อดูรายละเอียด</div>
+                                            <div className={`text-[10px] text-gray-400 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${isExporting ? 'hidden' : ''}`}>คลิกเพื่อดูรายละเอียด</div>
                                         </td>
-                                        <td className="p-3 text-center">{asset.qty}</td>
+                                        <td className="p-3 text-center font-bold">{asset.qty}</td>
                                         <td className="p-3 text-gray-600">{asset.location}</td>
                                         <td className="p-3 text-gray-500 text-xs max-w-xs truncate">{asset.details || '-'}</td>
                                         <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`}>
@@ -6900,15 +6909,18 @@ export default function App() {
 
           {/* New Tab for Tools Management */}
           {projectTab === 'tools' && (
-            <Card>
-                <div className="p-4 border-b flex justify-between items-center">
-                    <h3 className="font-bold flex items-center gap-2"><Wrench size={20}/> {t('toolsRegistry')}</h3>
-                    <div className="flex gap-2">
-                        {hasPerm('proj_tools', 'save') && <Button size="sm" icon={Plus} onClick={() => { setIsEditingTool(false); setNewTool({ code: '', name: '', qty: 1, location: '', photo: null, details: '' }); setShowAddToolModal(true); }}>{t('regTool')}</Button>}
+            <Card id="print-tools-area">
+                <div className="p-4 border-b flex justify-between items-center bg-white">
+                    <h3 className="font-bold flex items-center gap-2"><Wrench size={20} className="text-orange-500" /> {t('toolsRegistry')}</h3>
+                    <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
                         <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(tools.filter(t => t.projectId === selectedProject.id), 'tools_list')}>{t('exportCSV')}</Button>
+                        <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-tools-area', `Tools_${selectedProject?.code || 'List'}.pdf`, 'landscape')} disabled={isExporting}>
+                            {isExporting ? t('downloading') : t('downloadPDF')}
+                        </Button>
+                        {hasPerm('proj_tools', 'save') && <Button size="sm" icon={Plus} onClick={() => { setIsEditingTool(false); setNewTool({ code: '', name: '', qty: 1, location: '', photo: null, details: '' }); setShowAddToolModal(true); }}>{t('regTool')}</Button>}
                     </div>
                 </div>
-                <div className="overflow-x-auto">
+                <div className={isExporting ? "pb-4" : "overflow-x-auto"}>
                     <table className="w-full text-sm">
                         <thead className="bg-gray-50 text-gray-600 uppercase">
                             <tr>
@@ -6922,7 +6934,7 @@ export default function App() {
                                 <th className={`p-3 text-center w-16 ${isExporting ? 'hidden' : ''}`}>จัดการ</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100">
+                        <tbody className="divide-y divide-gray-100 bg-white">
                             {tools.filter(t => t.projectId === selectedProject.id).length > 0 ? (
                                 tools.filter(t => t.projectId === selectedProject.id).map((tool, index) => (
                                     <tr key={tool.id} className="hover:bg-gray-50">
@@ -6935,11 +6947,11 @@ export default function App() {
                                         <td className="p-3 font-mono font-medium text-orange-600">{tool.code}</td>
                                         <td className="p-3 cursor-pointer group hover:bg-gray-200 transition-colors rounded-md" onClick={() => setSelectedToolView(tool)}>
                                             <div className="font-bold text-gray-800 group-hover:text-orange-600 flex items-center gap-1">
-                                                {tool.name} <Search size={14} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                {tool.name} <Search size={14} className={`text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity ${isExporting ? 'hidden' : ''}`} />
                                             </div>
-                                            <div className="text-[10px] text-gray-400 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">คลิกเพื่อดูรายละเอียด</div>
+                                            <div className={`text-[10px] text-gray-400 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${isExporting ? 'hidden' : ''}`}>คลิกเพื่อดูรายละเอียด</div>
                                         </td>
-                                        <td className="p-3 text-center">{tool.qty}</td>
+                                        <td className="p-3 text-center font-bold">{tool.qty}</td>
                                         <td className="p-3 text-gray-600">{tool.location}</td>
                                         <td className="p-3 text-gray-500 text-xs max-w-xs truncate">{tool.details || '-'}</td>
                                         <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`}>
