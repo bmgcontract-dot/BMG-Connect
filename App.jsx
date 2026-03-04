@@ -2065,14 +2065,21 @@ export default function App() {
       return false; // ถ้าเป็นพนักงานประจำหน่วยงานปกติ จะถูกล็อค
   };
 
-  // ปรับปรุงการโหลดไลบรารี PDF ให้เสถียรขึ้น และอัปเกรดเป็นเวอร์ชัน 0.10.2
+  // แก้ไขขั้นสูง: ถอด html2pdf.js และโหลดเอนจิน html-to-image + jsPDF เพื่อแก้ภาษาไทย 100%
   useEffect(() => { 
-      if (!document.getElementById('html2pdf-script')) {
-          const script = document.createElement('script'); 
-          script.id = 'html2pdf-script';
-          script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js"; 
-          script.async = true; 
-          document.body.appendChild(script); 
+      if (!document.getElementById('html-to-image-script')) {
+          const script1 = document.createElement('script'); 
+          script1.id = 'html-to-image-script';
+          script1.src = "https://cdnjs.cloudflare.com/ajax/libs/html-to-image/1.11.11/html-to-image.min.js"; 
+          script1.async = true; 
+          document.body.appendChild(script1); 
+      }
+      if (!document.getElementById('jspdf-script')) {
+          const script2 = document.createElement('script'); 
+          script2.id = 'jspdf-script';
+          script2.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"; 
+          script2.async = true; 
+          document.body.appendChild(script2); 
       }
   }, []);
 
@@ -2628,15 +2635,15 @@ export default function App() {
           });
       }
       
-      // วาดข้อความ (ชื่อหน่วยงาน และ ที่อยู่)
+      // เปลี่ยนมาใช้ฟอนต์ Sarabun เพื่อให้สระไม่ลอยและตัวอักษรไม่ทับกัน
       ctxH.textBaseline = 'top';
       ctxH.fillStyle = '#FF4D00'; 
-      ctxH.font = `bold ${Math.round(mmToPx(5))}px 'Noto Sans Thai', sans-serif`;
-      ctxH.fillText(name, textStartX, mmToPx(4)); // ขยับข้อความขึ้น
+      ctxH.font = `bold ${Math.round(mmToPx(5))}px 'Sarabun', sans-serif`;
+      ctxH.fillText(name, textStartX, mmToPx(4)); 
       
       ctxH.fillStyle = '#4B5563'; 
-      ctxH.font = `normal ${Math.round(mmToPx(3.5))}px 'Noto Sans Thai', sans-serif`;
-      ctxH.fillText(address, textStartX, mmToPx(11)); // ขยับที่อยู่ขึ้น
+      ctxH.font = `normal ${Math.round(mmToPx(3.5))}px 'Sarabun', sans-serif`;
+      ctxH.fillText(address, textStartX, mmToPx(11)); 
       
       // เส้นคั่นล่างหัวกระดาษ
       ctxH.beginPath();
@@ -2674,10 +2681,10 @@ export default function App() {
       ctxF.lineWidth = mmToPx(0.5);
       ctxF.stroke();
       
-      // ข้อความท้ายกระดาษ (ซ้าย)
+      // เปลี่ยนมาใช้ฟอนต์ Sarabun
       ctxF.textBaseline = 'middle';
       ctxF.fillStyle = '#6B7280'; 
-      ctxF.font = `bold ${Math.round(mmToPx(3.5))}px 'Noto Sans Thai', sans-serif`;
+      ctxF.font = `bold ${Math.round(mmToPx(3.5))}px 'Sarabun', sans-serif`;
       ctxF.fillText('Managed by Best Million Group Co., Ltd.', mmToPx(10), mmToPx(10));
       
       // เลขหน้า (ขวา)
@@ -2689,19 +2696,21 @@ export default function App() {
   };
   // --------------------------------------------------------------------------
 
-  // เพิ่มพารามิเตอร์ orientation ค่าเริ่มต้นเป็น portrait (A4 แนวตั้ง)
+  // แก้ไขระดับขั้นสูง: เขียนระบบ Generate PDF ใหม่ด้วย html-to-image
   const handleExportPDF = async (elementId = 'print-area', filename = 'document.pdf', orientation = 'portrait', customMargin = null) => { 
-      if (!window.html2pdf) { alert("ระบบกำลังเตรียมความพร้อมเครื่องมือ PDF กรุณารอสักครู่แล้วกดใหม่อีกครั้ง"); return; } 
+      if (!window.htmlToImage || !window.jspdf) { 
+          alert("ระบบกำลังโหลดเครื่องมือ PDF ขั้นสูง กรุณารอสักครู่แล้วกดอีกครั้ง..."); 
+          return; 
+      } 
       setIsExporting(true); 
       
       try {
-          // รอให้ฟอนต์โหลดเสร็จก่อนเพื่อไม่ให้ html2canvas คำนวณความกว้างตัวอักษรผิดพลาด (สาเหตุหลักที่ตัวอักษรทับกัน)
           await document.fonts.ready;
 
           // สร้างไฟล์ภาพหัวกระดาษรอไว้
           const headerImg = await generateHeaderImage(selectedProject, companyInfo, orientation);
           
-          setTimeout(() => { 
+          setTimeout(async () => { 
               const element = document.getElementById(elementId); 
               if(!element) { 
                   alert(`เกิดข้อผิดพลาด: ไม่พบส่วนที่ต้องการพิมพ์ (Element ID: ${elementId})`);
@@ -2709,62 +2718,68 @@ export default function App() {
                   return; 
               }
               
-              const opt = { 
-                  margin: customMargin || [22, 10, 20, 10], // ปรับ Top Margin ค่า Default ลดลงเหลือ 22mm
-                  filename: filename, 
-                  image: { type: 'jpeg', quality: 1 }, // เพิ่มคุณภาพรูปภาพ
-                  html2canvas: { 
-                      scale: 2, 
-                      useCORS: true, 
-                      scrollY: 0,
-                      // เพิ่ม onclone เพื่อล้างค่า CSS บางตัวที่ทำให้ภาษาไทยกระโดด/ทับกัน หรือสระลอยเพี้ยน
-                      onclone: (clonedDoc) => {
-                          const style = clonedDoc.createElement('style');
-                          style.innerHTML = `
-                              * {
-                                  font-family: 'Noto Sans Thai', sans-serif !important;
-                                  letter-spacing: normal !important;
-                                  word-spacing: normal !important;
-                                  text-rendering: auto !important;
-                                  font-variant-ligatures: none !important;
-                                  font-feature-settings: "liga" 0 !important;
-                              }
-                              .whitespace-pre-wrap {
-                                  white-space: pre-wrap !important;
-                                  word-break: break-word !important;
-                                  overflow-wrap: break-word !important;
-                              }
-                          `;
-                          clonedDoc.head.appendChild(style);
-                      }
-                  }, 
-                  jsPDF: { unit: 'mm', format: 'a4', orientation: orientation },
-                  pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
-              }; 
-              
-              // แทรกกระบวนการลงในรอบของ html2pdf
-              window.html2pdf().set(opt).from(element).toPdf().get('pdf').then(function (pdf) {
-                  const totalPages = pdf.internal.getNumberOfPages();
-                  const pageWidth = pdf.internal.pageSize.getWidth();
-                  const pageHeight = pdf.internal.pageSize.getHeight();
+              try {
+                  // ใช้ htmlToImage (Native Browser Rendering) ขจัดปัญหาภาษาไทยทับกันโดยสิ้นเชิง
+                  const dataUrl = await window.htmlToImage.toJpeg(element, {
+                      quality: 1.0,
+                      pixelRatio: 2, // ความคมชัด x2
+                      backgroundColor: '#ffffff',
+                      style: { transform: 'none', transformOrigin: 'top left' }
+                  });
+
+                  const { jsPDF } = window.jspdf;
+                  const pdf = new jsPDF({ orientation: orientation, unit: 'mm', format: 'a4' });
+
+                  const pdfWidth = pdf.internal.pageSize.getWidth();
+                  const pdfHeight = pdf.internal.pageSize.getHeight();
+
+                  // ขอบกระดาษ (Margin): [Top, Left, Bottom, Right]
+                  const m = customMargin || [22, 10, 20, 10]; 
+                  const mTop = m[0], mLeft = m[1], mBottom = m[2], mRight = m[3];
+                  const printWidth = pdfWidth - mLeft - mRight;
+                  const printHeight = pdfHeight - mTop - mBottom;
+
+                  // โหลดข้อมูลรูปภาพเพื่อคำนวณสัดส่วน
+                  const img = new Image();
+                  img.src = dataUrl;
+                  await new Promise(resolve => { img.onload = resolve; });
+
+                  const imgRatio = img.height / img.width;
+                  const imgPrintHeight = printWidth * imgRatio;
                   
-                  // วนลูปประทับตรา (Stamp) หัวกระดาษและท้ายกระดาษลงไปทุกหน้า
-                  for (let i = 1; i <= totalPages; i++) {
-                      pdf.setPage(i);
+                  const totalPages = Math.ceil(imgPrintHeight / printHeight);
+                  let currentSliceMm = 0;
+
+                  for (let page = 1; page <= totalPages; page++) {
+                      if (page > 1) pdf.addPage();
+
+                      // 1. วางรูปภาพเนื้อหา โดยดันแกน Y ขึ้นไปเรื่อยๆ (Crop ตามหน้า)
+                      pdf.addImage(dataUrl, 'JPEG', mLeft, mTop - currentSliceMm, printWidth, imgPrintHeight);
+
+                      // 2. ถมสี่เหลี่ยมสีขาวทับขอบบนและล่าง เพื่อเป็น Clipping Mask (ซ่อนเนื้อหาที่ล้น)
+                      pdf.setFillColor(255, 255, 255);
+                      pdf.rect(0, 0, pdfWidth, mTop, 'F'); // ปิดขอบบน
+                      pdf.rect(0, pdfHeight - mBottom, pdfWidth, mBottom, 'F'); // ปิดขอบล่าง
+
+                      // 3. ประทับตรา Header
+                      pdf.addImage(headerImg, 'JPEG', 0, 0, pdfWidth, mTop);
                       
-                      // ใส่รูปภาพหัวกระดาษ (Y=0, Height=22) ให้ขนาดแมปกับมาร์จินบนพอดี
-                      pdf.addImage(headerImg, 'JPEG', 0, 0, pageWidth, 22);
-                      
-                      // สร้างและใส่รูปภาพท้ายกระดาษพร้อมเลขหน้าที่เปลี่ยนไปเรื่อยๆ (Y=หน้าลบ 20, Height=20)
-                      const footerImg = generateFooterImage(i, totalPages, orientation);
-                      pdf.addImage(footerImg, 'JPEG', 0, pageHeight - 20, pageWidth, 20);
+                      // 4. ประทับตรา Footer
+                      const footerImg = generateFooterImage(page, totalPages, orientation);
+                      pdf.addImage(footerImg, 'JPEG', 0, pdfHeight - mBottom, pdfWidth, mBottom);
+
+                      currentSliceMm += printHeight;
                   }
-              }).save().then(() => setIsExporting(false)).catch(err => { 
-                  console.error(err); 
-                  setIsExporting(false); 
-                  alert("เกิดข้อผิดพลาดในการสร้าง PDF"); 
-              }); 
-          }, 800); 
+
+                  pdf.save(filename);
+                  setIsExporting(false);
+
+              } catch (err) {
+                  console.error("PDF Engine Error:", err);
+                  alert("เกิดข้อผิดพลาดระหว่างการสร้าง PDF");
+                  setIsExporting(false);
+              }
+          }, 800); // ดีเลย์เพื่อซ่อน UI ปุ่มต่างๆ
       } catch (err) {
           console.error(err);
           setIsExporting(false);
@@ -2776,83 +2791,8 @@ export default function App() {
 
   // ฟังก์ชันพิเศษสำหรับจัด PDF ตารางงานให้พอดี A4 แนวนอน (แบบพอดีเป๊ะ)
   const exportSchedulePDF = async () => {
-      if (!window.html2pdf) { alert("ระบบกำลังเตรียมความพร้อมเครื่องมือ PDF กรุณารอสักครู่แล้วกดใหม่อีกครั้ง"); return; }
-      setIsExporting(true);
-      
-      try {
-          await document.fonts.ready; // รอฟอนต์โหลด
-
-          // ใช้ A4 แนวนอน (Landscape) ขนาด = 297mm x 210mm
-          const orientation = 'landscape';
-          const headerImg = await generateHeaderImage(selectedProject, companyInfo, orientation);
-          
-          // เพิ่มเวลาดีเลย์ 1 วินาทีให้ UI แปลงหน่วยเป็น mm และจัดฟอนต์ให้เสร็จก่อนแคปภาพ
-          setTimeout(() => {
-              const element = document.getElementById('print-schedule-area');
-              
-              if (!element) {
-                  setIsExporting(false);
-                  return;
-              }
-
-              // ตั้งค่า Margin: [Top, Left, Bottom, Right] เป็นหน่วย mm
-              // พื้นที่ความกว้างที่จะพิมพ์ได้ = 297 - 10(ซ้าย) - 10(ขวา) = 277mm
-              const opt = { 
-                  margin: [22, 10, 20, 10], 
-                  filename: `Work_Schedule_${selectedProject?.name || 'Project'}_${currentMonth}.pdf`, 
-                  image: { type: 'jpeg', quality: 1 }, 
-                  html2canvas: { 
-                      scale: 3, 
-                      useCORS: true, 
-                      scrollY: 0,
-                      scrollX: 0,
-                      // แก้ไขเรื่องสระลอย/เพี้ยนเช่นกัน
-                      onclone: (clonedDoc) => {
-                          const style = clonedDoc.createElement('style');
-                          style.innerHTML = `
-                              * {
-                                  font-family: 'Noto Sans Thai', sans-serif !important;
-                                  letter-spacing: normal !important;
-                                  word-spacing: normal !important;
-                                  text-rendering: auto !important;
-                                  font-variant-ligatures: none !important;
-                                  font-feature-settings: "liga" 0 !important;
-                              }
-                          `;
-                          clonedDoc.head.appendChild(style);
-                      }
-                  }, 
-                  jsPDF: { unit: 'mm', format: 'a4', orientation: orientation },
-                  pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
-              };
-
-              window.html2pdf().set(opt).from(element).toPdf().get('pdf').then(function (pdf) {
-                  const totalPages = pdf.internal.getNumberOfPages();
-                  const pageWidth = pdf.internal.pageSize.getWidth();
-                  const pageHeight = pdf.internal.pageSize.getHeight();
-                  
-                  // ประทับตราหัวกระดาษและท้ายกระดาษในทุกหน้า
-                  for (let i = 1; i <= totalPages; i++) {
-                      pdf.setPage(i);
-                      // วาง Header ไว้ที่พิกัด Y=0, ความสูง 22mm พอดีกับ Top Margin
-                      pdf.addImage(headerImg, 'JPEG', 0, 0, pageWidth, 22);
-                      
-                      // วาง Footer ไว้ที่ด้านล่างสุด ความสูง 20mm พอดีกับ Bottom Margin
-                      const footerImg = generateFooterImage(i, totalPages, orientation);
-                      pdf.addImage(footerImg, 'JPEG', 0, pageHeight - 20, pageWidth, 20);
-                  }
-              }).save().then(() => {
-                  setIsExporting(false);
-              }).catch(err => { 
-                  console.error(err); 
-                  setIsExporting(false); 
-                  alert("เกิดข้อผิดพลาดในการสร้าง PDF"); 
-              });
-          }, 1000); 
-      } catch (err) {
-          console.error(err);
-          setIsExporting(false);
-      }
+      // เรียกใช้แกนหลักใหม่ได้เลย 
+      handleExportPDF('print-schedule-area', `Work_Schedule_${selectedProject?.name || 'Project'}_${currentMonth}.pdf`, 'landscape', [22, 10, 20, 10]);
   };
 
   // New Handlers for Daily Report
