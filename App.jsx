@@ -1087,14 +1087,45 @@ const INITIAL_READINGS = [
 
 const INITIAL_DAILY_REPORTS = []; const INITIAL_AUDITS = [ { id: 'au1', projectId: 'p1', date: '2025-02-10', category: 'Safety Standards', score: 95, remarks: 'Excellent adherence to safety protocols.', inspector: 'Admin Master', fileUrl: 'audit_safety_feb.pdf' }, { id: 'au2', projectId: 'p1', date: '2025-02-10', category: 'Cleanliness', score: 78, remarks: 'Lobby area needs improved dusting.', inspector: 'Admin Master', fileUrl: 'audit_clean_feb.pdf' }, { id: 'au3', projectId: 'p2', date: '2025-02-12', category: 'Security Guards', score: 88, remarks: 'Guards are attentive but uniform needs check.', inspector: 'Admin Master', fileUrl: 'audit_sec_feb.pdf' }, ]; const INITIAL_TOOLS = []; const INITIAL_UTILITY_READINGS = []; const INITIAL_ACTION_PLANS = [ { id: 'ap1', projectId: 'p1', issue: 'Leaking pipe at 5th floor', details: 'เปลี่ยนซีลยางท่อน้ำทิ้ง', responsible: 'Wichai Khonngan (Technician)', startDate: '2025-02-10', deadline: '2025-02-15', status: 'Pending' }, { id: 'ap2', projectId: 'p1', issue: 'Security gate noise', details: 'หล่อลื่นบานพับและเช็คมอเตอร์', responsible: 'Manop Chang (Technician)', startDate: '2025-02-08', deadline: '2025-02-10', status: 'Completed' }, ]; const INITIAL_SCHEDULES = []; const INITIAL_CONTRACTORS = [ { id: 'c1', name: 'Clean & Clear Service Co.', type: 'Vendor', category: 'งานด้านรักษาความสะอาด (Cleaning)', contact: 'Ms. Yupin', phone: '081-555-6666', email: 'contact@clean.com', status: 'Active' }, { id: 'c2', name: 'SafeGuard Security Ltd.', type: 'Contractor', category: 'งานด้านรักษาความปลอดภัย (Security)', contact: 'Mr. Somchai', phone: '02-999-8888', email: 'sales@safeguard.com', status: 'Active' }, { id: 'c3', name: 'Elevator Maintenance Experts', type: 'Contractor', category: 'บำรุงรักษาลิฟต์ (Elevator Maintenance)', contact: 'Mr. David', phone: '089-111-2222', email: 'service@eme.com', status: 'Active' }, { id: 'c4', name: 'Green Garden Supply', type: 'Vendor', category: 'งานด้านดูแลสวน (Gardening)', contact: 'Mrs. Noi', phone: '086-333-4444', email: 'noi@greengarden.com', status: 'Inactive' }, ];
 
-// --- NEW: Helper for Image Processing (ปรับให้รองรับไฟล์ขนาดใหญ่ ไม่จำกัดขนาดและคุณภาพ) ---
+// --- Helper for Image Processing (ปรับปรุงใหม่: ย่อขนาดและบีบอัดเพื่อป้องกันปัญหาพื้นที่ Local Storage เต็มและช่วยให้บันทึกภาพได้) ---
 const compressImage = (file) => {
     return new Promise((resolve) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
         reader.onload = (event) => {
-            // คืนค่า Base64 เป็นไฟล์ต้นฉบับดั้งเดิม (Original) โดยไม่มีการปรับย่อขนาดหรือบีบอัด
-            resolve(event.target.result);
+            const img = new Image();
+            img.src = event.target.result;
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                // กำหนดขนาดสูงสุด 1024px เพื่อคงความชัดเจน แต่ไฟล์ไม่ใหญ่เกินจนทำให้ระบบบันทึกไม่ได้
+                const MAX_WIDTH = 1024;
+                const MAX_HEIGHT = 1024;
+                let width = img.width;
+                let height = img.height;
+
+                if (width > height) {
+                    if (width > MAX_WIDTH) {
+                        height *= MAX_WIDTH / width;
+                        width = MAX_WIDTH;
+                    }
+                } else {
+                    if (height > MAX_HEIGHT) {
+                        width *= MAX_HEIGHT / height;
+                        height = MAX_HEIGHT;
+                    }
+                }
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                // บีบอัดเป็น JPEG Quality 70% (ช่วยลดขนาดไฟล์จากหลาย MB เหลือประมาณ 100-300 KB)
+                resolve(canvas.toDataURL('image/jpeg', 0.7));
+            };
+            img.onerror = () => {
+                // กรณีเกิดข้อผิดพลาดในการโหลดรูป ให้ส่งค่าต้นฉบับกลับไป
+                resolve(event.target.result);
+            };
         };
     });
 };
@@ -2867,7 +2898,7 @@ export default function App() {
   // Image Upload for Daily Report
   const handleDailyPerformanceImageUpload = async (dept, file) => {
     if (file) {
-        // ใช้ไฟล์ขนาดต้นฉบับ ไม่บีบอัด (รองรับไฟล์ขนาดใหญ่)
+        // ผ่านกระบวนการบีบอัดแล้ว เพื่อป้องกันระบบค้างและข้อมูลสูญหาย
         const compressedBase64 = await compressImage(file);
         setNewDailyReport(prev => ({
             ...prev,
