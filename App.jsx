@@ -1584,6 +1584,10 @@ export default function App() {
   const [utilityReadings, setUtilityReadings] = usePersistentState('bmg_utilityReadings', INITIAL_READINGS, fbUser);
   const [utilitySubTab, setUtilitySubTab] = useState('record'); // 'record', 'registry', 'analysis'
   const [utilityChartType, setUtilityChartType] = useState('bar'); // 'bar', 'line'
+  const [utilityAnalysisMonth, setUtilityAnalysisMonth] = useState(() => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
   
   // --- NEW: State สำหรับวิเคราะห์กราฟ ---
   const [hiddenAnalysisMeters, setHiddenAnalysisMeters] = useState(new Set());
@@ -8168,23 +8172,34 @@ export default function App() {
                       
                       {utilitySubTab === 'analysis' && (
                           <div className="space-y-6">
-                              <div className="flex justify-between items-center mb-4 border-b pb-4">
+                              <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 border-b pb-4 gap-4">
                                   <h3 className="font-bold text-gray-700 flex items-center gap-2">
                                       <BarChart3 size={20} className="text-red-500" /> วิเคราะห์การใช้พลังงาน (Energy Analysis)
                                   </h3>
-                                  <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border border-gray-200">
-                                      <button 
-                                          onClick={() => setUtilityChartType('bar')} 
-                                          className={`px-3 py-1.5 rounded-md text-xs font-bold transition-colors ${utilityChartType === 'bar' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
-                                      >
-                                          กราฟแท่ง (Bar)
-                                      </button>
-                                      <button 
-                                          onClick={() => setUtilityChartType('line')} 
-                                          className={`px-3 py-1.5 rounded-md text-xs font-bold transition-colors ${utilityChartType === 'line' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
-                                      >
-                                          กราฟเส้น (Line)
-                                      </button>
+                                  <div className="flex flex-wrap items-center gap-3">
+                                      <div className="flex items-center gap-2">
+                                          <label className="text-xs font-bold text-gray-500">ประจำเดือน:</label>
+                                          <input 
+                                              type="month" 
+                                              className="border border-gray-300 rounded-md p-1.5 text-sm focus:ring-2 focus:ring-red-200 outline-none bg-white transition-colors cursor-pointer"
+                                              value={utilityAnalysisMonth}
+                                              onChange={(e) => setUtilityAnalysisMonth(e.target.value)}
+                                          />
+                                      </div>
+                                      <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border border-gray-200">
+                                          <button 
+                                              onClick={() => setUtilityChartType('bar')} 
+                                              className={`px-3 py-1.5 rounded-md text-xs font-bold transition-colors ${utilityChartType === 'bar' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
+                                          >
+                                              กราฟแท่ง (Bar)
+                                          </button>
+                                          <button 
+                                              onClick={() => setUtilityChartType('line')} 
+                                              className={`px-3 py-1.5 rounded-md text-xs font-bold transition-colors ${utilityChartType === 'line' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
+                                          >
+                                              กราฟเส้น (Line)
+                                          </button>
+                                      </div>
                                   </div>
                               </div>
                               
@@ -8198,7 +8213,10 @@ export default function App() {
                                   const activeElecMeters = elecMeters.filter(m => !hiddenAnalysisMeters.has(m.id));
 
                                   const projectMeterIds = projectMeters.map(m => m.id);
-                                  const projectReadings = utilityReadings.filter(r => projectMeterIds.includes(r.meterId));
+                                  const projectReadings = utilityReadings.filter(r => 
+                                      projectMeterIds.includes(r.meterId) && 
+                                      r.date.startsWith(utilityAnalysisMonth)
+                                  );
 
                                   const chartDataMap = {};
                                   projectReadings.forEach(r => {
@@ -8224,7 +8242,7 @@ export default function App() {
                                           <div className="text-center text-gray-400 py-20 flex flex-col items-center border-2 border-dashed border-gray-200 rounded-xl bg-gray-50">
                                               <BarChart3 size={48} className="text-gray-300 mb-4"/>
                                               <p className="font-bold text-lg">ยังไม่มีข้อมูลสำหรับการวิเคราะห์</p>
-                                              <p className="text-sm">กรุณาบันทึกการจดมิเตอร์เพื่อดูแนวโน้มการใช้พลังงาน</p>
+                                              <p className="text-sm">ไม่พบประวัติการจดมิเตอร์ในเดือน {new Date(utilityAnalysisMonth + '-01').toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })}</p>
                                           </div>
                                       );
                                   }
