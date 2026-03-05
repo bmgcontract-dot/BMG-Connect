@@ -962,18 +962,12 @@ const TRANSLATIONS = {
 
 // --- Mock Data Generator & Initial Data ---
 const generateId = () => Math.random().toString(36).substr(2, 9);
-const INITIAL_USERS = [ { id: 'u1', username: 'admin', password: 'bosskim', firstName: 'Admin', lastName: 'Master', position: 'Super Admin', department: 'Head Office', projectId: null, status: 'Active', created_at: new Date().toISOString(), permissions: getFullPermissions() }, { id: 'u2', username: 'manager1', password: '123', firstName: 'Somsak', lastName: 'Jai dee', position: 'Building Manager', department: 'The Privacy Condo', projectId: 'p1', status: 'Active', created_at: new Date().toISOString() }, { id: 'u3', username: 'staff1', password: '123', firstName: 'Wichai', lastName: 'Khonngan', position: 'Technician', department: 'The Privacy Condo', projectId: 'p1', status: 'Active', created_at: new Date().toISOString() }, { id: 'u4', username: 'tech1', password: '123', firstName: 'Manop', lastName: 'Chang', position: 'Technician', department: 'Golden Village', projectId: 'p2', status: 'Active', created_at: new Date().toISOString() }, ];
-const INITIAL_PROJECTS = [ { id: 'p1', code: 'C-001', name: 'The Privacy Condo', type: 'Condo', address: 'Sukhumvit 101', phone: '02-111-2222', taxId: '1234567890123', contractStartDate: '2025-01-01', contractEndDate: '2025-12-31', contractValue: 150000, status: 'Active', logo: null }, { id: 'p2', code: 'V-001', name: 'Golden Village', type: 'Village', address: 'Bangna KM.7', phone: '02-333-4444', taxId: '9876543210987', contractStartDate: '2024-06-15', contractEndDate: '2026-06-14', contractValue: 85000, status: 'Active', logo: null }, ];
-const INITIAL_CONTRACTS = [ { id: 'ct1', projectId: 'p1', type: CONTRACT_TYPES.EXPENSE, category: 'งานด้านรักษาความปลอดภัย (Security)', vendorName: 'SafeGuard Security Ltd.', contactPerson: 'Mr. Somchai', contactPhone: '081-111-2222', startDate: '2025-01-01', endDate: '2025-12-31', amount: 100000, paymentCycle: 'Monthly', status: 'Active', fileUrl: 'contract_sec_2025.pdf' }, { id: 'ct2', projectId: 'p1', type: CONTRACT_TYPES.EXPENSE, category: 'งานด้านรักษาความสะอาด (Cleaning)', vendorName: 'Clean & Clear Service Co.', contactPerson: 'Ms. Yupin', contactPhone: '089-222-3333', startDate: '2025-01-01', endDate: '2025-12-31', amount: 80000, paymentCycle: 'Monthly', status: 'Active', fileUrl: 'contract_clean_2025.pdf' }, { id: 'ct3', projectId: 'p1', type: CONTRACT_TYPES.EXPENSE, category: 'งานด้านดูแลสวน (Gardening)', vendorName: 'Green Garden Supply', contactPerson: 'Mrs. Noi', contactPhone: '086-333-4444', startDate: '2024-06-01', endDate: '2025-05-31', amount: 30000, paymentCycle: 'Monthly', status: 'Expiring Soon', fileUrl: 'contract_garden.pdf' }, ];
+const INITIAL_USERS = [ { id: 'u1', username: 'admin', password: 'bosskim', firstName: 'Admin', lastName: 'Master', position: 'Super Admin', department: 'Head Office', projectId: null, status: 'Active', created_at: new Date().toISOString(), permissions: getFullPermissions() } ];
+const INITIAL_PROJECTS = [];
+const INITIAL_CONTRACTS = [];
 const INITIAL_ASSETS = []; 
-const INITIAL_MACHINES = [
-    { id: 'm1', projectId: 'p1', code: 'BMG-M-001', name: 'Main Pump A', system: 'ปั๊มน้ำดี (Booster Pump)', qty: 1, location: 'ชั้นดาดฟ้า', photo: null },
-    { id: 'm2', projectId: 'p1', code: 'BMG-M-002', name: 'Generator 500kVA', system: 'เครื่องกำเนิดไฟฟ้า (Generator)', qty: 1, location: 'ห้อง Generator', photo: null },
-];
-const INITIAL_PM_PLANS = [
-    { id: 'pmp1', projectId: 'p1', machineId: 'm1', frequency: 'Monthly', scheduleDetails: { date: '5' }, status: 'Active' },
-    { id: 'pmp2', projectId: 'p1', machineId: 'm2', frequency: 'Weekly', scheduleDetails: { dayOfWeek: '5' }, status: 'Active' }, // 5 = Friday
-];
+const INITIAL_MACHINES = [];
+const INITIAL_PM_PLANS = [];
 const INITIAL_PM_HISTORY = [];
 const INITIAL_REPAIRS = [];
 const INITIAL_OTHERS = [];
@@ -1076,16 +1070,16 @@ const INITIAL_COMPANY_INFO = {
 };
 
 // NEW: Initial data for Utilities
-const INITIAL_METERS = [
-  { id: 'mt1', projectId: 'p1', code: 'W-01', name: 'มิเตอร์น้ำประปา เมน', type: 'Water', lastReading: 1250, lastDate: '2026-01-20' },
-  { id: 'mt2', projectId: 'p1', code: 'E-01', name: 'มิเตอร์ไฟฟ้า เมน', type: 'Electricity', lastReading: 55400, lastDate: '2026-01-20' },
-];
-const INITIAL_READINGS = [
-    { id: 'rd1', meterId: 'mt1', date: '2026-01-20', value: 1250, prevValue: 1200, usage: 50, recorder: 'Admin Master' },
-    { id: 'rd2', meterId: 'mt2', date: '2026-01-20', value: 55400, prevValue: 54000, usage: 1400, recorder: 'Admin Master' },
-];
+const INITIAL_METERS = [];
+const INITIAL_READINGS = [];
 
-const INITIAL_DAILY_REPORTS = []; const INITIAL_AUDITS = [ { id: 'au1', projectId: 'p1', date: '2025-02-10', category: 'Safety Standards', score: 95, remarks: 'Excellent adherence to safety protocols.', inspector: 'Admin Master', fileUrl: 'audit_safety_feb.pdf' }, { id: 'au2', projectId: 'p1', date: '2025-02-10', category: 'Cleanliness', score: 78, remarks: 'Lobby area needs improved dusting.', inspector: 'Admin Master', fileUrl: 'audit_clean_feb.pdf' }, { id: 'au3', projectId: 'p2', date: '2025-02-12', category: 'Security Guards', score: 88, remarks: 'Guards are attentive but uniform needs check.', inspector: 'Admin Master', fileUrl: 'audit_sec_feb.pdf' }, ]; const INITIAL_TOOLS = []; const INITIAL_UTILITY_READINGS = []; const INITIAL_ACTION_PLANS = [ { id: 'ap1', projectId: 'p1', issue: 'Leaking pipe at 5th floor', details: 'เปลี่ยนซีลยางท่อน้ำทิ้ง', responsible: 'Wichai Khonngan (Technician)', startDate: '2025-02-10', deadline: '2025-02-15', status: 'Pending' }, { id: 'ap2', projectId: 'p1', issue: 'Security gate noise', details: 'หล่อลื่นบานพับและเช็คมอเตอร์', responsible: 'Manop Chang (Technician)', startDate: '2025-02-08', deadline: '2025-02-10', status: 'Completed' }, ]; const INITIAL_SCHEDULES = []; const INITIAL_CONTRACTORS = [ { id: 'c1', name: 'Clean & Clear Service Co.', type: 'Vendor', category: 'งานด้านรักษาความสะอาด (Cleaning)', contact: 'Ms. Yupin', phone: '081-555-6666', email: 'contact@clean.com', status: 'Active' }, { id: 'c2', name: 'SafeGuard Security Ltd.', type: 'Contractor', category: 'งานด้านรักษาความปลอดภัย (Security)', contact: 'Mr. Somchai', phone: '02-999-8888', email: 'sales@safeguard.com', status: 'Active' }, { id: 'c3', name: 'Elevator Maintenance Experts', type: 'Contractor', category: 'บำรุงรักษาลิฟต์ (Elevator Maintenance)', contact: 'Mr. David', phone: '089-111-2222', email: 'service@eme.com', status: 'Active' }, { id: 'c4', name: 'Green Garden Supply', type: 'Vendor', category: 'งานด้านดูแลสวน (Gardening)', contact: 'Mrs. Noi', phone: '086-333-4444', email: 'noi@greengarden.com', status: 'Inactive' }, ];
+const INITIAL_DAILY_REPORTS = []; 
+const INITIAL_AUDITS = []; 
+const INITIAL_TOOLS = []; 
+const INITIAL_UTILITY_READINGS = []; 
+const INITIAL_ACTION_PLANS = []; 
+const INITIAL_SCHEDULES = []; 
+const INITIAL_CONTRACTORS = [];
 
 // --- Helper for Image Processing (ปรับปรุงใหม่: ย่อขนาดและบีบอัดเพื่อป้องกันปัญหาพื้นที่ Local Storage เต็มและช่วยให้บันทึกภาพได้) ---
 const compressImage = (file) => {
@@ -1256,16 +1250,17 @@ function usePersistentState(key, initialValue, fbUser) {
         try {
           if (data.totalChunks !== undefined) {
               // ประกอบร่างข้อมูลจากหลายๆ Document (รองรับไฟล์ขนาด > 1MB)
-              let fullJson = '';
+              // ปรับปรุงใหม่: ใช้ Promise.all เพื่อดึงข้อมูลทุกก้อนพร้อมกัน (เร็วขึ้น 5-10 เท่า)
+              const chunkPromises = [];
               for (let i = 0; i < data.totalChunks; i++) {
                   const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
-                  const chunkSnap = await getDoc(chunkRef);
-                  if (chunkSnap.exists()) {
-                      fullJson += chunkSnap.data().chunk;
-                  }
+                  chunkPromises.push(getDoc(chunkRef));
               }
+              const chunkSnaps = await Promise.all(chunkPromises);
               
               if (thisFetchId !== currentFetchId) return; // ยกเลิกหากมีการอัปเดตใหม่กว่าเข้ามาแทรก
+              
+              const fullJson = chunkSnaps.map(snap => snap.exists() ? snap.data().chunk : '').join('');
               
               if (fullJson) {
                   const parsedData = JSON.parse(fullJson);
@@ -1301,36 +1296,41 @@ function usePersistentState(key, initialValue, fbUser) {
     setState(valueToStore);
     stateRef.current = valueToStore; // อัปเดต Ref ทันทีเพื่อให้คำสั่งถัดไปเห็นค่าใหม่
 
-    if (db && fbUser && appId) {
-       try {
-           const jsonStr = JSON.stringify(valueToStore);
-           // หั่นไฟล์ข้อมูลที่เกินขีดจำกัดออกเป็นก้อนๆ ขนาด 900KB (หลบเลี่ยงลิมิต 1MB ของ Firebase)
-           const CHUNK_SIZE = 900000; 
-           const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
-           
-           // บันทึกก้อนข้อมูลย่อย
-           for (let i = 0; i < totalChunks; i++) {
-               const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
-               const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-               await setDoc(chunkRef, { chunk: chunkData });
+    // ปรับปรุงใหม่: ใช้ setTimeout ผลักภาระการคำนวณ JSON ขนาดใหญ่ไปไว้คิวหลังสุด เพื่อไม่ให้หน้าจอค้าง
+    setTimeout(async () => {
+        if (db && fbUser && appId) {
+           try {
+               const jsonStr = JSON.stringify(valueToStore);
+               // หั่นไฟล์ข้อมูลที่เกินขีดจำกัดออกเป็นก้อนๆ ขนาด 900KB (หลบเลี่ยงลิมิต 1MB ของ Firebase)
+               const CHUNK_SIZE = 900000; 
+               const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
+               
+               // ปรับปรุงใหม่: บันทึกก้อนข้อมูลย่อยแบบขนาน (Concurrent) เพื่อลดเวลาการอัปโหลด
+               const uploadPromises = [];
+               for (let i = 0; i < totalChunks; i++) {
+                   const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
+                   const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+                   uploadPromises.push(setDoc(chunkRef, { chunk: chunkData }));
+               }
+               await Promise.all(uploadPromises);
+               
+               // บันทึกตัวหลักเป็น Metadata แจ้งจำนวน Chunk เพื่อ Trigger การซิงค์ไปเครื่องอื่น
+               const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
+               await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
+               
+           } catch(err) {
+               console.error("Firebase Storage Error:", err);
+               // alert(`⚠️ ข้อผิดพลาด: ไม่สามารถบันทึกข้อมูลออนไลน์ได้ (${err.message})`);
            }
-           
-           // บันทึกตัวหลักเป็น Metadata แจ้งจำนวน Chunk เพื่อ Trigger การซิงค์ไปเครื่องอื่น
-           const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
-           await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
-           
-       } catch(err) {
-           console.error("Firebase Storage Error:", err);
-           alert(`⚠️ ข้อผิดพลาด: ไม่สามารถบันทึกข้อมูลออนไลน์ได้ (${err.message})`);
-       }
-    } else if (!db && typeof window !== 'undefined') {
-       try {
-           localStorage.setItem(key, JSON.stringify(valueToStore));
-       } catch (err) {
-           console.error("Local Storage Error:", err);
-           alert(`พื้นที่จัดเก็บข้อมูลในเครื่องของคุณเต็ม (Local Storage)!\nระบบไม่สามารถบันทึกไฟล์ขนาดใหญ่ในโหมดออฟไลน์ได้`);
-       }
-    }
+        } else if (!db && typeof window !== 'undefined') {
+           try {
+               localStorage.setItem(key, JSON.stringify(valueToStore));
+           } catch (err) {
+               console.error("Local Storage Error:", err);
+               console.warn("พื้นที่จัดเก็บข้อมูลในเครื่องของคุณเต็ม (Local Storage)!");
+           }
+        }
+    }, 0);
   };
 
   return [state, setPersistentValue];
@@ -11925,77 +11925,65 @@ export default function App() {
                     <X size={24} />
                 </button>
 
-                <div id="print-pm-history-report" className={`space-y-6 bg-white ${isExporting ? 'w-[186mm] min-w-[186mm] max-w-[186mm] mx-auto box-border' : 'w-full'}`}>
+                <div id="print-pm-history-report" className={`bg-white ${isExporting ? 'w-[186mm] h-[255mm] min-w-[186mm] max-w-[186mm] mx-auto box-border flex flex-col p-[2mm] overflow-hidden' : 'space-y-6 w-full'}`}>
                     {/* Header */}
-                    <div className="text-center border-b pb-4 mb-6">
-                        <h2 className="text-2xl font-bold text-gray-800">รายงานผลการบำรุงรักษาเชิงป้องกัน (PM Report)</h2>
-                        <div className="flex justify-center gap-4 text-sm text-gray-500 mt-2">
+                    <div className={`text-center border-b border-gray-300 ${isExporting ? 'pb-2 mb-2 shrink-0' : 'pb-4 mb-6'}`}>
+                        <h2 className={`${isExporting ? 'text-lg' : 'text-2xl'} font-bold text-gray-800`}>รายงานผลการบำรุงรักษาเชิงป้องกัน (PM Report)</h2>
+                        <div className={`flex justify-center gap-4 text-gray-500 mt-1 ${isExporting ? 'text-[10px]' : 'text-sm'}`}>
                              <span>โครงการ: {projects.find(p => p.id === selectedPmHistory.projectId)?.name}</span>
                              <span>|</span>
-                             <span>วันที่กำหนด (Plan): {new Date(selectedPmHistory.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'})}</span>
+                             <span>วันที่กำหนด: {new Date(selectedPmHistory.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric'})}</span>
                              {selectedPmHistory.executedDate && selectedPmHistory.executedDate !== selectedPmHistory.date && (
                                  <>
                                      <span>|</span>
-                                     <span className="text-gray-700 font-bold">วันที่ทำจริง (Act): {new Date(selectedPmHistory.executedDate).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'})}</span>
+                                     <span className="text-gray-700 font-bold">วันที่ทำจริง: {new Date(selectedPmHistory.executedDate).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric'})}</span>
                                  </>
                              )}
                         </div>
                     </div>
 
                     {/* Machine Info */}
-                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-6 grid grid-cols-2 gap-4 text-sm">
+                    <div className={`bg-gray-50 rounded-lg border border-gray-200 grid grid-cols-2 ${isExporting ? 'p-2 mb-2 gap-2 text-[10px] shrink-0' : 'p-4 mb-6 gap-4 text-sm'}`}>
                         <div><span className="text-gray-500">รหัสเครื่องจักร:</span> <span className="font-bold font-mono text-gray-800">{selectedPmHistory.machineCode}</span></div>
                         <div><span className="text-gray-500">ชื่อเครื่องจักร:</span> <span className="font-bold text-gray-800">{selectedPmHistory.machineName}</span></div>
-                        <div className="flex items-center gap-2">
-                            <span className="text-gray-500">ระยะเวลาดำเนินการ:</span> 
+                        <div className="flex items-center gap-1.5">
+                            <span className="text-gray-500">ระยะเวลา:</span> 
                             {selectedPmHistory.executionTimingStatus ? (
-                                <span className={`px-2 py-0.5 rounded text-xs font-bold flex items-center gap-1 w-fit ${
+                                <span className={`px-1.5 py-0.5 rounded font-bold flex items-center gap-1 w-fit ${isExporting ? 'text-[9px]' : 'text-xs'} ${
                                     selectedPmHistory.executionTimingStatus === 'เร็วกว่าแผน' ? 'bg-blue-100 text-blue-700 border border-blue-200' :
                                     selectedPmHistory.executionTimingStatus === 'ช้ากว่าแผน' ? 'bg-red-100 text-red-700 border border-red-200' :
                                     'bg-green-100 text-green-700 border border-green-200'
                                 }`}>
-                                    {selectedPmHistory.executionTimingStatus === 'เร็วกว่าแผน' ? <ChevronLeft size={12}/> : selectedPmHistory.executionTimingStatus === 'ช้ากว่าแผน' ? <Clock size={12}/> : <CheckCircle size={12}/>}
+                                    {selectedPmHistory.executionTimingStatus === 'เร็วกว่าแผน' ? <ChevronLeft size={10}/> : selectedPmHistory.executionTimingStatus === 'ช้ากว่าแผน' ? <Clock size={10}/> : <CheckCircle size={10}/>}
                                     {selectedPmHistory.executionTimingStatus}
                                 </span>
                             ) : (
                                 <span className="text-gray-400">-</span>
                             )}
                         </div>
-                        <div className="flex items-center gap-2">
-                            <span className="text-gray-500">ผลการประเมินรวม:</span> 
+                        <div className="flex items-center gap-1.5">
+                            <span className="text-gray-500">ผลประเมินรวม:</span> 
                             {selectedPmHistory.status === 'Pass' ? (
-                                <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs font-bold flex items-center gap-1"><CheckCircle size={14}/> ผ่านเกณฑ์</span>
+                                <span className={`bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold flex items-center gap-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}><CheckCircle size={12}/> ผ่านเกณฑ์</span>
                             ) : (
-                                <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-bold flex items-center gap-1"><AlertTriangle size={14}/> พบปัญหา</span>
+                                <span className={`bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold flex items-center gap-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}><AlertTriangle size={12}/> พบปัญหา</span>
                             )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <span className="text-gray-500">สถานะอนุมัติ:</span> 
-                            {selectedPmHistory.approvalStatus === 'Approved' || !selectedPmHistory.approvalStatus ? (
-                                <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs font-bold">อนุมัติแล้ว</span>
-                            ) : selectedPmHistory.approvalStatus === 'Pending Chief' ? (
-                                <span className="bg-orange-100 text-orange-700 px-2 py-0.5 rounded text-xs font-bold">รอหัวหน้าช่างอนุมัติ</span>
-                            ) : selectedPmHistory.approvalStatus === 'Pending Manager' ? (
-                                <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-bold">รอผู้จัดการอนุมัติ</span>
-                            ) : selectedPmHistory.approvalStatus === 'Rejected' ? (
-                                <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-bold">ไม่อนุมัติ</span>
-                            ) : null}
                         </div>
                     </div>
 
                     {/* Checklist Results */}
-                    <div>
-                        <h3 className="font-bold text-gray-700 mb-3 text-sm flex items-center gap-2 border-b pb-2">
-                            <ClipboardCheck size={16}/> รายการตรวจสอบ (Inspection Results)
+                    <div className={`${isExporting ? 'shrink-0' : ''}`}>
+                        <h3 className={`font-bold text-gray-700 flex items-center gap-2 border-b border-gray-200 ${isExporting ? 'mb-1 pb-1 text-[11px]' : 'mb-3 pb-2 text-sm'}`}>
+                            <ClipboardCheck size={isExporting ? 14 : 16}/> รายการตรวจสอบ (Inspection Results)
                         </h3>
                         <div className={isExporting ? "w-full" : "overflow-x-auto"}>
-                            <table className="w-full text-sm border-collapse table-fixed break-words">
+                            <table className={`w-full border-collapse table-fixed break-words ${isExporting ? 'text-[10px]' : 'text-sm'}`}>
                                 <thead className="bg-gray-100 text-gray-600">
                                     <tr>
-                                        <th className="p-2 border border-gray-200 text-center w-10">#</th>
-                                        <th className="p-2 border border-gray-200 text-left">รายละเอียดการตรวจสอบ</th>
-                                        <th className="p-2 border border-gray-200 text-center w-24">ผลลัพธ์</th>
-                                        <th className="p-2 border border-gray-200 text-left w-[35%]">หมายเหตุ / ปัญหาที่พบ</th>
+                                        <th className={`border border-gray-200 text-center w-8 ${isExporting ? 'p-1' : 'p-2'}`}>#</th>
+                                        <th className={`border border-gray-200 text-left ${isExporting ? 'p-1' : 'p-2'}`}>รายละเอียดการตรวจสอบ</th>
+                                        <th className={`border border-gray-200 text-center w-20 ${isExporting ? 'p-1' : 'p-2'}`}>ผลลัพธ์</th>
+                                        <th className={`border border-gray-200 text-left w-[35%] ${isExporting ? 'p-1' : 'p-2'}`}>หมายเหตุ / ปัญหาที่พบ</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -12010,17 +11998,18 @@ export default function App() {
                                             const issue = selectedPmHistory.issues[key];
                                             
                                             let statusBadge;
-                                            if (answer === 'pass') statusBadge = <span className="text-green-600 font-bold flex items-center justify-center"><CheckCircle size={16} className="mr-1"/> ปกติ</span>;
-                                            else if (answer === 'fail') statusBadge = <span className="text-red-600 font-bold flex items-center justify-center"><XCircle size={16} className="mr-1"/> ผิดปกติ</span>;
+                                            const iconSize = isExporting ? 12 : 16;
+                                            if (answer === 'pass') statusBadge = <span className="text-green-600 font-bold flex items-center justify-center"><CheckCircle size={iconSize} className="mr-1"/> ปกติ</span>;
+                                            else if (answer === 'fail') statusBadge = <span className="text-red-600 font-bold flex items-center justify-center"><XCircle size={iconSize} className="mr-1"/> ผิดปกติ</span>;
                                             else if (answer === 'na') statusBadge = <span className="text-gray-400 font-medium">N/A</span>;
                                             else statusBadge = <span className="text-gray-300">-</span>;
 
                                             return (
                                                 <tr key={idx}>
-                                                    <td className="p-2 border border-gray-200 text-center text-gray-500 font-medium">{idx + 1}</td>
-                                                    <td className="p-2 border border-gray-200 text-gray-800 break-words whitespace-normal">{item}</td>
-                                                    <td className="p-2 border border-gray-200 text-center">{statusBadge}</td>
-                                                    <td className={`p-2 border border-gray-200 text-xs break-words whitespace-normal ${answer === 'fail' ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
+                                                    <td className={`border border-gray-200 text-center text-gray-500 font-medium ${isExporting ? 'p-0.5' : 'p-2'}`}>{idx + 1}</td>
+                                                    <td className={`border border-gray-200 text-gray-800 break-words whitespace-normal leading-tight ${isExporting ? 'p-0.5 px-1' : 'p-2'}`}>{item}</td>
+                                                    <td className={`border border-gray-200 text-center ${isExporting ? 'p-0.5' : 'p-2'}`}>{statusBadge}</td>
+                                                    <td className={`border border-gray-200 break-words whitespace-normal leading-tight ${isExporting ? 'p-0.5 px-1 text-[9px]' : 'p-2 text-xs'} ${answer === 'fail' ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
                                                         {issue || '-'}
                                                     </td>
                                                 </tr>
@@ -12033,69 +12022,88 @@ export default function App() {
                     </div>
 
                     {/* Summary & Remarks */}
-                    <div className="pt-4">
-                        <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-                             <h3 className="font-bold text-yellow-800 mb-1 text-sm flex items-center gap-1"><PenTool size={14}/> สรุปผล / ข้อเสนอแนะ</h3>
-                             <p className="text-xs text-gray-700 whitespace-pre-wrap">{selectedPmHistory.remark || 'ไม่มีข้อเสนอแนะเพิ่มเติม'}</p>
+                    <div className={`${isExporting ? 'pt-2 shrink-0' : 'pt-4'}`}>
+                        <div className={`bg-yellow-50 rounded-lg border border-yellow-200 ${isExporting ? 'p-2' : 'p-4'}`}>
+                             <h3 className={`font-bold text-yellow-800 flex items-center gap-1 ${isExporting ? 'mb-0.5 text-[10px]' : 'mb-1 text-sm'}`}><PenTool size={14}/> สรุปผล / ข้อเสนอแนะ</h3>
+                             <p className={`text-gray-700 whitespace-pre-wrap line-clamp-3 ${isExporting ? 'text-[9px]' : 'text-xs'}`}>{selectedPmHistory.remark || 'ไม่มีข้อเสนอแนะเพิ่มเติม'}</p>
                         </div>
                     </div>
                     
                     {/* Photos */}
                     {selectedPmHistory.images && selectedPmHistory.images.length > 0 && (
-                        <div className="pt-4">
-                            <h3 className="font-bold text-gray-700 mb-3 text-sm flex items-center gap-2 border-b pb-2">
-                                <Camera size={16}/> ภาพถ่ายประกอบการตรวจสอบ
+                        <div className={`${isExporting ? 'pt-2 shrink-0' : 'pt-4'}`}>
+                            <h3 className={`font-bold text-gray-700 flex items-center gap-2 border-b border-gray-200 ${isExporting ? 'mb-1 pb-1 text-[11px]' : 'mb-3 pb-2 text-sm'}`}>
+                                <Camera size={isExporting ? 14 : 16}/> ภาพถ่ายประกอบการตรวจสอบ
                             </h3>
                             <div className="flex flex-wrap gap-2">
                                 {selectedPmHistory.images.map((img, idx) => (
-                                    <div key={idx} className="w-32 h-32 rounded-lg border border-gray-200 overflow-hidden shadow-sm">
+                                    <div key={idx} className={`relative rounded-lg border border-gray-200 overflow-hidden shadow-sm group ${isExporting ? 'w-20 h-20' : 'w-32 h-32'}`}>
                                         <img src={img} alt="PM Evidence" className="w-full h-full object-cover" />
+                                        
+                                        {/* ปุ่มดาวน์โหลดรูปภาพ */}
+                                        <div className={`absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-[1px] ${isExporting ? 'hidden' : ''}`}>
+                                            <button 
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    const a = document.createElement('a');
+                                                    a.href = img;
+                                                    a.download = `PM_${selectedPmHistory.machineCode}_img${idx+1}.jpg`;
+                                                    document.body.appendChild(a);
+                                                    a.click();
+                                                    document.body.removeChild(a);
+                                                }}
+                                                className="bg-white text-gray-800 hover:text-blue-600 p-2.5 rounded-full shadow-lg transform transition-transform hover:scale-110 flex items-center justify-center"
+                                                title="ดาวน์โหลดรูปภาพนี้"
+                                            >
+                                                <Download size={18} />
+                                            </button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
                         </div>
                     )}
 
-                    {/* Signatures Area */}
-                    <div className="flex justify-between px-4 pt-16 pb-4 mt-6 border-t border-gray-300 gap-4 flex-wrap">
-                        <div className="text-center w-48">
-                            <div className="border-b border-gray-400 mb-2 h-8 text-blue-800 font-serif italic flex items-end justify-center pb-1">
+                    {/* Signatures Area - Pinned to bottom when exporting */}
+                    <div className={`flex justify-between border-t border-gray-300 flex-wrap ${isExporting ? 'px-2 pt-4 pb-0 mt-auto shrink-0' : 'px-4 pt-16 pb-4 mt-6 gap-4'}`}>
+                        <div className={`text-center ${isExporting ? 'w-32' : 'w-48'}`}>
+                            <div className={`border-b border-gray-400 text-blue-800 font-serif italic flex items-end justify-center pb-1 ${isExporting ? 'mb-1 h-6 text-sm' : 'mb-2 h-8 text-base'}`}>
                                 {selectedPmHistory.inspector}
                             </div>
-                            <div className="text-xs font-bold text-gray-800 mt-1">ผู้ตรวจสอบ (Inspector)</div>
-                            <div className="text-[10px] text-gray-500 mt-1">{new Date(selectedPmHistory.date).toLocaleDateString('th-TH')}</div>
+                            <div className={`font-bold text-gray-800 mt-1 ${isExporting ? 'text-[10px]' : 'text-xs'}`}>ผู้ตรวจสอบ (Inspector)</div>
+                            <div className={`text-gray-500 mt-0.5 ${isExporting ? 'text-[8px]' : 'text-[10px]'}`}>{new Date(selectedPmHistory.date).toLocaleDateString('th-TH')}</div>
                         </div>
 
                         {/* Map Dynamic Approvals */}
                         {selectedPmHistory.approvals && selectedPmHistory.approvals.map((app, idx) => (
-                             <div className="text-center w-48" key={idx}>
-                                <div className="border-b border-gray-400 mb-2 h-8 text-blue-800 font-serif italic flex items-end justify-center pb-1 relative">
-                                    {app.action === 'Rejected' && <span className="absolute -top-4 right-0 text-red-500 font-sans font-bold border-2 border-red-500 rounded px-1.5 py-0.5 transform rotate-12 text-xs">ไม่อนุมัติ</span>}
-                                    {app.action === 'Approved' && <span className="absolute -top-4 right-0 text-green-500 font-sans font-bold border-2 border-green-500 rounded px-1.5 py-0.5 transform rotate-12 text-xs">อนุมัติแล้ว</span>}
+                             <div className={`text-center ${isExporting ? 'w-32' : 'w-48'}`} key={idx}>
+                                <div className={`border-b border-gray-400 text-blue-800 font-serif italic flex items-end justify-center pb-1 relative ${isExporting ? 'mb-1 h-6 text-sm' : 'mb-2 h-8 text-base'}`}>
+                                    {app.action === 'Rejected' && <span className="absolute -top-4 right-0 text-red-500 font-sans font-bold border-2 border-red-500 rounded px-1.5 py-0.5 transform rotate-12 text-[9px]">ไม่อนุมัติ</span>}
+                                    {app.action === 'Approved' && <span className="absolute -top-4 right-0 text-green-500 font-sans font-bold border-2 border-green-500 rounded px-1.5 py-0.5 transform rotate-12 text-[9px]">อนุมัติแล้ว</span>}
                                     {app.approver}
                                 </div>
-                                <div className="text-xs font-bold text-gray-800 mt-1 truncate px-2" title={app.role}>{app.role}</div>
-                                <div className="text-[10px] text-gray-500 mt-1">{new Date(app.date).toLocaleDateString('th-TH')}</div>
+                                <div className={`font-bold text-gray-800 mt-1 truncate px-1 ${isExporting ? 'text-[10px]' : 'text-xs'}`} title={app.role}>{app.role}</div>
+                                <div className={`text-gray-500 mt-0.5 ${isExporting ? 'text-[8px]' : 'text-[10px]'}`}>{new Date(app.date).toLocaleDateString('th-TH')}</div>
                             </div>
                         ))}
                         
                         {/* Placeholder for Pending Approvals */}
                         {selectedPmHistory.approvalStatus === 'Pending Chief' && (
-                            <div className="text-center w-48 opacity-50">
-                                <div className="border-b border-gray-400 mb-2 h-8"></div>
-                                <div className="text-xs font-bold text-gray-800 mt-1">หัวหน้าช่าง (Chief)</div>
+                            <div className={`text-center opacity-50 ${isExporting ? 'w-32' : 'w-48'}`}>
+                                <div className={`border-b border-gray-400 ${isExporting ? 'mb-1 h-6' : 'mb-2 h-8'}`}></div>
+                                <div className={`font-bold text-gray-800 mt-1 ${isExporting ? 'text-[10px]' : 'text-xs'}`}>หัวหน้าช่าง (Chief)</div>
                             </div>
                         )}
                         {(selectedPmHistory.approvalStatus === 'Pending Manager' || selectedPmHistory.approvalStatus === 'Pending Chief') && (
-                            <div className="text-center w-48 opacity-50">
-                                <div className="border-b border-gray-400 mb-2 h-8"></div>
-                                <div className="text-xs font-bold text-gray-800 mt-1">ผู้จัดการ (Manager)</div>
+                            <div className={`text-center opacity-50 ${isExporting ? 'w-32' : 'w-48'}`}>
+                                <div className={`border-b border-gray-400 ${isExporting ? 'mb-1 h-6' : 'mb-2 h-8'}`}></div>
+                                <div className={`font-bold text-gray-800 mt-1 ${isExporting ? 'text-[10px]' : 'text-xs'}`}>ผู้จัดการ (Manager)</div>
                             </div>
                         )}
                     </div>
                     
                     {/* Footer Info */}
-                    <div className="flex justify-between items-end mt-4 pt-4 border-t text-[10px] text-gray-400">
+                    <div className={`flex justify-between items-end border-t text-gray-400 ${isExporting ? 'mt-2 pt-1 text-[8px] shrink-0' : 'mt-4 pt-4 text-[10px]'}`}>
                         <div>Ref ID: {selectedPmHistory.id}</div>
                         <div>Generated by Best Million Group System</div>
                     </div>
