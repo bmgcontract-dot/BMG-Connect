@@ -5050,15 +5050,16 @@ export default function App() {
                       
                       // เช็คเฉพาะฟิลด์บังคับ คือ username และ firstName
                       if (userObj.username && userObj.firstName) {
+                          const finalUsername = userObj.username;
                           newUsers.push({
                               id: generateId(),
-                              employeeId: userObj.employeeId || '',
+                              employeeId: finalUsername, // บังคับให้รหัสพนักงานเป็นค่าเดียวกับชื่อผู้ใช้งาน
                               firstName: userObj.firstName || '',
                               lastName: userObj.lastName || '',
                               position: userObj.position || EMPLOYEE_POSITIONS[0], // ค่าเริ่มต้น
                               department: userObj.department || 'Head Office',
                               phone: userObj.phone || '',
-                              username: userObj.username,
+                              username: finalUsername, // บังคับให้ชื่อผู้ใช้งานเป็นค่าเดียวกับรหัสพนักงาน
                               password: userObj.password || '1234', // รหัสผ่านตั้งต้นถ้าไม่ได้ใส่มา
                               status: 'Active',
                               created_at: new Date().toISOString(),
@@ -10256,13 +10257,34 @@ export default function App() {
                 </div>
                 <div className="flex-1 space-y-4">
                   <h3 className="text-lg font-semibold text-gray-700 border-b pb-2">{t('personalInfo')}</h3>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">{t('empId')}</label><input type="text" className={`w-full border rounded-md p-2 ${isEditingUser ? 'bg-gray-100 cursor-not-allowed text-gray-500' : ''}`} value={newUser.employeeId} onChange={e => setNewUser({...newUser, employeeId: e.target.value})} placeholder="e.g., EMP-001" disabled={isEditingUser} /></div>
-                  <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-medium text-gray-700 mb-1">{t('firstName')}</label><input type="text" required className="w-full border rounded-md p-2" value={newUser.firstName} onChange={e => setNewUser({...newUser, firstName: e.target.value})} /></div><div><label className="block text-sm font-medium text-gray-700 mb-1">{t('lastName')}</label><input type="text" required className="w-full border rounded-md p-2" value={newUser.lastName} onChange={e => setNewUser({...newUser, lastName: e.target.value})} /></div></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">{t('phone')}</label><input type="tel" className="w-full border rounded-md p-2" value={newUser.phone} onChange={e => setNewUser({...newUser, phone: e.target.value})} /></div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div><label className="block text-sm font-medium text-gray-700 mb-1">{t('username')}</label><input type="text" required className="w-full border rounded-md p-2" value={newUser.username} onChange={e => setNewUser({...newUser, username: e.target.value})} /></div>
-                    <div><label className="block text-sm font-medium text-gray-700 mb-1">{t('password')}</label><input type="text" required className="w-full border rounded-md p-2" value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} /></div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">{t('empId')} / {t('username')}</label>
+                          <input 
+                              type="text" 
+                              required 
+                              className={`w-full border rounded-md p-2 ${isEditingUser && currentUser?.username !== 'admin' ? 'bg-gray-100 cursor-not-allowed text-gray-500' : ''}`} 
+                              value={newUser.employeeId} 
+                              onChange={e => {
+                                  const val = e.target.value;
+                                  setNewUser({...newUser, employeeId: val, username: val});
+                              }} 
+                              placeholder="รหัสพนักงาน (ใช้เป็นชื่อเข้าระบบ)" 
+                              disabled={isEditingUser && currentUser?.username !== 'admin'} 
+                          />
+                      </div>
+                      <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">{t('password')}</label>
+                          <input type="text" required className="w-full border rounded-md p-2" value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} />
+                      </div>
                   </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                      <div><label className="block text-sm font-medium text-gray-700 mb-1">{t('firstName')}</label><input type="text" required className="w-full border rounded-md p-2" value={newUser.firstName} onChange={e => setNewUser({...newUser, firstName: e.target.value})} /></div>
+                      <div><label className="block text-sm font-medium text-gray-700 mb-1">{t('lastName')}</label><input type="text" required className="w-full border rounded-md p-2" value={newUser.lastName} onChange={e => setNewUser({...newUser, lastName: e.target.value})} /></div>
+                  </div>
+                  <div><label className="block text-sm font-medium text-gray-700 mb-1">{t('phone')}</label><input type="tel" className="w-full border rounded-md p-2" value={newUser.phone} onChange={e => setNewUser({...newUser, phone: e.target.value})} /></div>
                 </div>
               </div>
               <div className="space-y-4">
