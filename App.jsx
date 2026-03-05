@@ -5259,7 +5259,7 @@ export default function App() {
                                       </td>
                                       <td className={`p-4 text-center space-x-1 ${isExporting ? 'hidden' : ''}`}>
                                           {hasPerm('users', 'edit') && <button className="text-gray-400 hover:text-blue-600 transition-colors p-1.5 rounded-md hover:bg-blue-50" onClick={(e) => { e.stopPropagation(); handleEditUser(user); }} title="แก้ไขข้อมูล"><Edit size={16} /></button>}
-                                          {hasPerm('users', 'delete') && <button className="text-gray-400 hover:text-red-600 transition-colors p-1.5 rounded-md hover:bg-red-50" onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบผู้ใช้งาน ${user.firstName} ${user.lastName} ใช่หรือไม่?`, () => setUsers(users.filter(u => u.id !== user.id))); }} title="ลบข้อมูล"><Trash2 size={16} /></button>}
+                                          {hasPerm('users', 'delete') && <button className="text-gray-400 hover:text-red-600 transition-colors p-1.5 rounded-md hover:bg-red-50" onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบผู้ใช้งาน ${user.firstName} ${user.lastName} ใช่หรือไม่?`, () => setUsers(prev => prev.filter(u => u.id !== user.id))); }} title="ลบข้อมูล"><Trash2 size={16} /></button>}
                                       </td>
                                   </tr>
                               )) : (
@@ -5357,7 +5357,7 @@ export default function App() {
                                   </div>
                                   <div className="flex justify-between items-center mb-1">
                                       <h3 className="text-lg font-bold text-gray-800 truncate pr-2">{project.name}</h3>
-                                      <div className="flex gap-1">
+                                          <div className="flex gap-1">
                                           {hasPerm('projects', 'edit') && (
                                               <button 
                                                   onClick={(e) => { 
@@ -5377,7 +5377,7 @@ export default function App() {
                                                   onClick={(e) => { 
                                                       e.stopPropagation(); 
                                                       showConfirm('ยืนยันการลบ', `คุณต้องการลบข้อมูลโครงการ/หน่วยงาน ${project.name} ใช่หรือไม่?`, () => {
-                                                          setProjects(projects.filter(p => p.id !== project.id));
+                                                          setProjects(prev => prev.filter(p => p.id !== project.id));
                                                           if(selectedProject?.id === project.id) setSelectedProject(null);
                                                       });
                                                   }} 
@@ -5453,7 +5453,7 @@ export default function App() {
                                               <td className="p-4 text-center"><Badge status={project.status} /></td>
                                               <td className={`p-4 text-center space-x-1 ${isExporting ? 'hidden' : ''}`} onClick={(e) => e.stopPropagation()}>
                                                   {hasPerm('projects', 'edit') && <button className="text-gray-400 hover:text-orange-600 transition-colors p-1.5 rounded-md hover:bg-orange-50" onClick={() => { setNewProject({ files: { orchor: null, committee: null, regulations: null, resident_rules: null }, ...project }); setIsEditingProject(true); setShowAddProjectModal(true); }} title="แก้ไขข้อมูล"><Edit size={16} /></button>}
-                                                  {hasPerm('projects', 'delete') && <button className="text-gray-400 hover:text-red-600 transition-colors p-1.5 rounded-md hover:bg-red-50" onClick={() => { showConfirm('ยืนยันการลบ', `คุณต้องการลบข้อมูลโครงการ/หน่วยงาน ${project.name} ใช่หรือไม่?`, () => { setProjects(projects.filter(p => p.id !== project.id)); if(selectedProject?.id === project.id) setSelectedProject(null); }); }} title="ลบข้อมูลหน่วยงาน"><Trash2 size={16} /></button>}
+                                                  {hasPerm('projects', 'delete') && <button className="text-gray-400 hover:text-red-600 transition-colors p-1.5 rounded-md hover:bg-red-50" onClick={() => { showConfirm('ยืนยันการลบ', `คุณต้องการลบข้อมูลโครงการ/หน่วยงาน ${project.name} ใช่หรือไม่?`, () => { setProjects(prev => prev.filter(p => p.id !== project.id)); if(selectedProject?.id === project.id) setSelectedProject(null); }); }} title="ลบข้อมูลหน่วยงาน"><Trash2 size={16} /></button>}
                                               </td>
                                           </tr>
                                       );
@@ -5582,7 +5582,7 @@ export default function App() {
                                                   {hasPerm('audits', 'delete') && (
                                                       <button 
                                                           className="text-gray-400 hover:text-red-600 transition-colors p-1" 
-                                                          onClick={() => showConfirm('ยืนยันการลบ', 'คุณต้องการลบรายงานผลการตรวจสอบนี้ใช่หรือไม่?', () => setAudits(audits.filter(a => a.id !== audit.id)))}
+                                                          onClick={() => showConfirm('ยืนยันการลบ', 'คุณต้องการลบรายงานผลการตรวจสอบนี้ใช่หรือไม่?', () => setAudits(prev => prev.filter(a => a.id !== audit.id)))}
                                                           title="ลบรายงาน"
                                                       >
                                                           <Trash2 size={18} />
@@ -5754,7 +5754,7 @@ export default function App() {
                                           <td className={`p-4 text-center ${isExporting ? 'hidden' : ''}`}>
                                               {hasPerm('proj_contractors', 'delete') && !c.isAuto && (
                                                   <button 
-                                                      onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบซัพพลายเออร์ ${c.name} ใช่หรือไม่?`, () => setContractors(contractors.filter(con => con.id !== c.id))); }}
+                                                      onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบซัพพลายเออร์ ${c.name} ใช่หรือไม่?`, () => setContractors(prev => prev.filter(con => con.id !== c.id))); }}
                                                       className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
                                                       title="ลบข้อมูล"
                                                   >
@@ -6462,7 +6462,7 @@ export default function App() {
                                                     )}
                                                     {hasPerm('proj_contracts', 'delete') && (
                                                         <button 
-                                                            onClick={() => showConfirm('ยืนยันการลบ', `คุณต้องการลบสัญญา ${c.vendorName} ใช่หรือไม่?`, () => setContracts(contracts.filter(contract => contract.id !== c.id)))}
+                                                            onClick={() => showConfirm('ยืนยันการลบ', `คุณต้องการลบสัญญา ${c.vendorName} ใช่หรือไม่?`, () => setContracts(prev => prev.filter(contract => contract.id !== c.id)))}
                                                             className="text-red-500 hover:text-red-700 p-1.5 bg-red-50 hover:bg-red-100 rounded-md transition-colors"
                                                             title="ลบสัญญา"
                                                         >
@@ -6988,7 +6988,7 @@ export default function App() {
                                                 )}
                                                 {hasPerm('proj_assets', 'delete') && (
                                                     <button 
-                                                        onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบทรัพย์สิน ${asset.name} ใช่หรือไม่?`, () => setAssets(assets.filter(a => a.id !== asset.id))); }}
+                                                        onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบทรัพย์สิน ${asset.name} ใช่หรือไม่?`, () => setAssets(prev => prev.filter(a => a.id !== asset.id))); }}
                                                         className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
                                                         title="ลบทรัพย์สิน"
                                                     >
@@ -7068,7 +7068,7 @@ export default function App() {
                                                 )}
                                                 {hasPerm('proj_tools', 'delete') && (
                                                     <button 
-                                                        onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบเครื่องมือช่าง ${tool.name} ใช่หรือไม่?`, () => setTools(tools.filter(t => t.id !== tool.id))); }}
+                                                        onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบเครื่องมือช่าง ${tool.name} ใช่หรือไม่?`, () => setTools(prev => prev.filter(t => t.id !== tool.id))); }}
                                                         className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
                                                         title="ลบเครื่องมือ"
                                                     >
@@ -7541,7 +7541,7 @@ export default function App() {
                                                         )}
                                                         {hasPerm('proj_pm', 'delete') && (
                                                             <button 
-                                                                onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบเครื่องจักร ${machine.name} ใช่หรือไม่?`, () => setMachines(machines.filter(m => m.id !== machine.id))); }}
+                                                                onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบเครื่องจักร ${machine.name} ใช่หรือไม่?`, () => setMachines(prev => prev.filter(m => m.id !== machine.id))); }}
                                                                 className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
                                                                 title="ลบเครื่องจักร"
                                                             >
@@ -7633,7 +7633,7 @@ export default function App() {
                                                         <div className="flex justify-center items-center gap-1">
                                                             {hasPerm('proj_pm', 'delete') && (
                                                                 <button 
-                                                                    onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบแผน PM สำหรับเครื่องจักรนี้ใช่หรือไม่?`, () => setPmPlans(pmPlans.filter(p => p.id !== plan.id))); }}
+                                                                    onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบแผน PM สำหรับเครื่องจักรนี้ใช่หรือไม่?`, () => setPmPlans(prev => prev.filter(p => p.id !== plan.id))); }}
                                                                     className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
                                                                     title="ลบแผนงาน"
                                                                 >
@@ -8681,7 +8681,7 @@ export default function App() {
                                               </td>
                                               <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`}>
                                                   <div className="flex justify-center items-center gap-1">
-                                                      {hasPerm('proj_repair', 'edit') && (
+                                                              {hasPerm('proj_repair', 'edit') && (
                                                           <button 
                                                               onClick={(e) => { e.stopPropagation(); handleEditRepair(rep); }}
                                                               className="text-gray-400 hover:text-blue-600 p-1.5 rounded-md hover:bg-blue-50 transition-colors"
@@ -8692,7 +8692,7 @@ export default function App() {
                                                       )}
                                                       {hasPerm('proj_repair', 'delete') && (
                                                           <button 
-                                                              onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบรายการแจ้งซ่อม ${rep.code} ใช่หรือไม่?`, () => setRepairs(repairs.filter(r => r.id !== rep.id))); }}
+                                                              onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบรายการแจ้งซ่อม ${rep.code} ใช่หรือไม่?`, () => setRepairs(prev => prev.filter(r => r.id !== rep.id))); }}
                                                               className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
                                                               title="ลบรายการ"
                                                           >
@@ -8973,7 +8973,7 @@ export default function App() {
                                               <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`}>
                                                   {hasPerm('proj_action', 'delete') && (
                                                       <button 
-                                                          onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบรายการ Action Plan นี้ใช่หรือไม่?`, () => setActionPlans(actionPlans.filter(a => a.id !== ap.id))); }}
+                                                          onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบรายการ Action Plan นี้ใช่หรือไม่?`, () => setActionPlans(prev => prev.filter(a => a.id !== ap.id))); }}
                                                           className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
                                                           title="ลบรายการ"
                                                       >
@@ -9105,7 +9105,7 @@ export default function App() {
                                           <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`}>
                                               {hasPerm('proj_audit', 'delete') && (
                                                   <button 
-                                                      onClick={() => showConfirm('ยืนยันการลบ', 'คุณต้องการลบรายงานผลการตรวจสอบนี้ใช่หรือไม่?', () => setAudits(audits.filter(a => a.id !== audit.id)))}
+                                                      onClick={() => showConfirm('ยืนยันการลบ', 'คุณต้องการลบรายงานผลการตรวจสอบนี้ใช่หรือไม่?', () => setAudits(prev => prev.filter(a => a.id !== audit.id)))}
                                                       className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
                                                       title="ลบรายงาน"
                                                   >
@@ -9167,7 +9167,7 @@ export default function App() {
                                                       </button>
                                                   )}
                                                   {hasPerm('proj_forms', 'delete') && (
-                                                      <button className="bg-white p-1.5 rounded-md shadow-sm border border-gray-200 text-gray-400 hover:text-red-600 hover:border-red-300 transition-colors" onClick={() => showConfirm('ยืนยันการลบ', `คุณต้องการลบแบบฟอร์ม "${form.name}" ใช่หรือไม่?`, () => setFormsList(formsList.filter(f => f.id !== form.id)))} title="ลบแบบฟอร์ม">
+                                                      <button className="bg-white p-1.5 rounded-md shadow-sm border border-gray-200 text-gray-400 hover:text-red-600 hover:border-red-300 transition-colors" onClick={() => showConfirm('ยืนยันการลบ', `คุณต้องการลบแบบฟอร์ม "${form.name}" ใช่หรือไม่?`, () => setFormsList(prev => prev.filter(f => f.id !== form.id)))} title="ลบแบบฟอร์ม">
                                                           <Trash2 size={14} />
                                                       </button>
                                                   )}
@@ -9271,7 +9271,7 @@ export default function App() {
                                                       )}
                                                       {hasPerm('proj_others', 'delete') && (
                                                           <button 
-                                                              onClick={() => showConfirm('ยืนยันการลบ', `คุณต้องการลบข้อมูลหัวข้อ "${item.title}" ใช่หรือไม่?`, () => setOthersData(othersData.filter(o => o.id !== item.id)))}
+                                                              onClick={() => showConfirm('ยืนยันการลบ', `คุณต้องการลบข้อมูลหัวข้อ "${item.title}" ใช่หรือไม่?`, () => setOthersData(prev => prev.filter(o => o.id !== item.id)))}
                                                               className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
                                                               title="ลบข้อมูล"
                                                           >
