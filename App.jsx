@@ -2801,6 +2801,55 @@ export default function App() {
       }
   }; 
   
+  // --- NEW: Helper Function สำหรับสร้างรูปภาพ (JPEG) ---
+  const handleExportImage = async (elementId = 'print-area', filename = 'document.jpg') => { 
+      if (!window.htmlToImage) { 
+          alert("ระบบกำลังโหลดเครื่องมือสร้างรูปภาพ กรุณารอสักครู่แล้วกดอีกครั้ง..."); 
+          return; 
+      } 
+      setIsExporting(true); 
+      
+      try {
+          await document.fonts.ready;
+          
+          setTimeout(async () => { 
+              const element = document.getElementById(elementId); 
+              if(!element) { 
+                  alert(`เกิดข้อผิดพลาด: ไม่พบส่วนที่ต้องการพิมพ์ (Element ID: ${elementId})`);
+                  setIsExporting(false); 
+                  return; 
+              }
+              
+              try {
+                  // ใช้ htmlToImage เพื่อสร้างรูปภาพ
+                  const dataUrl = await window.htmlToImage.toJpeg(element, {
+                      quality: 1.0,
+                      pixelRatio: 2, // เพิ่มความคมชัดเป็น 2 เท่า
+                      backgroundColor: '#ffffff',
+                      style: { transform: 'none', transformOrigin: 'top left' }
+                  });
+
+                  // สั่งดาวน์โหลด
+                  const a = document.createElement('a');
+                  a.href = dataUrl;
+                  a.download = filename;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  
+                  setIsExporting(false);
+              } catch (err) {
+                  console.error("Image Engine Error:", err);
+                  alert("เกิดข้อผิดพลาดระหว่างการสร้างรูปภาพ");
+                  setIsExporting(false);
+              }
+          }, 800); // ดีเลย์เพื่อซ่อน UI ปุ่มต่างๆ ก่อนแคปหน้าจอ
+      } catch (err) {
+          console.error(err);
+          setIsExporting(false);
+      }
+  }; 
+  
   // ซ่อน Header แบบเก่าใน HTML เพื่อไม่ให้ซ้ำซ้อนกับ Header ใหม่ที่แสตมป์เข้าไปใน PDF ทุกหน้า
   const ReportHeader = () => { return null; };
 
@@ -12125,6 +12174,13 @@ export default function App() {
                     </div>
                     <div className="flex gap-2">
                         <Button variant="secondary" onClick={() => setSelectedPmHistory(null)}>{t('close')}</Button>
+                        <Button variant="outline" icon={ImageIcon} onClick={() => {
+                            const modalContainer = document.getElementById('pm-history-modal-container');
+                            if (modalContainer) modalContainer.scrollTop = 0;
+                            setTimeout(() => handleExportImage('print-pm-history-report', `PM_Report_${selectedPmHistory.machineCode}.jpg`), 100);
+                        }} disabled={isExporting} className="border-blue-500 text-blue-600 hover:bg-blue-50">
+                            {isExporting ? 'กำลังโหลด...' : 'ดาวน์โหลดรูปภาพ'}
+                        </Button>
                         <Button icon={Printer} onClick={() => {
                             const modalContainer = document.getElementById('pm-history-modal-container');
                             if (modalContainer) modalContainer.scrollTop = 0;
