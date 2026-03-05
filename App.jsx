@@ -7229,10 +7229,10 @@ export default function App() {
                               </Card>
 
                               {/* History Card (Merged) */}
-                              <Card className="border-t-4 border-gray-600 mt-6">
+                              <Card id="print-pm-history-area" className="border-t-4 border-gray-600 mt-6">
                                   <div className="p-4 border-b flex justify-between items-center bg-white">
                                       <h3 className="font-bold flex items-center gap-2 text-gray-800"><History size={20}/> ประวัติการบำรุงรักษา (PM History)</h3>
-                                      <div className="flex gap-2">
+                                      <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
                                           <Button variant="outline" size="sm" icon={Download} onClick={() => {
                                               const filteredToExport = pmHistoryList.filter(h => {
                                                   if (h.projectId !== selectedProject.id) return false;
@@ -7247,6 +7247,15 @@ export default function App() {
                                               });
                                               exportToCSV(filteredToExport, 'pm_history_list');
                                           }}>{t('exportCSV')}</Button>
+                                          <Button 
+                                              variant="outline" 
+                                              size="sm" 
+                                              icon={isExporting ? Loader2 : PrinterIcon} 
+                                              onClick={() => handleExportPDF('print-pm-history-area', `PM_History_${selectedProject?.code || 'List'}.pdf`, 'landscape')} 
+                                              disabled={isExporting}
+                                          >
+                                              {isExporting ? t('downloading') : t('downloadPDF')}
+                                          </Button>
                                       </div>
                                   </div>
                                   
@@ -7304,7 +7313,7 @@ export default function App() {
                                       </div>
                                   </div>
 
-                                  <div className="overflow-x-auto">
+                                  <div className={isExporting ? "pb-4" : "overflow-x-auto"}>
                                       <table className="w-full text-sm">
                                           <thead className="bg-gray-100 text-gray-700 uppercase">
                                               <tr>
