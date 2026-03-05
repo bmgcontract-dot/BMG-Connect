@@ -405,6 +405,16 @@ const getFullPermissions = () => {
     return perms;
 };
 
+// --- NEW: Helper Function เพื่อป้องกันปัญหา Object Reference ซ้อนทับ และเติมเมนูใหม่ให้อัตโนมัติ ---
+const getMergedPermissions = (templatePerms) => {
+    const base = getDefaultPermissions();
+    const merged = {};
+    Object.keys(base).forEach(key => {
+        merged[key] = { ...base[key], ...(templatePerms?.[key] || {}) };
+    });
+    return merged;
+};
+
 const PROJECT_TABS = [
   { id: 'overview', label: 'tab_overview', icon: BarChart3 },
   { id: 'contracts', label: 'tab_contracts', icon: Briefcase },
@@ -5096,7 +5106,8 @@ export default function App() {
                           <>
                               <Button variant="outline" className="border-orange-500 text-orange-600 hover:bg-orange-50 font-bold hidden md:flex" icon={Shield} onClick={() => {
                                   setEditingRole(EMPLOYEE_POSITIONS[0]);
-                                  setEditingRolePerms(rolePermissions[EMPLOYEE_POSITIONS[0]] || getDefaultPermissions());
+                                  // แก้ไข: ใช้ getMergedPermissions เพื่อให้ได้โครงสร้างสิทธิ์ที่สมบูรณ์เสมอ
+                                  setEditingRolePerms(getMergedPermissions(rolePermissions[EMPLOYEE_POSITIONS[0]]));
                                   setShowRolePermModal(true);
                               }}>ตั้งค่าสิทธิ์ตามตำแหน่ง</Button>
                               <label className="cursor-pointer flex items-center justify-center gap-2 px-4 py-2 text-sm rounded-md font-medium transition-colors bg-green-600 text-white hover:bg-green-700 shadow-sm" title="นำเข้าข้อมูลจากไฟล์ .csv">
@@ -10303,8 +10314,8 @@ export default function App() {
                               setNewUser({
                                   ...newUser, 
                                   position: newPos,
-                                  // ดึงสิทธิ์ที่ตั้งค่าไว้ตามตำแหน่งมาใช้เป็นค่าเริ่มต้นอัตโนมัติ
-                                  permissions: rolePermissions[newPos] || getDefaultPermissions()
+                                  // แก้ไข: ใช้ getMergedPermissions ป้องกันปัญหา Reference หลุด
+                                  permissions: getMergedPermissions(rolePermissions[newPos])
                               });
                           }} 
                           disabled={isEditingUser && currentUser?.username !== 'admin'}
@@ -13384,7 +13395,8 @@ export default function App() {
                    onChange={(e) => {
                        const r = e.target.value;
                        setEditingRole(r);
-                       setEditingRolePerms(rolePermissions[r] || getDefaultPermissions());
+                       // แก้ไข: ใช้ getMergedPermissions ตอนสลับ Dropdown
+                       setEditingRolePerms(getMergedPermissions(rolePermissions[r]));
                    }}
                >
                    {EMPLOYEE_POSITIONS.map(pos => <option key={pos} value={pos}>{pos}</option>)}
@@ -13453,7 +13465,8 @@ export default function App() {
             <div className="flex justify-end gap-3 pt-6 border-t mt-4 shrink-0">
                 <Button variant="secondary" onClick={() => setShowRolePermModal(false)}>{t('cancel')}</Button>
                 <Button icon={Save} onClick={() => {
-                    setRolePermissions({...rolePermissions, [editingRole]: editingRolePerms});
+                    // แก้ไข: บังคับตัด Reference (Deep Clone) ตอนเซฟ ป้องกันสิทธิ์เพี้ยนไปกระทบค่าเดิม
+                    setRolePermissions({...rolePermissions, [editingRole]: JSON.parse(JSON.stringify(editingRolePerms))});
                     alert('บันทึกสิทธิ์สำหรับตำแหน่งนี้เรียบร้อยแล้ว เมื่อคุณเพิ่มหรือเปลี่ยนผู้ใช้ให้เป็นตำแหน่งนี้ ระบบจะดึงสิทธิ์นี้ไปใช้เป็นค่าเริ่มต้น');
                     setShowRolePermModal(false);
                 }}>บันทึกสิทธิ์เริ่มต้น</Button>
