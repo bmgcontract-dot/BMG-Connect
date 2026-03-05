@@ -3652,7 +3652,7 @@ export default function App() {
           
           const backupData = {
               timestamp: new Date().toISOString(),
-              version: '1.1', // Updated Version
+              version: '1.2', // Updated Version for Stability
               data: {
                   companyInfo,
                   users,
@@ -3716,7 +3716,7 @@ export default function App() {
 
               showConfirm(
                   'ยืนยันการนำเข้าและกู้คืนข้อมูล (Restore)',
-                  'คำเตือนอย่างร้ายแรง: การนำเข้าข้อมูลจะ เขียนทับ (Overwrite) ข้อมูลปัจจุบันในระบบทั้งหมดด้วยข้อมูลจากไฟล์ Backup นี้ คุณแน่ใจหรือไม่ที่จะดำเนินการต่อ?',
+                  'คำเตือนอย่างร้ายแรง: การนำเข้าข้อมูลจะ เขียนทับ (Overwrite) ข้อมูลปัจจุบันในระบบทั้งหมดด้วยข้อมูลจากไฟล์ Backup นี้ คุณแน่ใจหรือไม่ที่จะดำเนินการต่อ? (กระบวนการนี้อาจใช้เวลา 1-2 นาที กรุณาอย่าปิดหน้าต่าง)',
                   async () => {
                       setIsRestoring(true);
                       try {
@@ -3729,36 +3729,51 @@ export default function App() {
                               }
                           }
 
-                          // 2. กู้คืน State ข้อมูล
-                          if (d.companyInfo) setCompanyInfo(d.companyInfo);
-                          if (d.users) setUsers(d.users);
-                          if (d.projects) setProjects(d.projects);
-                          if (d.contracts) setContracts(d.contracts);
-                          if (d.assets) setAssets(d.assets);
-                          if (d.tools) setTools(d.tools);
-                          if (d.machines) setMachines(d.machines);
-                          if (d.pmPlans) setPmPlans(d.pmPlans);
-                          if (d.pmHistoryList) setPmHistoryList(d.pmHistoryList);
-                          if (d.meters) setMeters(d.meters);
-                          if (d.utilityReadings) setUtilityReadings(d.utilityReadings);
-                          if (d.repairs) setRepairs(d.repairs);
-                          if (d.actionPlans) setActionPlans(d.actionPlans);
-                          if (d.contractors) setContractors(d.contractors);
-                          if (d.formsList) setFormsList(d.formsList);
-                          if (d.audits) setAudits(d.audits);
-                          if (d.dailyReports) setDailyReports(d.dailyReports);
-                          if (d.schedules) setSchedules(d.schedules);
-                          if (d.scheduleNotes) setScheduleNotes(d.scheduleNotes);
-                          if (d.scheduleApprovals) setScheduleApprovals(d.scheduleApprovals);
-                          if (d.projectStaffOrder) setProjectStaffOrder(d.projectStaffOrder);
-                          if (d.othersData) setOthersData(d.othersData);
+                          // 2. กู้คืน State ข้อมูล (ค่อยๆ ทยอยเซฟด้วย await เพื่อป้องกัน Firebase Rate Limit / Payload Too Large)
+                          const delay = (ms) => new Promise(res => setTimeout(res, ms));
+
+                          const restoreData = async (setter, data) => {
+                              if (data !== undefined && data !== null) {
+                                  await setter(data);
+                                  await delay(250); // หน่วงเวลา 250ms ต่อการบันทึก 1 ตาราง เพื่อให้มั่นใจว่าข้อมูลขึ้น Cloud สมบูรณ์
+                              }
+                          };
+
+                          await restoreData(setCompanyInfo, d.companyInfo);
+                          await restoreData(setUsers, d.users);
+                          await restoreData(setProjects, d.projects);
+                          await restoreData(setContracts, d.contracts);
+                          await restoreData(setAssets, d.assets);
+                          await restoreData(setTools, d.tools);
+                          await restoreData(setMachines, d.machines);
+                          await restoreData(setPmPlans, d.pmPlans);
+                          await restoreData(setPmHistoryList, d.pmHistoryList);
+                          await restoreData(setMeters, d.meters);
+                          await restoreData(setUtilityReadings, d.utilityReadings);
+                          await restoreData(setRepairs, d.repairs);
+                          await restoreData(setActionPlans, d.actionPlans);
+                          await restoreData(setContractors, d.contractors);
+                          await restoreData(setFormsList, d.formsList);
+                          await restoreData(setAudits, d.audits);
+                          await restoreData(setDailyReports, d.dailyReports);
+                          await restoreData(setSchedules, d.schedules);
+                          await restoreData(setScheduleNotes, d.scheduleNotes);
+                          await restoreData(setScheduleApprovals, d.scheduleApprovals);
+                          await restoreData(setProjectStaffOrder, d.projectStaffOrder);
+                          await restoreData(setOthersData, d.othersData);
+                          
                           if (d.theme) setTheme(d.theme);
-                          if (d.rolePermissions) setRolePermissions(d.rolePermissions); // Restore role permissions
+                          if (d.rolePermissions) await restoreData(setRolePermissions, d.rolePermissions);
 
                           alert("กู้คืนข้อมูลสำเร็จ ระบบได้ทำการอัปเดตข้อมูลกลับมาเรียบร้อยแล้ว (Restore successful)");
+                          // บังคับ Reload หน้าเว็บเพื่อให้ดึงข้อมูลใหม่ที่เพิ่งเซฟลง DB ขึ้นมาแสดงผลอย่างถูกต้อง 100%
+                          setTimeout(() => {
+                              window.location.reload();
+                          }, 1000);
+                          
                       } catch (err) {
                           console.error("Restore state error:", err);
-                          alert("เกิดข้อผิดพลาดระหว่างการกู้คืนข้อมูล");
+                          alert("เกิดข้อผิดพลาดระหว่างการกู้คืนข้อมูล: " + err.message);
                       } finally {
                           setIsRestoring(false);
                       }
@@ -9371,7 +9386,7 @@ export default function App() {
                       <label className={`cursor-pointer w-full inline-block ${isRestoring ? 'opacity-50 pointer-events-none' : ''}`}>
                           <div className="w-full bg-red-600 hover:bg-red-700 text-white font-medium py-2.5 px-4 rounded-md transition-colors flex justify-center items-center gap-2 shadow-sm">
                               {isRestoring ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />} 
-                              {isRestoring ? 'กำลังกู้คืนข้อมูล...' : 'เลือกไฟล์เพื่อนำเข้า (Import JSON)'}
+                              {isRestoring ? 'กำลังกู้คืนข้อมูลทีละส่วน (โปรดรอ)...' : 'เลือกไฟล์เพื่อนำเข้า (Import JSON)'}
                           </div>
                           <input 
                               type="file" 
