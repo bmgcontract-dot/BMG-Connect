@@ -11966,7 +11966,7 @@ export default function App() {
       {/* NEW: Selected PM History View Modal */}
       {selectedPmHistory && (
         <div className={`fixed inset-0 bg-black bg-opacity-50 flex justify-center z-50 ${isExporting ? 'items-start overflow-visible' : 'items-center overflow-y-auto'}`}>
-            <div id="pm-history-modal-container" className={`w-full m-4 relative animate-fade-in ${isExporting ? 'bg-white shadow-none p-4 h-max overflow-visible max-w-max' : 'max-w-[210mm] bg-white rounded-lg shadow-xl p-8 max-h-[95vh] overflow-y-auto'}`}>
+            <div id="pm-history-modal-container" className={`w-full m-4 relative animate-fade-in ${isExporting ? 'bg-transparent shadow-none p-0 h-max overflow-visible max-w-max' : 'max-w-[210mm] bg-white rounded-lg shadow-xl p-8 max-h-[95vh] overflow-y-auto'}`}>
                 <button 
                     onClick={() => setSelectedPmHistory(null)} 
                     className={`absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors z-10 ${isExporting ? 'hidden' : ''}`}
@@ -11974,11 +11974,11 @@ export default function App() {
                     <X size={24} />
                 </button>
 
-                <div id="print-pm-history-report" className={`bg-white ${isExporting ? 'w-[186mm] h-[255mm] min-w-[186mm] max-w-[186mm] mx-auto box-border flex flex-col p-[2mm] overflow-hidden' : 'space-y-6 w-full'}`}>
+                <div id="print-pm-history-report" className={`bg-white ${isExporting ? 'w-[186mm] h-[255mm] min-w-[186mm] max-w-[186mm] mx-auto box-border flex flex-col overflow-hidden relative' : 'space-y-6 w-full'}`}>
                     {/* Header */}
-                    <div className={`text-center border-b border-gray-300 ${isExporting ? 'pb-2 mb-2 shrink-0' : 'pb-4 mb-6'}`}>
-                        <h2 className={`${isExporting ? 'text-lg' : 'text-2xl'} font-bold text-gray-800`}>รายงานผลการบำรุงรักษาเชิงป้องกัน (PM Report)</h2>
-                        <div className={`flex justify-center gap-4 text-gray-500 mt-1 ${isExporting ? 'text-[10px]' : 'text-sm'}`}>
+                    <div className={`text-center border-b border-gray-300 ${isExporting ? 'pb-1 mb-2 shrink-0' : 'pb-4 mb-6'}`}>
+                        <h2 className={`${isExporting ? 'text-[16px]' : 'text-2xl'} font-bold text-gray-800`}>รายงานผลการบำรุงรักษาเชิงป้องกัน (PM Report)</h2>
+                        <div className={`flex justify-center gap-4 text-gray-500 mt-1 ${isExporting ? 'text-[9px]' : 'text-sm'}`}>
                              <span>โครงการ: {projects.find(p => p.id === selectedPmHistory.projectId)?.name}</span>
                              <span>|</span>
                              <span>วันที่กำหนด: {new Date(selectedPmHistory.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric'})}</span>
@@ -11992,7 +11992,7 @@ export default function App() {
                     </div>
 
                     {/* Machine Info */}
-                    <div className={`bg-gray-50 rounded-lg border border-gray-200 grid grid-cols-2 ${isExporting ? 'p-2 mb-2 gap-2 text-[10px] shrink-0' : 'p-4 mb-6 gap-4 text-sm'}`}>
+                    <div className={`bg-gray-50 rounded-lg border border-gray-200 grid grid-cols-2 ${isExporting ? 'p-1.5 mb-2 gap-2 text-[10px] shrink-0' : 'p-4 mb-6 gap-4 text-sm'}`}>
                         <div><span className="text-gray-500">รหัสเครื่องจักร:</span> <span className="font-bold font-mono text-gray-800">{selectedPmHistory.machineCode}</span></div>
                         <div><span className="text-gray-500">ชื่อเครื่องจักร:</span> <span className="font-bold text-gray-800">{selectedPmHistory.machineName}</span></div>
                         <div className="flex items-center gap-1.5">
@@ -12030,9 +12030,9 @@ export default function App() {
                                 <thead className="bg-gray-100 text-gray-600">
                                     <tr>
                                         <th className={`border border-gray-200 text-center w-8 ${isExporting ? 'p-1' : 'p-2'}`}>#</th>
-                                        <th className={`border border-gray-200 text-left ${isExporting ? 'p-1' : 'p-2'}`}>รายละเอียดการตรวจสอบ</th>
+                                        <th className={`border border-gray-200 text-left ${isExporting ? 'p-1 px-2' : 'p-2'}`}>รายละเอียดการตรวจสอบ</th>
                                         <th className={`border border-gray-200 text-center w-20 ${isExporting ? 'p-1' : 'p-2'}`}>ผลลัพธ์</th>
-                                        <th className={`border border-gray-200 text-left w-[35%] ${isExporting ? 'p-1' : 'p-2'}`}>หมายเหตุ / ปัญหาที่พบ</th>
+                                        <th className={`border border-gray-200 text-left w-[35%] ${isExporting ? 'p-1 px-2' : 'p-2'}`}>หมายเหตุ / ปัญหาที่พบ</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -12056,9 +12056,9 @@ export default function App() {
                                             return (
                                                 <tr key={idx}>
                                                     <td className={`border border-gray-200 text-center text-gray-500 font-medium ${isExporting ? 'p-0.5' : 'p-2'}`}>{idx + 1}</td>
-                                                    <td className={`border border-gray-200 text-gray-800 break-words whitespace-normal leading-tight ${isExporting ? 'p-0.5 px-1' : 'p-2'}`}>{item}</td>
+                                                    <td className={`border border-gray-200 text-gray-800 break-words whitespace-normal leading-tight ${isExporting ? 'p-0.5 px-1.5' : 'p-2'}`}>{item}</td>
                                                     <td className={`border border-gray-200 text-center ${isExporting ? 'p-0.5' : 'p-2'}`}>{statusBadge}</td>
-                                                    <td className={`border border-gray-200 break-words whitespace-normal leading-tight ${isExporting ? 'p-0.5 px-1 text-[9px]' : 'p-2 text-xs'} ${answer === 'fail' ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
+                                                    <td className={`border border-gray-200 break-words whitespace-normal leading-tight ${isExporting ? 'p-0.5 px-1.5 text-[9px]' : 'p-2 text-xs'} ${answer === 'fail' ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
                                                         {issue || '-'}
                                                     </td>
                                                 </tr>
@@ -12072,21 +12072,21 @@ export default function App() {
 
                     {/* Summary & Remarks */}
                     <div className={`${isExporting ? 'pt-2 shrink-0' : 'pt-4'}`}>
-                        <div className={`bg-yellow-50 rounded-lg border border-yellow-200 ${isExporting ? 'p-2' : 'p-4'}`}>
+                        <div className={`bg-yellow-50 rounded-lg border border-yellow-200 ${isExporting ? 'p-1.5' : 'p-4'}`}>
                              <h3 className={`font-bold text-yellow-800 flex items-center gap-1 ${isExporting ? 'mb-0.5 text-[10px]' : 'mb-1 text-sm'}`}><PenTool size={14}/> สรุปผล / ข้อเสนอแนะ</h3>
                              <p className={`text-gray-700 whitespace-pre-wrap line-clamp-3 ${isExporting ? 'text-[9px]' : 'text-xs'}`}>{selectedPmHistory.remark || 'ไม่มีข้อเสนอแนะเพิ่มเติม'}</p>
                         </div>
                     </div>
                     
-                    {/* Photos */}
+                    {/* Photos - Made it a flex-1 to push signatures to bottom if there's space, or shrink if too tight */}
                     {selectedPmHistory.images && selectedPmHistory.images.length > 0 && (
-                        <div className={`${isExporting ? 'pt-2 shrink-0' : 'pt-4'}`}>
+                        <div className={`${isExporting ? 'pt-2 flex-1 overflow-hidden min-h-[60px]' : 'pt-4'}`}>
                             <h3 className={`font-bold text-gray-700 flex items-center gap-2 border-b border-gray-200 ${isExporting ? 'mb-1 pb-1 text-[11px]' : 'mb-3 pb-2 text-sm'}`}>
                                 <Camera size={isExporting ? 14 : 16}/> ภาพถ่ายประกอบการตรวจสอบ
                             </h3>
-                            <div className="flex flex-wrap gap-2">
+                            <div className="flex flex-wrap gap-2 h-full">
                                 {selectedPmHistory.images.map((img, idx) => (
-                                    <div key={idx} className={`relative rounded-lg border border-gray-200 overflow-hidden shadow-sm group ${isExporting ? 'w-20 h-20' : 'w-32 h-32'}`}>
+                                    <div key={idx} className={`relative rounded-lg border border-gray-200 overflow-hidden shadow-sm group ${isExporting ? 'h-full max-h-[85px] w-auto aspect-square' : 'w-32 h-32'}`}>
                                         <img src={img} alt="PM Evidence" className="w-full h-full object-cover" />
                                         
                                         {/* ปุ่มดาวน์โหลดรูปภาพ */}
@@ -12113,46 +12113,46 @@ export default function App() {
                         </div>
                     )}
 
-                    {/* Signatures Area - Pinned to bottom when exporting */}
-                    <div className={`flex justify-between border-t border-gray-300 flex-wrap ${isExporting ? 'px-2 pt-4 pb-0 mt-auto shrink-0' : 'px-4 pt-16 pb-4 mt-6 gap-4'}`}>
-                        <div className={`text-center ${isExporting ? 'w-32' : 'w-48'}`}>
-                            <div className={`border-b border-gray-400 text-blue-800 font-serif italic flex items-end justify-center pb-1 ${isExporting ? 'mb-1 h-6 text-sm' : 'mb-2 h-8 text-base'}`}>
+                    {/* Signatures Area - Pinned to bottom when exporting using mt-auto */}
+                    <div className={`flex justify-between border-t border-gray-300 flex-wrap w-full ${isExporting ? 'pt-2 pb-0 mt-auto shrink-0' : 'px-4 pt-16 pb-4 mt-6 gap-4'}`}>
+                        <div className={`text-center ${isExporting ? 'w-[30%]' : 'w-48'}`}>
+                            <div className={`border-b border-gray-400 text-blue-800 font-serif italic flex items-end justify-center pb-0.5 ${isExporting ? 'mb-1 h-5 text-[11px]' : 'mb-2 h-8 text-base'}`}>
                                 {selectedPmHistory.inspector}
                             </div>
-                            <div className={`font-bold text-gray-800 mt-1 ${isExporting ? 'text-[10px]' : 'text-xs'}`}>ผู้ตรวจสอบ (Inspector)</div>
+                            <div className={`font-bold text-gray-800 mt-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}>ผู้ตรวจสอบ (Inspector)</div>
                             <div className={`text-gray-500 mt-0.5 ${isExporting ? 'text-[8px]' : 'text-[10px]'}`}>{new Date(selectedPmHistory.date).toLocaleDateString('th-TH')}</div>
                         </div>
 
                         {/* Map Dynamic Approvals */}
                         {selectedPmHistory.approvals && selectedPmHistory.approvals.map((app, idx) => (
-                             <div className={`text-center ${isExporting ? 'w-32' : 'w-48'}`} key={idx}>
-                                <div className={`border-b border-gray-400 text-blue-800 font-serif italic flex items-end justify-center pb-1 relative ${isExporting ? 'mb-1 h-6 text-sm' : 'mb-2 h-8 text-base'}`}>
-                                    {app.action === 'Rejected' && <span className="absolute -top-4 right-0 text-red-500 font-sans font-bold border-2 border-red-500 rounded px-1.5 py-0.5 transform rotate-12 text-[9px]">ไม่อนุมัติ</span>}
-                                    {app.action === 'Approved' && <span className="absolute -top-4 right-0 text-green-500 font-sans font-bold border-2 border-green-500 rounded px-1.5 py-0.5 transform rotate-12 text-[9px]">อนุมัติแล้ว</span>}
+                             <div className={`text-center ${isExporting ? 'w-[30%]' : 'w-48'}`} key={idx}>
+                                <div className={`border-b border-gray-400 text-blue-800 font-serif italic flex items-end justify-center pb-0.5 relative ${isExporting ? 'mb-1 h-5 text-[11px]' : 'mb-2 h-8 text-base'}`}>
+                                    {app.action === 'Rejected' && <span className="absolute -top-3 right-0 text-red-500 font-sans font-bold border border-red-500 rounded px-1 py-0.5 transform rotate-12 text-[8px]">ไม่อนุมัติ</span>}
+                                    {app.action === 'Approved' && <span className="absolute -top-3 right-0 text-green-500 font-sans font-bold border border-green-500 rounded px-1 py-0.5 transform rotate-12 text-[8px]">อนุมัติแล้ว</span>}
                                     {app.approver}
                                 </div>
-                                <div className={`font-bold text-gray-800 mt-1 truncate px-1 ${isExporting ? 'text-[10px]' : 'text-xs'}`} title={app.role}>{app.role}</div>
+                                <div className={`font-bold text-gray-800 mt-1 truncate px-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`} title={app.role}>{app.role}</div>
                                 <div className={`text-gray-500 mt-0.5 ${isExporting ? 'text-[8px]' : 'text-[10px]'}`}>{new Date(app.date).toLocaleDateString('th-TH')}</div>
                             </div>
                         ))}
                         
                         {/* Placeholder for Pending Approvals */}
                         {selectedPmHistory.approvalStatus === 'Pending Chief' && (
-                            <div className={`text-center opacity-50 ${isExporting ? 'w-32' : 'w-48'}`}>
-                                <div className={`border-b border-gray-400 ${isExporting ? 'mb-1 h-6' : 'mb-2 h-8'}`}></div>
-                                <div className={`font-bold text-gray-800 mt-1 ${isExporting ? 'text-[10px]' : 'text-xs'}`}>หัวหน้าช่าง (Chief)</div>
+                            <div className={`text-center opacity-50 ${isExporting ? 'w-[30%]' : 'w-48'}`}>
+                                <div className={`border-b border-gray-400 ${isExporting ? 'mb-1 h-5' : 'mb-2 h-8'}`}></div>
+                                <div className={`font-bold text-gray-800 mt-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}>หัวหน้าช่าง (Chief)</div>
                             </div>
                         )}
                         {(selectedPmHistory.approvalStatus === 'Pending Manager' || selectedPmHistory.approvalStatus === 'Pending Chief') && (
-                            <div className={`text-center opacity-50 ${isExporting ? 'w-32' : 'w-48'}`}>
-                                <div className={`border-b border-gray-400 ${isExporting ? 'mb-1 h-6' : 'mb-2 h-8'}`}></div>
-                                <div className={`font-bold text-gray-800 mt-1 ${isExporting ? 'text-[10px]' : 'text-xs'}`}>ผู้จัดการ (Manager)</div>
+                            <div className={`text-center opacity-50 ${isExporting ? 'w-[30%]' : 'w-48'}`}>
+                                <div className={`border-b border-gray-400 ${isExporting ? 'mb-1 h-5' : 'mb-2 h-8'}`}></div>
+                                <div className={`font-bold text-gray-800 mt-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}>ผู้จัดการ (Manager)</div>
                             </div>
                         )}
                     </div>
                     
                     {/* Footer Info */}
-                    <div className={`flex justify-between items-end border-t text-gray-400 ${isExporting ? 'mt-2 pt-1 text-[8px] shrink-0' : 'mt-4 pt-4 text-[10px]'}`}>
+                    <div className={`flex justify-between items-end border-t text-gray-400 ${isExporting ? 'mt-1 pt-0.5 text-[7px] shrink-0' : 'mt-4 pt-4 text-[10px]'}`}>
                         <div>Ref ID: {selectedPmHistory.id}</div>
                         <div>Generated by Best Million Group System</div>
                     </div>
