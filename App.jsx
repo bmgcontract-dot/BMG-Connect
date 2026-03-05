@@ -11570,15 +11570,15 @@ export default function App() {
       {/* Selected Daily Report View Modal */}
       {selectedDailyReport && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-[210mm] p-8 m-4 max-h-[95vh] overflow-y-auto relative">
+            <div className={`bg-white rounded-lg shadow-xl w-full max-w-[210mm] m-4 relative animate-fade-in ${isExporting ? 'p-0 shadow-none overflow-visible' : 'p-8 max-h-[95vh] overflow-y-auto'}`}>
                 <button 
                     onClick={() => setSelectedDailyReport(null)} 
-                    className="absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors"
+                    className={`absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors z-10 ${isExporting ? 'hidden' : ''}`}
                 >
                     <X size={24} />
                 </button>
 
-                <div id="print-daily-report" className="space-y-6">
+                <div id="print-daily-report" className={`space-y-6 bg-white ${isExporting ? 'p-8' : ''}`}>
                     {/* Header */}
                     <div className="text-center border-b pb-4 mb-6">
                         <h2 className="text-2xl font-bold text-gray-800">
@@ -11779,14 +11779,27 @@ export default function App() {
                     </div>
                 </div>
 
-                <div className="mt-8 flex justify-end gap-2">
+                <div className={`mt-8 flex justify-end gap-2 border-t pt-4 bg-white ${isExporting ? 'hidden' : ''}`}>
                     {hasPerm('proj_daily', 'edit') && !isExporting && (
                         <Button variant="outline" icon={Edit} onClick={() => handleEditDailyReport(selectedDailyReport)}>
                             แก้ไขรายงาน
                         </Button>
                     )}
                     <Button variant="secondary" onClick={() => setSelectedDailyReport(null)}>{t('close')}</Button>
-                    <Button icon={Printer} onClick={() => handleExportPDF('print-daily-report', `DailyReport_${selectedDailyReport.date}.pdf`, 'portrait')} disabled={isExporting}>{isExporting ? t('downloading') : t('printPDF')}</Button>
+                    <Button variant="outline" icon={ImageIcon} onClick={() => {
+                        const modalContainer = document.getElementById('print-daily-report')?.closest('.overflow-y-auto');
+                        if (modalContainer) modalContainer.scrollTop = 0;
+                        setTimeout(() => handleExportImage('print-daily-report', `DailyReport_${selectedDailyReport.date}.jpg`), 100);
+                    }} disabled={isExporting} className="border-blue-500 text-blue-600 hover:bg-blue-50">
+                        {isExporting ? 'กำลังโหลด...' : 'ดาวน์โหลดรูปภาพ'}
+                    </Button>
+                    <Button icon={Printer} onClick={() => {
+                        const modalContainer = document.getElementById('print-daily-report')?.closest('.overflow-y-auto');
+                        if (modalContainer) modalContainer.scrollTop = 0;
+                        setTimeout(() => handleExportPDF('print-daily-report', `DailyReport_${selectedDailyReport.date}.pdf`, 'portrait', [22, 10, 20, 10]), 100);
+                    }} disabled={isExporting}>
+                        {isExporting ? t('downloading') : 'ดาวน์โหลด PDF'}
+                    </Button>
                 </div>
             </div>
         </div>
