@@ -384,7 +384,8 @@ const getDefaultPermissions = () => {
         perms[m.id] = { view: false, save: false, edit: false, approve: false, delete: false, print: false };
         if (m.submenus) {
             m.submenus.forEach(sub => {
-                perms[sub.id] = { view: false, save: false, edit: false, approve: false, delete: false, print: false };
+                // แก้ไข: ให้พนักงานมองเห็น (view: true) เมนูย่อยในหน่วยงานเป็นค่าเริ่มต้น
+                perms[sub.id] = { view: true, save: false, edit: false, approve: false, delete: false, print: false };
             });
         }
     });
@@ -2053,9 +2054,15 @@ export default function App() {
   // ฟังก์ชันตรวจสอบสิทธิ์การเข้าถึง (Permission Checker)
   const hasPerm = (menuId, action = 'view') => {
       if (!currentUser) return false;
-      if (currentUser.username === 'admin') return true; // Admin เข้าถึงได้ทุกอย่าง
+      if (currentUser.username === 'admin' || currentUser.position === 'Super Admin') return true; // Admin เข้าถึงได้ทุกอย่าง
       
       const perms = currentUser.permissions || {};
+      
+      // Backward Compatibility: ถ้าเป็นเมนูย่อยของหน่วยงาน และไม่มีข้อมูลสิทธิ์เดิมในระบบ ให้ถือว่าดูได้ไปก่อน (ป้องกันเมนูหาย)
+      if (menuId.startsWith('proj_') && action === 'view' && (!perms[menuId] || perms[menuId].view === undefined)) {
+          return true;
+      }
+      
       return !!perms[menuId]?.[action];
   };
 
@@ -4450,16 +4457,19 @@ export default function App() {
                       <span className="truncate">{selectedProject.name}</span>
                       {hasPerm('projects', 'edit') && <Edit size={14} className="text-gray-500 group-hover:text-orange-400 transition-colors shrink-0" />}
                   </div>
-                  {PROJECT_TABS.filter(tab => hasPerm(`proj_${tab.id}`)).map(tab => (
-                      <button
-                          key={tab.id}
-                          onClick={() => { setProjectTab(tab.id); setIsMobileMenuOpen(false); }}
-                          className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all text-sm mb-1 ${projectTab === tab.id ? 'bg-orange-600 text-white shadow-md font-medium' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}
-                      >
-                          <tab.icon size={18} />
-                          <span>{t(tab.label)}</span>
-                      </button>
-                  ))}
+                  {PROJECT_TABS.filter(tab => hasPerm(`proj_${tab.id}`)).map(tab => {
+                      const TabIcon = tab.icon;
+                      return (
+                          <button
+                              key={tab.id}
+                              onClick={() => { setProjectTab(tab.id); setIsMobileMenuOpen(false); }}
+                              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all text-sm mb-1 ${projectTab === tab.id ? 'bg-orange-600 text-white shadow-md font-medium' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}
+                          >
+                              <TabIcon size={18} />
+                              <span>{t(tab.label)}</span>
+                          </button>
+                      );
+                  })}
               </>
           )}
         </nav>
