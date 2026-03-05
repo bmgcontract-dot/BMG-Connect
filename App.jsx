@@ -3992,7 +3992,8 @@ export default function App() {
       if (isEditingUser) {
           setUsers(users.map(u => u.id === newUser.id ? { ...newUser } : u));
       } else {
-          setUsers([...users, { id: generateId(), status: 'Active', created_at: new Date().toISOString(), ...newUser }]);
+          // แก้ไข: สลับตำแหน่ง ...newUser ไว้ด้านหน้า เพื่อไม่ให้เอา id เดิมมาทับ id ใหม่ (ป้องกันบัค ID ซ้ำในระบบ)
+          setUsers([...users, { ...newUser, id: generateId(), status: 'Active', created_at: new Date().toISOString() }]);
       }
       setShowAddUserModal(false);
       alert(t('saveSuccess'));
@@ -5114,7 +5115,25 @@ export default function App() {
                                   <Upload size={16} /> นำเข้า CSV
                                   <input type="file" accept=".csv" className="hidden" onChange={handleImportUsersCSV} />
                               </label>
-                              <Button icon={Plus} onClick={() => { setIsEditingUser(false); setShowAddUserModal(true); }}>{t('addUser')}</Button>
+                              <Button icon={Plus} onClick={() => { 
+                                  setIsEditingUser(false); 
+                                  // แก้ไข: ล้างข้อมูล State ให้เป็นค่าเริ่มต้นทุกครั้งที่กดเพิ่มผู้ใช้ใหม่ ป้องกันข้อมูลคนเก่าค้าง
+                                  setNewUser({ 
+                                      employeeId: '', 
+                                      firstName: '', 
+                                      lastName: '', 
+                                      position: EMPLOYEE_POSITIONS[0], 
+                                      otherPosition: '', 
+                                      department: '', 
+                                      accessibleDepts: [], 
+                                      phone: '', 
+                                      username: '', 
+                                      password: '', 
+                                      photo: null, 
+                                      permissions: getMergedPermissions(rolePermissions[EMPLOYEE_POSITIONS[0]]) 
+                                  });
+                                  setShowAddUserModal(true); 
+                              }}>{t('addUser')}</Button>
                           </>
                       )}
                       <Button variant="outline" icon={Download} onClick={() => exportToCSV(filteredUsers, 'users_list')}>CSV</Button>
