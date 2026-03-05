@@ -11916,16 +11916,16 @@ export default function App() {
 
       {/* NEW: Selected PM History View Modal */}
       {selectedPmHistory && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-[210mm] p-8 m-4 max-h-[95vh] overflow-y-auto relative">
+        <div className={`fixed inset-0 bg-black bg-opacity-50 flex justify-center z-50 ${isExporting ? 'items-start overflow-visible' : 'items-center overflow-y-auto'}`}>
+            <div id="pm-history-modal-container" className={`w-full m-4 relative animate-fade-in ${isExporting ? 'bg-white shadow-none p-4 h-max overflow-visible max-w-max' : 'max-w-[210mm] bg-white rounded-lg shadow-xl p-8 max-h-[95vh] overflow-y-auto'}`}>
                 <button 
                     onClick={() => setSelectedPmHistory(null)} 
-                    className="absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors"
+                    className={`absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors z-10 ${isExporting ? 'hidden' : ''}`}
                 >
                     <X size={24} />
                 </button>
 
-                <div id="print-pm-history-report" className="space-y-6">
+                <div id="print-pm-history-report" className={`space-y-6 bg-white ${isExporting ? 'w-[186mm] min-w-[186mm] max-w-[186mm] mx-auto box-border' : 'w-full'}`}>
                     {/* Header */}
                     <div className="text-center border-b pb-4 mb-6">
                         <h2 className="text-2xl font-bold text-gray-800">รายงานผลการบำรุงรักษาเชิงป้องกัน (PM Report)</h2>
@@ -11988,14 +11988,14 @@ export default function App() {
                         <h3 className="font-bold text-gray-700 mb-3 text-sm flex items-center gap-2 border-b pb-2">
                             <ClipboardCheck size={16}/> รายการตรวจสอบ (Inspection Results)
                         </h3>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm border-collapse">
+                        <div className={isExporting ? "w-full" : "overflow-x-auto"}>
+                            <table className="w-full text-sm border-collapse table-fixed break-words">
                                 <thead className="bg-gray-100 text-gray-600">
                                     <tr>
                                         <th className="p-2 border border-gray-200 text-center w-10">#</th>
                                         <th className="p-2 border border-gray-200 text-left">รายละเอียดการตรวจสอบ</th>
                                         <th className="p-2 border border-gray-200 text-center w-24">ผลลัพธ์</th>
-                                        <th className="p-2 border border-gray-200 text-left">หมายเหตุ / ปัญหาที่พบ</th>
+                                        <th className="p-2 border border-gray-200 text-left w-[35%]">หมายเหตุ / ปัญหาที่พบ</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -12018,9 +12018,9 @@ export default function App() {
                                             return (
                                                 <tr key={idx}>
                                                     <td className="p-2 border border-gray-200 text-center text-gray-500 font-medium">{idx + 1}</td>
-                                                    <td className="p-2 border border-gray-200 text-gray-800">{item}</td>
+                                                    <td className="p-2 border border-gray-200 text-gray-800 break-words whitespace-normal">{item}</td>
                                                     <td className="p-2 border border-gray-200 text-center">{statusBadge}</td>
-                                                    <td className={`p-2 border border-gray-200 text-xs ${answer === 'fail' ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
+                                                    <td className={`p-2 border border-gray-200 text-xs break-words whitespace-normal ${answer === 'fail' ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
                                                         {issue || '-'}
                                                     </td>
                                                 </tr>
@@ -12101,7 +12101,7 @@ export default function App() {
                     </div>
                 </div>
 
-                <div className="mt-8 flex justify-between items-center gap-2 border-t pt-4 bg-white">
+                <div className={`mt-8 flex justify-between items-center gap-2 border-t pt-4 bg-white ${isExporting ? 'hidden' : ''}`}>
                     <div>
                         {(() => {
                             // Check if current user can approve
@@ -12131,7 +12131,11 @@ export default function App() {
                     </div>
                     <div className="flex gap-2">
                         <Button variant="secondary" onClick={() => setSelectedPmHistory(null)}>{t('close')}</Button>
-                        <Button icon={Printer} onClick={() => handleExportPDF('print-pm-history-report', `PM_Report_${selectedPmHistory.machineCode}.pdf`, 'portrait')} disabled={isExporting}>
+                        <Button icon={Printer} onClick={() => {
+                            const modalContainer = document.getElementById('pm-history-modal-container');
+                            if (modalContainer) modalContainer.scrollTop = 0;
+                            setTimeout(() => handleExportPDF('print-pm-history-report', `PM_Report_${selectedPmHistory.machineCode}.pdf`, 'portrait', [22, 12, 20, 12]), 100);
+                        }} disabled={isExporting}>
                             {isExporting ? t('downloading') : 'ดาวน์โหลด PDF'}
                         </Button>
                     </div>
