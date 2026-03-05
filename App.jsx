@@ -1250,17 +1250,16 @@ function usePersistentState(key, initialValue, fbUser) {
         try {
           if (data.totalChunks !== undefined) {
               // ประกอบร่างข้อมูลจากหลายๆ Document (รองรับไฟล์ขนาด > 1MB)
-              // ปรับปรุงใหม่: ใช้ Promise.all เพื่อดึงข้อมูลทุกก้อนพร้อมกัน (เร็วขึ้น 5-10 เท่า)
-              const chunkPromises = [];
+              let fullJson = '';
               for (let i = 0; i < data.totalChunks; i++) {
                   const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
-                  chunkPromises.push(getDoc(chunkRef));
+                  const chunkSnap = await getDoc(chunkRef);
+                  if (chunkSnap.exists()) {
+                      fullJson += chunkSnap.data().chunk;
+                  }
               }
-              const chunkSnaps = await Promise.all(chunkPromises);
               
               if (thisFetchId !== currentFetchId) return; // ยกเลิกหากมีการอัปเดตใหม่กว่าเข้ามาแทรก
-              
-              const fullJson = chunkSnaps.map(snap => snap.exists() ? snap.data().chunk : '').join('');
               
               if (fullJson) {
                   const parsedData = JSON.parse(fullJson);
@@ -1296,41 +1295,36 @@ function usePersistentState(key, initialValue, fbUser) {
     setState(valueToStore);
     stateRef.current = valueToStore; // อัปเดต Ref ทันทีเพื่อให้คำสั่งถัดไปเห็นค่าใหม่
 
-    // ปรับปรุงใหม่: ใช้ setTimeout ผลักภาระการคำนวณ JSON ขนาดใหญ่ไปไว้คิวหลังสุด เพื่อไม่ให้หน้าจอค้าง
-    setTimeout(async () => {
-        if (db && fbUser && appId) {
-           try {
-               const jsonStr = JSON.stringify(valueToStore);
-               // หั่นไฟล์ข้อมูลที่เกินขีดจำกัดออกเป็นก้อนๆ ขนาด 900KB (หลบเลี่ยงลิมิต 1MB ของ Firebase)
-               const CHUNK_SIZE = 900000; 
-               const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
-               
-               // ปรับปรุงใหม่: บันทึกก้อนข้อมูลย่อยแบบขนาน (Concurrent) เพื่อลดเวลาการอัปโหลด
-               const uploadPromises = [];
-               for (let i = 0; i < totalChunks; i++) {
-                   const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
-                   const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                   uploadPromises.push(setDoc(chunkRef, { chunk: chunkData }));
-               }
-               await Promise.all(uploadPromises);
-               
-               // บันทึกตัวหลักเป็น Metadata แจ้งจำนวน Chunk เพื่อ Trigger การซิงค์ไปเครื่องอื่น
-               const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
-               await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
-               
-           } catch(err) {
-               console.error("Firebase Storage Error:", err);
-               // alert(`⚠️ ข้อผิดพลาด: ไม่สามารถบันทึกข้อมูลออนไลน์ได้ (${err.message})`);
+    if (db && fbUser && appId) {
+       try {
+           const jsonStr = JSON.stringify(valueToStore);
+           // หั่นไฟล์ข้อมูลที่เกินขีดจำกัดออกเป็นก้อนๆ ขนาด 900KB (หลบเลี่ยงลิมิต 1MB ของ Firebase)
+           const CHUNK_SIZE = 900000; 
+           const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
+           
+           // บันทึกก้อนข้อมูลย่อย
+           for (let i = 0; i < totalChunks; i++) {
+               const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
+               const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+               await setDoc(chunkRef, { chunk: chunkData });
            }
-        } else if (!db && typeof window !== 'undefined') {
-           try {
-               localStorage.setItem(key, JSON.stringify(valueToStore));
-           } catch (err) {
-               console.error("Local Storage Error:", err);
-               console.warn("พื้นที่จัดเก็บข้อมูลในเครื่องของคุณเต็ม (Local Storage)!");
-           }
-        }
-    }, 0);
+           
+           // บันทึกตัวหลักเป็น Metadata แจ้งจำนวน Chunk เพื่อ Trigger การซิงค์ไปเครื่องอื่น
+           const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
+           await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
+           
+       } catch(err) {
+           console.error("Firebase Storage Error:", err);
+           alert(`⚠️ ข้อผิดพลาด: ไม่สามารถบันทึกข้อมูลออนไลน์ได้ (${err.message})`);
+       }
+    } else if (!db && typeof window !== 'undefined') {
+       try {
+           localStorage.setItem(key, JSON.stringify(valueToStore));
+       } catch (err) {
+           console.error("Local Storage Error:", err);
+           alert(`พื้นที่จัดเก็บข้อมูลในเครื่องของคุณเต็ม (Local Storage)!\nระบบไม่สามารถบันทึกไฟล์ขนาดใหญ่ในโหมดออฟไลน์ได้`);
+       }
+    }
   };
 
   return [state, setPersistentValue];
@@ -2807,55 +2801,6 @@ export default function App() {
       }
   }; 
   
-  // --- NEW: ฟังก์ชันสำหรับบันทึกหน้าจอเป็นไฟล์รูปภาพ (JPG) ---
-  const handleExportImage = async (elementId = 'print-area', filename = 'document.jpg') => {
-      if (!window.htmlToImage) {
-          alert("ระบบกำลังโหลดเครื่องมือสร้างรูปภาพ กรุณารอสักครู่แล้วกดอีกครั้ง...");
-          return;
-      }
-      setIsExporting(true);
-
-      try {
-          await document.fonts.ready;
-
-          setTimeout(async () => {
-              const element = document.getElementById(elementId);
-              if (!element) {
-                  alert(`เกิดข้อผิดพลาด: ไม่พบส่วนที่ต้องการบันทึก (Element ID: ${elementId})`);
-                  setIsExporting(false);
-                  return;
-              }
-
-              try {
-                  const dataUrl = await window.htmlToImage.toJpeg(element, {
-                      quality: 1.0,
-                      pixelRatio: 2, // ความคมชัด x2
-                      backgroundColor: '#ffffff',
-                      style: { transform: 'none', transformOrigin: 'top left' }
-                  });
-
-                  // สร้าง Link สำหรับดาวน์โหลดไฟล์
-                  const link = document.createElement('a');
-                  link.download = filename;
-                  link.href = dataUrl;
-                  document.body.appendChild(link);
-                  link.click();
-                  document.body.removeChild(link);
-
-                  setIsExporting(false);
-              } catch (err) {
-                  console.error("Image Export Error:", err);
-                  alert("เกิดข้อผิดพลาดระหว่างการสร้างรูปภาพ");
-                  setIsExporting(false);
-              }
-          }, 800); // ดีเลย์เพื่อซ่อน UI และขยาย Layout ให้พอดีก่อนแคปภาพ
-      } catch (err) {
-          console.error(err);
-          setIsExporting(false);
-      }
-  };
-  // --------------------------------------------------------
-
   // ซ่อน Header แบบเก่าใน HTML เพื่อไม่ให้ซ้ำซ้อนกับ Header ใหม่ที่แสตมป์เข้าไปใน PDF ทุกหน้า
   const ReportHeader = () => { return null; };
 
@@ -11966,7 +11911,7 @@ export default function App() {
       {/* NEW: Selected PM History View Modal */}
       {selectedPmHistory && (
         <div className={`fixed inset-0 bg-black bg-opacity-50 flex justify-center z-50 ${isExporting ? 'items-start overflow-visible' : 'items-center overflow-y-auto'}`}>
-            <div id="pm-history-modal-container" className={`w-full m-4 relative animate-fade-in ${isExporting ? 'bg-transparent shadow-none p-0 h-max overflow-visible max-w-max' : 'max-w-[210mm] bg-white rounded-lg shadow-xl p-8 max-h-[95vh] overflow-y-auto'}`}>
+            <div id="pm-history-modal-container" className={`w-full m-4 relative animate-fade-in ${isExporting ? 'bg-white shadow-none p-4 h-max overflow-visible max-w-max' : 'max-w-[210mm] bg-white rounded-lg shadow-xl p-8 max-h-[95vh] overflow-y-auto'}`}>
                 <button 
                     onClick={() => setSelectedPmHistory(null)} 
                     className={`absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors z-10 ${isExporting ? 'hidden' : ''}`}
@@ -11974,65 +11919,77 @@ export default function App() {
                     <X size={24} />
                 </button>
 
-                <div id="print-pm-history-report" className={`bg-white ${isExporting ? 'w-[186mm] h-[255mm] min-w-[186mm] max-w-[186mm] mx-auto box-border flex flex-col overflow-hidden relative' : 'space-y-6 w-full'}`}>
+                <div id="print-pm-history-report" className={`space-y-6 bg-white ${isExporting ? 'w-[186mm] min-w-[186mm] max-w-[186mm] mx-auto box-border' : 'w-full'}`}>
                     {/* Header */}
-                    <div className={`text-center border-b border-gray-300 ${isExporting ? 'pb-1 mb-2 shrink-0' : 'pb-4 mb-6'}`}>
-                        <h2 className={`${isExporting ? 'text-[16px]' : 'text-2xl'} font-bold text-gray-800`}>รายงานผลการบำรุงรักษาเชิงป้องกัน (PM Report)</h2>
-                        <div className={`flex justify-center gap-4 text-gray-500 mt-1 ${isExporting ? 'text-[9px]' : 'text-sm'}`}>
+                    <div className="text-center border-b pb-4 mb-6">
+                        <h2 className="text-2xl font-bold text-gray-800">รายงานผลการบำรุงรักษาเชิงป้องกัน (PM Report)</h2>
+                        <div className="flex justify-center gap-4 text-sm text-gray-500 mt-2">
                              <span>โครงการ: {projects.find(p => p.id === selectedPmHistory.projectId)?.name}</span>
                              <span>|</span>
-                             <span>วันที่กำหนด: {new Date(selectedPmHistory.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric'})}</span>
+                             <span>วันที่กำหนด (Plan): {new Date(selectedPmHistory.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'})}</span>
                              {selectedPmHistory.executedDate && selectedPmHistory.executedDate !== selectedPmHistory.date && (
                                  <>
                                      <span>|</span>
-                                     <span className="text-gray-700 font-bold">วันที่ทำจริง: {new Date(selectedPmHistory.executedDate).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric'})}</span>
+                                     <span className="text-gray-700 font-bold">วันที่ทำจริง (Act): {new Date(selectedPmHistory.executedDate).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'})}</span>
                                  </>
                              )}
                         </div>
                     </div>
 
                     {/* Machine Info */}
-                    <div className={`bg-gray-50 rounded-lg border border-gray-200 grid grid-cols-2 ${isExporting ? 'p-1.5 mb-2 gap-2 text-[10px] shrink-0' : 'p-4 mb-6 gap-4 text-sm'}`}>
+                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-6 grid grid-cols-2 gap-4 text-sm">
                         <div><span className="text-gray-500">รหัสเครื่องจักร:</span> <span className="font-bold font-mono text-gray-800">{selectedPmHistory.machineCode}</span></div>
                         <div><span className="text-gray-500">ชื่อเครื่องจักร:</span> <span className="font-bold text-gray-800">{selectedPmHistory.machineName}</span></div>
-                        <div className="flex items-center gap-1.5">
-                            <span className="text-gray-500">ระยะเวลา:</span> 
+                        <div className="flex items-center gap-2">
+                            <span className="text-gray-500">ระยะเวลาดำเนินการ:</span> 
                             {selectedPmHistory.executionTimingStatus ? (
-                                <span className={`px-1.5 py-0.5 rounded font-bold flex items-center gap-1 w-fit ${isExporting ? 'text-[9px]' : 'text-xs'} ${
+                                <span className={`px-2 py-0.5 rounded text-xs font-bold flex items-center gap-1 w-fit ${
                                     selectedPmHistory.executionTimingStatus === 'เร็วกว่าแผน' ? 'bg-blue-100 text-blue-700 border border-blue-200' :
                                     selectedPmHistory.executionTimingStatus === 'ช้ากว่าแผน' ? 'bg-red-100 text-red-700 border border-red-200' :
                                     'bg-green-100 text-green-700 border border-green-200'
                                 }`}>
-                                    {selectedPmHistory.executionTimingStatus === 'เร็วกว่าแผน' ? <ChevronLeft size={10}/> : selectedPmHistory.executionTimingStatus === 'ช้ากว่าแผน' ? <Clock size={10}/> : <CheckCircle size={10}/>}
+                                    {selectedPmHistory.executionTimingStatus === 'เร็วกว่าแผน' ? <ChevronLeft size={12}/> : selectedPmHistory.executionTimingStatus === 'ช้ากว่าแผน' ? <Clock size={12}/> : <CheckCircle size={12}/>}
                                     {selectedPmHistory.executionTimingStatus}
                                 </span>
                             ) : (
                                 <span className="text-gray-400">-</span>
                             )}
                         </div>
-                        <div className="flex items-center gap-1.5">
-                            <span className="text-gray-500">ผลประเมินรวม:</span> 
+                        <div className="flex items-center gap-2">
+                            <span className="text-gray-500">ผลการประเมินรวม:</span> 
                             {selectedPmHistory.status === 'Pass' ? (
-                                <span className={`bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold flex items-center gap-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}><CheckCircle size={12}/> ผ่านเกณฑ์</span>
+                                <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs font-bold flex items-center gap-1"><CheckCircle size={14}/> ผ่านเกณฑ์</span>
                             ) : (
-                                <span className={`bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold flex items-center gap-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}><AlertTriangle size={12}/> พบปัญหา</span>
+                                <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-bold flex items-center gap-1"><AlertTriangle size={14}/> พบปัญหา</span>
                             )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-gray-500">สถานะอนุมัติ:</span> 
+                            {selectedPmHistory.approvalStatus === 'Approved' || !selectedPmHistory.approvalStatus ? (
+                                <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs font-bold">อนุมัติแล้ว</span>
+                            ) : selectedPmHistory.approvalStatus === 'Pending Chief' ? (
+                                <span className="bg-orange-100 text-orange-700 px-2 py-0.5 rounded text-xs font-bold">รอหัวหน้าช่างอนุมัติ</span>
+                            ) : selectedPmHistory.approvalStatus === 'Pending Manager' ? (
+                                <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-bold">รอผู้จัดการอนุมัติ</span>
+                            ) : selectedPmHistory.approvalStatus === 'Rejected' ? (
+                                <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-bold">ไม่อนุมัติ</span>
+                            ) : null}
                         </div>
                     </div>
 
                     {/* Checklist Results */}
-                    <div className={`${isExporting ? 'shrink-0' : ''}`}>
-                        <h3 className={`font-bold text-gray-700 flex items-center gap-2 border-b border-gray-200 ${isExporting ? 'mb-1 pb-1 text-[11px]' : 'mb-3 pb-2 text-sm'}`}>
-                            <ClipboardCheck size={isExporting ? 14 : 16}/> รายการตรวจสอบ (Inspection Results)
+                    <div>
+                        <h3 className="font-bold text-gray-700 mb-3 text-sm flex items-center gap-2 border-b pb-2">
+                            <ClipboardCheck size={16}/> รายการตรวจสอบ (Inspection Results)
                         </h3>
                         <div className={isExporting ? "w-full" : "overflow-x-auto"}>
-                            <table className={`w-full border-collapse table-fixed break-words ${isExporting ? 'text-[10px]' : 'text-sm'}`}>
+                            <table className="w-full text-sm border-collapse table-fixed break-words">
                                 <thead className="bg-gray-100 text-gray-600">
                                     <tr>
-                                        <th className={`border border-gray-200 text-center w-8 ${isExporting ? 'p-1' : 'p-2'}`}>#</th>
-                                        <th className={`border border-gray-200 text-left ${isExporting ? 'p-1 px-2' : 'p-2'}`}>รายละเอียดการตรวจสอบ</th>
-                                        <th className={`border border-gray-200 text-center w-20 ${isExporting ? 'p-1' : 'p-2'}`}>ผลลัพธ์</th>
-                                        <th className={`border border-gray-200 text-left w-[35%] ${isExporting ? 'p-1 px-2' : 'p-2'}`}>หมายเหตุ / ปัญหาที่พบ</th>
+                                        <th className="p-2 border border-gray-200 text-center w-10">#</th>
+                                        <th className="p-2 border border-gray-200 text-left">รายละเอียดการตรวจสอบ</th>
+                                        <th className="p-2 border border-gray-200 text-center w-24">ผลลัพธ์</th>
+                                        <th className="p-2 border border-gray-200 text-left w-[35%]">หมายเหตุ / ปัญหาที่พบ</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -12047,18 +12004,17 @@ export default function App() {
                                             const issue = selectedPmHistory.issues[key];
                                             
                                             let statusBadge;
-                                            const iconSize = isExporting ? 12 : 16;
-                                            if (answer === 'pass') statusBadge = <span className="text-green-600 font-bold flex items-center justify-center"><CheckCircle size={iconSize} className="mr-1"/> ปกติ</span>;
-                                            else if (answer === 'fail') statusBadge = <span className="text-red-600 font-bold flex items-center justify-center"><XCircle size={iconSize} className="mr-1"/> ผิดปกติ</span>;
+                                            if (answer === 'pass') statusBadge = <span className="text-green-600 font-bold flex items-center justify-center"><CheckCircle size={16} className="mr-1"/> ปกติ</span>;
+                                            else if (answer === 'fail') statusBadge = <span className="text-red-600 font-bold flex items-center justify-center"><XCircle size={16} className="mr-1"/> ผิดปกติ</span>;
                                             else if (answer === 'na') statusBadge = <span className="text-gray-400 font-medium">N/A</span>;
                                             else statusBadge = <span className="text-gray-300">-</span>;
 
                                             return (
                                                 <tr key={idx}>
-                                                    <td className={`border border-gray-200 text-center text-gray-500 font-medium ${isExporting ? 'p-0.5' : 'p-2'}`}>{idx + 1}</td>
-                                                    <td className={`border border-gray-200 text-gray-800 break-words whitespace-normal leading-tight ${isExporting ? 'p-0.5 px-1.5' : 'p-2'}`}>{item}</td>
-                                                    <td className={`border border-gray-200 text-center ${isExporting ? 'p-0.5' : 'p-2'}`}>{statusBadge}</td>
-                                                    <td className={`border border-gray-200 break-words whitespace-normal leading-tight ${isExporting ? 'p-0.5 px-1.5 text-[9px]' : 'p-2 text-xs'} ${answer === 'fail' ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
+                                                    <td className="p-2 border border-gray-200 text-center text-gray-500 font-medium">{idx + 1}</td>
+                                                    <td className="p-2 border border-gray-200 text-gray-800 break-words whitespace-normal">{item}</td>
+                                                    <td className="p-2 border border-gray-200 text-center">{statusBadge}</td>
+                                                    <td className={`p-2 border border-gray-200 text-xs break-words whitespace-normal ${answer === 'fail' ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
                                                         {issue || '-'}
                                                     </td>
                                                 </tr>
@@ -12071,88 +12027,69 @@ export default function App() {
                     </div>
 
                     {/* Summary & Remarks */}
-                    <div className={`${isExporting ? 'pt-2 shrink-0' : 'pt-4'}`}>
-                        <div className={`bg-yellow-50 rounded-lg border border-yellow-200 ${isExporting ? 'p-1.5' : 'p-4'}`}>
-                             <h3 className={`font-bold text-yellow-800 flex items-center gap-1 ${isExporting ? 'mb-0.5 text-[10px]' : 'mb-1 text-sm'}`}><PenTool size={14}/> สรุปผล / ข้อเสนอแนะ</h3>
-                             <p className={`text-gray-700 whitespace-pre-wrap line-clamp-3 ${isExporting ? 'text-[9px]' : 'text-xs'}`}>{selectedPmHistory.remark || 'ไม่มีข้อเสนอแนะเพิ่มเติม'}</p>
+                    <div className="pt-4">
+                        <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                             <h3 className="font-bold text-yellow-800 mb-1 text-sm flex items-center gap-1"><PenTool size={14}/> สรุปผล / ข้อเสนอแนะ</h3>
+                             <p className="text-xs text-gray-700 whitespace-pre-wrap">{selectedPmHistory.remark || 'ไม่มีข้อเสนอแนะเพิ่มเติม'}</p>
                         </div>
                     </div>
                     
-                    {/* Photos - Made it a flex-1 to push signatures to bottom if there's space, or shrink if too tight */}
+                    {/* Photos */}
                     {selectedPmHistory.images && selectedPmHistory.images.length > 0 && (
-                        <div className={`${isExporting ? 'pt-2 flex-1 overflow-hidden min-h-[60px]' : 'pt-4'}`}>
-                            <h3 className={`font-bold text-gray-700 flex items-center gap-2 border-b border-gray-200 ${isExporting ? 'mb-1 pb-1 text-[11px]' : 'mb-3 pb-2 text-sm'}`}>
-                                <Camera size={isExporting ? 14 : 16}/> ภาพถ่ายประกอบการตรวจสอบ
+                        <div className="pt-4">
+                            <h3 className="font-bold text-gray-700 mb-3 text-sm flex items-center gap-2 border-b pb-2">
+                                <Camera size={16}/> ภาพถ่ายประกอบการตรวจสอบ
                             </h3>
-                            <div className="flex flex-wrap gap-2 h-full">
+                            <div className="flex flex-wrap gap-2">
                                 {selectedPmHistory.images.map((img, idx) => (
-                                    <div key={idx} className={`relative rounded-lg border border-gray-200 overflow-hidden shadow-sm group ${isExporting ? 'h-full max-h-[85px] w-auto aspect-square' : 'w-32 h-32'}`}>
+                                    <div key={idx} className="w-32 h-32 rounded-lg border border-gray-200 overflow-hidden shadow-sm">
                                         <img src={img} alt="PM Evidence" className="w-full h-full object-cover" />
-                                        
-                                        {/* ปุ่มดาวน์โหลดรูปภาพ */}
-                                        <div className={`absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-[1px] ${isExporting ? 'hidden' : ''}`}>
-                                            <button 
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    const a = document.createElement('a');
-                                                    a.href = img;
-                                                    a.download = `PM_${selectedPmHistory.machineCode}_img${idx+1}.jpg`;
-                                                    document.body.appendChild(a);
-                                                    a.click();
-                                                    document.body.removeChild(a);
-                                                }}
-                                                className="bg-white text-gray-800 hover:text-blue-600 p-2.5 rounded-full shadow-lg transform transition-transform hover:scale-110 flex items-center justify-center"
-                                                title="ดาวน์โหลดรูปภาพนี้"
-                                            >
-                                                <Download size={18} />
-                                            </button>
-                                        </div>
                                     </div>
                                 ))}
                             </div>
                         </div>
                     )}
 
-                    {/* Signatures Area - Pinned to bottom when exporting using mt-auto */}
-                    <div className={`flex justify-between border-t border-gray-300 flex-wrap w-full ${isExporting ? 'pt-2 pb-0 mt-auto shrink-0' : 'px-4 pt-16 pb-4 mt-6 gap-4'}`}>
-                        <div className={`text-center ${isExporting ? 'w-[30%]' : 'w-48'}`}>
-                            <div className={`border-b border-gray-400 text-blue-800 font-serif italic flex items-end justify-center pb-0.5 ${isExporting ? 'mb-1 h-5 text-[11px]' : 'mb-2 h-8 text-base'}`}>
+                    {/* Signatures Area */}
+                    <div className="flex justify-between px-4 pt-16 pb-4 mt-6 border-t border-gray-300 gap-4 flex-wrap">
+                        <div className="text-center w-48">
+                            <div className="border-b border-gray-400 mb-2 h-8 text-blue-800 font-serif italic flex items-end justify-center pb-1">
                                 {selectedPmHistory.inspector}
                             </div>
-                            <div className={`font-bold text-gray-800 mt-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}>ผู้ตรวจสอบ (Inspector)</div>
-                            <div className={`text-gray-500 mt-0.5 ${isExporting ? 'text-[8px]' : 'text-[10px]'}`}>{new Date(selectedPmHistory.date).toLocaleDateString('th-TH')}</div>
+                            <div className="text-xs font-bold text-gray-800 mt-1">ผู้ตรวจสอบ (Inspector)</div>
+                            <div className="text-[10px] text-gray-500 mt-1">{new Date(selectedPmHistory.date).toLocaleDateString('th-TH')}</div>
                         </div>
 
                         {/* Map Dynamic Approvals */}
                         {selectedPmHistory.approvals && selectedPmHistory.approvals.map((app, idx) => (
-                             <div className={`text-center ${isExporting ? 'w-[30%]' : 'w-48'}`} key={idx}>
-                                <div className={`border-b border-gray-400 text-blue-800 font-serif italic flex items-end justify-center pb-0.5 relative ${isExporting ? 'mb-1 h-5 text-[11px]' : 'mb-2 h-8 text-base'}`}>
-                                    {app.action === 'Rejected' && <span className="absolute -top-3 right-0 text-red-500 font-sans font-bold border border-red-500 rounded px-1 py-0.5 transform rotate-12 text-[8px]">ไม่อนุมัติ</span>}
-                                    {app.action === 'Approved' && <span className="absolute -top-3 right-0 text-green-500 font-sans font-bold border border-green-500 rounded px-1 py-0.5 transform rotate-12 text-[8px]">อนุมัติแล้ว</span>}
+                             <div className="text-center w-48" key={idx}>
+                                <div className="border-b border-gray-400 mb-2 h-8 text-blue-800 font-serif italic flex items-end justify-center pb-1 relative">
+                                    {app.action === 'Rejected' && <span className="absolute -top-4 right-0 text-red-500 font-sans font-bold border-2 border-red-500 rounded px-1.5 py-0.5 transform rotate-12 text-xs">ไม่อนุมัติ</span>}
+                                    {app.action === 'Approved' && <span className="absolute -top-4 right-0 text-green-500 font-sans font-bold border-2 border-green-500 rounded px-1.5 py-0.5 transform rotate-12 text-xs">อนุมัติแล้ว</span>}
                                     {app.approver}
                                 </div>
-                                <div className={`font-bold text-gray-800 mt-1 truncate px-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`} title={app.role}>{app.role}</div>
-                                <div className={`text-gray-500 mt-0.5 ${isExporting ? 'text-[8px]' : 'text-[10px]'}`}>{new Date(app.date).toLocaleDateString('th-TH')}</div>
+                                <div className="text-xs font-bold text-gray-800 mt-1 truncate px-2" title={app.role}>{app.role}</div>
+                                <div className="text-[10px] text-gray-500 mt-1">{new Date(app.date).toLocaleDateString('th-TH')}</div>
                             </div>
                         ))}
                         
                         {/* Placeholder for Pending Approvals */}
                         {selectedPmHistory.approvalStatus === 'Pending Chief' && (
-                            <div className={`text-center opacity-50 ${isExporting ? 'w-[30%]' : 'w-48'}`}>
-                                <div className={`border-b border-gray-400 ${isExporting ? 'mb-1 h-5' : 'mb-2 h-8'}`}></div>
-                                <div className={`font-bold text-gray-800 mt-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}>หัวหน้าช่าง (Chief)</div>
+                            <div className="text-center w-48 opacity-50">
+                                <div className="border-b border-gray-400 mb-2 h-8"></div>
+                                <div className="text-xs font-bold text-gray-800 mt-1">หัวหน้าช่าง (Chief)</div>
                             </div>
                         )}
                         {(selectedPmHistory.approvalStatus === 'Pending Manager' || selectedPmHistory.approvalStatus === 'Pending Chief') && (
-                            <div className={`text-center opacity-50 ${isExporting ? 'w-[30%]' : 'w-48'}`}>
-                                <div className={`border-b border-gray-400 ${isExporting ? 'mb-1 h-5' : 'mb-2 h-8'}`}></div>
-                                <div className={`font-bold text-gray-800 mt-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}>ผู้จัดการ (Manager)</div>
+                            <div className="text-center w-48 opacity-50">
+                                <div className="border-b border-gray-400 mb-2 h-8"></div>
+                                <div className="text-xs font-bold text-gray-800 mt-1">ผู้จัดการ (Manager)</div>
                             </div>
                         )}
                     </div>
                     
                     {/* Footer Info */}
-                    <div className={`flex justify-between items-end border-t text-gray-400 ${isExporting ? 'mt-1 pt-0.5 text-[7px] shrink-0' : 'mt-4 pt-4 text-[10px]'}`}>
+                    <div className="flex justify-between items-end mt-4 pt-4 border-t text-[10px] text-gray-400">
                         <div>Ref ID: {selectedPmHistory.id}</div>
                         <div>Generated by Best Million Group System</div>
                     </div>
@@ -12186,48 +12123,973 @@ export default function App() {
                             return null;
                         })()}
                     </div>
-                    <div className="flex gap-2 items-center">
+                    <div className="flex gap-2">
                         <Button variant="secondary" onClick={() => setSelectedPmHistory(null)}>{t('close')}</Button>
-                        
-                        {/* Dropdown Menu for Download Options */}
-                        <div className="relative group inline-block">
-                            <Button icon={Download} disabled={isExporting}>
-                                {isExporting ? t('downloading') : 'ดาวน์โหลดรายงาน'} <ChevronDown size={16} className="ml-1 opacity-70" />
-                            </Button>
-                            
-                            <div className="absolute bottom-full right-0 mb-2 hidden group-hover:flex flex-col bg-white border border-gray-200 shadow-xl rounded-xl w-56 overflow-hidden z-50 transform origin-bottom-right transition-all">
-                                <button
-                                    type="button"
-                                    className="flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 transition-colors text-gray-700"
-                                    onClick={() => {
-                                        const modalContainer = document.getElementById('pm-history-modal-container');
-                                        if (modalContainer) modalContainer.scrollTop = 0;
-                                        setTimeout(() => handleExportPDF('print-pm-history-report', `PM_Report_${selectedPmHistory.machineCode}.pdf`, 'portrait', [22, 12, 20, 12]), 100);
-                                    }}
-                                >
-                                    <div className="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center text-red-500 shrink-0"><FileText size={18}/></div>
-                                    <div className="flex flex-col">
-                                        <span className="font-bold">ไฟล์เอกสาร PDF</span>
-                                        <span className="text-[10px] text-gray-500">สำหรับสั่งพิมพ์หรือจัดเก็บ</span>
-                                    </div>
-                                </button>
-                                <div className="h-[1px] bg-gray-100 mx-2"></div>
-                                <button
-                                    type="button"
-                                    className="flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 transition-colors text-gray-700"
-                                    onClick={() => {
-                                        const modalContainer = document.getElementById('pm-history-modal-container');
-                                        if (modalContainer) modalContainer.scrollTop = 0;
-                                        setTimeout(() => handleExportImage('print-pm-history-report', `PM_Report_${selectedPmHistory.machineCode}.jpg`), 100);
-                                    }}
-                                >
-                                    <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-500 shrink-0"><ImageIcon size={18}/></div>
-                                    <div className="flex flex-col">
-                                        <span className="font-bold">ไฟล์รูปภาพ (JPG)</span>
-                                        <span className="text-[10px] text-gray-500">สำหรับส่งรายงานในแชทกลุ่ม</span>
-                                    </div>
-                                </button>
+                        <Button icon={Printer} onClick={() => {
+                            const modalContainer = document.getElementById('pm-history-modal-container');
+                            if (modalContainer) modalContainer.scrollTop = 0;
+                            setTimeout(() => handleExportPDF('print-pm-history-report', `PM_Report_${selectedPmHistory.machineCode}.pdf`, 'portrait', [22, 12, 20, 12]), 100);
+                        }} disabled={isExporting}>
+                            {isExporting ? t('downloading') : 'ดาวน์โหลด PDF'}
+                        </Button>
+                    </div>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* NEW: Selected Machine Details Modal */}
+      {selectedMachineDetails && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl p-8 m-4 max-h-[95vh] overflow-y-auto relative animate-fade-in">
+                <button 
+                    onClick={() => setSelectedMachineDetails(null)} 
+                    className="absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors"
+                >
+                    <X size={24} />
+                </button>
+
+                <div className="mb-6 border-b pb-4">
+                    <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2"><Settings className="text-red-600"/> รายละเอียดเครื่องจักร</h2>
+                    <p className="text-sm text-gray-500">ข้อมูลและสถานะของเครื่องจักร / อุปกรณ์ (Machine Details)</p>
+                </div>
+
+                <div className="flex flex-col md:flex-row gap-8 mb-6">
+                    {/* Photo */}
+                    <div className="w-full md:w-1/3 flex flex-col items-center">
+                        <div className="w-48 h-48 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden shadow-sm">
+                            {selectedMachineDetails.photo ? (
+                                <img src={selectedMachineDetails.photo} alt={selectedMachineDetails.name} className="w-full h-full object-cover" />
+                            ) : (
+                                <Settings className="text-gray-300" size={64} />
+                            )}
+                        </div>
+                    </div>
+                    {/* Details */}
+                    <div className="w-full md:w-2/3 space-y-4">
+                        <div className="grid grid-cols-2 gap-y-5 gap-x-4 text-sm">
+                            <div>
+                                <span className="text-gray-500 block text-xs mb-1">รหัสเครื่องจักร (Code)</span>
+                                <span className="font-mono font-bold text-lg text-red-600 bg-red-50 px-2 py-1 rounded">{selectedMachineDetails.code}</span>
                             </div>
+                            <div>
+                                <span className="text-gray-500 block text-xs mb-1">ชื่อเครื่องจักร (Name)</span>
+                                <span className="font-bold text-gray-800 text-base">{selectedMachineDetails.name}</span>
+                            </div>
+                            <div className="col-span-2 border-t border-gray-100 pt-3">
+                                <span className="text-gray-500 block text-xs mb-1">ระบบที่เกี่ยวข้อง (System)</span>
+                                <span className="text-gray-700 bg-gray-100 px-3 py-1.5 rounded-md inline-block font-medium border border-gray-200">{selectedMachineDetails.system}</span>
+                            </div>
+                            <div>
+                                <span className="text-gray-500 block text-xs mb-1">สถานที่ติดตั้ง (Location)</span>
+                                <span className="text-gray-800 flex items-center gap-1"><MapPin size={14} className="text-gray-400"/> {selectedMachineDetails.location || '-'}</span>
+                            </div>
+                            <div>
+                                <span className="text-gray-500 block text-xs mb-1">จำนวน (Qty)</span>
+                                <span className="text-gray-800 font-bold">{selectedMachineDetails.qty} Unit(s)</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Linked PM Plans */}
+                <div className="mt-4">
+                    <h3 className="font-bold text-gray-700 mb-3 text-sm flex items-center gap-2 border-b pb-2">
+                        <Calendar size={16} className="text-blue-600"/> แผนบำรุงรักษาที่ผูกไว้ (Linked PM Plans)
+                    </h3>
+                    <div className="bg-gray-50 rounded-lg border border-gray-200 max-h-40 overflow-y-auto">
+                        {pmPlans.filter(p => p.machineId === selectedMachineDetails.id).length > 0 ? (
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-gray-100 text-gray-600 text-xs">
+                                    <tr>
+                                        <th className="p-2 pl-4">ความถี่ (Frequency)</th>
+                                        <th className="p-2">รายละเอียดกำหนดการ</th>
+                                        <th className="p-2 text-center pr-4">สถานะ</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200">
+                                    {pmPlans.filter(p => p.machineId === selectedMachineDetails.id).map(plan => {
+                                        let scheduleText = '-';
+                                        const days = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
+                                        const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+                                        if (plan.frequency === 'Weekly') scheduleText = `ทุกวัน${days[plan.scheduleDetails.dayOfWeek] || ''}`;
+                                        else if (plan.frequency === 'Monthly') scheduleText = `ทุกวันที่ ${plan.scheduleDetails.date} ของเดือน`;
+                                        else if (plan.frequency === 'Yearly') scheduleText = `ทุกวันที่ ${plan.scheduleDetails.date} ${months[parseInt(plan.scheduleDetails.month)-1] || ''}`;
+                                        else if (plan.frequency === 'Daily') scheduleText = 'ทุกวัน (Everyday)';
+
+                                        return (
+                                            <tr key={plan.id}>
+                                                <td className="p-2 pl-4 font-medium text-blue-700">{t(`freq_${plan.frequency}`)}</td>
+                                                <td className="p-2 text-gray-600">{scheduleText}</td>
+                                                <td className="p-2 text-center pr-4"><Badge status={plan.status} /></td>
+                                            </tr>
+                                        )
+                                    })}
+                                </tbody>
+                            </table>
+                        ) : (
+                            <div className="text-center text-gray-500 text-xs py-6 flex flex-col items-center gap-2">
+                                <FileText size={24} className="text-gray-300"/>
+                                ยังไม่มีแผน PM สำหรับเครื่องจักรนี้
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                <div className="mt-8 flex justify-end gap-2 pt-4 border-t">
+                    {hasPerm('proj_pm', 'edit') && (
+                        <Button variant="outline" icon={Edit} onClick={() => handleEditMachine(selectedMachineDetails)}>แก้ไขข้อมูล</Button>
+                    )}
+                    <Button variant="secondary" onClick={() => setSelectedMachineDetails(null)}>{t('close')}</Button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* Add Meter Modal */}
+      {showAddMeterModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-8 m-4 animate-fade-in">
+            <div className="flex justify-between items-start mb-6 border-b pb-4">
+              <div>
+                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                    {newMeter.id ? <Edit className="text-orange-500" size={20}/> : <Plus className="text-red-600" size={20}/>} 
+                    {newMeter.id ? 'แก้ไขทะเบียนมิเตอร์' : 'เพิ่มทะเบียนมิเตอร์'}
+                </h2>
+                <p className="text-sm text-gray-500 mt-1">{newMeter.id ? 'แก้ไขข้อมูลรายละเอียดของมิเตอร์' : 'ลงทะเบียนมิเตอร์น้ำประปาหรือไฟฟ้าใหม่'}</p>
+              </div>
+              <button onClick={() => setShowAddMeterModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
+            </div>
+            <form onSubmit={handleSaveMeter} className="space-y-5">
+                
+                {/* Type Selection */}
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">1. เลือกประเภทมิเตอร์</label>
+                    <div className="grid grid-cols-2 gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setNewMeter({...newMeter, type: 'Water'})}
+                            className={`py-3 px-4 rounded-lg border-2 flex items-center justify-center gap-2 transition-all ${newMeter.type === 'Water' ? 'bg-blue-50 border-blue-500 text-blue-700 font-bold shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:border-gray-300'}`}
+                        >
+                            <Droplet size={20} /> น้ำประปา
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setNewMeter({...newMeter, type: 'Electricity'})}
+                            className={`py-3 px-4 rounded-lg border-2 flex items-center justify-center gap-2 transition-all ${newMeter.type === 'Electricity' ? 'bg-orange-50 border-orange-500 text-orange-700 font-bold shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:border-gray-300'}`}
+                        >
+                            <Zap size={20} /> ไฟฟ้า
+                        </button>
+                    </div>
+                </div>
+
+                <div className="border-t border-gray-100 pt-4">
+                    <label className="block text-sm font-bold text-gray-700 mb-4">2. รายละเอียดมิเตอร์</label>
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs font-medium text-gray-500 mb-1">เลขมิเตอร์ (Code)</label>
+                                <input 
+                                    type="text" 
+                                    required 
+                                    className="w-full border border-gray-300 rounded-md p-2.5 focus:ring-2 focus:ring-red-200 focus:border-red-500 outline-none uppercase font-mono text-sm bg-gray-50 focus:bg-white transition-colors"
+                                    value={newMeter.code}
+                                    onChange={e => setNewMeter({...newMeter, code: e.target.value})}
+                                    placeholder="เช่น M-001"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-gray-500 mb-1">ชื่อเรียก (ถ้ามี)</label>
+                                <input 
+                                    type="text" 
+                                    className="w-full border border-gray-300 rounded-md p-2.5 focus:ring-2 focus:ring-red-200 focus:border-red-500 outline-none text-sm bg-gray-50 focus:bg-white transition-colors"
+                                    value={newMeter.name}
+                                    onChange={e => setNewMeter({...newMeter, name: e.target.value})}
+                                    placeholder="เช่น มิเตอร์เมนอาคาร A"
+                                />
+                            </div>
+                        </div>
+
+                        {/* Location */}
+                        <div>
+                            <label className="block text-xs font-medium text-gray-500 mb-1">ตำแหน่งที่ติดตั้ง</label>
+                            <div className="relative">
+                                <MapPin size={16} className="absolute left-3 top-3 text-gray-400"/>
+                                <input 
+                                    type="text" 
+                                    required
+                                    className="w-full border border-gray-300 rounded-md pl-9 p-2.5 focus:ring-2 focus:ring-red-200 focus:border-red-500 outline-none text-sm bg-gray-50 focus:bg-white transition-colors"
+                                    value={newMeter.location}
+                                    onChange={e => setNewMeter({...newMeter, location: e.target.value})}
+                                    placeholder="เช่น ชั้น 1 ห้องเครื่อง, เสาหน้าโครงการ"
+                                />
+                            </div>
+                        </div>
+
+                        {/* Initial Value */}
+                        <div>
+                            <label className="block text-xs font-medium text-gray-500 mb-1">{newMeter.id ? 'เลขมิเตอร์ปัจจุบัน (แก้ไขถ้าจำเป็น)' : 'ค่ายกมา / ค่าเริ่มต้น (Initial Value)'}</label>
+                            <input 
+                                type="number" 
+                                step="0.01"
+                                required
+                                className="w-full border border-gray-300 rounded-md p-3 focus:ring-2 focus:ring-red-200 focus:border-red-500 outline-none text-right font-bold text-gray-800 text-lg bg-gray-50 focus:bg-white transition-colors"
+                                value={newMeter.initialValue}
+                                onChange={e => setNewMeter({...newMeter, initialValue: e.target.value})}
+                                placeholder="0.00"
+                            />
+                            <p className="text-[11px] text-gray-400 mt-1 flex items-center gap-1">
+                                *ตัวเลขนี้จะถูกใช้เป็นค่ายกมา (Prev Value) สำหรับการจดมิเตอร์ครั้งต่อไป
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-6 border-t mt-4">
+                    <Button variant="secondary" onClick={() => setShowAddMeterModal(false)}>{t('cancel')}</Button>
+                    <Button type="submit" icon={Save} className={newMeter.id ? "bg-orange-600 hover:bg-orange-700 px-6" : "bg-red-600 hover:bg-red-700 px-6"}>
+                        {newMeter.id ? 'บันทึกการแก้ไข' : 'บันทึกมิเตอร์'}
+                    </Button>
+                </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add/Edit Action Plan Modal */}
+      {showAddActionPlanModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 m-4 animate-fade-in">
+            <div className="flex justify-between items-start mb-6 border-b pb-4">
+              <div>
+                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                    <CheckCircle className="text-orange-500" size={24}/> 
+                    {newActionPlan.id ? 'แก้ไข Action Plan' : 'เพิ่ม Action Plan'}
+                </h2>
+                <p className="text-sm text-gray-500 mt-1">บันทึกแผนงาน, การแจ้งซ่อม หรือปัญหาที่พบ</p>
+              </div>
+              <button onClick={() => setShowAddActionPlanModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
+            </div>
+            
+            <form onSubmit={handleSaveActionPlan} className="space-y-4">
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">หัวข้อปัญหา / งาน (Issue/Task) <span className="text-red-500">*</span></label>
+                    <input 
+                        type="text" 
+                        required 
+                        className="w-full border border-gray-300 rounded-md p-2.5 focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none text-sm transition-colors"
+                        value={newActionPlan.issue}
+                        onChange={e => setNewActionPlan({...newActionPlan, issue: e.target.value})}
+                        placeholder="เช่น ท่อน้ำรั่วชั้น 5, ไฟส่องสว่างทางเดินเสีย"
+                    />
+                </div>
+
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">รายละเอียด (Details)</label>
+                    <textarea 
+                        className="w-full border border-gray-300 rounded-md p-2.5 focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none text-sm h-24 resize-none transition-colors"
+                        value={newActionPlan.details}
+                        onChange={e => setNewActionPlan({...newActionPlan, details: e.target.value})}
+                        placeholder="ระบุรายละเอียดเพิ่มเติม หรือแนวทางการแก้ไข..."
+                    ></textarea>
+                </div>
+
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">ผู้รับผิดชอบ (Assignee)</label>
+                    <select 
+                        className="w-full border border-gray-300 rounded-md p-2.5 focus:ring-2 focus:ring-orange-200 outline-none text-sm bg-white"
+                        value={newActionPlan.responsible}
+                        onChange={e => setNewActionPlan({...newActionPlan, responsible: e.target.value})}
+                    >
+                        <option value="">-- เลือกตำแหน่งผู้รับผิดชอบ --</option>
+                        {EMPLOYEE_POSITIONS.map(pos => (
+                            <option key={pos} value={pos}>
+                                {pos}
+                            </option>
+                        ))}
+                    </select>
+                    {newActionPlan.responsible?.startsWith('อื่นๆ') && (
+                        <input 
+                            type="text" 
+                            className="mt-2 w-full border border-gray-300 rounded-md p-2.5 focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none text-sm bg-gray-50 focus:bg-white transition-colors"
+                            placeholder="โปรดระบุผู้รับผิดชอบ..."
+                            value={newActionPlan.otherResponsible || ''}
+                            onChange={e => setNewActionPlan({...newActionPlan, otherResponsible: e.target.value})}
+                            required
+                        />
+                    )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">วันเริ่ม (Start Date)</label>
+                        <input 
+                            type="date" 
+                            required
+                            className="w-full border border-gray-300 rounded-md p-2.5 focus:ring-2 focus:ring-orange-200 outline-none text-sm text-gray-700 bg-white"
+                            value={newActionPlan.startDate}
+                            onChange={e => setNewActionPlan({...newActionPlan, startDate: e.target.value})}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">กำหนดเสร็จ (Deadline)</label>
+                        <input 
+                            type="date" 
+                            className="w-full border border-gray-300 rounded-md p-2.5 focus:ring-2 focus:ring-orange-200 outline-none text-sm text-gray-700 bg-white"
+                            value={newActionPlan.deadline}
+                            onChange={e => setNewActionPlan({...newActionPlan, deadline: e.target.value})}
+                        />
+                    </div>
+                </div>
+
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">สถานะเริ่มต้น (Status)</label>
+                    <div className="grid grid-cols-2 gap-2">
+                        {['Pending', 'In Progress', 'Completed', 'Cancelled'].map(status => (
+                            <button
+                                key={status}
+                                type="button"
+                                onClick={() => setNewActionPlan({...newActionPlan, status})}
+                                className={`py-2 text-xs font-bold rounded-md border transition-all ${
+                                    newActionPlan.status === status 
+                                        ? status === 'Completed' ? 'bg-green-50 border-green-500 text-green-700 shadow-sm'
+                                        : status === 'In Progress' ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm'
+                                        : status === 'Cancelled' ? 'bg-gray-100 border-gray-500 text-gray-700 shadow-sm'
+                                        : 'bg-orange-50 border-orange-500 text-orange-700 shadow-sm'
+                                    : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
+                                }`}
+                            >
+                                {status === 'Completed' ? 'ดำเนินการแล้วเสร็จ' : status === 'In Progress' ? 'อยู่ระหว่างดำเนินการ' : status === 'Cancelled' ? 'ยกเลิกดำเนินการ' : 'รอดำเนินการ'}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-6 border-t mt-4">
+                    <Button variant="secondary" onClick={() => setShowAddActionPlanModal(false)}>{t('cancel')}</Button>
+                    <Button type="submit" icon={Save}>บันทึกข้อมูล</Button>
+                </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Audit Form Modal */}
+      {showAddAuditModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl p-6 m-4 max-h-[95vh] flex flex-col animate-fade-in">
+            <div className="flex justify-between items-start mb-4 border-b pb-4 shrink-0">
+              <div>
+                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                    <ClipboardCheck className="text-blue-600" size={24}/> แบบฟอร์มตรวจสอบ (Audit Checklist)
+                </h2>
+                <p className="text-sm text-gray-500 mt-1">บันทึกผลการประเมินคุณภาพและมาตรฐานการทำงาน</p>
+              </div>
+              <button onClick={() => setShowAddAuditModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
+            </div>
+            
+            <form onSubmit={handleSaveAudit} className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-6">
+                
+                {/* General Info */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 bg-blue-50 p-4 rounded-lg border border-blue-100">
+                    <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">โครงการ (Project)</label>
+                        <select 
+                            className="w-full border border-gray-300 rounded p-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
+                            value={newAudit.projectId}
+                            onChange={(e) => setNewAudit({...newAudit, projectId: e.target.value})}
+                            disabled={!!selectedProject} // Lock if opened from Project Detail
+                        >
+                            <option value="">-- เลือกโครงการ --</option>
+                            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">วันที่ตรวจ (Audit Date)</label>
+                        <input 
+                            type="date" 
+                            required
+                            className="w-full border border-gray-300 rounded p-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
+                            value={newAudit.date}
+                            onChange={(e) => setNewAudit({...newAudit, date: e.target.value})}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">ประเภทการประเมิน (Audit Type)</label>
+                        <select 
+                            className="w-full border border-gray-300 rounded p-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
+                            value={newAudit.type}
+                            onChange={(e) => setNewAudit({...newAudit, type: e.target.value})}
+                        >
+                            <option value="Internal Audit">Internal Audit</option>
+                            <option value="Quality Check">Quality Check</option>
+                            <option value="Compliance">Compliance</option>
+                            <option value="Risk Assessment">Risk Assessment</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">ชื่อผู้ตรวจสอบ (Auditor Name)</label>
+                        <input 
+                            type="text" 
+                            required
+                            className="w-full border border-gray-300 rounded p-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
+                            value={newAudit.inspector}
+                            onChange={(e) => setNewAudit({...newAudit, inspector: e.target.value})}
+                        />
+                    </div>
+                </div>
+
+                {/* Checklist Categories */}
+                <div className="space-y-6">
+                    {AUDIT_FORM_TEMPLATE.map((category, catIdx) => (
+                        <div key={catIdx} className="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm">
+                            <div className="bg-gray-100 px-4 py-2 border-b border-gray-200 font-bold text-gray-800 text-sm">
+                                {category.title}
+                            </div>
+                            <table className="w-full text-sm">
+                                <thead className="bg-gray-50 text-gray-600 hidden md:table-header-group">
+                                    <tr>
+                                        <th className="p-2 pl-4 text-left font-medium w-1/2">รายการตรวจสอบ (Checklist Items)</th>
+                                        <th className="p-2 text-center font-medium w-1/4">คะแนน (1-5)</th>
+                                        <th className="p-2 pr-4 text-left font-medium w-1/4">หมายเหตุ (Remark)</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {category.items.map((item, itemIdx) => (
+                                        <tr key={itemIdx} className="flex flex-col md:table-row hover:bg-gray-50 border-b md:border-b-0 border-gray-100 last:border-0">
+                                            <td className="p-3 pl-4 md:py-3 text-gray-800 font-medium md:font-normal">{item}</td>
+                                            <td className="p-3 md:py-3 border-t md:border-t-0 border-dashed border-gray-200">
+                                                <div className="flex gap-1 justify-center">
+                                                    {[1, 2, 3, 4, 5].map(score => {
+                                                        const isSelected = newAudit.scores[`${catIdx}_${itemIdx}`] === score;
+                                                        return (
+                                                            <label key={score} className={`w-8 h-8 rounded-full border flex items-center justify-center cursor-pointer transition-all ${isSelected ? 'bg-blue-600 text-white border-blue-700 shadow-md scale-110 font-bold' : 'bg-white text-gray-600 hover:bg-blue-50 border-gray-300'}`}>
+                                                                <input 
+                                                                    type="radio" 
+                                                                    name={`score_${catIdx}_${itemIdx}`} 
+                                                                    value={score} 
+                                                                    checked={isSelected}
+                                                                    onChange={() => handleAuditScoreChange(catIdx, itemIdx, score)}
+                                                                    className="hidden"
+                                                                />
+                                                                {score}
+                                                            </label>
+                                                        )
+                                                    })}
+                                                </div>
+                                            </td>
+                                            <td className="p-3 pr-4 md:py-3">
+                                                <input 
+                                                    type="text" 
+                                                    placeholder="ระบุหมายเหตุ..." 
+                                                    className="w-full border border-gray-200 rounded p-1.5 text-xs outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
+                                                    value={newAudit.remarks[`${catIdx}_${itemIdx}`] || ''}
+                                                    onChange={(e) => handleAuditRemarkChange(catIdx, itemIdx, e.target.value)}
+                                                />
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ))}
+                </div>
+
+                {/* Additional Comments */}
+                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm p-4">
+                    <label className="block text-sm font-bold text-gray-800 mb-2">ความคิดเห็นเพิ่มเติม (Additional Comments)</label>
+                    <textarea 
+                        className="w-full border border-gray-300 rounded p-3 text-sm focus:ring-2 focus:ring-blue-200 outline-none resize-none h-20"
+                        placeholder="ข้อเสนอแนะเพิ่มเติมสำหรับการประเมินครั้งนี้..."
+                        value={newAudit.additionalComments}
+                        onChange={(e) => setNewAudit({...newAudit, additionalComments: e.target.value})}
+                    ></textarea>
+                </div>
+
+                {/* Sticky Footer */}
+                <div className="sticky bottom-0 bg-white border-t border-gray-200 py-4 px-2 mt-6 flex flex-col md:flex-row justify-between items-center gap-4 shrink-0">
+                    <div className="flex items-center gap-3">
+                        <span className="text-gray-600 font-bold">คะแนนประเมินปัจจุบัน:</span>
+                        <div className="bg-blue-100 text-blue-800 px-4 py-2 rounded-lg text-2xl font-black shadow-inner border border-blue-200 tracking-wider flex items-baseline gap-1">
+                            {calculateTotalAuditScore()} <span className="text-sm font-medium text-blue-600">/ 235</span>
+                        </div>
+                    </div>
+                    <div className="flex gap-3 w-full md:w-auto">
+                        <Button variant="secondary" onClick={() => setShowAddAuditModal(false)} className="flex-1 md:flex-none py-3">{t('cancel')}</Button>
+                        <Button type="submit" icon={Save} className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700 py-3 shadow-md">บันทึกผลการประเมิน</Button>
+                    </div>
+                </div>
+
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Selected Audit Report View Modal */}
+      {selectedAuditReport && (
+        <div className={`fixed inset-0 bg-black bg-opacity-50 flex justify-center z-50 ${isExporting ? 'items-start overflow-visible' : 'items-center overflow-y-auto'}`}>
+            <div id="audit-modal-container" className={`w-full max-w-4xl m-4 relative animate-fade-in ${isExporting ? 'bg-white shadow-none p-4 h-max overflow-visible' : 'bg-white rounded-lg shadow-xl max-h-[95vh] p-8 overflow-y-auto'}`}>
+                <button 
+                    onClick={() => setSelectedAuditReport(null)} 
+                    className={`absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors z-10 ${isExporting ? 'hidden' : ''}`}
+                >
+                    <X size={24} />
+                </button>
+
+                {/* บังคับความกว้าง 186mm (เท่ากับ A4 210mm หักขอบซ้ายขวาด้านละ 12mm) เพื่อไม่ให้ล้นตอนแคปภาพ */}
+                <div id="print-audit-report" className={`space-y-6 bg-white ${isExporting ? 'w-[186mm] min-w-[186mm] max-w-[186mm] mx-auto box-border' : 'w-full'}`}>
+                    {/* Header */}
+                    <div className="text-center border-b border-gray-400 pb-4 mb-6">
+                        <h2 className="text-2xl font-bold text-gray-800">รายงานผลการตรวจสอบคุณภาพ (Audit Report)</h2>
+                        <h3 className="text-lg text-blue-600 font-medium mt-1">{projects.find(p => p.id === selectedAuditReport.projectId)?.name || 'Unknown Project'}</h3>
+                    </div>
+
+                    {/* Meta Info */}
+                    <div className="grid grid-cols-2 gap-y-4 gap-x-8 text-sm bg-gray-50 p-4 rounded-lg border border-gray-200 mb-6">
+                        <div className="flex"><span className="w-32 font-bold text-gray-700 shrink-0">วันที่ตรวจ:</span> <span className="text-gray-800">{new Date(selectedAuditReport.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'})}</span></div>
+                        <div className="flex"><span className="w-32 font-bold text-gray-700 shrink-0">ผู้ตรวจสอบ:</span> <span className="text-gray-800 truncate" title={selectedAuditReport.inspector}>{selectedAuditReport.inspector}</span></div>
+                        <div className="flex"><span className="w-32 font-bold text-gray-700 shrink-0">ประเภทการประเมิน:</span> <span className="text-gray-800">{selectedAuditReport.category}</span></div>
+                        <div className="flex"><span className="w-32 font-bold text-gray-700 shrink-0">คะแนนรวม:</span> 
+                            <span className={`font-bold ${selectedAuditReport.score >= 90 ? 'text-green-600' : selectedAuditReport.score >= 70 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                {selectedAuditReport.rawScore ? `${selectedAuditReport.rawScore} / 235 (${selectedAuditReport.score}%)` : `${selectedAuditReport.score}%`}
+                            </span>
+                        </div>
+                    </div>
+
+                    {/* Detailed Checklist (Only show if new format with itemScores exists) */}
+                    {selectedAuditReport.itemScores ? (
+                        <div className="space-y-4">
+                            {AUDIT_FORM_TEMPLATE.map((category, catIdx) => (
+                                <div key={catIdx} className="mb-4">
+                                    <h4 className="font-bold text-gray-800 text-sm bg-gray-100 p-2 border border-gray-300 rounded-t-md">
+                                        {category.title}
+                                    </h4>
+                                    {/* บังคับ table-fixed เพื่อให้ตารางไม่ขยายตัวเกินความกว้างที่กำหนด */}
+                                    <table className="w-full text-xs border-x border-b border-gray-300 border-collapse table-fixed break-words">
+                                        <thead className="bg-gray-50 text-gray-600">
+                                            <tr>
+                                                <th className="p-2 border border-gray-300 text-left w-[50%]">รายการตรวจสอบ</th>
+                                                <th className="p-2 border border-gray-300 text-center w-[15%]">คะแนน</th>
+                                                <th className="p-2 border border-gray-300 text-left w-[35%]">หมายเหตุ</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {category.items.map((item, itemIdx) => {
+                                                const score = selectedAuditReport.itemScores[`${catIdx}_${itemIdx}`];
+                                                const remark = selectedAuditReport.itemRemarks[`${catIdx}_${itemIdx}`];
+                                                return (
+                                                    <tr key={itemIdx}>
+                                                        <td className="p-2 border border-gray-300 text-gray-800 break-words whitespace-normal">{item}</td>
+                                                        <td className="p-2 border border-gray-300 text-center font-bold">{score || '-'}</td>
+                                                        <td className="p-2 border border-gray-300 text-gray-600 break-words whitespace-normal">{remark || '-'}</td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="p-10 text-center border-2 border-dashed border-gray-200 rounded-lg bg-gray-50 text-gray-500">
+                            ( ข้อมูลรายงานฉบับนี้เป็นรูปแบบเก่า ไม่มีรายละเอียดคะแนนรายข้อ )
+                        </div>
+                    )}
+
+                    {/* Overall Remarks */}
+                    <div className="mt-6 border border-gray-300 rounded-lg p-4 break-words">
+                        <h4 className="font-bold text-gray-800 text-sm mb-2 border-b pb-2">ความคิดเห็นเพิ่มเติม / สรุปผล</h4>
+                        <p className="text-sm text-gray-700 whitespace-pre-wrap break-words whitespace-normal">{selectedAuditReport.remarks || '-'}</p>
+                    </div>
+
+                    {/* Signature Area */}
+                    <div className="flex justify-between px-10 pt-16 pb-4">
+                        <div className="text-center">
+                            <div className="border-b border-gray-400 w-40 mb-2 h-8"></div>
+                            <div className="text-xs text-gray-600 truncate w-40">( {selectedAuditReport.inspector} )</div>
+                            <div className="text-sm font-bold text-gray-800 mt-1">ผู้ตรวจสอบ (Auditor)</div>
+                        </div>
+                        <div className="text-center">
+                            <div className="border-b border-gray-400 w-40 mb-2 h-8"></div>
+                            <div className="text-xs text-gray-600 w-40">( ........................................ )</div>
+                            <div className="text-sm font-bold text-gray-800 mt-1">ผู้รับรอง (Manager)</div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Print Buttons (Not visible in PDF) */}
+                <div className={`mt-8 flex justify-end gap-2 border-t pt-4 bg-white ${isExporting ? 'hidden' : ''}`}>
+                    <Button variant="secondary" onClick={() => setSelectedAuditReport(null)}>{t('close')}</Button>
+                    <Button icon={Printer} onClick={() => {
+                        // เลื่อน Scroll กลับไปบนสุดก่อนแคปภาพ เพื่อป้องกันบัคพื้นที่ว่างจาก html2canvas
+                        const modalContainer = document.getElementById('audit-modal-container');
+                        if (modalContainer) modalContainer.scrollTop = 0;
+                        // ตั้งค่าระยะขอบ (Margin) ให้พอดีกับ A4: บน 22mm, ซ้าย 12mm, ล่าง 20mm, ขวา 12mm
+                        setTimeout(() => handleExportPDF('print-audit-report', `AuditReport_${selectedAuditReport.date}.pdf`, 'portrait', [22, 12, 20, 12]), 100);
+                    }} disabled={isExporting}>
+                        {isExporting ? t('downloading') : 'ดาวน์โหลด PDF'}
+                    </Button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* NEW: Selected Form Details Modal (Upgraded to Printable Form Viewer) */}
+      {selectedFormDetails && (
+        <div className={`fixed inset-0 bg-black bg-opacity-50 flex justify-center z-50 ${isExporting ? 'items-start overflow-hidden' : 'items-center overflow-y-auto'}`}>
+            <div className={`w-full max-w-4xl m-4 flex flex-col relative animate-fade-in ${isExporting ? 'bg-transparent shadow-none' : 'bg-gray-100 rounded-lg shadow-xl max-h-[95vh]'}`}>
+                
+                {/* Header Actions */}
+                <div className={`bg-white p-4 border-b flex justify-between items-center rounded-t-lg shrink-0 z-10 sticky top-0 shadow-sm ${isExporting ? 'hidden' : ''}`}>
+                    <div>
+                        <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                            <FileText className="text-orange-600" size={24} /> 
+                            ตัวอย่างแบบฟอร์ม (Form Preview)
+                            {isEditingForm && <span className="ml-2 bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded-full animate-pulse">โหมดแก้ไข (Edit Mode)</span>}
+                        </h2>
+                        <p className="text-sm text-gray-500 mt-1">{selectedFormDetails.name}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        {isEditingForm && <span className="text-xs text-blue-600 mr-2 hidden md:inline">* คลิกที่ข้อความที่มีกรอบเส้นประเพื่อแก้ไข</span>}
+                        <Button 
+                            variant={isEditingForm ? "primary" : "secondary"} 
+                            icon={isEditingForm ? Save : Edit} 
+                            onClick={() => setIsEditingForm(!isEditingForm)}
+                        >
+                            {isEditingForm ? 'เสร็จสิ้นการแก้ไข' : 'แก้ไขแบบฟอร์ม'}
+                        </Button>
+                        <Button 
+                            variant="outline" 
+                            icon={PrinterIcon} 
+                            onClick={() => {
+                                setIsEditingForm(false); // ปิดโหมดแก้ก่อนพิมพ์เพื่อซ่อนกรอบ
+                                // เลื่อน Scroll กลับไปบนสุดก่อนแคปภาพ เพื่อแก้บัคเนื้อหาเลื่อน/มีช่องว่างใน html2canvas
+                                const modalContainer = document.getElementById('form-modal-container');
+                                if (modalContainer) modalContainer.scrollTop = 0;
+                                // บังคับ Margin ซ้าย-ขวา เป็น 0 เพื่อให้ px-[20mm] ใน HTML คุมขนาดได้ 1:1 พอดีเป๊ะ ไม่ถูกบีบ
+                                setTimeout(() => handleExportPDF('print-standard-form', `Form_${selectedFormDetails.id}.pdf`, 'portrait', [22, 0, 20, 0]), 100);
+                            }} 
+                            disabled={isExporting}
+                        >
+                            {isExporting ? t('downloading') : 'พิมพ์ / PDF'}
+                        </Button>
+                        <button 
+                            onClick={() => { setSelectedFormDetails(null); setIsEditingForm(false); }} 
+                            className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                        >
+                            <X size={24} />
+                        </button>
+                    </div>
+                </div>
+
+                {/* Document Container */}
+                <div id="form-modal-container" className={`flex-1 flex justify-center ${isExporting ? 'p-0 overflow-visible' : 'overflow-y-auto p-4 md:p-8'}`}>
+                    <div id="print-standard-form" className={`bg-white w-[210mm] min-h-[297mm] px-[20mm] pb-[10mm] relative mx-auto box-border flex flex-col ${isExporting ? 'pt-[2mm] border-none shadow-none' : 'pt-[10mm] shadow-md border border-gray-200 text-gray-800'}`}>
+                        
+                        {/* Common Document Header */}
+                        {/* ใช้ isExporting ซ่อนส่วนนี้เมื่อสั่งพิมพ์ เนื่องจาก handleExportPDF จะแสตมป์หัวกระดาษลงทุกหน้าให้อัตโนมัติแล้ว */}
+                        <div className={`flex justify-between items-start mb-6 border-b-2 border-gray-800 pb-4 shrink-0 ${isExporting ? 'hidden' : ''}`}>
+                            <div className="flex items-center gap-4">
+                                {selectedProject?.logo ? (
+                                    <img src={selectedProject.logo} className="w-16 h-16 object-contain" />
+                                ) : (
+                                    <div className="w-16 h-16 bg-gray-100 border border-gray-300 rounded flex items-center justify-center">
+                                        <Building2 size={32} className="text-gray-400"/>
+                                    </div>
+                                )}
+                                <div>
+                                    <h1 className={`text-xl font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>{selectedProject?.name || 'นิติบุคคลอาคารชุด / หมู่บ้านจัดสรร'}</h1>
+                                    <p className={`text-sm text-gray-600 mt-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>{selectedProject?.address || 'ที่อยู่โครงการ / หน่วยงาน'}</p>
+                                    <p className={`text-sm text-gray-600 mt-1 inline-block ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>โทร. {selectedProject?.phone || '02-XXX-XXXX'}</p>
+                                </div>
+                            </div>
+                            <div className="text-right">
+                                <div className={`text-sm font-bold bg-gray-100 px-3 py-1 rounded border border-gray-300 mb-2 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>Doc No: {selectedFormDetails.id.toUpperCase()}-{new Date().getFullYear()}</div>
+                                <div className={`text-sm ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>วันที่ (Date): ______/______/________</div>
+                            </div>
+                        </div>
+
+                        {/* Document Title */}
+                        <h2 className={`text-2xl font-bold text-center mb-8 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>
+                            {selectedFormDetails.name.split(' (')[0]}
+                        </h2>
+
+                        {/* Dynamic Form Content */}
+                        <div className="text-sm space-y-6">
+                            
+                            {/* --- ข้อมูลผู้ร้องขอ (Common Section) --- */}
+                            <div className="mb-6">
+                                <h3 className={`font-bold text-base mb-3 border-b pb-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>1. ข้อมูลผู้ร้องขอ (Applicant Information)</h3>
+                                <div className="grid grid-cols-2 gap-y-4 gap-x-6">
+                                    <div className="flex items-end"><span className={`w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ชื่อ-นามสกุล:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                    <div className="flex items-end"><span className={`w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เบอร์โทรศัพท์:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                    <div className="flex items-end"><span className={`w-32 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>บ้านเลขที่/ห้องเลขที่:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                    <div className="flex items-center gap-4">
+                                        <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>สถานะ:</span>
+                                        <label className="flex items-center gap-1"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เจ้าของร่วม</span></label>
+                                        <label className="flex items-center gap-1"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ผู้เช่า</span></label>
+                                        <label className="flex items-center gap-1"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ตัวแทน</span></label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* --- Render Form Specific Content --- */}
+                            {(() => {
+                                const id = selectedFormDetails.id;
+
+                                // แบบฟอร์มย้ายเข้า-ออก (Move In/Out)
+                                if (id === 'f1' || id === 'f2') {
+                                    return (
+                                        <>
+                                            <div className="mb-6">
+                                                <h3 className={`font-bold text-base mb-3 border-b pb-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>2. รายละเอียดการดำเนินการ (Details)</h3>
+                                                <div className="grid grid-cols-2 gap-y-4 gap-x-6 mb-4">
+                                                    <div className="flex items-end"><span className={`w-32 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>วันที่ต้องการดำเนินการ:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                                    <div className="flex items-end"><span className={`w-16 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เวลา:</span><div className="flex-1 border-b border-dotted border-gray-400 text-center"></div> <span className={`mx-2 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ถึง</span> <div className="flex-1 border-b border-dotted border-gray-400 text-center"></div></div>
+                                                    <div className="col-span-2 flex items-end"><span className={`w-48 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>บริษัทรับจ้างขนย้าย (ถ้ามี):</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                                </div>
+                                                
+                                                <p className={`font-bold mb-2 inline-block ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>รายการทรัพย์สิน (List of Items):</p>
+                                                <table className="w-full border-collapse border border-gray-400 text-center">
+                                                    <thead className="bg-gray-100">
+                                                        <tr>
+                                                            <th className={`border border-gray-400 p-2 w-12 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ลำดับ</th>
+                                                            <th className={`border border-gray-400 p-2 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>รายการ (Description)</th>
+                                                            <th className={`border border-gray-400 p-2 w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>จำนวน</th>
+                                                            <th className={`border border-gray-400 p-2 w-48 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>หมายเหตุ</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {[1,2,3,4,5].map(i => (
+                                                            <tr key={i}>
+                                                                <td className="border border-gray-400 p-3 h-8">{i}</td>
+                                                                <td className="border border-gray-400 p-3"></td>
+                                                                <td className="border border-gray-400 p-3"></td>
+                                                                <td className="border border-gray-400 p-3"></td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            <div className="mb-6 bg-gray-50 p-4 border border-gray-200 text-xs">
+                                                <p className={`font-bold text-red-600 mb-1 inline-block ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เงื่อนไขการขนย้าย (สามารถแก้ไขได้):</p>
+                                                <ol className={`list-decimal pl-4 space-y-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text p-2' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>
+                                                    <li>ต้องแจ้งนิติบุคคลล่วงหน้าอย่างน้อย 3 วันทำการ</li>
+                                                    <li>อนุญาตให้ขนย้ายได้ในวันจันทร์-เสาร์ เวลา 09.00 - 17.00 น. เท่านั้น (งดวันอาทิตย์และวันหยุดนักขัตฤกษ์)</li>
+                                                    <li>ผู้ร้องขอต้องรับผิดชอบต่อความเสียหายใดๆ ที่เกิดขึ้นกับทรัพย์สินส่วนกลางระหว่างการขนย้าย</li>
+                                                </ol>
+                                            </div>
+                                        </>
+                                    );
+                                }
+
+                                // แบบฟอร์มสติ๊กเกอร์ / ทะเบียนรถ (Vehicle)
+                                if (id === 'f3' || id === 'f4') {
+                                    return (
+                                        <>
+                                            <div className="mb-6">
+                                                <h3 className={`font-bold text-base mb-3 border-b pb-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>2. ข้อมูลยานพาหนะ (Vehicle Details)</h3>
+                                                <div className="flex items-center gap-6 mb-4">
+                                                    <label className="flex items-center gap-2 font-bold"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>รถยนต์ (Car)</span></label>
+                                                    <label className="flex items-center gap-2 font-bold"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>รถจักรยานยนต์ (Motorcycle)</span></label>
+                                                </div>
+                                                <table className="w-full border-collapse border border-gray-400 text-center mb-4">
+                                                    <thead className="bg-gray-100">
+                                                        <tr>
+                                                            <th className={`border border-gray-400 p-2 w-12 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>คันที่</th>
+                                                            <th className={`border border-gray-400 p-2 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ยี่ห้อ (Brand)</th>
+                                                            <th className={`border border-gray-400 p-2 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>รุ่น (Model)</th>
+                                                            <th className={`border border-gray-400 p-2 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>สี (Color)</th>
+                                                            <th className={`border border-gray-400 p-2 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>หมายเลขทะเบียน (Plate)</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {[1,2].map(i => (
+                                                            <tr key={i}>
+                                                                <td className="border border-gray-400 p-3 h-10">{i}</td>
+                                                                <td className="border border-gray-400 p-3"></td>
+                                                                <td className="border border-gray-400 p-3"></td>
+                                                                <td className="border border-gray-400 p-3"></td>
+                                                                <td className="border border-gray-400 p-3"></td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                                <div className="flex items-end mt-4"><span className={`w-40 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เอกสารแนบประกอบ:</span><label className="mr-4"><input type="checkbox"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>สำเนาทะเบียนรถ</span></label><label className="mr-4"><input type="checkbox"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>สำเนาบัตรประชาชน</span></label></div>
+                                            </div>
+                                        </>
+                                    );
+                                }
+
+                                // แบบฟอร์มแจ้งซ่อม (Repair)
+                                if (id === 'f10') {
+                                    return (
+                                        <>
+                                            <div className="mb-6">
+                                                <h3 className={`font-bold text-base mb-3 border-b pb-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>2. รายละเอียดการแจ้งซ่อม (Problem Description)</h3>
+                                                <div className="flex flex-wrap gap-4 mb-4">
+                                                    <label className="flex items-center gap-1"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ระบบไฟฟ้า</span></label>
+                                                    <label className="flex items-center gap-1"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ระบบประปา</span></label>
+                                                    <label className="flex items-center gap-1"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เครื่องปรับอากาศ</span></label>
+                                                    <label className="flex items-center gap-1"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>โครงสร้าง/สถาปัตย์</span></label>
+                                                    <div className="flex items-end w-48"><span className={`mr-2 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>อื่นๆ:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                                </div>
+                                                <div className="w-full h-32 border border-gray-400 rounded p-2 mb-4 bg-gray-50">
+                                                    <span className={`text-gray-400 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>(ระบุรายละเอียดปัญหา / จุดที่พบ)</span>
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="mb-6 border-2 border-dashed border-gray-300 p-4 relative">
+                                                <div className={`absolute -top-3 left-4 bg-white px-2 font-bold text-gray-500 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ส่วนของเจ้าหน้าที่ (For Staff Only)</div>
+                                                <div className="grid grid-cols-2 gap-y-4 gap-x-6 mt-2">
+                                                    <div className="col-span-2 flex items-center gap-4">
+                                                        <span className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ผลการตรวจสอบ:</span>
+                                                        <label><input type="radio" name="rep_status"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ซ่อมแซมเสร็จสิ้น</span></label>
+                                                        <label><input type="radio" name="rep_status"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>รออะไหล่</span></label>
+                                                        <label><input type="radio" name="rep_status"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ต้องจ้างผู้รับเหมาภายนอก</span></label>
+                                                    </div>
+                                                    <div className="col-span-2 flex items-end"><span className={`w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>รายละเอียด:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                                    <div className="flex items-end"><span className={`w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ค่าใช้จ่าย (ถ้ามี):</span><div className="flex-1 border-b border-dotted border-gray-400"></div> <span className="ml-2">บาท</span></div>
+                                                    <div className="flex justify-end gap-2 items-end"><span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ลงชื่อช่างผู้ดำเนินงาน:</span><div className="w-32 border-b border-dotted border-gray-400"></div></div>
+                                                </div>
+                                            </div>
+                                        </>
+                                    );
+                                }
+
+                                // แบบฟอร์มขออนุญาตต่อเติม (Renovation)
+                                if (id === 'f8') {
+                                    return (
+                                        <>
+                                            <div className="mb-6">
+                                                <h3 className={`font-bold text-base mb-3 border-b pb-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>2. รายละเอียดการตกแต่งต่อเติม (Renovation Details)</h3>
+                                                <div className="grid grid-cols-2 gap-y-4 gap-x-6 mb-4">
+                                                    <div className="col-span-2 flex items-end"><span className={`w-32 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>บริษัทผู้รับเหมา:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                                    <div className="flex items-end"><span className={`w-32 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ชื่อผู้ควบคุมงาน:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                                    <div className="flex items-end"><span className={`w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เบอร์โทรศัพท์:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                                    <div className="flex items-end"><span className={`w-32 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ระยะเวลาดำเนินงาน:</span><span className={`mx-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เริ่ม</span> <div className="w-20 border-b border-dotted border-gray-400 text-center"></div><span className={`mx-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ถึง</span> <div className="w-20 border-b border-dotted border-gray-400 text-center"></div></div>
+                                                    <div className="flex items-end"><span className={`w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>รวมจำนวน:</span><div className="w-16 border-b border-dotted border-gray-400 text-center"></div> <span className="ml-1">วัน</span></div>
+                                                </div>
+                                                <div className="w-full h-24 border border-gray-400 rounded p-2 mb-4 bg-gray-50 flex flex-col">
+                                                    <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ขอบเขตงาน (Scope of Work):</span>
+                                                </div>
+                                                <div className="flex items-center gap-4 bg-gray-100 p-3 rounded border border-gray-300">
+                                                    <span className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เงินประกันความเสียหาย (Deposit):</span>
+                                                    <div className="w-32 border-b border-gray-800 bg-white"></div> บาท
+                                                    <span className={`text-gray-500 text-xs ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>(ชำระก่อนเข้าพื้นที่ และคืนเมื่อตรวจสอบว่าไม่มีความเสียหาย)</span>
+                                                </div>
+                                            </div>
+                                        </>
+                                    );
+                                }
+
+                                // แบบฟอร์มขอคืนเงินค้ำประกันตกแต่ง (Renovation Deposit Refund)
+                                if (id === 'f17') {
+                                    return (
+                                        <>
+                                            <div className="mb-6">
+                                                <h3 className={`font-bold text-base mb-3 border-b pb-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>2. รายละเอียดการขอคืนเงินค้ำประกัน (Refund Details)</h3>
+                                                <div className="grid grid-cols-2 gap-y-4 gap-x-6 mb-4">
+                                                    <div className="col-span-2 flex items-end"><span className={`w-40 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>อ้างอิงใบอนุญาตต่อเติมเลขที่:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                                    <div className="flex items-end"><span className={`w-44 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>จำนวนเงินค้ำประกันที่วางไว้:</span><div className="flex-1 border-b border-dotted border-gray-400 text-center font-bold"></div><span className="ml-2">บาท</span></div>
+                                                    <div className="flex items-end"><span className={`w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>วันที่วางเงิน:</span><div className="flex-1 border-b border-dotted border-gray-400 text-center"></div></div>
+                                                    
+                                                    <div className="col-span-2 mt-4 font-bold"><span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>กรณีโอนเงินคืน โปรดระบุบัญชีธนาคาร (Bank Account Details):</span></div>
+                                                    <div className="flex items-end"><span className={`w-16 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ชื่อบัญชี:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                                    <div className="flex items-end"><span className={`w-16 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ธนาคาร:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                                    <div className="flex items-end"><span className={`w-16 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>สาขา:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                                    <div className="flex items-end"><span className={`w-20 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เลขที่บัญชี:</span><div className="flex-1 border-b border-dotted border-gray-400 font-mono tracking-widest"></div></div>
+                                                </div>
+                                            </div>
+
+                                            <div className="mb-6 border-2 border-dashed border-gray-300 p-5 relative bg-gray-50 rounded">
+                                                <div className={`absolute -top-3 left-4 bg-gray-50 px-2 font-bold text-gray-500 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ส่วนของเจ้าหน้าที่ตรวจสอบ (For Staff Only)</div>
+                                                <div className="space-y-4 mt-2">
+                                                    <div className="flex items-center gap-6">
+                                                        <span className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ผลการตรวจสอบพื้นที่:</span>
+                                                        <label className="flex items-center gap-1"><input type="radio" name="insp" /> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เรียบร้อย ไม่มีส่วนเสียหาย (คืนเต็มจำนวน)</span></label>
+                                                        <label className="flex items-center gap-1"><input type="radio" name="insp" /> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>พบความเสียหาย (โปรดระบุด้านล่าง)</span></label>
+                                                    </div>
+                                                    <div className="flex items-end w-full"><span className={`w-36 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>รายละเอียดความเสียหาย:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                                    <div className="grid grid-cols-2 gap-6 pt-4 border-t border-gray-200">
+                                                        <div className="flex items-end bg-red-50 p-2 rounded border border-red-100"><span className={`w-32 text-red-600 font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>หักค่าเสียหายรวม:</span><div className="flex-1 border-b border-dotted border-red-300 text-center text-red-600 font-bold"></div><span className="ml-2 text-red-600">บาท</span></div>
+                                                        <div className="flex items-end bg-green-50 p-2 rounded border border-green-100"><span className={`w-32 text-green-600 font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ยอดสุทธิที่คืนเงิน:</span><div className="flex-1 border-b border-dotted border-green-300 text-center text-green-600 font-bold"></div><span className="ml-2 text-green-600">บาท</span></div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </>
+                                    );
+                                }
+
+                                // แบบฟอร์มขอผ่อนชำระค่าส่วนกลาง (Installment Payment)
+                                if (id === 'f16') {
+                                    return (
+                                        <>
+                                            <div className="mb-6">
+                                                <h3 className={`font-bold text-base mb-3 border-b pb-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>2. รายละเอียดหนี้สินและการขอผ่อนชำระ (Debt and Installment Details)</h3>
+                                                <div className="grid grid-cols-2 gap-y-6 gap-x-6 mb-4">
+                                                    <div className="col-span-2 flex items-end"><span className={`w-48 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ยอดหนี้ค้างชำระรวมทั้งสิ้น:</span><div className="flex-1 border-b border-dotted border-gray-400"></div><span className={`ml-2 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>บาท</span></div>
+                                                    <div className="col-span-2 flex items-end"><span className={`w-36 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>มีความประสงค์ขอผ่อนชำระ:</span><div className="w-24 border-b border-dotted border-gray-400 text-center"></div><span className={`mx-2 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>งวด (เดือน)  งวดละ:</span><div className="w-32 border-b border-dotted border-gray-400 text-center"></div><span className={`ml-2 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>บาท</span></div>
+                                                    <div className="col-span-2 flex items-end"><span className={`w-40 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เริ่มชำระงวดแรกภายในวันที่:</span><div className="w-32 border-b border-dotted border-gray-400 text-center"></div><span className={`mx-2 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>และงวดถัดไปทุกวันที่:</span><div className="w-24 border-b border-dotted border-gray-400 text-center"></div><span className={`ml-2 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ของทุกเดือน</span></div>
+                                                </div>
+                                                <div className="mt-8 bg-red-50 p-4 border border-red-200 text-sm rounded-lg text-red-800">
+                                                    <p className={`font-bold mb-2 inline-block ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เงื่อนไขการผ่อนชำระ (Conditions):</p>
+                                                    <ol className={`list-decimal pl-5 space-y-2 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>
+                                                        <li>ข้าพเจ้ายินยอมชำระหนี้ตามเงื่อนไขที่ระบุไว้ข้างต้นอย่างเคร่งครัด</li>
+                                                        <li>หากข้าพเจ้าผิดนัดชำระงวดใดงวดหนึ่ง ถือว่าข้าพเจ้าสละสิทธิ์การผ่อนชำระทันที</li>
+                                                        <li>ข้าพเจ้ายินยอมให้นิติบุคคลฯ ดำเนินการตามกฎหมาย หรือระงับการให้บริการส่วนกลางตามระเบียบได้ทันที โดยไม่ต้องแจ้งให้ทราบล่วงหน้า</li>
+                                                    </ol>
+                                                </div>
+                                            </div>
+                                        </>
+                                    );
+                                }
+
+                                // Default Generic Form / ร้องเรียน
+                                return (
+                                    <>
+                                        <div className="mb-6">
+                                            <h3 className={`font-bold text-base mb-3 border-b pb-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>2. รายละเอียด (Description)</h3>
+                                            <div className="w-full h-48 border border-gray-400 rounded p-2 mb-4">
+                                                <div className="border-b border-dotted border-gray-400 h-8 mt-2"></div>
+                                                <div className="border-b border-dotted border-gray-400 h-8 mt-2"></div>
+                                                <div className="border-b border-dotted border-gray-400 h-8 mt-2"></div>
+                                                <div className="border-b border-dotted border-gray-400 h-8 mt-2"></div>
+                                                <div className="border-b border-dotted border-gray-400 h-8 mt-2"></div>
+                                            </div>
+                                        </div>
+                                    </>
+                                );
+                            })()}
+
+                            {/* --- Signatures (Common Section) --- */}
+                            <div className="mt-12 flex justify-between px-4">
+                                <div className="text-center w-56">
+                                    <div className="border-b border-gray-800 mb-2 h-8"></div>
+                                    <div className="mb-1">( ....................................................... )</div>
+                                    <div className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ผู้ร้องขอ / เจ้าของร่วม</div>
+                                    <div className="text-xs text-gray-500 mt-1">วันที่ ....... / ....... / ...........</div>
+                                </div>
+                                <div className="text-center w-56">
+                                    <div className="border-b border-gray-800 mb-2 h-8"></div>
+                                    <div className="mb-1">( ....................................................... )</div>
+                                    <div className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เจ้าหน้าที่นิติบุคคลฯ</div>
+                                    <div className="text-xs text-gray-500 mt-1">วันที่ ....... / ....... / ...........</div>
+                                </div>
+                                <div className="text-center w-56">
+                                    <div className="border-b border-gray-800 mb-2 h-8"></div>
+                                    <div className="mb-1">( ....................................................... )</div>
+                                    <div className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ผู้จัดการนิติบุคคลฯ (ผู้อนุมัติ)</div>
+                                    <div className="text-xs text-gray-500 mt-1">วันที่ ....... / ....... / ...........</div>
+                                </div>
+                            </div>
+
+                        </div>
+
+                        {/* Watermark/Footer */}
+                        {/* ใช้ isExporting ซ่อนเช่นกัน */}
+                        <div className={`absolute bottom-4 left-0 w-full text-center text-[10px] text-gray-400 ${isExporting ? 'hidden' : ''}`}>
+                            Managed by Best Million Group Co., Ltd.
                         </div>
                     </div>
                 </div>
