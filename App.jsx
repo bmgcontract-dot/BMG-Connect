@@ -1240,13 +1240,17 @@ function usePersistentState(key, initialValue, fbUser) {
   // FIX: ใช้ useRef เพื่อเก็บค่า State ล่าสุด ป้องกันปัญหา Stale State (ดึงข้อมูลเก่ามาทับ)
   const stateRef = useRef(state);
   const [isSynced, setIsSynced] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false); // NEW: เพิ่ม Flag ตรวจสอบการโหลดข้อมูล
 
   useEffect(() => {
       stateRef.current = state;
   }, [state]);
 
   useEffect(() => {
-    if (!db) return; 
+    if (!db) {
+        setIsLoaded(true); // Offline mode ถือว่าโหลดเสร็จแล้ว
+        return; 
+    }
     if (!fbUser || !appId) return;
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
     
@@ -1285,12 +1289,15 @@ function usePersistentState(key, initialValue, fbUser) {
               stateRef.current = parsedData;
           }
         } catch(e) { console.error("Parse error", key, e); }
+        setIsLoaded(true); // ข้อมูลโหลดเสร็จสมบูรณ์
       } else if (!isSynced) {
          setPersistentValue(stateRef.current);
+         setIsLoaded(true); // เป็นการสร้างข้อมูลครั้งแรก ถือว่าพร้อมแล้ว
       }
       setIsSynced(true);
     }, (err) => {
       console.error("Sync error", key, err);
+      setIsLoaded(true); // ป้องกันแอปค้างกรณีเน็ตมีปัญหา
     });
 
     return () => unsubscribe();
@@ -1338,7 +1345,7 @@ function usePersistentState(key, initialValue, fbUser) {
     }
   };
 
-  return [state, setPersistentValue];
+  return [state, setPersistentValue, isLoaded]; // ส่งค่า isLoaded กลับไปด้วย
 }
 
 // --- NEW: Custom Hook for User Specific Persistent Storage (Theme, UI settings) ---
@@ -1356,13 +1363,17 @@ function useUserPersistentState(key, initialValue, fbUser) {
   // FIX: ใช้ useRef เหมือนกัน
   const stateRef = useRef(state);
   const [isSynced, setIsSynced] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false); // NEW
 
   useEffect(() => {
       stateRef.current = state;
   }, [state]);
 
   useEffect(() => {
-    if (!db) return;
+    if (!db) {
+        setIsLoaded(true);
+        return;
+    }
     if (!fbUser || !appId) return;
     const docRef = doc(db, 'artifacts', appId, 'users', fbUser.uid, 'user_preferences', key);
     
@@ -1373,12 +1384,15 @@ function useUserPersistentState(key, initialValue, fbUser) {
           setState(parsedData);
           stateRef.current = parsedData;
         } catch(e) { console.error("Parse error", key, e); }
+        setIsLoaded(true);
       } else if (!isSynced) {
         setDoc(docRef, { value: JSON.stringify(stateRef.current) }).catch(console.error);
+        setIsLoaded(true);
       }
       setIsSynced(true);
     }, (err) => {
       console.error("Sync error", key, err);
+      setIsLoaded(true);
     });
 
     return () => unsubscribe();
@@ -1404,7 +1418,7 @@ function useUserPersistentState(key, initialValue, fbUser) {
     }
   };
 
-  return [state, setPersistentValue];
+  return [state, setPersistentValue, isLoaded]; // ส่งค่า isLoaded กลับไปด้วย
 }
 
 // --- Main Application ---
@@ -1692,7 +1706,7 @@ export default function App() {
   const [isSavingProject, setIsSavingProject] = useState(false); // NEW: State สำหรับแสดง Loading ตอนอัปโหลดรูป/ไฟล์เข้า Drive
   const [newProject, setNewProject] = useState({ logo: null, code: '', name: '', type: 'Condo', address: '', phone: '', taxId: '', contractStartDate: '', contractEndDate: '', contractValue: '', status: 'Active', files: { orchor: null, committee: null, regulations: null, resident_rules: null } });
 
-  const [users, setUsers] = usePersistentState('bmg_users', INITIAL_USERS, fbUser);
+  const [users, setUsers, isUsersLoaded] = usePersistentState('bmg_users', INITIAL_USERS, fbUser); // รับค่า isUsersLoaded มาใช้งาน
   const [projects, setProjects] = usePersistentState('bmg_projects', INITIAL_PROJECTS, fbUser);
   const [contracts, setContracts] = usePersistentState('bmg_contracts', INITIAL_CONTRACTS, fbUser);
   const [audits, setAudits] = usePersistentState('bmg_audits', INITIAL_AUDITS, fbUser);
@@ -1758,7 +1772,7 @@ export default function App() {
 
   // --- NEW: ตรวจจับและบันทึกเวลาล่าสุดเมื่อเปิดระบบ (Refresh/Auto-login) เพื่อให้ซิงค์ข้ามเครื่อง ---
   useEffect(() => {
-      if (!currentUser) return;
+      if (!currentUser || !isUsersLoaded) return; // บังคับให้รอจนกว่าโหลดข้อมูล Users จาก Firebase สำเร็จก่อน
 
       // ฟังก์ชันสำหรับอัปเดตเวลาล่าสุด
       const updatePresence = () => {
@@ -1787,7 +1801,7 @@ export default function App() {
 
       // ยกเลิกการตั้งเวลาเมื่อผู้ใช้ออกจากระบบหรือปิดหน้าต่าง
       return () => clearInterval(intervalId);
-  }, [currentUser?.id]); // ใช้แค่ currentUser.id เป็น dependency
+  }, [currentUser?.id, isUsersLoaded]); // ผูกกับ Dependency 2 ตัวนี้
 
   // --- NEW: Auto-Sync State (สถานะการซิงค์อัตโนมัติ) ---
   const [autoSyncMessage, setAutoSyncMessage] = useState('');
@@ -2622,6 +2636,47 @@ export default function App() {
       setSelectedProject(null); 
   };
   
+  // --- NEW: ระบบ Auto-Logout เมื่อไม่มีการตอบสนอง 10 นาที ---
+  useEffect(() => {
+      // ทำงานเฉพาะตอนที่มีคนล็อกอินอยู่เท่านั้น
+      if (!currentUser) return;
+
+      let timeoutId;
+      const TIMEOUT_MS = 10 * 60 * 1000; // 10 นาที (10 นาที * 60 วินาที * 1000 มิลลิวินาที)
+
+      const logoutDueToInactivity = () => {
+          alert('เซสชั่นหมดอายุ: คุณไม่ได้ใช้งานระบบติดต่อกันเกิน 10 นาที ระบบได้ทำการออกจากระบบอัตโนมัติเพื่อความปลอดภัยและอัปเดตข้อมูล กรุณาเข้าสู่ระบบใหม่อีกครั้ง');
+          handleLogout();
+      };
+
+      const resetTimer = () => {
+          if (timeoutId) clearTimeout(timeoutId);
+          // ตั้งเวลาใหม่ทุกครั้งที่มีการขยับ
+          timeoutId = setTimeout(logoutDueToInactivity, TIMEOUT_MS);
+      };
+
+      // รายการ Event ที่บ่งบอกว่าผู้ใช้กำลังใช้งานอยู่
+      const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click'];
+
+      // ติดตั้งตัวดักจับ Event ลงบนหน้าต่างเบราว์เซอร์
+      activityEvents.forEach(event => {
+          // ใช้ passive: true เพื่อไม่ให้รบกวนประสิทธิภาพการ scroll ของหน้าเว็บ
+          window.addEventListener(event, resetTimer, { passive: true });
+      });
+
+      // เริ่มจับเวลาครั้งแรกเมื่อ Effect ทำงาน
+      resetTimer();
+
+      // Cleanup function: ล้าง Event และ Timer ออกเมื่อ Component ถูกถอดทิ้ง หรือเมื่อ User ล็อกเอาท์
+      return () => {
+          if (timeoutId) clearTimeout(timeoutId);
+          activityEvents.forEach(event => {
+              window.removeEventListener(event, resetTimer);
+          });
+      };
+  }, [currentUser]); // ผูกกับ State currentUser เพื่อให้เริ่มทำงานใหม่เมื่อมีการล็อกอิน
+  // --------------------------------------------------------
+
   const getKPIs = () => ({ projects: projects.length, employees: users.length, pendingTasks: 0, pmDue: 0 });
   const exportToCSV = (data, filename) => { if (!data || data.length === 0) return alert('No data to export'); const headers = Object.keys(data[0]); const csvContent = [headers.join(','), ...data.map(row => headers.map(fieldName => `"${row[fieldName] || ''}"`).join(','))].join('\n'); const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' }); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `${filename}.csv`; link.click(); }; 
   
@@ -4277,64 +4332,72 @@ export default function App() {
         )}
 
         {/* Login Form */}
-        <form onSubmit={handleLogin} className="space-y-5">
-          <div>
-              <label className="block text-sm font-bold text-gray-300 mb-1.5 ml-1">ชื่อผู้ใช้งาน (รหัสพนักงาน)</label>
-              <div className="relative">
-                  <User className="absolute left-4 top-3.5 text-gray-500" size={18} />
-                  <input 
-                      type="text" 
-                      className="pl-11 block w-full rounded-xl border-gray-700 shadow-sm p-3 border focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all bg-gray-800/50 text-white placeholder-gray-500 focus:bg-gray-800" 
-                      value={loginForm.username} 
-                      onChange={e => setLoginForm({...loginForm, username: e.target.value})} 
-                      placeholder="กรอกรหัสพนักงาน" 
-                  />
+        {!isUsersLoaded ? (
+            <div className="flex flex-col items-center justify-center py-8 space-y-4">
+                <Loader2 size={40} className="text-orange-500 animate-spin" />
+                <div className="text-orange-400 font-bold text-lg animate-pulse">กำลังเชื่อมต่อฐานข้อมูล...</div>
+                <div className="text-gray-500 text-sm">กรุณารอสักครู่ (Please wait)</div>
+            </div>
+        ) : (
+            <form onSubmit={handleLogin} className="space-y-5">
+              <div>
+                  <label className="block text-sm font-bold text-gray-300 mb-1.5 ml-1">ชื่อผู้ใช้งาน (รหัสพนักงาน)</label>
+                  <div className="relative">
+                      <User className="absolute left-4 top-3.5 text-gray-500" size={18} />
+                      <input 
+                          type="text" 
+                          className="pl-11 block w-full rounded-xl border-gray-700 shadow-sm p-3 border focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all bg-gray-800/50 text-white placeholder-gray-500 focus:bg-gray-800" 
+                          value={loginForm.username} 
+                          onChange={e => setLoginForm({...loginForm, username: e.target.value})} 
+                          placeholder="กรอกรหัสพนักงาน" 
+                      />
+                  </div>
               </div>
-          </div>
-          <div>
-              <label className="block text-sm font-bold text-gray-300 mb-1.5 ml-1">รหัสผ่าน</label>
-              <div className="relative">
-                  <Lock className="absolute left-4 top-3.5 text-gray-500" size={18} />
-                  <input 
-                      type={showPassword ? "text" : "password"} 
-                      className="pl-11 pr-12 block w-full rounded-xl border-gray-700 shadow-sm p-3 border focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all bg-gray-800/50 text-white placeholder-gray-500 focus:bg-gray-800" 
-                      value={loginForm.password} 
-                      onChange={e => setLoginForm({...loginForm, password: e.target.value})} 
-                      placeholder="กรอกรหัสผ่าน" 
-                  />
-                  <button 
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-4 top-3.5 text-gray-500 hover:text-gray-300 focus:outline-none transition-colors"
-                  >
-                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
+              <div>
+                  <label className="block text-sm font-bold text-gray-300 mb-1.5 ml-1">รหัสผ่าน</label>
+                  <div className="relative">
+                      <Lock className="absolute left-4 top-3.5 text-gray-500" size={18} />
+                      <input 
+                          type={showPassword ? "text" : "password"} 
+                          className="pl-11 pr-12 block w-full rounded-xl border-gray-700 shadow-sm p-3 border focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all bg-gray-800/50 text-white placeholder-gray-500 focus:bg-gray-800" 
+                          value={loginForm.password} 
+                          onChange={e => setLoginForm({...loginForm, password: e.target.value})} 
+                          placeholder="กรอกรหัสผ่าน" 
+                      />
+                      <button 
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-4 top-3.5 text-gray-500 hover:text-gray-300 focus:outline-none transition-colors"
+                      >
+                          {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                  </div>
               </div>
-          </div>
-          
-          {loginError && (
-              <div className="bg-red-900/30 text-red-400 text-sm p-3 rounded-xl border border-red-800/50 flex items-center gap-2 animate-fade-in">
-                  <AlertTriangle size={16} className="shrink-0"/> {loginError}
-              </div>
-          )}
-          
-          <button 
-              type="submit" 
-              className="w-full text-white font-bold py-3.5 px-4 rounded-xl transform hover:-translate-y-1 hover:scale-[1.02] transition-all duration-300 mt-6 relative overflow-hidden group" 
-              style={{
-                  background: 'linear-gradient(135deg, rgba(255, 140, 0, 0.7) 0%, rgba(234, 67, 0, 0.95) 100%)',
-                  backdropFilter: 'blur(10px)',
-                  boxShadow: '0 8px 25px rgba(234, 88, 12, 0.5), inset 0 2px 2px rgba(255, 255, 255, 0.6), inset 0 -2px 4px rgba(0, 0, 0, 0.2)',
-                  border: '1px solid rgba(255, 255, 255, 0.4)'
-              }}
-          >
-              {/* แสงสะท้อนวิ่งพาดผ่านเมื่อ Hover */}
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white to-transparent opacity-30 transform -translate-x-[150%] group-hover:translate-x-[150%] transition-transform duration-700 ease-in-out skew-x-12"></div>
-              <span className="relative z-10 text-lg tracking-wider" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.4)' }}>
-                  {t('signIn')}
-              </span>
-          </button>
-        </form>
+              
+              {loginError && (
+                  <div className="bg-red-900/30 text-red-400 text-sm p-3 rounded-xl border border-red-800/50 flex items-center gap-2 animate-fade-in">
+                      <AlertTriangle size={16} className="shrink-0"/> {loginError}
+                  </div>
+              )}
+              
+              <button 
+                  type="submit" 
+                  className="w-full text-white font-bold py-3.5 px-4 rounded-xl transform hover:-translate-y-1 hover:scale-[1.02] transition-all duration-300 mt-6 relative overflow-hidden group" 
+                  style={{
+                      background: 'linear-gradient(135deg, rgba(255, 140, 0, 0.7) 0%, rgba(234, 67, 0, 0.95) 100%)',
+                      backdropFilter: 'blur(10px)',
+                      boxShadow: '0 8px 25px rgba(234, 88, 12, 0.5), inset 0 2px 2px rgba(255, 255, 255, 0.6), inset 0 -2px 4px rgba(0, 0, 0, 0.2)',
+                      border: '1px solid rgba(255, 255, 255, 0.4)'
+                  }}
+              >
+                  {/* แสงสะท้อนวิ่งพาดผ่านเมื่อ Hover */}
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white to-transparent opacity-30 transform -translate-x-[150%] group-hover:translate-x-[150%] transition-transform duration-700 ease-in-out skew-x-12"></div>
+                  <span className="relative z-10 text-lg tracking-wider" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.4)' }}>
+                      {t('signIn')}
+                  </span>
+              </button>
+            </form>
+        )}
         
         {/* Footer */}
         <div className="mt-8 text-center text-xs text-gray-500 border-t border-gray-800 pt-6">
