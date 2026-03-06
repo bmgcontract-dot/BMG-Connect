@@ -1477,6 +1477,7 @@ export default function App() {
   const [isExporting, setIsExporting] = useState(false);
   const [isBackingUp, setIsBackingUp] = useState(false); // NEW: State สำหรับตอนกด Export Backup
   const [isRestoring, setIsRestoring] = useState(false); // NEW: State สำหรับตอนกำลัง Import Restore
+  const [restoreProgress, setRestoreProgress] = useState(''); // NEW: State สำหรับแสดงความคืบหน้าตอน Import
   const [isEditingUser, setIsEditingUser] = useState(false);
   const [scheduleNote, setScheduleNote] = useState(''); // NEW: State สำหรับเก็บ Note ในตารางงาน
   const [scheduleNotes, setScheduleNotes] = usePersistentState('bmg_scheduleNotes', {}, fbUser); // NEW: Persistent state for schedule notes
@@ -3766,89 +3767,115 @@ export default function App() {
       const file = event.target.files[0];
       if (!file) return;
 
-      const reader = new FileReader();
-      reader.onload = (e) => {
-          try {
-              const importedData = JSON.parse(e.target.result);
-              
-              if (!importedData.data || !importedData.timestamp) {
-                  alert("ไฟล์ข้อมูลไม่ถูกต้อง (Invalid backup file format)");
-                  return;
-              }
+      showConfirm(
+          'ยืนยันการนำเข้าและกู้คืนข้อมูล (Restore)',
+          'คำเตือนอย่างร้ายแรง: การนำเข้าข้อมูลจะ เขียนทับ (Overwrite) ข้อมูลปัจจุบันในระบบทั้งหมดด้วยข้อมูลจากไฟล์ Backup นี้ คุณแน่ใจหรือไม่ที่จะดำเนินการต่อ? (กระบวนการนี้อาจใช้เวลา 1-3 นาที กรุณาอย่าปิดหน้าต่าง)',
+          () => {
+              setIsRestoring(true);
+              setRestoreProgress('กำลังเตรียมการอ่านไฟล์...');
 
-              showConfirm(
-                  'ยืนยันการนำเข้าและกู้คืนข้อมูล (Restore)',
-                  'คำเตือนอย่างร้ายแรง: การนำเข้าข้อมูลจะ เขียนทับ (Overwrite) ข้อมูลปัจจุบันในระบบทั้งหมดด้วยข้อมูลจากไฟล์ Backup นี้ คุณแน่ใจหรือไม่ที่จะดำเนินการต่อ? (กระบวนการนี้อาจใช้เวลา 1-2 นาที กรุณาอย่าปิดหน้าต่าง)',
-                  async () => {
-                      setIsRestoring(true);
+              // หน่วงเวลาให้ UI เรนเดอร์การโหลดก่อนทำงานหนัก
+              setTimeout(() => {
+                  const reader = new FileReader();
+                  reader.onload = async (e) => {
                       try {
+                          setRestoreProgress('กำลังประมวลผลข้อมูล (Parsing)... อาจใช้เวลาสักครู่');
+                          await new Promise(resolve => setTimeout(resolve, 100)); // ยอมให้ UI อัปเดตข้อความ
+
+                          const importedData = JSON.parse(e.target.result);
+                          
+                          if (!importedData.data || !importedData.timestamp) {
+                              alert("ไฟล์ข้อมูลไม่ถูกต้อง (Invalid backup file format)");
+                              setIsRestoring(false);
+                              setRestoreProgress('');
+                              return;
+                          }
+
                           const d = importedData.data;
                           
                           // 1. กู้คืนไฟล์ PDF ต่างๆ ลง IndexedDB
                           if (d.localFiles) {
-                              for (const [fileId, fileData] of Object.entries(d.localFiles)) {
-                                  await saveFileLocally(fileId, fileData);
+                              const fileIds = Object.keys(d.localFiles);
+                              const totalFiles = fileIds.length;
+                              let count = 0;
+                              setRestoreProgress(`กำลังกู้คืนไฟล์เอกสารแนบ (0/${totalFiles})...`);
+
+                              for (const fileId of fileIds) {
+                                  await saveFileLocally(fileId, d.localFiles[fileId]);
+                                  count++;
+                                  // อัปเดต UI ทุกๆ 5 ไฟล์เพื่อไม่ให้หน่วงเกินไป
+                                  if (count % 5 === 0 || count === totalFiles) {
+                                      setRestoreProgress(`กำลังกู้คืนไฟล์เอกสารแนบ (${count}/${totalFiles})...`);
+                                      await new Promise(resolve => setTimeout(resolve, 10)); // ยอมให้ UI อัปเดต
+                                  }
                               }
                           }
 
-                          // 2. กู้คืน State ข้อมูล (ค่อยๆ ทยอยเซฟด้วย await เพื่อป้องกัน Firebase Rate Limit / Payload Too Large)
-                          const delay = (ms) => new Promise(res => setTimeout(res, ms));
+                          // 2. เตรียมรายการข้อมูลที่จะกู้คืน
+                          const stateSetters = [
+                              { key: 'ข้อมูลองค์กร', setter: setCompanyInfo, data: d.companyInfo },
+                              { key: 'รายชื่อผู้ใช้งาน', setter: setUsers, data: d.users },
+                              { key: 'ข้อมูลโครงการ', setter: setProjects, data: d.projects },
+                              { key: 'ข้อมูลสัญญา', setter: setContracts, data: d.contracts },
+                              { key: 'ทะเบียนทรัพย์สิน', setter: setAssets, data: d.assets },
+                              { key: 'ทะเบียนเครื่องมือช่าง', setter: setTools, data: d.tools },
+                              { key: 'ทะเบียนเครื่องจักร', setter: setMachines, data: d.machines },
+                              { key: 'แผน PM', setter: setPmPlans, data: d.pmPlans },
+                              { key: 'ประวัติทำ PM', setter: setPmHistoryList, data: d.pmHistoryList },
+                              { key: 'ทะเบียนมิเตอร์', setter: setMeters, data: d.meters },
+                              { key: 'ประวัติจดมิเตอร์', setter: setUtilityReadings, data: d.utilityReadings },
+                              { key: 'งานแจ้งซ่อม', setter: setRepairs, data: d.repairs },
+                              { key: 'แผนปฏิบัติการ (Action Plan)', setter: setActionPlans, data: d.actionPlans },
+                              { key: 'รายชื่อผู้รับเหมา', setter: setContractors, data: d.contractors },
+                              { key: 'แบบฟอร์มมาตรฐาน', setter: setFormsList, data: d.formsList },
+                              { key: 'ผลการประเมิน (Audit)', setter: setAudits, data: d.audits },
+                              { key: 'รายงานประจำวัน', setter: setDailyReports, data: d.dailyReports },
+                              { key: 'ตารางงาน', setter: setSchedules, data: d.schedules },
+                              { key: 'หมายเหตุตารางงาน', setter: setScheduleNotes, data: d.scheduleNotes },
+                              { key: 'สถานะอนุมัติตารางงาน', setter: setScheduleApprovals, data: d.scheduleApprovals },
+                              { key: 'ลำดับพนักงาน', setter: setProjectStaffOrder, data: d.projectStaffOrder },
+                              { key: 'ข้อมูลอื่นๆ', setter: setOthersData, data: d.othersData },
+                              { key: 'สิทธิ์การใช้งานระบบ', setter: setRolePermissions, data: d.rolePermissions }
+                          ];
 
-                          const restoreData = async (setter, data) => {
-                              if (data !== undefined && data !== null) {
-                                  await setter(data);
-                                  await delay(250); // หน่วงเวลา 250ms ต่อการบันทึก 1 ตาราง เพื่อให้มั่นใจว่าข้อมูลขึ้น Cloud สมบูรณ์
+                          const totalTables = stateSetters.length;
+                          let currentTable = 0;
+
+                          // ทยอยเซฟและอัปเดต UI เพื่อไม่ให้หน้าเว็บค้าง
+                          for (const item of stateSetters) {
+                              currentTable++;
+                              if (item.data !== undefined && item.data !== null) {
+                                  setRestoreProgress(`กำลังเขียนฐานข้อมูล: ${item.key} (${currentTable}/${totalTables})`);
+                                  await item.setter(item.data);
+                                  await new Promise(res => setTimeout(res, 200)); // หน่วงเวลาให้ Firebase บันทึกและ UI โชว์
                               }
-                          };
-
-                          await restoreData(setCompanyInfo, d.companyInfo);
-                          await restoreData(setUsers, d.users);
-                          await restoreData(setProjects, d.projects);
-                          await restoreData(setContracts, d.contracts);
-                          await restoreData(setAssets, d.assets);
-                          await restoreData(setTools, d.tools);
-                          await restoreData(setMachines, d.machines);
-                          await restoreData(setPmPlans, d.pmPlans);
-                          await restoreData(setPmHistoryList, d.pmHistoryList);
-                          await restoreData(setMeters, d.meters);
-                          await restoreData(setUtilityReadings, d.utilityReadings);
-                          await restoreData(setRepairs, d.repairs);
-                          await restoreData(setActionPlans, d.actionPlans);
-                          await restoreData(setContractors, d.contractors);
-                          await restoreData(setFormsList, d.formsList);
-                          await restoreData(setAudits, d.audits);
-                          await restoreData(setDailyReports, d.dailyReports);
-                          await restoreData(setSchedules, d.schedules);
-                          await restoreData(setScheduleNotes, d.scheduleNotes);
-                          await restoreData(setScheduleApprovals, d.scheduleApprovals);
-                          await restoreData(setProjectStaffOrder, d.projectStaffOrder);
-                          await restoreData(setOthersData, d.othersData);
+                          }
                           
                           if (d.theme) setTheme(d.theme);
-                          if (d.rolePermissions) await restoreData(setRolePermissions, d.rolePermissions);
 
-                          alert("กู้คืนข้อมูลสำเร็จ ระบบได้ทำการอัปเดตข้อมูลกลับมาเรียบร้อยแล้ว (Restore successful)");
-                          // บังคับ Reload หน้าเว็บเพื่อให้ดึงข้อมูลใหม่ที่เพิ่งเซฟลง DB ขึ้นมาแสดงผลอย่างถูกต้อง 100%
+                          setRestoreProgress('กู้คืนข้อมูลสำเร็จสมบูรณ์! ระบบกำลังเตรียมพร้อม...');
+                          
+                          // แจ้งเตือนเสร็จสิ้นและรอรีโหลด
                           setTimeout(() => {
-                              window.location.reload();
-                          }, 1000);
+                              showAlert("สำเร็จ", "ระบบนำเข้าและอัปเดตข้อมูลเสร็จสมบูรณ์ ระบบจะทำการรีเฟรชหน้าจออัตโนมัติภายใน 3 วินาที");
+                              setTimeout(() => {
+                                  window.location.reload();
+                              }, 3000);
+                          }, 500);
                           
                       } catch (err) {
                           console.error("Restore state error:", err);
-                          alert("เกิดข้อผิดพลาดระหว่างการกู้คืนข้อมูล: " + err.message);
-                      } finally {
+                          showAlert("เกิดข้อผิดพลาด", "เกิดข้อผิดพลาดระหว่างการกู้คืนข้อมูล: " + err.message);
                           setIsRestoring(false);
+                          setRestoreProgress('');
                       }
-                  },
-                  'ยืนยันการกู้คืน',
-                  'warning'
-              );
-          } catch (error) {
-              console.error("Import error:", error);
-              alert("ไม่สามารถอ่านไฟล์ได้ โปรดตรวจสอบว่าท่านเลือกไฟล์ Backup (.json) ที่ถูกต้อง");
-          }
-      };
-      reader.readAsText(file);
+                  };
+                  reader.readAsText(file);
+              }, 500); // รอให้ Modal ยืนยันปิดลงก่อนเริ่มอ่านไฟล์
+          },
+          'ยืนยันการกู้คืน',
+          'warning'
+      );
   };
 
   // --- NEW: Google Sheets Sync Handler ---
@@ -9456,10 +9483,21 @@ export default function App() {
                               การนำเข้าข้อมูล จะทำการ <span className="underline">เขียนทับ (Overwrite)</span> ข้อมูลปัจจุบันในระบบทั้งหมดด้วยข้อมูลจากไฟล์ กรุณาตรวจสอบให้แน่ใจก่อนดำเนินการ
                           </div>
                       </div>
-                      <label className={`cursor-pointer w-full inline-block ${isRestoring ? 'opacity-50 pointer-events-none' : ''}`}>
-                          <div className="w-full bg-red-600 hover:bg-red-700 text-white font-medium py-2.5 px-4 rounded-md transition-colors flex justify-center items-center gap-2 shadow-sm">
-                              {isRestoring ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />} 
-                              {isRestoring ? 'กำลังกู้คืนข้อมูลทีละส่วน (โปรดรอ)...' : 'เลือกไฟล์เพื่อนำเข้า (Import JSON)'}
+                      <label className={`cursor-pointer w-full inline-block ${isRestoring ? 'opacity-90 pointer-events-none' : ''}`}>
+                          <div className={`w-full text-white font-medium py-3 px-4 rounded-md transition-all flex flex-col justify-center items-center gap-2 shadow-sm ${isRestoring ? 'bg-orange-500' : 'bg-red-600 hover:bg-red-700'}`}>
+                              {isRestoring ? (
+                                  <>
+                                      <div className="flex items-center gap-2">
+                                          <Loader2 size={20} className="animate-spin" />
+                                          <span className="font-bold tracking-wide">กำลังทำงาน โปรดอย่าปิดหน้าต่าง...</span>
+                                      </div>
+                                      <div className="text-xs bg-black/20 px-3 py-1 rounded-full text-white/90 mt-1 animate-pulse">
+                                          {restoreProgress}
+                                      </div>
+                                  </>
+                              ) : (
+                                  <div className="flex items-center gap-2"><Upload size={18} /> เลือกไฟล์เพื่อนำเข้า (Import JSON)</div>
+                              )}
                           </div>
                           <input 
                               type="file" 
