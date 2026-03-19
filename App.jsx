@@ -2687,7 +2687,22 @@ export default function App() {
 
   const handleLogin = (e) => { 
       e.preventDefault(); 
-      const user = users.find(u => u.username === loginForm.username && u.password === loginForm.password); 
+      
+      // ตัดช่องว่าง (Space) หน้า-หลังทิ้ง ป้องกันปัญหาการพิมพ์เว้นวรรคเกิน
+      const inputUsername = loginForm.username.trim();
+      
+      let user = users.find(u => u.username === inputUsername && u.password === loginForm.password); 
+      
+      // --- FIX: Master Admin Fallback ---
+      // ป้องกันกรณีฐานข้อมูล (Firebase/Local Storage) ว่างเปล่า หรือถูกลบข้อมูล Admin ทิ้ง
+      if (!user && inputUsername === 'admin' && loginForm.password === 'bosskim') {
+          user = INITIAL_USERS[0];
+          // ดึงบัญชี Admin กลับเข้าสู่ฐานข้อมูลอัตโนมัติ
+          if (users.length === 0) {
+              setUsers(INITIAL_USERS);
+          }
+      }
+
       if (user) { 
           // อัปเดตเวลาเข้าใช้งานล่าสุด
           const updatedUser = { ...user, lastLogin: new Date().toISOString() };
