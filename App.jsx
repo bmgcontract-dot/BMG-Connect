@@ -18,7 +18,7 @@ import {
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot, getDoc } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, onSnapshot, getDoc, collection, deleteDoc } from 'firebase/firestore';
 
 // --- Firebase Initialization ---
 let app, auth, db, appId;
@@ -1348,6 +1348,104 @@ function usePersistentState(key, initialValue, fbUser) {
   return [state, setPersistentValue, isLoaded]; // ส่งค่า isLoaded กลับไปด้วย
 }
 
+// --- NEW: Custom Hook for Collection Storage (แก้ปัญหาบันทึกแล้วข้อมูลทับกัน) ---
+// เก็บบันทึกข้อมูลแยกเป็นราย Document แทนการรวมเป็น Array ก้อนเดียว
+function usePersistentCollection(collectionName, initialValue, fbUser) {
+  const [state, setState] = useState(() => {
+      if (!db && typeof window !== 'undefined') {
+          const local = localStorage.getItem(collectionName);
+          if (local) {
+              try { return JSON.parse(local); } catch(e) { return initialValue; }
+          }
+      }
+      return initialValue;
+  });
+
+  const stateRef = useRef(state);
+  const isLoadedRef = useRef(false);
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  useEffect(() => {
+      stateRef.current = state;
+  }, [state]);
+
+  // 1. Firebase Listener (อ่านข้อมูลทั้งหมดใน Collection)
+  useEffect(() => {
+    if (!db) {
+        setIsLoaded(true);
+        return;
+    }
+    if (!fbUser || !appId) return;
+
+    const collRef = collection(db, 'artifacts', appId, 'public', 'data', collectionName);
+    const unsubscribe = onSnapshot(collRef, (snapshot) => {
+      const items = [];
+      snapshot.forEach(doc => {
+          items.push({ ...doc.data(), id: doc.id });
+      });
+
+      setState(items);
+      stateRef.current = items;
+      isLoadedRef.current = true;
+      setIsLoaded(true);
+    }, (err) => {
+      console.error("Collection Sync error", collectionName, err);
+      setIsLoaded(true);
+    });
+
+    return () => unsubscribe();
+  }, [fbUser, collectionName]);
+
+  // 2. State Updater (อัปเดตเฉพาะส่วนที่เปลี่ยนแปลงเพื่อไม่ให้ทับกัน)
+  const setPersistentValue = async (newValue) => {
+    const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
+    if (valueToStore === stateRef.current) return;
+
+    const oldState = stateRef.current;
+    setState(valueToStore);
+    stateRef.current = valueToStore;
+
+    if (db && fbUser && appId && isLoadedRef.current) {
+       // ทำงานเบื้องหลังเพื่อไม่ให้ UI กระตุก
+       (async () => {
+           try {
+               // 1. หาข้อมูลที่เพิ่มใหม่ (Added) หรือถูกแก้ไข (Updated)
+               for (const item of valueToStore) {
+                   if (!item.id) continue;
+                   const oldItem = oldState.find(o => o.id === item.id);
+                   // ถ้าของเดิมไม่มี หรือข้อมูลไม่เหมือนเดิม ให้สั่ง setDoc (เขียนทับเฉพาะไฟล์นั้น)
+                   if (!oldItem || JSON.stringify(oldItem) !== JSON.stringify(item)) {
+                       const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, String(item.id));
+                       await setDoc(docRef, item);
+                   }
+               }
+
+               // 2. หาข้อมูลที่ถูกลบออก (Deleted)
+               for (const oldItem of oldState) {
+                   if (!oldItem.id) continue;
+                   const stillExists = valueToStore.some(n => n.id === oldItem.id);
+                   // ถ้าหาใน State ใหม่ไม่เจอ แสดงว่าถูกลบ ให้สั่ง deleteDoc
+                   if (!stillExists) {
+                       const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, String(oldItem.id));
+                       await deleteDoc(docRef);
+                   }
+               }
+           } catch (err) {
+               console.error(`Firestore Write Error [${collectionName}]:`, err);
+           }
+       })();
+    } else if (!db && typeof window !== 'undefined') {
+       try {
+           localStorage.setItem(collectionName, JSON.stringify(valueToStore));
+       } catch (err) {
+           console.error("Local Storage Error:", err);
+       }
+    }
+  };
+
+  return [state, setPersistentValue, isLoaded];
+}
+
 // --- NEW: Custom Hook for User Specific Persistent Storage (Theme, UI settings) ---
 function useUserPersistentState(key, initialValue, fbUser) {
   const [state, setState] = useState(() => {
@@ -1522,7 +1620,6 @@ export default function App() {
   });
 
   // Assets Management State
-  const [assets, setAssets] = usePersistentState('bmg_assets', INITIAL_ASSETS, fbUser);
   const [showAddAssetModal, setShowAddAssetModal] = useState(false);
   const [selectedAssetView, setSelectedAssetView] = useState(null); // NEW: State สำหรับแสดงรายละเอียดทรัพย์สิน
   const [isEditingAsset, setIsEditingAsset] = useState(false); // NEW: State สำหรับสถานะกำลังแก้ไข
@@ -1537,7 +1634,6 @@ export default function App() {
   });
 
   // Tools Management State
-  const [tools, setTools] = usePersistentState('bmg_tools', INITIAL_TOOLS, fbUser);
   const [showAddToolModal, setShowAddToolModal] = useState(false);
   const [selectedToolView, setSelectedToolView] = useState(null); // NEW: State สำหรับแสดงรายละเอียดเครื่องมือ
   const [isEditingTool, setIsEditingTool] = useState(false); // NEW: State สำหรับสถานะกำลังแก้ไข
@@ -1552,7 +1648,6 @@ export default function App() {
   });
 
   // Machine Management State (PM)
-  const [machines, setMachines] = usePersistentState('bmg_machines', INITIAL_MACHINES, fbUser);
   const [showAddMachineModal, setShowAddMachineModal] = useState(false);
   const [isEditingMachine, setIsEditingMachine] = useState(false);
   const [isSavingMachine, setIsSavingMachine] = useState(false); // NEW: State สำหรับแสดง Loading ตอนอัปโหลดรูปเข้า Drive
@@ -1567,7 +1662,6 @@ export default function App() {
   });
 
   // PM Plan State
-  const [pmPlans, setPmPlans] = usePersistentState('bmg_pmPlans', INITIAL_PM_PLANS, fbUser);
   const [showAddPmPlanModal, setShowAddPmPlanModal] = useState(false);
   const [newPmPlan, setNewPmPlan] = useState({
       id: null,
@@ -1579,7 +1673,6 @@ export default function App() {
   const [selectedDateTasks, setSelectedDateTasks] = useState(null); // NEW: State สำหรับแสดงรายการ PM แบบเต็มในแต่ละวัน
   
   // PM History State
-  const [pmHistoryList, setPmHistoryList] = usePersistentState('bmg_pmHistoryList', INITIAL_PM_HISTORY, fbUser);
   const [selectedPmHistory, setSelectedPmHistory] = useState(null); // NEW: State สำหรับเก็บข้อมูลประวัติที่ถูกคลิกดู
   const [selectedMachineDetails, setSelectedMachineDetails] = useState(null); // NEW: State สำหรับเก็บข้อมูลเครื่องจักรที่คลิกดูรายละเอียด
   const [selectedFormSystem, setSelectedFormSystem] = useState(''); // NEW: State สำหรับเลือกระบบที่จะพิมพ์ฟอร์มเปล่า
@@ -1600,8 +1693,6 @@ export default function App() {
   const [pmFormImages, setPmFormImages] = useState([]); // NEW: State สำหรับเก็บรูปภาพหลายรูปในฟอร์ม PM
 
   // NEW: Utilities State
-  const [meters, setMeters] = usePersistentState('bmg_meters', INITIAL_METERS, fbUser);
-  const [utilityReadings, setUtilityReadings] = usePersistentState('bmg_utilityReadings', INITIAL_READINGS, fbUser);
   const [utilitySubTab, setUtilitySubTab] = useState('record'); // 'record', 'registry', 'analysis'
   const [utilityChartType, setUtilityChartType] = useState('bar'); // 'bar', 'line'
   const [utilityAnalysisMonth, setUtilityAnalysisMonth] = useState(() => {
@@ -1635,7 +1726,6 @@ export default function App() {
   });
 
   // Repair Request State
-  const [repairs, setRepairs] = usePersistentState('bmg_repairs', INITIAL_REPAIRS, fbUser);
   const [showAddRepairModal, setShowAddRepairModal] = useState(false);
   const [selectedRepairView, setSelectedRepairView] = useState(null); // NEW: State สำหรับเก็บข้อมูลแจ้งซ่อมที่จะ Print/View
   const [newRepair, setNewRepair] = useState({
@@ -1656,7 +1746,6 @@ export default function App() {
   });
 
   // Action Plan State
-  const [actionPlans, setActionPlans] = usePersistentState('bmg_actionPlans', INITIAL_ACTION_PLANS, fbUser);
   const [showAddActionPlanModal, setShowAddActionPlanModal] = useState(false);
   const [newActionPlan, setNewActionPlan] = useState({
       id: null,
@@ -1680,7 +1769,6 @@ export default function App() {
   const [isEditingForm, setIsEditingForm] = useState(false); // NEW: State สำหรับโหมดแก้ไขแบบฟอร์ม
 
   // --- NEW: State สำหรับจัดการรายการแบบฟอร์ม ---
-  const [formsList, setFormsList] = usePersistentState('bmg_forms_list', STANDARD_FORMS, fbUser);
   const [showAddFormModal, setShowAddFormModal] = useState(false);
   const [newFormItem, setNewFormItem] = useState({ id: null, category: 'งานบริหารและนิติบุคคล (Juristic & Mgmt.)', name: '', format: 'PDF', size: '100 KB', description: '' });
 
@@ -1707,12 +1795,26 @@ export default function App() {
   const [isSavingProject, setIsSavingProject] = useState(false); // NEW: State สำหรับแสดง Loading ตอนอัปโหลดรูป/ไฟล์เข้า Drive
   const [newProject, setNewProject] = useState({ logo: null, code: '', name: '', type: 'Condo', address: '', phone: '', taxId: '', contractStartDate: '', contractEndDate: '', contractValue: '', status: 'Active', files: { orchor: null, committee: null, regulations: null, resident_rules: null } });
 
-  const [users, setUsers, isUsersLoaded] = usePersistentState('bmg_users', INITIAL_USERS, fbUser); // รับค่า isUsersLoaded มาใช้งาน
-  const [projects, setProjects] = usePersistentState('bmg_projects', INITIAL_PROJECTS, fbUser);
-  const [contracts, setContracts] = usePersistentState('bmg_contracts', INITIAL_CONTRACTS, fbUser);
-  const [audits, setAudits] = usePersistentState('bmg_audits', INITIAL_AUDITS, fbUser);
-  const [dailyReports, setDailyReports] = usePersistentState('bmg_dailyReports', INITIAL_DAILY_REPORTS, fbUser);
-  const [contractors, setContractors] = usePersistentState('bmg_contractors', INITIAL_CONTRACTORS, fbUser);
+  // อัปเกรดเป็น usePersistentCollection สำหรับข้อมูลที่เป็น Array (รายการ) ป้องกันข้อมูลสูญหาย/ทับกัน
+  const [users, setUsers, isUsersLoaded] = usePersistentCollection('bmg_users', INITIAL_USERS, fbUser); 
+  const [projects, setProjects] = usePersistentCollection('bmg_projects', INITIAL_PROJECTS, fbUser);
+  const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, fbUser);
+  const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, fbUser);
+  const [dailyReports, setDailyReports] = usePersistentCollection('bmg_dailyReports', INITIAL_DAILY_REPORTS, fbUser);
+  const [contractors, setContractors] = usePersistentCollection('bmg_contractors', INITIAL_CONTRACTORS, fbUser);
+  const [assets, setAssets] = usePersistentCollection('bmg_assets', INITIAL_ASSETS, fbUser);
+  const [tools, setTools] = usePersistentCollection('bmg_tools', INITIAL_TOOLS, fbUser);
+  const [machines, setMachines] = usePersistentCollection('bmg_machines', INITIAL_MACHINES, fbUser);
+  const [pmPlans, setPmPlans] = usePersistentCollection('bmg_pmPlans', INITIAL_PM_PLANS, fbUser);
+  const [pmHistoryList, setPmHistoryList] = usePersistentCollection('bmg_pmHistoryList', INITIAL_PM_HISTORY, fbUser);
+  const [meters, setMeters] = usePersistentCollection('bmg_meters', INITIAL_METERS, fbUser);
+  const [utilityReadings, setUtilityReadings] = usePersistentCollection('bmg_utilityReadings', INITIAL_READINGS, fbUser);
+  const [repairs, setRepairs] = usePersistentCollection('bmg_repairs', INITIAL_REPAIRS, fbUser);
+  const [actionPlans, setActionPlans] = usePersistentCollection('bmg_actionPlans', INITIAL_ACTION_PLANS, fbUser);
+  const [othersData, setOthersData] = usePersistentCollection('bmg_othersData', INITIAL_OTHERS, fbUser);
+  const [formsList, setFormsList] = usePersistentCollection('bmg_forms_list', STANDARD_FORMS, fbUser);
+
+  // คงใช้ usePersistentState สำหรับข้อมูลที่เป็น Object เดี่ยวๆ
   const [schedules, setSchedules] = usePersistentState('bmg_schedules', {}, fbUser);
   
   const getLocalMonthStr = () => {
@@ -1727,7 +1829,6 @@ export default function App() {
   const dragOverItem = useRef(null); // NEW: Ref สำหรับจดจำ index เป้าหมายที่จะวาง
 
   // Others Module State
-  const [othersData, setOthersData] = usePersistentState('bmg_othersData', INITIAL_OTHERS, fbUser);
   const [showAddOtherModal, setShowAddOtherModal] = useState(false);
   const [newOther, setNewOther] = useState({
       id: null,
