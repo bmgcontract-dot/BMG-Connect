@@ -2688,19 +2688,17 @@ export default function App() {
   const handleLogin = (e) => { 
       e.preventDefault(); 
       
-      // ตัดช่องว่าง (Space) หน้า-หลังทิ้ง ป้องกันปัญหาการพิมพ์เว้นวรรคเกิน
-      const inputUsername = loginForm.username.trim();
+      // 1. ตัดช่องว่าง (Space) หน้า-หลังทิ้ง และแปลง Username เป็นพิมพ์เล็กทั้งหมด
+      const inputUsername = loginForm.username.trim().toLowerCase();
+      const inputPassword = loginForm.password.trim();
       
-      let user = users.find(u => u.username === inputUsername && u.password === loginForm.password); 
+      // 2. ค้นหาผู้ใช้ (เปรียบเทียบแบบป้องกันเคสพิมพ์เล็ก/ใหญ่)
+      let user = users.find(u => (u.username || '').trim().toLowerCase() === inputUsername && u.password === inputPassword); 
       
-      // --- FIX: Master Admin Fallback ---
-      // ป้องกันกรณีฐานข้อมูล (Firebase/Local Storage) ว่างเปล่า หรือถูกลบข้อมูล Admin ทิ้ง
-      if (!user && inputUsername === 'admin' && loginForm.password === 'bosskim') {
+      // --- 3. FIX: Master Admin Fallback (กุญแจสำรอง) ---
+      // เผื่อกรณีข้อมูลหาย หรือพนักงานลบแอคเคาท์ Admin ทิ้ง
+      if (!user && inputUsername === 'admin' && inputPassword === 'bosskim') {
           user = INITIAL_USERS[0];
-          // ดึงบัญชี Admin กลับเข้าสู่ฐานข้อมูลอัตโนมัติ
-          if (users.length === 0) {
-              setUsers(INITIAL_USERS);
-          }
       }
 
       if (user) { 
@@ -2708,16 +2706,22 @@ export default function App() {
           const updatedUser = { ...user, lastLogin: new Date().toISOString() };
           
           setCurrentUser(updatedUser);
-          // NEW: บันทึกข้อมูลลง LocalStorage เพื่อให้จำค่าตอน Refresh
+          // บันทึกข้อมูลลง LocalStorage เพื่อให้จำค่าตอน Refresh
           if (typeof window !== 'undefined') {
               localStorage.setItem('bmg_current_user', JSON.stringify(updatedUser));
           }
           setNewDailyReport(prev => ({...prev, reporter: `${updatedUser.firstName} ${updatedUser.lastName}`})); 
           setLoginError(''); 
 
-          // อัปเดตข้อมูลใน State เพื่อให้เวลาแสดงผลในตาราง
-          const updatedUsers = users.map(u => u.id === updatedUser.id ? updatedUser : u);
-          setUsers(updatedUsers);
+          // 4. FIX: อัปเดตข้อมูลใน State อย่างปลอดภัย (เช็คก่อนว่ามีบัญชีนี้ในระบบหรือยัง)
+          setUsers(prevUsers => {
+              const userExists = prevUsers.some(u => u.id === updatedUser.id);
+              if (userExists) {
+                  return prevUsers.map(u => u.id === updatedUser.id ? updatedUser : u);
+              } else {
+                  return [...prevUsers, updatedUser]; // กรณีดึงบัญชี Admin สำรองกลับมา
+              }
+          });
           
           // ตรวจสอบหน่วยงานประจำของผู้ใช้
           if (updatedUser.department && updatedUser.department !== 'Head Office') {
@@ -2738,7 +2742,7 @@ export default function App() {
               setActiveMenu('dashboard');
           }
       } else { 
-          setLoginError('หากไม่สามารถเข้าใช้งานได้ กรุณาติดต่อผู้ดูแลระบบ (Admin)'); 
+          setLoginError('ชื่อผู้ใช้ หรือ รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง'); 
       } 
   };
   
