@@ -9,7 +9,7 @@ import {
   XCircle, Image as ImageIcon, File, Hourglass, Phone, Mail, LayoutGrid, List, ChevronDown, Save,
   ChevronLeft, ChevronRight, MousePointer2, FileCheck, DollarSign, Camera,
   MapPin, Box, PenTool, Printer as PrinterIcon, History, Folder, Lock,
-  Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2, Bell
+  Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2, Bell, DownloadCloud
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
@@ -1677,9 +1677,8 @@ export default function App() {
   const [scheduleApprovals, setScheduleApprovals] = usePersistentState('bmg_scheduleApprovals', {}, fbUser); // NEW: State สำหรับเก็บสถานะการอนุมัติตารางงาน
   const [selectedKpiDetail, setSelectedKpiDetail] = useState(null); // NEW: State สำหรับเปิด Modal รายละเอียด KPI
   const [isSyncingSheets, setIsSyncingSheets] = useState(false); // NEW: State สำหรับสถานะกำลังส่งข้อมูลไป Google Sheets
-  const [isImportingFromSheets, setIsImportingFromSheets] = useState(false); // NEW: State สำหรับนำเข้าข้อมูลจาก Sheet
+  const [isImportingFromSheets, setIsImportingFromSheets] = useState(false); // NEW: State สำหรับสถานะกำลังดึงข้อมูลจาก Google Sheets
   const [isBackingUpToDrive, setIsBackingUpToDrive] = useState(false); // NEW: State สำหรับสถานะกำลังส่งไฟล์ไป Google Drive
-  const [isImportingFromDrive, setIsImportingFromDrive] = useState(false); // NEW: State สำหรับนำเข้าไฟล์จาก Drive
 
   // NEW: State สำหรับ Confirm Modal ป้องกันการลบข้อมูลผิดพลาด
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null, confirmText: 'ยืนยันการลบ', type: 'danger' });
@@ -4085,90 +4084,53 @@ export default function App() {
       }
   };
 
-  // --- NEW: Import from Google Sheets Handler ---
+  // --- NEW: Google Sheets Import Handler ---
   const handleImportFromGoogleSheets = async () => {
-      const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzmNdR7LVpfUossHkcNH_onBPTG2dw6GuJzh5JilthkMwW-Sdr4s0lFjPKwSsCBTg/exec';
+      // ❗ คำเตือน: นำ Web App URL ที่ได้จาก Google Apps Script (ที่เขียนฟังก์ชัน doGet ให้ Return JSON) มาวางที่นี่
+      const GOOGLE_SCRIPT_IMPORT_URL = 'YOUR_GOOGLE_SCRIPT_WEB_APP_URL_HERE_FOR_IMPORT';
       
-      if(!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL === 'YOUR_GOOGLE_SCRIPT_WEB_APP_URL_HERE') {
-          alert("กรุณานำ Web App URL ของ Google Apps Script มาใส่ในโค้ดก่อนใช้งานฟังก์ชันนี้");
+      if(!GOOGLE_SCRIPT_IMPORT_URL || GOOGLE_SCRIPT_IMPORT_URL === 'YOUR_GOOGLE_SCRIPT_WEB_APP_URL_HERE_FOR_IMPORT') {
+          alert("กรุณานำ Web App URL ของ Google Apps Script สำหรับดึงข้อมูลมาใส่ในโค้ดก่อนใช้งานฟังก์ชันนี้");
           return;
       }
 
       showConfirm(
-          'ยืนยันการนำเข้าข้อมูลจาก Google Sheets',
-          'คำเตือน: ระบบจะทำการเชื่อมต่อและดึงข้อมูลล่าสุดจากตารางใน Google Sheets มาเขียนทับ (Overwrite) ข้อมูลปัจจุบันในระบบทั้งหมด คุณแน่ใจหรือไม่ที่จะดำเนินการต่อ?',
+          'ยืนยันการดึงข้อมูลจาก Google Sheets',
+          'คำเตือนอย่างร้ายแรง: การนำเข้าข้อมูล จะเขียนทับ (Overwrite) ข้อมูลปัจจุบันในระบบทั้งหมดด้วยข้อมูลล่าสุดจาก Google Sheets (ยกเว้นรูปภาพและไฟล์จะยังคงเดิม) คุณแน่ใจหรือไม่?',
           async () => {
               setIsImportingFromSheets(true);
-              setRestoreProgress('กำลังเชื่อมต่อ Google Sheets...');
-
               try {
-                  // ส่ง GET request ไปยัง Google Apps Script (ต้องตั้งค่า doGet ให้คืนค่า JSON)
-                  const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=export_to_app`);
-                  
-                  if (!response.ok) {
-                       throw new Error(`HTTP error! status: ${response.status}`);
-                  }
-                  
+                  const response = await fetch(GOOGLE_SCRIPT_IMPORT_URL);
                   const result = await response.json();
 
-                  if (!result || typeof result !== 'object') {
-                      throw new Error('ไม่พบข้อมูล หรือรูปแบบข้อมูลจาก Google Sheets ไม่ถูกต้อง');
+                  if (result && typeof result === 'object') {
+                      // ทยอยอัปเดตทีละตารางและบังคับเขียนทับ (isRestore = true)
+                      if (result['Users_พนักงาน']) await setUsers(result['Users_พนักงาน'], true);
+                      if (result['Projects_โครงการ']) await setProjects(result['Projects_โครงการ'], true);
+                      if (result['Contracts_สัญญา']) await setContracts(result['Contracts_สัญญา'], true);
+                      if (result['Contractors_ผู้รับเหมา']) await setContractors(result['Contractors_ผู้รับเหมา'], true);
+                      if (result['Assets_ทรัพย์สิน']) await setAssets(result['Assets_ทรัพย์สิน'], true);
+                      if (result['Tools_เครื่องมือ']) await setTools(result['Tools_เครื่องมือ'], true);
+                      if (result['Machines_เครื่องจักร']) await setMachines(result['Machines_เครื่องจักร'], true);
+                      if (result['PM_Plans_แผนบำรุงรักษา']) await setPmPlans(result['PM_Plans_แผนบำรุงรักษา'], true);
+                      if (result['PM_History_ประวัติPM']) await setPmHistoryList(result['PM_History_ประวัติPM'], true);
+                      if (result['Repairs_แจ้งซ่อม']) await setRepairs(result['Repairs_แจ้งซ่อม'], true);
+                      if (result['ActionPlans_แผนงาน']) await setActionPlans(result['ActionPlans_แผนงาน'], true);
+                      if (result['Audits_ประเมินคุณภาพ']) await setAudits(result['Audits_ประเมินคุณภาพ'], true);
+                      if (result['UtilityMeters_มิเตอร์']) await setMeters(result['UtilityMeters_มิเตอร์'], true);
+                      if (result['UtilityReadings_จดมิเตอร์']) await setUtilityReadings(result['UtilityReadings_จดมิเตอร์'], true);
+                      if (result['DailyReports_รายงานประจำวัน']) await setDailyReports(result['DailyReports_รายงานประจำวัน'], true);
+
+                      showAlert("สำเร็จ", "✅ ดึงข้อมูลจาก Google Sheets ลงสู่ระบบสำเร็จเรียบร้อยแล้ว! ระบบจะทำการรีเฟรชหน้าจอ");
+                      setTimeout(() => window.location.reload(), 2000);
+                  } else {
+                      showAlert("เกิดข้อผิดพลาด", "❌ รูปแบบข้อมูลที่ได้รับจาก Google Sheets ไม่ถูกต้อง (ต้องเป็น JSON Object)");
                   }
-
-                  // ปรับโครงสร้างการอ่านข้อมูลเผื่อ Apps Script ส่งมาใน key data หรือส่งมาตรงๆ
-                  const d = result.data || result;
-                  
-                  setRestoreProgress('กำลังประมวลผลและอัปเดตข้อมูล...');
-                  await new Promise(resolve => setTimeout(resolve, 500)); // ให้ UI โหลด
-
-                  // ทยอยอัปเดตทีละตาราง
-                  const stateSetters = [
-                      { key: 'Users_พนักงาน', setter: setUsers },
-                      { key: 'Projects_โครงการ', setter: setProjects },
-                      { key: 'Contracts_สัญญา', setter: setContracts },
-                      { key: 'Contractors_ผู้รับเหมา', setter: setContractors },
-                      { key: 'Assets_ทรัพย์สิน', setter: setAssets },
-                      { key: 'Tools_เครื่องมือ', setter: setTools },
-                      { key: 'Machines_เครื่องจักร', setter: setMachines },
-                      { key: 'PM_Plans_แผนบำรุงรักษา', setter: setPmPlans },
-                      { key: 'PM_History_ประวัติPM', setter: setPmHistoryList },
-                      { key: 'Repairs_แจ้งซ่อม', setter: setRepairs },
-                      { key: 'ActionPlans_แผนงาน', setter: setActionPlans },
-                      { key: 'Audits_ประเมินคุณภาพ', setter: setAudits },
-                      { key: 'UtilityMeters_มิเตอร์', setter: setMeters },
-                      { key: 'UtilityReadings_จดมิเตอร์', setter: setUtilityReadings },
-                      { key: 'DailyReports_รายงานประจำวัน', setter: setDailyReports }
-                  ];
-
-                  let currentTable = 0;
-                  const totalTables = stateSetters.length;
-
-                  for (const item of stateSetters) {
-                      currentTable++;
-                      if (d[item.key] && Array.isArray(d[item.key])) {
-                          setRestoreProgress(`กำลังอัปเดต: ${item.key.split('_')[1] || item.key} (${currentTable}/${totalTables})`);
-                          await new Promise(resolve => setTimeout(resolve, 50));
-                          try {
-                              await item.setter(d[item.key], true); // true = force overwrite
-                          } catch (e) {
-                              console.error(`Error syncing ${item.key}:`, e);
-                          }
-                      }
-                  }
-
-                  setRestoreProgress('นำเข้าข้อมูลสำเร็จ 100%!');
-                  
-                  setTimeout(() => {
-                      showAlert("สำเร็จ", "ดึงข้อมูลจาก Google Sheets ลงระบบเสร็จสมบูรณ์ ระบบจะรีเฟรชหน้าจออัตโนมัติเพื่อแสดงข้อมูลใหม่");
-                      setTimeout(() => window.location.reload(), 3000);
-                  }, 500);
-
               } catch (error) {
                   console.error("Import from Sheets error:", error);
-                  showAlert("เกิดข้อผิดพลาด", "ไม่สามารถดึงข้อมูลจาก Google Sheets ได้:\n" + error.message + "\n\n*โปรดตรวจสอบว่า Google Apps Script ของคุณมีฟังก์ชัน doGet() ที่รองรับและส่งค่า JSON กลับมาได้");
+                  showAlert("เกิดข้อผิดพลาด", "❌ ไม่สามารถเชื่อมต่อหรือดึงข้อมูลจาก Google Sheets ได้ กรุณาตรวจสอบ URL หรือการตั้งค่า CORS ของ Apps Script");
               } finally {
                   setIsImportingFromSheets(false);
-                  setRestoreProgress('');
               }
           },
           'ยืนยันการดึงข้อมูล',
@@ -4271,116 +4233,6 @@ export default function App() {
       } finally {
           setIsBackingUpToDrive(false);
       }
-  };
-
-  // --- NEW: Import Files/Images from Google Drive Handler ---
-  const handleImportFromDrive = async () => {
-      const GOOGLE_SCRIPT_DRIVE_URL = 'https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec';
-      
-      if(!GOOGLE_SCRIPT_DRIVE_URL || GOOGLE_SCRIPT_DRIVE_URL === 'YOUR_GOOGLE_SCRIPT_DRIVE_URL_HERE') {
-          alert("กรุณานำ Web App URL ของ Google Apps Script สำหรับบันทึกลง Drive มาใส่ในโค้ดก่อนใช้งานฟังก์ชันนี้");
-          return;
-      }
-
-      showConfirm(
-          'ยืนยันการกู้คืนไฟล์จาก Google Drive',
-          'ระบบจะทำการค้นหาโฟลเดอร์ Backup ล่าสุดใน Google Drive และดาวน์โหลดรูปภาพ/เอกสารกลับมายังเครื่องนี้ (อาจใช้เวลาหลายนาทีขึ้นอยู่กับจำนวนและขนาดไฟล์) ต้องการดำเนินการต่อหรือไม่?',
-          async () => {
-              setIsImportingFromDrive(true);
-              setRestoreProgress('กำลังเชื่อมต่อ Google Drive...');
-
-              try {
-                  const response = await fetch(`${GOOGLE_SCRIPT_DRIVE_URL}?action=import_from_drive`);
-                  
-                  if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                  
-                  const result = await response.json();
-
-                  if (result.status === 'success' && result.files && result.files.length > 0) {
-                      setRestoreProgress(`กำลังประมวลผลไฟล์ ${result.files.length} รายการ...`);
-                      await new Promise(resolve => setTimeout(resolve, 100)); // UI refresh
-                      
-                      const filesToSaveToIDB = {};
-                      let successCount = 0;
-                      
-                      // เตรียมอัปเดต State กรณีเป็นรูปภาพหลัก
-                      let newCompanyInfo = { ...companyInfo };
-                      let newUsers = [...users];
-                      let newAssets = [...assets];
-                      let newTools = [...tools];
-                      let newMachines = [...machines];
-                      let stateChanged = false;
-
-                      for (const file of result.files) {
-                          if (file.filename && file.data && file.mimeType) {
-                              const dataUri = `data:${file.mimeType};base64,${file.data}`;
-                              
-                              if (file.filename === 'Company_Logo.jpg') {
-                                  newCompanyInfo.logo = dataUri;
-                                  stateChanged = true;
-                              } else if (file.filename.startsWith('User_')) {
-                                  const id = file.filename.replace('User_', '').replace('.jpg', '');
-                                  newUsers = newUsers.map(u => (u.employeeId === id || u.id === id) ? {...u, photo: dataUri} : u);
-                                  stateChanged = true;
-                              } else if (file.filename.startsWith('Asset_')) {
-                                  const code = file.filename.replace('Asset_', '').replace('.jpg', '');
-                                  newAssets = newAssets.map(a => a.code === code ? {...a, photo: dataUri} : a);
-                                  stateChanged = true;
-                              } else if (file.filename.startsWith('Tool_')) {
-                                  const code = file.filename.replace('Tool_', '').replace('.jpg', '');
-                                  newTools = newTools.map(t => t.code === code ? {...t, photo: dataUri} : t);
-                                  stateChanged = true;
-                              } else if (file.filename.startsWith('Machine_')) {
-                                  const code = file.filename.replace('Machine_', '').replace('.jpg', '');
-                                  newMachines = newMachines.map(m => m.code === code ? {...m, photo: dataUri} : m);
-                                  stateChanged = true;
-                              } else if (file.filename.startsWith('Document_')) {
-                                  // ไฟล์ PDF ให้เซฟลง IndexedDB ของเครื่อง
-                                  const fileId = file.filename.replace('Document_', '').replace('.pdf', '');
-                                  filesToSaveToIDB[fileId] = dataUri;
-                              } else {
-                                  // ไฟล์รูปภาพอื่นๆ เช่น PM, รายงานประจำวัน, สัญญา บันทึกลง IndexedDB เช่นกัน
-                                  filesToSaveToIDB[file.filename] = dataUri;
-                              }
-                              successCount++;
-                          }
-                      }
-
-                      // ถ้ามีรูปภาพหลักเปลี่ยน ให้อัปเดต State โดยบังคับส่งขึ้น Cloud ให้ด้วย
-                      if (stateChanged) {
-                          setCompanyInfo(newCompanyInfo);
-                          setUsers(newUsers, true);
-                          setAssets(newAssets, true);
-                          setTools(newTools, true);
-                          setMachines(newMachines, true);
-                      }
-
-                      // บันทึกไฟล์เอกสารลงฐานข้อมูล Local (IndexedDB)
-                      if (Object.keys(filesToSaveToIDB).length > 0) {
-                          setRestoreProgress('กำลังบันทึกเอกสารลงระบบ...');
-                          await saveMultipleFilesLocally(filesToSaveToIDB);
-                      }
-
-                      setRestoreProgress('ดาวน์โหลดสำเร็จ 100%');
-                      setTimeout(() => {
-                          showAlert("สำเร็จ", `ดึงไฟล์จาก Google Drive เสร็จสมบูรณ์ (${successCount} ไฟล์)\nรูปภาพและเอกสารได้รับการอัปเดตลงระบบเรียบร้อยแล้ว`);
-                      }, 500);
-
-                  } else {
-                      showAlert("แจ้งเตือน", "ไม่พบโฟลเดอร์ Backup ใน Google Drive หรือโฟลเดอร์ล่าสุดไม่มีไฟล์");
-                  }
-
-              } catch (error) {
-                  console.error("Import from Drive error:", error);
-                  showAlert("เกิดข้อผิดพลาด", "ไม่สามารถดึงไฟล์จาก Google Drive ได้:\n" + error.message + "\n\n*โปรดตรวจสอบว่า Google Apps Script มีฟังก์ชัน doGet() ที่รองรับ action=import_from_drive");
-              } finally {
-                  setIsImportingFromDrive(false);
-                  setRestoreProgress('');
-              }
-          },
-          'เริ่มดึงไฟล์ภาพ/เอกสาร',
-          'info'
-      );
   };
   // ----------------------------------------
 
@@ -9905,53 +9757,53 @@ export default function App() {
                   </Card>
 
                   {/* Google Sheets Sync Card */}
-                  <Card className="p-6 border-t-4 border-green-500 md:col-span-2">
+                  <Card className="p-6 border-t-4 border-green-500 md:col-span-1">
                       <div className="flex items-center gap-3 mb-4">
                           <div className="p-3 bg-green-100 text-green-600 rounded-lg shadow-sm">
                               <Globe size={24} />
                           </div>
                           <div>
-                              <h3 className="text-lg font-bold text-gray-800">สำรองข้อมูลไปที่ Google Sheets</h3>
+                              <h3 className="text-lg font-bold text-gray-800">ส่งข้อมูลไปที่ Google Sheets</h3>
                               <p className="text-sm text-gray-500">ซิงค์ฐานข้อมูลหลักออกไปยัง Spreadsheet</p>
                           </div>
                       </div>
                       <p className="text-sm text-gray-600 mb-6 bg-green-50 p-4 rounded-lg border border-green-100 leading-relaxed">
-                          ระบบจะทำการส่งข้อมูลตารางหลักทั้งหมด (เช่น รายชื่อพนักงาน, ทรัพย์สิน, ประวัติแจ้งซ่อม, บันทึกมิเตอร์น้ำไฟ) ไปยัง Google Sheet ID: <br/><span className="font-mono font-bold text-green-700 bg-white px-2 py-1 rounded inline-block mt-2 shadow-sm break-all">1J5rup8PlSmKStjO8G13EvGfau1yFCF5kSWFLFHfHklU</span><br/>โดยสคริปต์จะทำการสร้าง Sheet ย่อย และจัดเรียงคอลัมน์ให้อัตโนมัติ
+                          ระบบจะทำการส่งข้อมูลตารางหลักทั้งหมด ไปยัง Google Sheet ของคุณ 
+                          โดยสคริปต์จะทำการสร้าง Sheet ย่อย และจัดเรียงคอลัมน์ให้อัตโนมัติ (อัปเดตข้อมูลทางเดียว)
                       </p>
                       
                       <Button 
-                          className="w-full md:w-auto flex justify-center items-center gap-2 bg-green-600 hover:bg-green-700 shadow-md text-base py-3 px-6" 
+                          className="w-full md:w-auto flex justify-center items-center gap-2 bg-green-600 hover:bg-green-700 shadow-md text-base py-3 px-6 mt-auto" 
                           onClick={handleSyncToGoogleSheets}
                           disabled={isSyncingSheets}
                       >
                           {isSyncingSheets ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />} 
-                          {isSyncingSheets ? 'ระบบกำลังทำการซิงค์ข้อมูล...' : 'ส่งข้อมูลไปอัปเดตที่ Google Sheets'}
+                          {isSyncingSheets ? 'กำลังส่งข้อมูล...' : 'ส่งออกข้อมูล (Export)'}
                       </Button>
                   </Card>
 
-                  {/* Import from Google Sheets Card */}
-                  <Card className="p-6 border-t-4 border-teal-500 md:col-span-2">
+                  {/* NEW: Google Sheets Import Card */}
+                  <Card className="p-6 border-t-4 border-teal-500 md:col-span-1 flex flex-col">
                       <div className="flex items-center gap-3 mb-4">
                           <div className="p-3 bg-teal-100 text-teal-600 rounded-lg shadow-sm">
-                              <Download size={24} />
+                              <DownloadCloud size={24} />
                           </div>
                           <div>
-                              <h3 className="text-lg font-bold text-gray-800">นำเข้าข้อมูลล่าสุดจาก Google Sheets</h3>
-                              <p className="text-sm text-gray-500">ดึงข้อมูลจาก Spreadsheet กลับมาที่ระบบ</p>
+                              <h3 className="text-lg font-bold text-gray-800">ดึงข้อมูลล่าสุดจาก Google Sheets</h3>
+                              <p className="text-sm text-gray-500">นำเข้าข้อมูลจาก Spreadsheet มาทับในระบบ</p>
                           </div>
                       </div>
                       <p className="text-sm text-gray-600 mb-6 bg-teal-50 p-4 rounded-lg border border-teal-100 leading-relaxed">
-                          ระบบจะทำการเชื่อมต่อและดึงข้อมูลล่าสุดที่อยู่ใน Google Sheets กลับมาอัปเดตในระบบ (เขียนทับตารางเดิม) <br/>
-                          <span className="font-bold text-red-600 flex items-center gap-1 mt-1"><AlertTriangle size={14}/> คำเตือน: ข้อมูลที่ไม่ได้ถูกซิงค์ไปที่ Sheet ก่อนหน้านี้อาจสูญหายได้</span>
+                          ดึงข้อมูลล่าสุดที่คุณแก้ไขผ่านตารางบน Google Sheets กลับเข้ามาอัปเดตในระบบหลัก (จะเขียนทับข้อมูลตารางทั้งหมด ยกเว้นรูปภาพและไฟล์)
                       </p>
                       
                       <Button 
-                          className="w-full md:w-auto flex justify-center items-center gap-2 bg-teal-600 hover:bg-teal-700 shadow-md text-base py-3 px-6" 
+                          className="w-full md:w-auto flex justify-center items-center gap-2 bg-teal-600 hover:bg-teal-700 shadow-md text-base py-3 px-6 mt-auto" 
                           onClick={handleImportFromGoogleSheets}
                           disabled={isImportingFromSheets}
                       >
-                          {isImportingFromSheets ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />} 
-                          {isImportingFromSheets ? 'กำลังดึงข้อมูล... ' + restoreProgress : 'ดึงข้อมูลจาก Google Sheets'}
+                          {isImportingFromSheets ? <Loader2 size={18} className="animate-spin" /> : <DownloadCloud size={18} />} 
+                          {isImportingFromSheets ? 'กำลังดึงข้อมูล...' : 'ดึงมาอัปเดต (Import)'}
                       </Button>
                   </Card>
 
@@ -9978,32 +9830,6 @@ export default function App() {
                       >
                           {isBackingUpToDrive ? <Loader2 size={18} className="animate-spin" /> : <Cloud size={18} />} 
                           {isBackingUpToDrive ? 'กำลังส่งไฟล์ไปที่ Drive ทีละรายการ...' : 'เริ่มอัปโหลดไฟล์ไปที่ Google Drive'}
-                      </Button>
-                  </Card>
-
-                  {/* NEW: Import from Google Drive Card */}
-                  <Card className="p-6 border-t-4 border-pink-500 md:col-span-2">
-                      <div className="flex items-center gap-3 mb-4">
-                          <div className="p-3 bg-pink-100 text-pink-600 rounded-lg shadow-sm">
-                              <Image size={24} className="text-pink-600" as={ImageIcon}/>
-                          </div>
-                          <div>
-                              <h3 className="text-lg font-bold text-gray-800">กู้คืนไฟล์และรูปภาพ จาก Google Drive</h3>
-                              <p className="text-sm text-gray-500">ดึงรูปภาพและเอกสารที่เคย Backup ไว้กลับมาที่เครื่องนี้</p>
-                          </div>
-                      </div>
-                      <p className="text-sm text-gray-600 mb-6 bg-pink-50 p-4 rounded-lg border border-pink-100 leading-relaxed">
-                          ระบบจะค้นหาโฟลเดอร์ Backup ล่าสุดใน Google Drive และทำการดาวน์โหลดรูปภาพ (โลโก้, รูปพนักงาน, ทรัพย์สิน) รวมถึงไฟล์เอกสาร PDF ต่างๆ กลับมาแสดงผลในระบบ <br/>
-                          <span className="font-bold text-pink-700">*เหมาะสำหรับใช้เมื่อเปลี่ยนเครื่องคอมพิวเตอร์ใหม่ หรือไฟล์รูปภาพไม่แสดงผล</span>
-                      </p>
-                      
-                      <Button 
-                          className="w-full md:w-auto flex justify-center items-center gap-2 bg-pink-600 hover:bg-pink-700 shadow-md text-base py-3 px-6" 
-                          onClick={handleImportFromDrive}
-                          disabled={isImportingFromDrive}
-                      >
-                          {isImportingFromDrive ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />} 
-                          {isImportingFromDrive ? 'กำลังดึงข้อมูล... ' + restoreProgress : 'ดึงไฟล์และรูปภาพจาก Google Drive'}
                       </Button>
                   </Card>
               </div>
