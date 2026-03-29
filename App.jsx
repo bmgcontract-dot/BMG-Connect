@@ -18,7 +18,7 @@ import {
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot, getDoc } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, onSnapshot, getDoc, collection, deleteDoc, writeBatch } from 'firebase/firestore';
 
 // --- Firebase Initialization ---
 let app, auth, db, appId;
@@ -330,6 +330,9 @@ const STANDARD_FORMS = [
     // หมวดหมู่: งานบุคคลและภายใน (Internal HR / Finance) - คงไว้สำหรับพนักงานนิติฯ
     { id: 'f14', category: 'งานบุคคลและภายใน (Internal)', name: 'ใบลาพักผ่อน / ลากิจ / ลาป่วย (Leave Request)', format: 'PDF', size: '120 KB', lastUpdated: '2025-01-05', description: 'เอกสารขออนุมัติวันลาต่างๆ สำหรับพนักงานและเจ้าหน้าที่ประจำหน่วยงาน (Leave request form for annual, personal, or sick leave for employees and site staff.)' },
     { id: 'f15', category: 'งานบุคคลและภายใน (Internal)', name: 'ใบเบิกเงินสดย่อย (Petty Cash Voucher)', format: 'Excel', size: '45 KB', lastUpdated: '2025-01-05', description: 'เอกสารประกอบการขอเบิกเงินทดรองจ่าย หรือเงินสดย่อยประจำหน่วยงาน (Form for requesting petty cash reimbursement or advance payments for site operations.)' },
+    
+    // หมวดหมู่: งานส่งมอบและฝึกอบรม (Handover & Training)
+    { id: 'f18', category: 'งานส่งมอบและฝึกอบรม (Handover & Training)', name: 'แบบฟอร์มส่งมอบงาน (Handover Form) - ผู้จัดการอาคาร/หมู่บ้าน', format: 'PDF', size: '180 KB', lastUpdated: '2026-03-29', description: 'แบบฟอร์มสำหรับส่งมอบงาน ทรัพย์สิน ระบบงาน การเงิน และคดีความต่างๆ ระหว่างผู้จัดการคนเก่าและผู้จัดการคนใหม่ พร้อม Checklist แผนสอนงาน 1 เดือน' },
 ];
 
 // Shift Codes
@@ -417,21 +420,21 @@ const getMergedPermissions = (templatePerms) => {
 };
 
 const PROJECT_TABS = [
-  { id: 'overview', label: 'tab_overview', icon: BarChart3 },
-  { id: 'contracts', label: 'tab_contracts', icon: Briefcase },
-  { id: 'staff', label: 'tab_staff', icon: Users },
-  { id: 'schedule', label: 'tab_schedule', icon: Calendar },
-  { id: 'daily', label: 'tab_daily', icon: FileText },
-  { id: 'assets', label: 'tab_assets', icon: Shield },
-  { id: 'tools', label: 'tab_tools', icon: Wrench },
-  { id: 'pm', label: 'tab_pm', icon: Zap },
-  { id: 'repair', label: 'tab_repair', icon: Hammer },
-  { id: 'utilities', label: 'tab_utilities', icon: Droplet },
-  { id: 'action', label: 'tab_action', icon: CheckCircle },
-  { id: 'audit', label: 'tab_audit', icon: ClipboardCheck },
-  { id: 'forms', label: 'tab_forms', icon: Folder },
-  { id: 'contractors', label: 'menu_contractors', icon: Search },
-  { id: 'others', label: 'tab_others', icon: Layers },
+  { id: 'overview', label: 'tab_overview', icon: BarChart3, color: 'blue' },
+  { id: 'contracts', label: 'tab_contracts', icon: Briefcase, color: 'cyan' },
+  { id: 'staff', label: 'tab_staff', icon: Users, color: 'green' },
+  { id: 'schedule', label: 'tab_schedule', icon: Calendar, color: 'pink' },
+  { id: 'daily', label: 'tab_daily', icon: FileText, color: 'purple' },
+  { id: 'assets', label: 'tab_assets', icon: Shield, color: 'red' },
+  { id: 'tools', label: 'tab_tools', icon: Wrench, color: 'orange' },
+  { id: 'pm', label: 'tab_pm', icon: Zap, color: 'yellow' },
+  { id: 'repair', label: 'tab_repair', icon: Hammer, color: 'red' },
+  { id: 'utilities', label: 'tab_utilities', icon: Droplet, color: 'cyan' },
+  { id: 'action', label: 'tab_action', icon: CheckCircle, color: 'green' },
+  { id: 'audit', label: 'tab_audit', icon: ClipboardCheck, color: 'purple' },
+  { id: 'forms', label: 'tab_forms', icon: Folder, color: 'blue' },
+  { id: 'contractors', label: 'menu_contractors', icon: Search, color: 'gray' },
+  { id: 'others', label: 'tab_others', icon: Layers, color: 'gray' },
 ];
 
 // --- Translation Dictionary ---
@@ -1102,9 +1105,9 @@ const compressImage = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                // กำหนดขนาดสูงสุด 1024px เพื่อคงความชัดเจน แต่ไฟล์ไม่ใหญ่เกินจนทำให้ระบบบันทึกไม่ได้
-                const MAX_WIDTH = 1024;
-                const MAX_HEIGHT = 1024;
+                // กำหนดขนาดสูงสุด 800px เพื่อคงความชัดเจน แต่ลดขนาดไฟล์ป้องกันปัญหา 1MB Limit ของฐานข้อมูล
+                const MAX_WIDTH = 800;
+                const MAX_HEIGHT = 800;
                 let width = img.width;
                 let height = img.height;
 
@@ -1124,8 +1127,8 @@ const compressImage = (file) => {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
                 
-                // บีบอัดเป็น JPEG Quality 70% (ช่วยลดขนาดไฟล์จากหลาย MB เหลือประมาณ 100-300 KB)
-                resolve(canvas.toDataURL('image/jpeg', 0.7));
+                // บีบอัดเป็น JPEG Quality 60%
+                resolve(canvas.toDataURL('image/jpeg', 0.6));
             };
             img.onerror = () => {
                 // กรณีเกิดข้อผิดพลาดในการโหลดรูป ให้ส่งค่าต้นฉบับกลับไป
@@ -1186,6 +1189,21 @@ const saveFileLocally = async (fileId, data) => {
     } catch (e) { console.error("IDB Save Error", e); }
 };
 
+const saveMultipleFilesLocally = async (filesObj) => {
+    try {
+        const db = await initDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            Object.keys(filesObj).forEach(fileId => {
+                store.put(filesObj[fileId], fileId);
+            });
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+    } catch (e) { console.error("IDB Batch Save Error", e); }
+};
+
 const getFileLocally = async (fileId) => {
     try {
         const db = await initDB();
@@ -1228,7 +1246,8 @@ const getAllFilesLocally = async () => {
 // --- Custom Hook for Persistent Storage (Firebase or LocalStorage Fallback) ---
 function usePersistentState(key, initialValue, fbUser) {
   const [state, setState] = useState(() => {
-      if (!db && typeof window !== 'undefined') {
+      // FIX: โหลดข้อมูลจาก Cache (Local Storage) ขึ้นมาแสดงผลทันทีก่อนเสมอ (Optimistic Load) เพื่อแก้ปัญหาโหลดหน้าเว็บช้า
+      if (typeof window !== 'undefined') {
           const local = localStorage.getItem(key);
           if (local) {
               try { return JSON.parse(local); } catch(e) { return initialValue; }
@@ -1237,10 +1256,9 @@ function usePersistentState(key, initialValue, fbUser) {
       return initialValue;
   });
   
-  // FIX: ใช้ useRef เพื่อเก็บค่า State ล่าสุด ป้องกันปัญหา Stale State (ดึงข้อมูลเก่ามาทับ)
   const stateRef = useRef(state);
   const [isSynced, setIsSynced] = useState(false);
-  const [isLoaded, setIsLoaded] = useState(false); // NEW: เพิ่ม Flag ตรวจสอบการโหลดข้อมูล
+  const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
       stateRef.current = state;
@@ -1248,13 +1266,13 @@ function usePersistentState(key, initialValue, fbUser) {
 
   useEffect(() => {
     if (!db) {
-        setIsLoaded(true); // Offline mode ถือว่าโหลดเสร็จแล้ว
+        setIsLoaded(true);
         return; 
     }
     if (!fbUser || !appId) return;
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
     
-    let currentFetchId = 0; // NEW: ป้องกันปัญหาการโหลดข้อมูลซ้อนทับกัน (Race condition)
+    let currentFetchId = 0;
 
     const unsubscribe = onSnapshot(docRef, async (docSnap) => {
       if (docSnap.exists()) {
@@ -1264,7 +1282,6 @@ function usePersistentState(key, initialValue, fbUser) {
         const data = docSnap.data();
         try {
           if (data.totalChunks !== undefined) {
-              // ประกอบร่างข้อมูลจากหลายๆ Document (รองรับไฟล์ขนาด > 1MB)
               let fullJson = '';
               for (let i = 0; i < data.totalChunks; i++) {
                   const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
@@ -1273,85 +1290,256 @@ function usePersistentState(key, initialValue, fbUser) {
                       fullJson += chunkSnap.data().chunk;
                   }
               }
-              
-              if (thisFetchId !== currentFetchId) return; // ยกเลิกหากมีการอัปเดตใหม่กว่าเข้ามาแทรก
-              
+              if (thisFetchId !== currentFetchId) return;
               if (fullJson) {
                   const parsedData = JSON.parse(fullJson);
-                  setState(parsedData);
-                  stateRef.current = parsedData;
+                  if (JSON.stringify(stateRef.current) !== JSON.stringify(parsedData)) {
+                      setState(parsedData);
+                      stateRef.current = parsedData;
+                      if (typeof window !== 'undefined') localStorage.setItem(key, JSON.stringify(parsedData));
+                  }
               }
           } else if (data.value) {
-              if (thisFetchId !== currentFetchId) return; // ยกเลิกหากมีการอัปเดตใหม่กว่าเข้ามาแทรก
-              // รองรับข้อมูลรูปแบบเก่าที่เป็น Document เดียว
+              if (thisFetchId !== currentFetchId) return;
               const parsedData = JSON.parse(data.value);
-              setState(parsedData);
-              stateRef.current = parsedData;
+              if (JSON.stringify(stateRef.current) !== JSON.stringify(parsedData)) {
+                  setState(parsedData);
+                  stateRef.current = parsedData;
+                  if (typeof window !== 'undefined') localStorage.setItem(key, JSON.stringify(parsedData));
+              }
           }
         } catch(e) { console.error("Parse error", key, e); }
-        setIsLoaded(true); // ข้อมูลโหลดเสร็จสมบูรณ์
+        setIsLoaded(true);
       } else if (!isSynced) {
          setPersistentValue(stateRef.current);
-         setIsLoaded(true); // เป็นการสร้างข้อมูลครั้งแรก ถือว่าพร้อมแล้ว
+         setIsLoaded(true);
       }
       setIsSynced(true);
     }, (err) => {
       console.error("Sync error", key, err);
-      setIsLoaded(true); // ป้องกันแอปค้างกรณีเน็ตมีปัญหา
+      setIsLoaded(true);
     });
 
     return () => unsubscribe();
   }, [fbUser, key]);
 
-  const setPersistentValue = async (newValue) => {
-    // FIX: ดึงค่าจาก stateRef.current เสมอ เพื่อรับประกันว่าเป็นข้อมูลชุดล่าสุดจริงๆ
+  const setPersistentValue = async (newValue, isRestore = false) => {
     const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
-    
-    // NEW: ป้องกันการบันทึกทับด้วยข้อมูลเดิม (ลดภาระการเขียนซ้ำซ้อนและป้องกัน State กระตุกรูปหาย)
-    if (valueToStore === stateRef.current) return;
+    if (!isRestore && valueToStore === stateRef.current) return;
 
     setState(valueToStore);
-    stateRef.current = valueToStore; // อัปเดต Ref ทันทีเพื่อให้คำสั่งถัดไปเห็นค่าใหม่
+    stateRef.current = valueToStore;
+    
+    if (typeof window !== 'undefined') {
+        // ผลักการทำงานของ LocalStorage ไปไว้คิวหลังสุด เพื่อไม่ให้หน้าจอค้าง
+        setTimeout(() => {
+            try { localStorage.setItem(key, JSON.stringify(valueToStore)); } catch (e) {}
+        }, 0);
+    }
 
     if (db && fbUser && appId) {
-       try {
-           const jsonStr = JSON.stringify(valueToStore);
-           // หั่นไฟล์ข้อมูลที่เกินขีดจำกัดออกเป็นก้อนๆ ขนาด 900KB (หลบเลี่ยงลิมิต 1MB ของ Firebase)
-           const CHUNK_SIZE = 900000; 
-           const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
-           
-           // บันทึกก้อนข้อมูลย่อย
-           for (let i = 0; i < totalChunks; i++) {
-               const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
-               const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-               await setDoc(chunkRef, { chunk: chunkData });
+       return new Promise(async (resolve) => {
+           try {
+               const jsonStr = JSON.stringify(valueToStore);
+               const CHUNK_SIZE = 900000; 
+               const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
+               
+               for (let i = 0; i < totalChunks; i++) {
+                   const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
+                   const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+                   await setDoc(chunkRef, { chunk: chunkData });
+                   // พัก UI เล็กน้อยให้เบราว์เซอร์ไม่ค้าง
+                   await new Promise(r => setTimeout(r, 10));
+               }
+               
+               const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
+               await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
+               resolve();
+           } catch(err) {
+               console.error("Firebase Storage Error:", err);
+               resolve();
            }
-           
-           // บันทึกตัวหลักเป็น Metadata แจ้งจำนวน Chunk เพื่อ Trigger การซิงค์ไปเครื่องอื่น
-           const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
-           await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
-           
-       } catch(err) {
-           console.error("Firebase Storage Error:", err);
-           alert(`⚠️ ข้อผิดพลาด: ไม่สามารถบันทึกข้อมูลออนไลน์ได้ (${err.message})`);
-       }
-    } else if (!db && typeof window !== 'undefined') {
-       try {
-           localStorage.setItem(key, JSON.stringify(valueToStore));
-       } catch (err) {
-           console.error("Local Storage Error:", err);
-           alert(`พื้นที่จัดเก็บข้อมูลในเครื่องของคุณเต็ม (Local Storage)!\nระบบไม่สามารถบันทึกไฟล์ขนาดใหญ่ในโหมดออฟไลน์ได้`);
-       }
+       });
     }
   };
 
-  return [state, setPersistentValue, isLoaded]; // ส่งค่า isLoaded กลับไปด้วย
+  return [state, setPersistentValue, isLoaded];
+}
+
+// --- NEW: Custom Hook for Collection Storage (แก้ปัญหาบันทึกแล้วข้อมูลทับกัน) ---
+function usePersistentCollection(collectionName, initialValue, fbUser) {
+  const [state, setState] = useState(() => {
+      if (typeof window !== 'undefined') {
+          const local = localStorage.getItem(collectionName);
+          if (local) {
+              try { 
+                  const parsed = JSON.parse(local); 
+                  if (Array.isArray(parsed) && parsed.length === 0 && Array.isArray(initialValue) && initialValue.length > 0) return initialValue;
+                  return parsed;
+              } catch(e) { return initialValue; }
+          }
+      }
+      return initialValue;
+  });
+
+  const stateRef = useRef(state);
+  const isLoadedRef = useRef(false);
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  useEffect(() => {
+      stateRef.current = state;
+  }, [state]);
+
+  useEffect(() => {
+    if (!db) {
+        setIsLoaded(true);
+        return;
+    }
+    if (!fbUser || !appId) return;
+
+    const collRef = collection(db, 'artifacts', appId, 'public', 'data', collectionName);
+    const unsubscribe = onSnapshot(collRef, (snapshot) => {
+      const items = [];
+      snapshot.forEach(doc => {
+          items.push({ ...doc.data(), id: doc.id });
+      });
+
+      if (items.length === 0 && Array.isArray(initialValue) && initialValue.length > 0) {
+          setState(initialValue);
+          stateRef.current = initialValue;
+          initialValue.forEach(item => {
+              if (item.id) {
+                  const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, String(item.id));
+                  setDoc(docRef, item).catch(console.error);
+              }
+          });
+      } else {
+          // เปรียบเทียบข้อมูลโดยไม่สนใจลำดับ (ป้องกัน UI กระพริบหรือข้อมูลถูกดึงกลับสลับที่ตอนซิงค์)
+          const isSame = (arr1, arr2) => {
+              if (!Array.isArray(arr1) || !Array.isArray(arr2)) return false;
+              if (arr1.length !== arr2.length) return false;
+              const map1 = new Map(arr1.map(i => [String(i.id), i]));
+              for (const item2 of arr2) {
+                  const item1 = map1.get(String(item2.id));
+                  if (!item1 || JSON.stringify(item1) !== JSON.stringify(item2)) return false;
+              }
+              return true;
+          };
+
+          if (!isSame(stateRef.current, items)) {
+              setState(items);
+              stateRef.current = items;
+              if (typeof window !== 'undefined') localStorage.setItem(collectionName, JSON.stringify(items));
+          }
+      }
+
+      isLoadedRef.current = true;
+      setIsLoaded(true);
+    }, (err) => {
+      console.error("Collection Sync error", collectionName, err);
+      setIsLoaded(true);
+    });
+
+    return () => unsubscribe();
+  }, [fbUser, collectionName]);
+
+  const setPersistentValue = async (newValue, isRestore = false) => {
+    const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
+    if (!isRestore && valueToStore === stateRef.current) return;
+
+    const oldState = stateRef.current;
+    setState(valueToStore);
+    stateRef.current = valueToStore;
+    
+    if (typeof window !== 'undefined') {
+        // ผลักการทำงานของ LocalStorage ไปไว้คิวหลังสุด เพื่อไม่ให้หน้าจอค้าง
+        setTimeout(() => {
+            try { localStorage.setItem(collectionName, JSON.stringify(valueToStore)); } catch (e) {}
+        }, 0);
+    }
+
+    if (db && fbUser && appId && isLoadedRef.current) {
+       return new Promise(async (resolve) => {
+           try {
+               let batch = writeBatch(db);
+               let opCount = 0;
+               
+               const oldStateMap = new Map();
+               for (const o of oldState) {
+                   if (o && o.id) oldStateMap.set(String(o.id), o);
+               }
+
+               const newStateMap = new Map();
+               for (const n of valueToStore) {
+                   if (n && n.id) newStateMap.set(String(n.id), n);
+               }
+
+               // 1. เพิ่มหรืออัปเดตข้อมูล
+               for (const item of valueToStore) {
+                   if (!item.id) continue;
+                   const strId = String(item.id);
+                   
+                   let needsUpdate = true;
+                   // หากเป็นการ Restore จะบังคับเขียนทับเลย ข้ามการเปรียบเทียบข้อมูลเพื่อลดภาระ CPU
+                   if (!isRestore) {
+                       const oldItem = oldStateMap.get(strId);
+                       if (oldItem && JSON.stringify(oldItem) === JSON.stringify(item)) {
+                           needsUpdate = false;
+                       }
+                   }
+
+                   if (needsUpdate) {
+                       const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, strId);
+                       batch.set(docRef, item);
+                       opCount++;
+                   }
+                   
+                   // ตัดรอบส่งเมื่อครบ 400 รายการ และรอให้สำเร็จก่อนทำชุดถัดไป
+                   if (opCount >= 400) {
+                       await batch.commit(); 
+                       batch = writeBatch(db);
+                       opCount = 0;
+                       await new Promise(r => setTimeout(r, 20)); // พัก UI 20ms ป้องกันหน้าจอค้าง
+                   }
+               }
+
+               // 2. ลบข้อมูลที่ไม่มีในก้อนใหม่
+               for (const oldId of oldStateMap.keys()) {
+                   if (!newStateMap.has(oldId)) {
+                       const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, oldId);
+                       batch.delete(docRef);
+                       opCount++;
+                   }
+                   
+                   if (opCount >= 400) {
+                       await batch.commit();
+                       batch = writeBatch(db);
+                       opCount = 0;
+                       await new Promise(r => setTimeout(r, 20));
+                   }
+               }
+
+               // ส่งข้อมูลเศษที่เหลือ
+               if (opCount > 0) {
+                   await batch.commit();
+               }
+               resolve();
+
+           } catch (err) {
+               console.error(`Firestore Batch Write Error [${collectionName}]:`, err);
+               resolve();
+           }
+       });
+    }
+  };
+
+  return [state, setPersistentValue, isLoaded];
 }
 
 // --- NEW: Custom Hook for User Specific Persistent Storage (Theme, UI settings) ---
 function useUserPersistentState(key, initialValue, fbUser) {
   const [state, setState] = useState(() => {
-      if (!db && typeof window !== 'undefined') {
+      if (typeof window !== 'undefined') {
           const local = localStorage.getItem(`user_pref_${key}`);
           if (local) {
               try { return JSON.parse(local); } catch(e) { return initialValue; }
@@ -1360,10 +1548,9 @@ function useUserPersistentState(key, initialValue, fbUser) {
       return initialValue;
   });
 
-  // FIX: ใช้ useRef เหมือนกัน
   const stateRef = useRef(state);
   const [isSynced, setIsSynced] = useState(false);
-  const [isLoaded, setIsLoaded] = useState(false); // NEW
+  const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
       stateRef.current = state;
@@ -1381,8 +1568,11 @@ function useUserPersistentState(key, initialValue, fbUser) {
       if (docSnap.exists()) {
         try {
           const parsedData = JSON.parse(docSnap.data().value);
-          setState(parsedData);
-          stateRef.current = parsedData;
+          if (JSON.stringify(stateRef.current) !== JSON.stringify(parsedData)) {
+              setState(parsedData);
+              stateRef.current = parsedData;
+              if (typeof window !== 'undefined') localStorage.setItem(`user_pref_${key}`, JSON.stringify(parsedData));
+          }
         } catch(e) { console.error("Parse error", key, e); }
         setIsLoaded(true);
       } else if (!isSynced) {
@@ -1398,27 +1588,33 @@ function useUserPersistentState(key, initialValue, fbUser) {
     return () => unsubscribe();
   }, [fbUser, key]);
 
-  const setPersistentValue = (newValue) => {
+  const setPersistentValue = async (newValue, isRestore = false) => {
     const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
-    
-    if (valueToStore === stateRef.current) return;
+    if (!isRestore && valueToStore === stateRef.current) return;
 
     setState(valueToStore);
     stateRef.current = valueToStore;
+    
+    if (typeof window !== 'undefined') {
+        setTimeout(() => {
+            try { localStorage.setItem(`user_pref_${key}`, JSON.stringify(valueToStore)); } catch (e) {}
+        }, 0);
+    }
 
     if (db && fbUser && appId) {
-       const docRef = doc(db, 'artifacts', appId, 'users', fbUser.uid, 'user_preferences', key);
-       setDoc(docRef, { value: JSON.stringify(valueToStore) }).catch(console.error);
-    } else if (!db && typeof window !== 'undefined') {
-       try {
-           localStorage.setItem(`user_pref_${key}`, JSON.stringify(valueToStore));
-       } catch (e) {
-           console.error("Storage Error for Pref", e);
-       }
+       return new Promise(async (resolve) => {
+           try {
+               const docRef = doc(db, 'artifacts', appId, 'users', fbUser.uid, 'user_preferences', key);
+               await setDoc(docRef, { value: JSON.stringify(valueToStore) });
+               resolve();
+           } catch(e) {
+               resolve();
+           }
+       });
     }
   };
 
-  return [state, setPersistentValue, isLoaded]; // ส่งค่า isLoaded กลับไปด้วย
+  return [state, setPersistentValue, isLoaded];
 }
 
 // --- Main Application ---
@@ -1522,7 +1718,6 @@ export default function App() {
   });
 
   // Assets Management State
-  const [assets, setAssets] = usePersistentState('bmg_assets', INITIAL_ASSETS, fbUser);
   const [showAddAssetModal, setShowAddAssetModal] = useState(false);
   const [selectedAssetView, setSelectedAssetView] = useState(null); // NEW: State สำหรับแสดงรายละเอียดทรัพย์สิน
   const [isEditingAsset, setIsEditingAsset] = useState(false); // NEW: State สำหรับสถานะกำลังแก้ไข
@@ -1537,7 +1732,6 @@ export default function App() {
   });
 
   // Tools Management State
-  const [tools, setTools] = usePersistentState('bmg_tools', INITIAL_TOOLS, fbUser);
   const [showAddToolModal, setShowAddToolModal] = useState(false);
   const [selectedToolView, setSelectedToolView] = useState(null); // NEW: State สำหรับแสดงรายละเอียดเครื่องมือ
   const [isEditingTool, setIsEditingTool] = useState(false); // NEW: State สำหรับสถานะกำลังแก้ไข
@@ -1552,7 +1746,6 @@ export default function App() {
   });
 
   // Machine Management State (PM)
-  const [machines, setMachines] = usePersistentState('bmg_machines', INITIAL_MACHINES, fbUser);
   const [showAddMachineModal, setShowAddMachineModal] = useState(false);
   const [isEditingMachine, setIsEditingMachine] = useState(false);
   const [isSavingMachine, setIsSavingMachine] = useState(false); // NEW: State สำหรับแสดง Loading ตอนอัปโหลดรูปเข้า Drive
@@ -1567,7 +1760,6 @@ export default function App() {
   });
 
   // PM Plan State
-  const [pmPlans, setPmPlans] = usePersistentState('bmg_pmPlans', INITIAL_PM_PLANS, fbUser);
   const [showAddPmPlanModal, setShowAddPmPlanModal] = useState(false);
   const [newPmPlan, setNewPmPlan] = useState({
       id: null,
@@ -1579,7 +1771,6 @@ export default function App() {
   const [selectedDateTasks, setSelectedDateTasks] = useState(null); // NEW: State สำหรับแสดงรายการ PM แบบเต็มในแต่ละวัน
   
   // PM History State
-  const [pmHistoryList, setPmHistoryList] = usePersistentState('bmg_pmHistoryList', INITIAL_PM_HISTORY, fbUser);
   const [selectedPmHistory, setSelectedPmHistory] = useState(null); // NEW: State สำหรับเก็บข้อมูลประวัติที่ถูกคลิกดู
   const [selectedMachineDetails, setSelectedMachineDetails] = useState(null); // NEW: State สำหรับเก็บข้อมูลเครื่องจักรที่คลิกดูรายละเอียด
   const [selectedFormSystem, setSelectedFormSystem] = useState(''); // NEW: State สำหรับเลือกระบบที่จะพิมพ์ฟอร์มเปล่า
@@ -1600,8 +1791,6 @@ export default function App() {
   const [pmFormImages, setPmFormImages] = useState([]); // NEW: State สำหรับเก็บรูปภาพหลายรูปในฟอร์ม PM
 
   // NEW: Utilities State
-  const [meters, setMeters] = usePersistentState('bmg_meters', INITIAL_METERS, fbUser);
-  const [utilityReadings, setUtilityReadings] = usePersistentState('bmg_utilityReadings', INITIAL_READINGS, fbUser);
   const [utilitySubTab, setUtilitySubTab] = useState('record'); // 'record', 'registry', 'analysis'
   const [utilityChartType, setUtilityChartType] = useState('bar'); // 'bar', 'line'
   const [utilityAnalysisMonth, setUtilityAnalysisMonth] = useState(() => {
@@ -1635,7 +1824,6 @@ export default function App() {
   });
 
   // Repair Request State
-  const [repairs, setRepairs] = usePersistentState('bmg_repairs', INITIAL_REPAIRS, fbUser);
   const [showAddRepairModal, setShowAddRepairModal] = useState(false);
   const [selectedRepairView, setSelectedRepairView] = useState(null); // NEW: State สำหรับเก็บข้อมูลแจ้งซ่อมที่จะ Print/View
   const [newRepair, setNewRepair] = useState({
@@ -1656,7 +1844,6 @@ export default function App() {
   });
 
   // Action Plan State
-  const [actionPlans, setActionPlans] = usePersistentState('bmg_actionPlans', INITIAL_ACTION_PLANS, fbUser);
   const [showAddActionPlanModal, setShowAddActionPlanModal] = useState(false);
   const [newActionPlan, setNewActionPlan] = useState({
       id: null,
@@ -1680,7 +1867,6 @@ export default function App() {
   const [isEditingForm, setIsEditingForm] = useState(false); // NEW: State สำหรับโหมดแก้ไขแบบฟอร์ม
 
   // --- NEW: State สำหรับจัดการรายการแบบฟอร์ม ---
-  const [formsList, setFormsList] = usePersistentState('bmg_forms_list', STANDARD_FORMS, fbUser);
   const [showAddFormModal, setShowAddFormModal] = useState(false);
   const [newFormItem, setNewFormItem] = useState({ id: null, category: 'งานบริหารและนิติบุคคล (Juristic & Mgmt.)', name: '', format: 'PDF', size: '100 KB', description: '' });
 
@@ -1707,12 +1893,26 @@ export default function App() {
   const [isSavingProject, setIsSavingProject] = useState(false); // NEW: State สำหรับแสดง Loading ตอนอัปโหลดรูป/ไฟล์เข้า Drive
   const [newProject, setNewProject] = useState({ logo: null, code: '', name: '', type: 'Condo', address: '', phone: '', taxId: '', contractStartDate: '', contractEndDate: '', contractValue: '', status: 'Active', files: { orchor: null, committee: null, regulations: null, resident_rules: null } });
 
-  const [users, setUsers, isUsersLoaded] = usePersistentState('bmg_users', INITIAL_USERS, fbUser); // รับค่า isUsersLoaded มาใช้งาน
-  const [projects, setProjects] = usePersistentState('bmg_projects', INITIAL_PROJECTS, fbUser);
-  const [contracts, setContracts] = usePersistentState('bmg_contracts', INITIAL_CONTRACTS, fbUser);
-  const [audits, setAudits] = usePersistentState('bmg_audits', INITIAL_AUDITS, fbUser);
-  const [dailyReports, setDailyReports] = usePersistentState('bmg_dailyReports', INITIAL_DAILY_REPORTS, fbUser);
-  const [contractors, setContractors] = usePersistentState('bmg_contractors', INITIAL_CONTRACTORS, fbUser);
+  // อัปเกรดเป็น usePersistentCollection สำหรับข้อมูลที่เป็น Array (รายการ) ป้องกันข้อมูลสูญหาย/ทับกัน
+  const [users, setUsers, isUsersLoaded] = usePersistentCollection('bmg_users', INITIAL_USERS, fbUser); 
+  const [projects, setProjects] = usePersistentCollection('bmg_projects', INITIAL_PROJECTS, fbUser);
+  const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, fbUser);
+  const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, fbUser);
+  const [dailyReports, setDailyReports] = usePersistentCollection('bmg_dailyReports', INITIAL_DAILY_REPORTS, fbUser);
+  const [contractors, setContractors] = usePersistentCollection('bmg_contractors', INITIAL_CONTRACTORS, fbUser);
+  const [assets, setAssets] = usePersistentCollection('bmg_assets', INITIAL_ASSETS, fbUser);
+  const [tools, setTools] = usePersistentCollection('bmg_tools', INITIAL_TOOLS, fbUser);
+  const [machines, setMachines] = usePersistentCollection('bmg_machines', INITIAL_MACHINES, fbUser);
+  const [pmPlans, setPmPlans] = usePersistentCollection('bmg_pmPlans', INITIAL_PM_PLANS, fbUser);
+  const [pmHistoryList, setPmHistoryList] = usePersistentCollection('bmg_pmHistoryList', INITIAL_PM_HISTORY, fbUser);
+  const [meters, setMeters] = usePersistentCollection('bmg_meters', INITIAL_METERS, fbUser);
+  const [utilityReadings, setUtilityReadings] = usePersistentCollection('bmg_utilityReadings', INITIAL_READINGS, fbUser);
+  const [repairs, setRepairs] = usePersistentCollection('bmg_repairs', INITIAL_REPAIRS, fbUser);
+  const [actionPlans, setActionPlans] = usePersistentCollection('bmg_actionPlans', INITIAL_ACTION_PLANS, fbUser);
+  const [othersData, setOthersData] = usePersistentCollection('bmg_othersData', INITIAL_OTHERS, fbUser);
+  const [formsList, setFormsList] = usePersistentCollection('bmg_forms_list', STANDARD_FORMS, fbUser);
+
+  // คงใช้ usePersistentState สำหรับข้อมูลที่เป็น Object เดี่ยวๆ
   const [schedules, setSchedules] = usePersistentState('bmg_schedules', {}, fbUser);
   
   const getLocalMonthStr = () => {
@@ -1727,7 +1927,6 @@ export default function App() {
   const dragOverItem = useRef(null); // NEW: Ref สำหรับจดจำ index เป้าหมายที่จะวาง
 
   // Others Module State
-  const [othersData, setOthersData] = usePersistentState('bmg_othersData', INITIAL_OTHERS, fbUser);
   const [showAddOtherModal, setShowAddOtherModal] = useState(false);
   const [newOther, setNewOther] = useState({
       id: null,
@@ -1809,23 +2008,19 @@ export default function App() {
 
   // --- NEW: Helper Function สำหรับ Auto-Sync ไปยัง Google Sheets/Drive ---
   const triggerAutoSync = (tableName, dataList, files = []) => {
-      // ใช้ URL เดียวกับปุ่ม Backup ในหน้าตั้งค่า
       const GOOGLE_SCRIPT_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbzmNdR7LVpfUossHkcNH_onBPTG2dw6GuJzh5JilthkMwW-Sdr4s0lFjPKwSsCBTg/exec';
       const GOOGLE_SCRIPT_DRIVE_URL = 'https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec';
 
       setAutoSyncMessage(`กำลังซิงค์ ${tableName} ไปยังคลาวด์...`);
 
-      // 1. ซิงค์ข้อความไปที่ Google Sheets (ทำแบบ Background ไม่ใช้ await block)
       if (GOOGLE_SCRIPT_SHEETS_URL && !GOOGLE_SCRIPT_SHEETS_URL.includes('YOUR_')) {
           try {
-              // ล้างรูปภาพ Base64 ออกเพื่อไม่ให้เซลล์ใน Google Sheets เต็ม
               const sanitizedData = dataList.map(item => {
                   const cleanItem = { ...item };
                   if (cleanItem.photo) cleanItem.photo = 'Base64 Image';
                   if (cleanItem.logo) cleanItem.logo = 'Base64 Image';
                   if (cleanItem.images) cleanItem.images = 'Photos attached';
                   if (cleanItem.files) cleanItem.files = 'Files attached';
-                  // จัดการกรณีเป็น Daily Report
                   if (cleanItem.performance) {
                       cleanItem.performance = JSON.parse(JSON.stringify(cleanItem.performance));
                       Object.keys(cleanItem.performance).forEach(dept => {
@@ -1837,14 +2032,13 @@ export default function App() {
 
               fetch(GOOGLE_SCRIPT_SHEETS_URL, {
                   method: 'POST',
-                  mode: 'no-cors', // เพิ่ม no-cors เพื่อป้องกันปัญหา Failed to fetch จากนโยบายข้ามโดเมน (CORS)
+                  mode: 'no-cors',
                   headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                   body: JSON.stringify({ [tableName]: sanitizedData })
               }).catch(err => console.error("Auto-sync sheet error", err));
           } catch(e) { console.error(e); }
       }
 
-      // 2. ซิงค์ไฟล์รูปภาพไปที่ Google Drive ทีละไฟล์ (ใน Background)
       if (files.length > 0 && GOOGLE_SCRIPT_DRIVE_URL && !GOOGLE_SCRIPT_DRIVE_URL.includes('YOUR_')) {
           const folderName = `AutoSync_${new Date().toISOString().split('T')[0]}`;
           files.forEach(file => {
@@ -1858,14 +2052,13 @@ export default function App() {
               };
               fetch(GOOGLE_SCRIPT_DRIVE_URL, {
                   method: 'POST',
-                  mode: 'no-cors', // เพิ่ม no-cors เพื่อให้เบราว์เซอร์ส่งข้อมูลเบื้องหลังสำเร็จโดยไม่ต้องรออ่าน response
+                  mode: 'no-cors',
                   headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                   body: JSON.stringify(payload)
               }).catch(err => console.error("Auto-sync drive error", err));
           });
       }
 
-      // ปิดข้อความแจ้งเตือนหลังผ่านไป 3 วินาที
       setTimeout(() => setAutoSyncMessage(''), 3000);
   };
 
@@ -2637,47 +2830,6 @@ export default function App() {
       setSelectedProject(null); 
   };
   
-  // --- NEW: ระบบ Auto-Logout เมื่อไม่มีการตอบสนอง 10 นาที ---
-  useEffect(() => {
-      // ทำงานเฉพาะตอนที่มีคนล็อกอินอยู่เท่านั้น
-      if (!currentUser) return;
-
-      let timeoutId;
-      const TIMEOUT_MS = 10 * 60 * 1000; // 10 นาที (10 นาที * 60 วินาที * 1000 มิลลิวินาที)
-
-      const logoutDueToInactivity = () => {
-          alert('เซสชั่นหมดอายุ: คุณไม่ได้ใช้งานระบบติดต่อกันเกิน 10 นาที ระบบได้ทำการออกจากระบบอัตโนมัติเพื่อความปลอดภัยและอัปเดตข้อมูล กรุณาเข้าสู่ระบบใหม่อีกครั้ง');
-          handleLogout();
-      };
-
-      const resetTimer = () => {
-          if (timeoutId) clearTimeout(timeoutId);
-          // ตั้งเวลาใหม่ทุกครั้งที่มีการขยับ
-          timeoutId = setTimeout(logoutDueToInactivity, TIMEOUT_MS);
-      };
-
-      // รายการ Event ที่บ่งบอกว่าผู้ใช้กำลังใช้งานอยู่
-      const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click'];
-
-      // ติดตั้งตัวดักจับ Event ลงบนหน้าต่างเบราว์เซอร์
-      activityEvents.forEach(event => {
-          // ใช้ passive: true เพื่อไม่ให้รบกวนประสิทธิภาพการ scroll ของหน้าเว็บ
-          window.addEventListener(event, resetTimer, { passive: true });
-      });
-
-      // เริ่มจับเวลาครั้งแรกเมื่อ Effect ทำงาน
-      resetTimer();
-
-      // Cleanup function: ล้าง Event และ Timer ออกเมื่อ Component ถูกถอดทิ้ง หรือเมื่อ User ล็อกเอาท์
-      return () => {
-          if (timeoutId) clearTimeout(timeoutId);
-          activityEvents.forEach(event => {
-              window.removeEventListener(event, resetTimer);
-          });
-      };
-  }, [currentUser]); // ผูกกับ State currentUser เพื่อให้เริ่มทำงานใหม่เมื่อมีการล็อกอิน
-  // --------------------------------------------------------
-
   const getKPIs = () => ({ projects: projects.length, employees: users.length, pendingTasks: 0, pmDue: 0 });
   const exportToCSV = (data, filename) => { if (!data || data.length === 0) return alert('No data to export'); const headers = Object.keys(data[0]); const csvContent = [headers.join(','), ...data.map(row => headers.map(fieldName => `"${row[fieldName] || ''}"`).join(','))].join('\n'); const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' }); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `${filename}.csv`; link.click(); }; 
   
@@ -3793,22 +3945,12 @@ export default function App() {
 
                           const d = importedData.data;
                           
-                          // 1. กู้คืนไฟล์ PDF ต่างๆ ลง IndexedDB
-                          if (d.localFiles) {
-                              const fileIds = Object.keys(d.localFiles);
-                              const totalFiles = fileIds.length;
-                              let count = 0;
-                              setRestoreProgress(`กำลังกู้คืนไฟล์เอกสารแนบ (0/${totalFiles})...`);
-
-                              for (const fileId of fileIds) {
-                                  await saveFileLocally(fileId, d.localFiles[fileId]);
-                                  count++;
-                                  // อัปเดต UI ทุกๆ 5 ไฟล์เพื่อไม่ให้หน่วงเกินไป
-                                  if (count % 5 === 0 || count === totalFiles) {
-                                      setRestoreProgress(`กำลังกู้คืนไฟล์เอกสารแนบ (${count}/${totalFiles})...`);
-                                      await new Promise(resolve => setTimeout(resolve, 10)); // ยอมให้ UI อัปเดต
-                                  }
-                              }
+                          // 1. กู้คืนไฟล์ PDF ต่างๆ ลง IndexedDB (รวบยอดแบบ Batch เพื่อความรวดเร็ว)
+                          if (d.localFiles && Object.keys(d.localFiles).length > 0) {
+                              const totalFiles = Object.keys(d.localFiles).length;
+                              setRestoreProgress(`กำลังกู้คืนไฟล์เอกสารแนบทั้งหมด (${totalFiles} ไฟล์)...`);
+                              await saveMultipleFilesLocally(d.localFiles);
+                              await new Promise(resolve => setTimeout(resolve, 50)); // ยอมให้ UI อัปเดต
                           }
 
                           // 2. เตรียมรายการข้อมูลที่จะกู้คืน
@@ -3841,23 +3983,38 @@ export default function App() {
                           const totalTables = stateSetters.length;
                           let currentTable = 0;
 
-                          // ทยอยเซฟและอัปเดต UI เพื่อไม่ให้หน้าเว็บค้าง
+                          setRestoreProgress('เริ่มดำเนินการกู้คืนข้อมูล (โปรดอย่าปิดหน้าต่าง)...');
+                          await new Promise(resolve => setTimeout(resolve, 500)); // พัก UI ให้เตรียมตัว
+
+                          // ทยอยทำทีละตาราง (Sequential Process) รอให้แต่ละตารางซิงค์เสร็จก่อนเริ่มตารางใหม่
                           for (const item of stateSetters) {
                               currentTable++;
                               if (item.data !== undefined && item.data !== null) {
-                                  setRestoreProgress(`กำลังเขียนฐานข้อมูล: ${item.key} (${currentTable}/${totalTables})`);
-                                  await item.setter(item.data);
-                                  await new Promise(res => setTimeout(res, 200)); // หน่วงเวลาให้ Firebase บันทึกและ UI โชว์
+                                  // อัปเดตข้อความให้ผู้ใช้ทราบว่าระบบไม่ได้ค้าง
+                                  setRestoreProgress(`กำลังเขียนและซิงค์คลาวด์ตาราง: ${item.key} (${currentTable}/${totalTables})`);
+                                  
+                                  // สำคัญ: บังคับให้เบราว์เซอร์วาดหน้าจอ (Render) แถบสถานะก่อนไปประมวลผลฐานข้อมูล
+                                  await new Promise(resolve => setTimeout(resolve, 50));
+
+                                  try {
+                                      // ใส่ค่า "true" ให้ setter เพื่อบังคับ Overwrite และรอจนกระบวนการทั้งหมดของตารางนี้สำเร็จ
+                                      const syncPromise = item.setter(item.data, true);
+                                      if (syncPromise) {
+                                          await syncPromise; 
+                                      }
+                                  } catch(e) {
+                                      console.error("Sync error for", item.key, e);
+                                  }
                               }
                           }
                           
                           if (d.theme) setTheme(d.theme);
 
-                          setRestoreProgress('กู้คืนข้อมูลสำเร็จสมบูรณ์! ระบบกำลังเตรียมพร้อม...');
+                          setRestoreProgress('ข้อมูลถูกนำเข้าและอัปโหลดเข้าสู่ระบบคลาวด์สมบูรณ์ 100% สำเร็จ!');
                           
                           // แจ้งเตือนเสร็จสิ้นและรอรีโหลด
                           setTimeout(() => {
-                              showAlert("สำเร็จ", "ระบบนำเข้าและอัปเดตข้อมูลเสร็จสมบูรณ์ ระบบจะทำการรีเฟรชหน้าจออัตโนมัติภายใน 3 วินาที");
+                              showAlert("สำเร็จ", "ระบบนำเข้าและอัปเดตข้อมูลเสร็จสมบูรณ์ 100% ระบบจะทำการรีเฟรชหน้าจออัตโนมัติภายใน 3 วินาที");
                               setTimeout(() => {
                                   window.location.reload();
                               }, 3000);
@@ -4510,16 +4667,16 @@ export default function App() {
         <nav className="flex-1 p-4 space-y-1">
           {!selectedProject ? (
               <>
-                  {(canAccessMultiple && hasPerm('dashboard')) && <SidebarItem icon={BarChart3} label={t('menu_dashboard')} id="dashboard" />}
-                  {(canAccessMultiple && hasPerm('users')) && <SidebarItem icon={Users} label={t('menu_users')} id="users" />}
-                  {(canAccessMultiple && hasPerm('projects')) && <SidebarItem icon={Building2} label={t('menu_projects')} id="projects" />}
-                  {(canAccessMultiple && hasPerm('audits')) && <SidebarItem icon={ClipboardCheck} label={t('menu_audits')} id="audits" />}
+                  {(canAccessMultiple && hasPerm('dashboard')) && <SidebarItem icon={BarChart3} label={t('menu_dashboard')} id="dashboard" colorTheme="blue" />}
+                  {(canAccessMultiple && hasPerm('users')) && <SidebarItem icon={Users} label={t('menu_users')} id="users" colorTheme="green" />}
+                  {(canAccessMultiple && hasPerm('projects')) && <SidebarItem icon={Building2} label={t('menu_projects')} id="projects" colorTheme="orange" />}
+                  {(canAccessMultiple && hasPerm('audits')) && <SidebarItem icon={ClipboardCheck} label={t('menu_audits')} id="audits" colorTheme="purple" />}
                   
                   {/* คู่มือการใช้งาน แสดงให้ทุกคนเห็น */}
-                  <SidebarItem icon={BookOpen} label={t('menu_manual')} id="manual" />
+                  <SidebarItem icon={BookOpen} label={t('menu_manual')} id="manual" colorTheme="pink" />
 
                   {/* เพิ่มเมนูตั้งค่าระบบให้เฉพาะ Admin มองเห็น */}
-                  {(canAccessMultiple && currentUser?.username === 'admin') && <SidebarItem icon={Settings} label={t('menu_settings')} id="settings" />}
+                  {(canAccessMultiple && currentUser?.username === 'admin') && <SidebarItem icon={Settings} label={t('menu_settings')} id="settings" colorTheme="gray" />}
                   
                   {/* แสดงข้อความหากผู้ใช้ถูกล็อคให้อยู่เฉพาะหน่วยงานแต่เผลอหลุดมาหน้านี้ */}
                   {!canAccessMultiple && (
@@ -4548,15 +4705,15 @@ export default function App() {
                       {hasPerm('projects', 'edit') && <Edit size={14} className="text-gray-500 group-hover:text-orange-400 transition-colors shrink-0" />}
                   </div>
                   {PROJECT_TABS.filter(tab => hasPerm(`proj_${tab.id}`)).map(tab => {
-                      const TabIcon = tab.icon;
+                      const isActive = projectTab === tab.id;
                       return (
                           <button
                               key={tab.id}
                               onClick={() => { setProjectTab(tab.id); setIsMobileMenuOpen(false); }}
-                              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all text-sm mb-1 ${projectTab === tab.id ? 'bg-orange-600 text-white shadow-md font-medium' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}
+                              className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-all duration-300 text-sm mb-1.5 group ${isActive ? 'bg-gray-800 text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)]' : 'text-gray-400 hover:bg-gray-800/50 hover:text-white'}`}
                           >
-                              <TabIcon size={18} />
-                              <span>{t(tab.label)}</span>
+                              <ThreeDIcon icon={tab.icon} colorTheme={tab.color} className={`transition-transform duration-300 ${isActive ? 'scale-110' : 'group-hover:scale-110 group-hover:rotate-3'}`} />
+                              <span className={`font-medium tracking-wide ${isActive ? 'text-orange-400' : ''}`}>{t(tab.label)}</span>
                           </button>
                       );
                   })}
@@ -4571,7 +4728,44 @@ export default function App() {
       </>
     );
   };
-  const SidebarItem = ({ icon: Icon, label, id }) => (<button onClick={() => { setActiveMenu(id); setSelectedProject(null); setIsMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${activeMenu === id && !selectedProject ? `bg-orange-600 text-white shadow-lg` : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}><Icon size={20} /><span>{label}</span></button>);
+  
+  const ThreeDIcon = ({ icon: Icon, colorTheme = 'blue', className = '' }) => {
+      const gradients = {
+          blue: 'from-blue-400 to-blue-600 shadow-blue-500/40 border-blue-400/50',
+          green: 'from-emerald-400 to-emerald-600 shadow-emerald-500/40 border-emerald-400/50',
+          orange: 'from-orange-400 to-orange-600 shadow-orange-500/40 border-orange-400/50',
+          purple: 'from-purple-400 to-purple-600 shadow-purple-500/40 border-purple-400/50',
+          pink: 'from-pink-400 to-pink-600 shadow-pink-500/40 border-pink-400/50',
+          gray: 'from-gray-500 to-gray-700 shadow-gray-500/40 border-gray-400/50',
+          red: 'from-red-400 to-red-600 shadow-red-500/40 border-red-400/50',
+          cyan: 'from-cyan-400 to-cyan-600 shadow-cyan-500/40 border-cyan-400/50',
+          yellow: 'from-amber-400 to-orange-500 shadow-amber-500/40 border-amber-400/50',
+      };
+      const gradClass = gradients[colorTheme] || gradients.blue;
+
+      return (
+          <div className={`relative flex items-center justify-center w-[34px] h-[34px] rounded-xl bg-gradient-to-br ${gradClass} shadow-lg shrink-0 overflow-hidden border border-t-white/40 border-l-white/20 border-b-black/40 border-r-black/20 ${className}`}>
+              {/* 3D Glass Highlights */}
+              <div className="absolute inset-0 bg-gradient-to-b from-white/40 to-transparent opacity-60 h-[50%]"></div>
+              <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/10 to-white/30 mix-blend-overlay"></div>
+              {/* Shadow for the icon inside */}
+              <Icon size={18} className="text-white relative z-10" style={{ filter: 'drop-shadow(0px 2px 2px rgba(0,0,0,0.3))' }} strokeWidth={2.5} />
+          </div>
+      );
+  };
+
+  const SidebarItem = ({ icon, label, id, colorTheme = 'blue' }) => (
+      <button 
+          onClick={() => { setActiveMenu(id); setSelectedProject(null); setIsMobileMenuOpen(false); }} 
+          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-300 group
+              ${activeMenu === id && !selectedProject 
+                  ? 'bg-gray-800 text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)]' 
+                  : 'text-gray-400 hover:bg-gray-800/50 hover:text-white'}`}
+      >
+          <ThreeDIcon icon={icon} colorTheme={colorTheme} className={`transition-transform duration-300 ${activeMenu === id && !selectedProject ? 'scale-110' : 'group-hover:scale-110 group-hover:rotate-3'}`} />
+          <span className={`font-medium tracking-wide ${activeMenu === id && !selectedProject ? 'text-orange-400 font-bold' : ''}`}>{label}</span>
+      </button>
+  );
   
   const DashboardView = () => {
       // แก้ไข: ลบ useState(null) ออกจากตรงนี้ เพื่อไม่ให้ผิดกฎของ React Hooks
@@ -13064,25 +13258,348 @@ export default function App() {
                         {/* Dynamic Form Content */}
                         <div className="text-sm space-y-6">
                             
-                            {/* --- ข้อมูลผู้ร้องขอ (Common Section) --- */}
-                            <div className="mb-6">
-                                <h3 className={`font-bold text-base mb-3 border-b pb-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>1. ข้อมูลผู้ร้องขอ (Applicant Information)</h3>
-                                <div className="grid grid-cols-2 gap-y-4 gap-x-6">
-                                    <div className="flex items-end"><span className={`w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ชื่อ-นามสกุล:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
-                                    <div className="flex items-end"><span className={`w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เบอร์โทรศัพท์:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
-                                    <div className="flex items-end"><span className={`w-32 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>บ้านเลขที่/ห้องเลขที่:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
-                                    <div className="flex items-center gap-4">
-                                        <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>สถานะ:</span>
-                                        <label className="flex items-center gap-1"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เจ้าของร่วม</span></label>
-                                        <label className="flex items-center gap-1"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ผู้เช่า</span></label>
-                                        <label className="flex items-center gap-1"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ตัวแทน</span></label>
+                            {/* --- ข้อมูลผู้ร้องขอ (Common Section) - ซ่อนในฟอร์ม f18 --- */}
+                            {selectedFormDetails.id !== 'f18' && (
+                                <div className="mb-6">
+                                    <h3 className={`font-bold text-base mb-3 border-b pb-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>1. ข้อมูลผู้ร้องขอ (Applicant Information)</h3>
+                                    <div className="grid grid-cols-2 gap-y-4 gap-x-6">
+                                        <div className="flex items-end"><span className={`w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ชื่อ-นามสกุล:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                        <div className="flex items-end"><span className={`w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เบอร์โทรศัพท์:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                        <div className="flex items-end"><span className={`w-32 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>บ้านเลขที่/ห้องเลขที่:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                        <div className="flex items-center gap-4">
+                                            <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>สถานะ:</span>
+                                            <label className="flex items-center gap-1"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เจ้าของร่วม</span></label>
+                                            <label className="flex items-center gap-1"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ผู้เช่า</span></label>
+                                            <label className="flex items-center gap-1"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ตัวแทน</span></label>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
+                            )}
 
                             {/* --- Render Form Specific Content --- */}
                             {(() => {
                                 const id = selectedFormDetails.id;
+
+                                // แบบฟอร์มส่งมอบงาน (Handover Form)
+                                if (id === 'f18') {
+                                    return (
+                                        <div className="space-y-4">
+                                            <div className="mb-2">
+                                                <h3 className={`font-bold text-base mb-2 border-b pb-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>1. ข้อมูลผู้ส่งมอบ และ ผู้รับมอบ (Handover Parties)</h3>
+                                                <div className="grid grid-cols-2 gap-y-3 gap-x-6 mb-2 text-sm">
+                                                    <div className="flex items-end"><span className={`w-32 font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ผู้ส่งมอบ (คนเก่า):</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                                    <div className="flex items-end"><span className={`w-36 font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ผู้รับมอบ (คนใหม่):</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                                    <div className="flex items-end"><span className={`w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ตำแหน่ง:</span><div className="flex-1 border-b border-dotted border-gray-400 text-center">ผู้จัดการอาคาร/หมู่บ้าน</div></div>
+                                                    <div className="flex items-end"><span className={`w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ตำแหน่ง:</span><div className="flex-1 border-b border-dotted border-gray-400 text-center">ผู้จัดการอาคาร/หมู่บ้าน</div></div>
+                                                    <div className="col-span-2 flex items-end"><span className={`w-40 font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เหตุผลการส่งมอบ:</span><label className="flex items-center gap-1 mr-4"><input type="checkbox"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ลาออก</span></label><label className="flex items-center gap-1 mr-4"><input type="checkbox"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>โยกย้ายหน่วยงาน</span></label><label className="flex items-center gap-1"><input type="checkbox"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>อื่นๆ</span><div className="w-32 border-b border-dotted border-gray-400 ml-1"></div></label></div>
+                                                </div>
+                                            </div>
+
+                                            {/* หมวด 2: เอกสารสำคัญนิติบุคคล */}
+                                            <div className="mb-2">
+                                                <h3 className={`font-bold text-sm mb-1.5 border-b pb-1 text-blue-800 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>2. หมวดเอกสารสำคัญนิติบุคคล (Juristic Important Documents)</h3>
+                                                <table className="w-full border-collapse border border-gray-400 text-[10px] text-left">
+                                                    <thead className="bg-gray-100 text-center">
+                                                        <tr>
+                                                            <th className="border border-gray-400 p-1 w-8">ลำดับ</th>
+                                                            <th className="border border-gray-400 p-1">รายการเอกสาร (Document Item)</th>
+                                                            <th className="border border-gray-400 p-1 w-10">มี</th>
+                                                            <th className="border border-gray-400 p-1 w-10">ไม่มี</th>
+                                                            <th className="border border-gray-400 p-1 w-40">สถานที่เก็บ / หมายเหตุ</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {[
+                                                            { title: 'โฉนดที่ดิน / เอกสารสิทธิ์พื้นที่ส่วนกลาง (Title Deeds)' },
+                                                            { title: 'ใบรับรองการจดทะเบียนนิติบุคคล / บัตรประจำตัวผู้เสียภาษี (Juristic Cert. & Tax ID)' },
+                                                            { title: 'ตราประทับนิติบุคคล (Company Seal/Stamp)' },
+                                                            { title: 'ข้อบังคับนิติบุคคลอาคารชุด / หมู่บ้านจัดสรร (Rules & Regulations)' },
+                                                            { title: 'แฟ้มทะเบียนเจ้าของร่วม / ทะเบียนลูกบ้าน (Co-owner/Resident Registry)' },
+                                                            { title: 'กรมธรรม์ประกันภัยความเสี่ยงภัยทุกชนิด (IAR) / ความรับผิดชอบต่อบุคคลภายนอก' },
+                                                            { title: 'ใบอนุญาตใช้อาคาร (อ.6) / เอกสารการตรวจสอบอาคารประจำปี (รซ.1)' },
+                                                            { title: 'แฟ้มเอกสารภาษีอากร (ภ.ง.ด., ภ.พ.30, ภาษีที่ดินและสิ่งปลูกสร้าง)' },
+                                                            { title: 'แฟ้มแบบแปลนอาคาร (As-built Drawings) และ คู่มือเครื่องจักร (O&M Manuals)' },
+                                                        ].map((item, idx) => (
+                                                            <tr key={`doc-${idx}`} className="hover:bg-gray-50">
+                                                                <td className="border border-gray-400 p-1 text-center font-medium">{idx + 1}</td>
+                                                                <td className={`border border-gray-400 p-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>{item.title}</td>
+                                                                <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3 h-3 cursor-pointer"/></td>
+                                                                <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3 h-3 cursor-pointer"/></td>
+                                                                <td className="border border-gray-400 p-0"><input type="text" className="w-full h-full p-1 border-none outline-none text-[10px] bg-transparent focus:bg-yellow-50" placeholder="..." /></td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+
+                                            {/* หมวด 3: รายงานการประชุม */}
+                                            <div className="mb-2">
+                                                <h3 className={`font-bold text-sm mb-1.5 border-b pb-1 text-blue-800 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>3. หมวดรายงานการประชุม (Meeting Minutes)</h3>
+                                                <table className="w-full border-collapse border border-gray-400 text-[10px] text-left">
+                                                    <thead className="bg-gray-100 text-center">
+                                                        <tr>
+                                                            <th className="border border-gray-400 p-1 w-8">ลำดับ</th>
+                                                            <th className="border border-gray-400 p-1">รายการรายงานการประชุม (Minutes Item)</th>
+                                                            <th className="border border-gray-400 p-1 w-10">มี</th>
+                                                            <th className="border border-gray-400 p-1 w-10">ไม่มี</th>
+                                                            <th className="border border-gray-400 p-1 w-40">สถานที่เก็บ / จำนวนแฟ้ม</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {[
+                                                            { title: 'แฟ้มรายงานการประชุมใหญ่สามัญ / วิสามัญเจ้าของร่วม (AGM / EGM)' },
+                                                            { title: 'แฟ้มรายงานการประชุมคณะกรรมการนิติบุคคลฯ (Committee Meetings)' },
+                                                            { title: 'เอกสารจดทะเบียนแต่งตั้งคณะกรรมการนิติบุคคลฯ (อช. / จสก.) ฉบับล่าสุด' },
+                                                            { title: 'เอกสารจดทะเบียนแต่งตั้งผู้จัดการนิติบุคคลฯ (อช. / จสก.) ฉบับล่าสุด' },
+                                                        ].map((item, idx) => (
+                                                            <tr key={`min-${idx}`} className="hover:bg-gray-50">
+                                                                <td className="border border-gray-400 p-1 text-center font-medium">{idx + 1}</td>
+                                                                <td className={`border border-gray-400 p-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>{item.title}</td>
+                                                                <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3 h-3 cursor-pointer"/></td>
+                                                                <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3 h-3 cursor-pointer"/></td>
+                                                                <td className="border border-gray-400 p-0"><input type="text" className="w-full h-full p-1 border-none outline-none text-[10px] bg-transparent focus:bg-yellow-50" placeholder="..." /></td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+
+                                            {/* หมวด 4: สัญญาจ้างและวันเวลาทำงาน */}
+                                            <div className="mb-2">
+                                                <h3 className={`font-bold text-sm mb-1.5 border-b pb-1 text-blue-800 flex items-center justify-between ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>
+                                                    <span>4. หมวดแฟ้มสัญญาจ้างและข้อมูลการปฏิบัติงานของคู่สัญญา (Contracts & Vendors Operations)</span>
+                                                </h3>
+                                                <table className="w-full border-collapse border border-gray-400 text-[10px] text-left">
+                                                    <thead className="bg-gray-100 text-center">
+                                                        <tr>
+                                                            <th className="border border-gray-400 p-1 w-6">#</th>
+                                                            <th className="border border-gray-400 p-1 w-28">ประเภทสัญญา / บริการ</th>
+                                                            <th className="border border-gray-400 p-1 w-24">วันปฏิบัติงาน</th>
+                                                            <th className="border border-gray-400 p-1 w-16">เวลาทำงาน</th>
+                                                            <th className="border border-gray-400 p-1 w-16">จน.คน/รอบ</th>
+                                                            <th className="border border-gray-400 p-1 w-20">ชื่อบริษัทคู่สัญญา</th>
+                                                            <th className="border border-gray-400 p-1 w-8">มีแฟ้ม</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {[
+                                                            { type: 'รักษาความปลอดภัย (รปภ.)', days: 'ทุกวัน (จ.-อา.)', time: 'กะเช้า/ดึก', qty: '...... คน/กะ' },
+                                                            { type: 'รักษาความสะอาด (แม่บ้าน)', days: 'จ.-ส. (หยุดอาทิตย์)', time: '08:00-17:00', qty: '...... คน/วัน' },
+                                                            { type: 'ดูแลสวน / กวาดถนน', days: 'จ.-ส. (หยุดอาทิตย์)', time: '08:00-17:00', qty: '...... คน/วัน' },
+                                                            { type: 'ดูแลสระว่ายน้ำ (Pool)', days: '........................', time: '........-........', qty: '...... ครั้ง/ด.' },
+                                                            { type: 'จัดเก็บขยะ (กทม./เอกชน)', days: '........................', time: '........-........', qty: '...... ครั้ง/สัปดาห์' },
+                                                            { type: 'กำจัดแมลง (Pest Control)', days: 'ตามแผนงานประจำเดือน', time: '-', qty: '...... ครั้ง/ด.' },
+                                                            { type: 'บำรุงรักษาลิฟต์ (Elevator)', days: 'ตามแผนงานประจำเดือน', time: '-', qty: '1 ครั้ง/ด.' },
+                                                            { type: 'บำรุงรักษาระบบแจ้งเหตุเพลิงไหม้', days: 'ตามแผนงานประจำเดือน', time: '-', qty: '1 ครั้ง/ด.' },
+                                                            { type: 'บำรุงรักษาเครื่องกำเนิดไฟฟ้า', days: 'ตามแผนงานประจำเดือน', time: '-', qty: '1 ครั้ง/ด.' },
+                                                            { type: 'ระบบไม้กั้น / ลานจอดรถ', days: 'ตามแผนงานประจำเดือน', time: '-', qty: '1 ครั้ง/ด.' },
+                                                        ].map((item, idx) => (
+                                                            <tr key={`vendor-${idx}`} className="hover:bg-gray-50">
+                                                                <td className="border border-gray-400 p-1 text-center font-medium">{idx + 1}</td>
+                                                                <td className={`border border-gray-400 p-1 font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>{item.type}</td>
+                                                                <td className="border border-gray-400 p-0"><input type="text" className="w-full h-full p-1 border-none outline-none text-[9px] bg-transparent text-center" defaultValue={item.days} /></td>
+                                                                <td className="border border-gray-400 p-0"><input type="text" className="w-full h-full p-1 border-none outline-none text-[9px] bg-transparent text-center" defaultValue={item.time} /></td>
+                                                                <td className="border border-gray-400 p-0"><input type="text" className="w-full h-full p-1 border-none outline-none text-[9px] bg-transparent text-center" defaultValue={item.qty} /></td>
+                                                                <td className="border border-gray-400 p-0"><input type="text" className="w-full h-full p-1 border-none outline-none text-[9px] bg-transparent" placeholder="ชื่อบริษัท..." /></td>
+                                                                <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3 h-3 cursor-pointer"/></td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+
+                                            {/* หมวด 5: ทรัพย์สินและอุปกรณ์ */}
+                                            <div className="mb-2">
+                                                <h3 className={`font-bold text-sm mb-1.5 border-b pb-1 text-blue-800 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>5. หมวดทรัพย์สินและอุปกรณ์ (Assets & Tools)</h3>
+                                                <table className="w-full border-collapse border border-gray-400 text-[10px] text-left">
+                                                    <thead className="bg-gray-100 text-center">
+                                                        <tr>
+                                                            <th className="border border-gray-400 p-1 w-8">ลำดับ</th>
+                                                            <th className="border border-gray-400 p-1">รายการ (Item)</th>
+                                                            <th className="border border-gray-400 p-1 w-10">มี</th>
+                                                            <th className="border border-gray-400 p-1 w-10">ไม่มี</th>
+                                                            <th className="border border-gray-400 p-1 w-40">หมายเหตุ / จำนวน</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {[
+                                                            { title: 'สมุดบัญชีธนาคารนิติบุคคล (Bookbank) และ สมุดเช็ค ทุกบัญชี' },
+                                                            { title: 'กุญแจสำนักงาน / กุญแจตู้จดหมาย / กุญแจห้องงานระบบ' },
+                                                            { title: 'รหัสผ่านตู้เซฟประจำสำนักงานนิติบุคคล (Safe Passcode)' },
+                                                            { title: 'โทรศัพท์มือถือส่วนกลาง / วิทยุสื่อสาร / อุปกรณ์สำนักงาน (คอมฯ/ปริ้นเตอร์)' },
+                                                            { title: 'Master Keycard / บัตรสำรอง / อุปกรณ์สำหรับตั้งค่าระบบ Access Control' },
+                                                            { title: 'ทะเบียนทรัพย์สิน (Asset Register) / เครื่องมือช่าง / อุปกรณ์ฉุกเฉิน' },
+                                                        ].map((item, idx) => (
+                                                            <tr key={`asset-${idx}`} className="hover:bg-gray-50">
+                                                                <td className="border border-gray-400 p-1 text-center font-medium">{idx + 1}</td>
+                                                                <td className={`border border-gray-400 p-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>{item.title}</td>
+                                                                <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3 h-3 cursor-pointer"/></td>
+                                                                <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3 h-3 cursor-pointer"/></td>
+                                                                <td className="border border-gray-400 p-0"><input type="text" className="w-full h-full p-1 border-none outline-none text-[10px] bg-transparent focus:bg-yellow-50" placeholder="..." /></td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-4 mb-2 mt-4 border-t border-gray-300 pt-3">
+                                                {/* การเงิน */}
+                                                <div>
+                                                    <h3 className={`font-bold text-sm mb-1.5 border-b pb-1 text-blue-800 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>6. การเงิน (Finance)</h3>
+                                                    <div className="bg-gray-50 p-2 border border-gray-300 rounded space-y-2 text-[11px]">
+                                                        <div className="flex items-center justify-between">
+                                                            <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เงินสดย่อย (Petty Cash):</span>
+                                                            <div className="flex items-center gap-1"><div className="w-16 border-b border-dotted border-gray-500 text-right font-bold pr-1"></div> ฿</div>
+                                                        </div>
+                                                        <div className="flex items-center justify-between">
+                                                            <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เงินทดรองจ่าย (Advance):</span>
+                                                            <div className="flex items-center gap-1"><div className="w-16 border-b border-dotted border-gray-500 text-right font-bold pr-1"></div> ฿</div>
+                                                        </div>
+                                                        <div className="flex items-center justify-between">
+                                                            <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เช็ครับล่วงหน้า (PDC) / รอนำฝาก:</span>
+                                                            <div className="flex items-center gap-1"><div className="w-16 border-b border-dotted border-gray-500 text-center font-bold"></div> ฉบับ</div>
+                                                        </div>
+                                                        <div className="flex items-center justify-between pt-1 border-t border-gray-200">
+                                                            <span className={`text-gray-800 font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>สมุดใบเสร็จ / ใบกำกับภาษี (ที่ยังไม่ใช้):</span>
+                                                            <div className="flex items-center gap-1"><div className="w-16 border-b border-dotted border-gray-500 text-center font-bold"></div> เล่ม</div>
+                                                        </div>
+                                                        <div className="flex items-center justify-between">
+                                                            <span className={`text-gray-800 font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>รายงานงบการเงิน / รับ-จ่าย เดือนล่าสุด:</span>
+                                                            <div className="flex items-center gap-1"><input type="checkbox" className="w-3 h-3"/> <span className="text-gray-500">แนบรายงาน</span></div>
+                                                        </div>
+                                                        <div className="flex items-center justify-between">
+                                                            <span className={`text-red-600 font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>รายงานสรุปลูกหนี้ค้างชำระ:</span>
+                                                            <div className="flex items-center gap-1"><input type="checkbox" className="w-3 h-3"/> <span className="text-gray-500">แนบรายงาน</span></div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                {/* รหัสผ่าน */}
+                                                <div>
+                                                    <h3 className={`font-bold text-sm mb-1.5 border-b pb-1 text-blue-800 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>7. ระบบงาน (Systems & Passwords)</h3>
+                                                    <div className="bg-gray-50 p-2 border border-gray-300 rounded space-y-1.5 flex flex-col">
+                                                        <label className="flex items-center gap-1 text-[11px] cursor-pointer"><input type="checkbox" className="w-3 h-3"/> ERP / โปรแกรมบัญชี-บริหารอาคาร</label>
+                                                        <label className="flex items-center gap-1 text-[11px] cursor-pointer"><input type="checkbox" className="w-3 h-3"/> Email นิติบุคคล & Social Media (Line/FB)</label>
+                                                        <label className="flex items-center gap-1 text-[11px] cursor-pointer"><input type="checkbox" className="w-3 h-3"/> ระบบกล้องวงจรปิด (CCTV) / ระบบไม้กั้น</label>
+                                                        <label className="flex items-center gap-1 text-[11px] cursor-pointer"><input type="checkbox" className="w-3 h-3"/> Internet Banking (Username/Password/Token)</label>
+                                                        <label className="flex items-center gap-1 text-[11px] cursor-pointer"><input type="checkbox" className="w-3 h-3"/> ระบบอินเตอร์เน็ตส่วนกลาง / รหัส Wi-Fi / Router</label>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="mb-2">
+                                                <h3 className={`font-bold text-sm mb-1.5 border-b pb-1 text-blue-800 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>8. งานค้างดำเนินการ และ คดีความ (Pending Tasks & Legal)</h3>
+                                                <div className="flex flex-col gap-1.5 text-[11px]">
+                                                    <div className="flex items-start gap-2">
+                                                        <label className="mt-0.5"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></label>
+                                                        <div className="flex-1">
+                                                            <span className={`font-bold text-red-600 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>แฟ้มคดีความ / ติดต่อกรมบังคับคดี (Legal):</span>
+                                                            <span className={`ml-2 text-gray-500 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>(ระบุสถานะลูกหนี้ที่ฟ้องร้อง/อายัดทรัพย์)</span>
+                                                            <div className="w-full border-b border-dotted border-gray-400 h-4 mt-1"></div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-start gap-2">
+                                                        <label className="mt-0.5"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></label>
+                                                        <div className="flex-1">
+                                                            <span className={`font-bold text-orange-600 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ลูกบ้านที่อยู่ระหว่างเจรจาประนอมหนี้ / ผ่อนชำระเป็นกรณีพิเศษ:</span>
+                                                            <div className="w-full border-b border-dotted border-gray-400 h-4 mt-1"></div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-start gap-2">
+                                                        <label className="mt-0.5"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></label>
+                                                        <div className="flex-1">
+                                                            <span className={`font-bold text-blue-600 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>งานติดตามซ่อมแซม Defect จากผู้พัฒนาโครงการ (ถ้ามี):</span>
+                                                            <div className="w-full border-b border-dotted border-gray-400 h-4 mt-1"></div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-start gap-2">
+                                                        <label className="mt-0.5"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></label>
+                                                        <div className="flex-1">
+                                                            <span className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>งานซ่อมแซมใหญ่ / ผู้รับเหมาที่ยังปฏิบัติงานไม่เสร็จ:</span>
+                                                            <div className="w-full border-b border-dotted border-gray-400 h-4 mt-1"></div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-start gap-2">
+                                                        <label className="mt-0.5"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></label>
+                                                        <div className="flex-1">
+                                                            <span className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ข้อร้องเรียนสำคัญของลูกบ้าน / สัญญาที่ใกล้หมดอายุใน 60 วัน:</span>
+                                                            <div className="w-full border-b border-dotted border-gray-400 h-4 mt-1"></div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-start gap-2">
+                                                        <label className="mt-0.5"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></label>
+                                                        <div className="flex-1">
+                                                            <span className={`font-bold text-green-700 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ส่งมอบแฟ้มสรุปแผนงาน (Action Plan) ฉบับล่าสุด</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="mb-2" style={{ pageBreakBefore: 'always' }}>
+                                                <h3 className={`font-bold text-base mb-1.5 border-b pb-1 text-blue-800 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>9. แผนการสอนงาน และ Checklist (1-Month Training & Handover)</h3>
+                                                <table className="w-full border-collapse border border-gray-400 text-[10px] text-left">
+                                                    <thead className="bg-blue-50 text-center">
+                                                        <tr>
+                                                            <th className="border border-gray-400 p-1 w-16">ระยะเวลา</th>
+                                                            <th className="border border-gray-400 p-1">หัวข้อการเรียนรู้ / ส่งมอบ (Training Topics)</th>
+                                                            <th className="border border-gray-400 p-1 w-20">ผู้สอน</th>
+                                                            <th className="border border-gray-400 p-1 w-12">สถานะ</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {/* Week 1 */}
+                                                        <tr>
+                                                            <td className="border border-gray-400 p-1 text-center font-bold bg-white" rowSpan="2">สัปดาห์ที่ 1<br/>(W1)</td>
+                                                            <td className={`border border-gray-400 p-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>1. แนะนำตัวคณะกรรมการ/ทีมงาน และ ศึกษากฎระเบียบข้อบังคับ/รายงานการประชุม (หมวด 2,3)</td>
+                                                            <td className="border border-gray-400 p-1 text-center text-gray-600">Area Mgr</td>
+                                                            <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td className={`border border-gray-400 p-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>2. ตรวจนับรายการทรัพย์สิน และ แฟ้มสัญญารับ-จ่าย คู่สัญญา (หมวด 4,5) ให้ครบถ้วน</td>
+                                                            <td className="border border-gray-400 p-1 text-center text-gray-600">Mgr คนเก่า</td>
+                                                            <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></td>
+                                                        </tr>
+                                                        {/* Week 2 */}
+                                                        <tr>
+                                                            <td className="border border-gray-400 p-1 text-center font-bold bg-gray-50" rowSpan="2">สัปดาห์ที่ 2<br/>(W2)</td>
+                                                            <td className={`border border-gray-400 p-1 bg-gray-50 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>3. เรียนรู้ระบบ ERP/บัญชี, การเบิกจ่าย, เงินสดย่อย และระบบออนไลน์ (หมวด 6,7)</td>
+                                                            <td className="border border-gray-400 p-1 text-center text-gray-600 bg-gray-50">ส่วนกลาง</td>
+                                                            <td className="border border-gray-400 p-1 text-center bg-gray-50"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td className={`border border-gray-400 p-1 bg-gray-50 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>4. สรุปสถานะแฟ้มคดีความ / กรมบังคับคดี / ลูกหนี้ค้างชำระ (หมวด 8)</td>
+                                                            <td className="border border-gray-400 p-1 text-center text-gray-600 bg-gray-50">Mgr คนเก่า</td>
+                                                            <td className="border border-gray-400 p-1 text-center bg-gray-50"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></td>
+                                                        </tr>
+                                                        {/* Week 3 */}
+                                                        <tr>
+                                                            <td className="border border-gray-400 p-1 text-center font-bold bg-white" rowSpan="2">สัปดาห์ที่ 3<br/>(W3)</td>
+                                                            <td className={`border border-gray-400 p-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>5. ตรวจสอบพื้นที่ส่วนกลาง (Walkthrough) ตรวจประเมินคู่สัญญา และจุดเสี่ยงในอาคาร</td>
+                                                            <td className="border border-gray-400 p-1 text-center text-gray-600">ช่างอาคาร</td>
+                                                            <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td className={`border border-gray-400 p-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>6. ตรวจสอบแผนบำรุงรักษา (PM), งานซ่อมค้าง และการจดมิเตอร์น้ำไฟ</td>
+                                                            <td className="border border-gray-400 p-1 text-center text-gray-600">หัวหน้าช่าง</td>
+                                                            <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></td>
+                                                        </tr>
+                                                        {/* Week 4 */}
+                                                        <tr>
+                                                            <td className="border border-gray-400 p-1 text-center font-bold bg-green-50" rowSpan="2">สัปดาห์ที่ 4<br/>(W4)</td>
+                                                            <td className={`border border-gray-400 p-1 bg-green-50 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>7. การจัดการข้อร้องเรียน และรับส่งมอบ Action Plan ที่ค้างอยู่ทั้งหมด</td>
+                                                            <td className="border border-gray-400 p-1 text-center text-gray-600 bg-green-50">Area Mgr</td>
+                                                            <td className="border border-gray-400 p-1 text-center bg-green-50"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td className={`border border-gray-400 p-1 bg-green-50 text-green-800 font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>8. เซ็นรับรองการส่งมอบงานสมบูรณ์ (Sign-off)</td>
+                                                            <td className="border border-gray-400 p-1 text-center text-gray-600 bg-green-50">Area Mgr</td>
+                                                            <td className="border border-gray-400 p-1 text-center bg-green-50"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    );
+                                }
 
                                 // แบบฟอร์มย้ายเข้า-ออก (Move In/Out)
                                 if (id === 'f1' || id === 'f2') {
@@ -13314,19 +13831,25 @@ export default function App() {
                                 <div className="text-center w-56">
                                     <div className="border-b border-gray-800 mb-2 h-8"></div>
                                     <div className="mb-1">( ....................................................... )</div>
-                                    <div className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ผู้ร้องขอ / เจ้าของร่วม</div>
+                                    <div className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>
+                                        {selectedFormDetails.id === 'f18' ? 'ผู้ส่งมอบงาน (คนเก่า)' : 'ผู้ร้องขอ / เจ้าของร่วม'}
+                                    </div>
                                     <div className="text-xs text-gray-500 mt-1">วันที่ ....... / ....... / ...........</div>
                                 </div>
                                 <div className="text-center w-56">
                                     <div className="border-b border-gray-800 mb-2 h-8"></div>
                                     <div className="mb-1">( ....................................................... )</div>
-                                    <div className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เจ้าหน้าที่นิติบุคคลฯ</div>
+                                    <div className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>
+                                        {selectedFormDetails.id === 'f18' ? 'ผู้รับมอบงาน (คนใหม่)' : 'เจ้าหน้าที่นิติบุคคลฯ'}
+                                    </div>
                                     <div className="text-xs text-gray-500 mt-1">วันที่ ....... / ....... / ...........</div>
                                 </div>
                                 <div className="text-center w-56">
                                     <div className="border-b border-gray-800 mb-2 h-8"></div>
                                     <div className="mb-1">( ....................................................... )</div>
-                                    <div className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ผู้จัดการนิติบุคคลฯ (ผู้อนุมัติ)</div>
+                                    <div className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>
+                                        {selectedFormDetails.id === 'f18' ? 'ผู้จัดการพื้นที่ (พยาน/ผู้อนุมัติ)' : 'ผู้จัดการนิติบุคคลฯ (ผู้อนุมัติ)'}
+                                    </div>
                                     <div className="text-xs text-gray-500 mt-1">วันที่ ....... / ....... / ...........</div>
                                 </div>
                             </div>
