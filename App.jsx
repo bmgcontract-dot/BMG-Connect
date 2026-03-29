@@ -330,9 +330,6 @@ const STANDARD_FORMS = [
     // หมวดหมู่: งานบุคคลและภายใน (Internal HR / Finance) - คงไว้สำหรับพนักงานนิติฯ
     { id: 'f14', category: 'งานบุคคลและภายใน (Internal)', name: 'ใบลาพักผ่อน / ลากิจ / ลาป่วย (Leave Request)', format: 'PDF', size: '120 KB', lastUpdated: '2025-01-05', description: 'เอกสารขออนุมัติวันลาต่างๆ สำหรับพนักงานและเจ้าหน้าที่ประจำหน่วยงาน (Leave request form for annual, personal, or sick leave for employees and site staff.)' },
     { id: 'f15', category: 'งานบุคคลและภายใน (Internal)', name: 'ใบเบิกเงินสดย่อย (Petty Cash Voucher)', format: 'Excel', size: '45 KB', lastUpdated: '2025-01-05', description: 'เอกสารประกอบการขอเบิกเงินทดรองจ่าย หรือเงินสดย่อยประจำหน่วยงาน (Form for requesting petty cash reimbursement or advance payments for site operations.)' },
-    
-    // หมวดหมู่: งานส่งมอบและฝึกอบรม (Handover & Training)
-    { id: 'f18', category: 'งานส่งมอบและฝึกอบรม (Handover & Training)', name: 'แบบฟอร์มส่งมอบงาน (Handover Form) - ผู้จัดการอาคาร/หมู่บ้าน', format: 'PDF', size: '180 KB', lastUpdated: '2026-03-29', description: 'แบบฟอร์มสำหรับส่งมอบงาน ทรัพย์สิน ระบบงาน การเงิน และคดีความต่างๆ ระหว่างผู้จัดการคนเก่าและผู้จัดการคนใหม่ พร้อม Checklist แผนสอนงาน 1 เดือน' },
 ];
 
 // Shift Codes
@@ -1680,7 +1677,9 @@ export default function App() {
   const [scheduleApprovals, setScheduleApprovals] = usePersistentState('bmg_scheduleApprovals', {}, fbUser); // NEW: State สำหรับเก็บสถานะการอนุมัติตารางงาน
   const [selectedKpiDetail, setSelectedKpiDetail] = useState(null); // NEW: State สำหรับเปิด Modal รายละเอียด KPI
   const [isSyncingSheets, setIsSyncingSheets] = useState(false); // NEW: State สำหรับสถานะกำลังส่งข้อมูลไป Google Sheets
+  const [isImportingFromSheets, setIsImportingFromSheets] = useState(false); // NEW: State สำหรับนำเข้าข้อมูลจาก Sheet
   const [isBackingUpToDrive, setIsBackingUpToDrive] = useState(false); // NEW: State สำหรับสถานะกำลังส่งไฟล์ไป Google Drive
+  const [isImportingFromDrive, setIsImportingFromDrive] = useState(false); // NEW: State สำหรับนำเข้าไฟล์จาก Drive
 
   // NEW: State สำหรับ Confirm Modal ป้องกันการลบข้อมูลผิดพลาด
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null, confirmText: 'ยืนยันการลบ', type: 'danger' });
@@ -4086,6 +4085,97 @@ export default function App() {
       }
   };
 
+  // --- NEW: Import from Google Sheets Handler ---
+  const handleImportFromGoogleSheets = async () => {
+      const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzmNdR7LVpfUossHkcNH_onBPTG2dw6GuJzh5JilthkMwW-Sdr4s0lFjPKwSsCBTg/exec';
+      
+      if(!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL === 'YOUR_GOOGLE_SCRIPT_WEB_APP_URL_HERE') {
+          alert("กรุณานำ Web App URL ของ Google Apps Script มาใส่ในโค้ดก่อนใช้งานฟังก์ชันนี้");
+          return;
+      }
+
+      showConfirm(
+          'ยืนยันการนำเข้าข้อมูลจาก Google Sheets',
+          'คำเตือน: ระบบจะทำการเชื่อมต่อและดึงข้อมูลล่าสุดจากตารางใน Google Sheets มาเขียนทับ (Overwrite) ข้อมูลปัจจุบันในระบบทั้งหมด คุณแน่ใจหรือไม่ที่จะดำเนินการต่อ?',
+          async () => {
+              setIsImportingFromSheets(true);
+              setRestoreProgress('กำลังเชื่อมต่อ Google Sheets...');
+
+              try {
+                  // ส่ง GET request ไปยัง Google Apps Script (ต้องตั้งค่า doGet ให้คืนค่า JSON)
+                  const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=export_to_app`);
+                  
+                  if (!response.ok) {
+                       throw new Error(`HTTP error! status: ${response.status}`);
+                  }
+                  
+                  const result = await response.json();
+
+                  if (!result || typeof result !== 'object') {
+                      throw new Error('ไม่พบข้อมูล หรือรูปแบบข้อมูลจาก Google Sheets ไม่ถูกต้อง');
+                  }
+
+                  // ปรับโครงสร้างการอ่านข้อมูลเผื่อ Apps Script ส่งมาใน key data หรือส่งมาตรงๆ
+                  const d = result.data || result;
+                  
+                  setRestoreProgress('กำลังประมวลผลและอัปเดตข้อมูล...');
+                  await new Promise(resolve => setTimeout(resolve, 500)); // ให้ UI โหลด
+
+                  // ทยอยอัปเดตทีละตาราง
+                  const stateSetters = [
+                      { key: 'Users_พนักงาน', setter: setUsers },
+                      { key: 'Projects_โครงการ', setter: setProjects },
+                      { key: 'Contracts_สัญญา', setter: setContracts },
+                      { key: 'Contractors_ผู้รับเหมา', setter: setContractors },
+                      { key: 'Assets_ทรัพย์สิน', setter: setAssets },
+                      { key: 'Tools_เครื่องมือ', setter: setTools },
+                      { key: 'Machines_เครื่องจักร', setter: setMachines },
+                      { key: 'PM_Plans_แผนบำรุงรักษา', setter: setPmPlans },
+                      { key: 'PM_History_ประวัติPM', setter: setPmHistoryList },
+                      { key: 'Repairs_แจ้งซ่อม', setter: setRepairs },
+                      { key: 'ActionPlans_แผนงาน', setter: setActionPlans },
+                      { key: 'Audits_ประเมินคุณภาพ', setter: setAudits },
+                      { key: 'UtilityMeters_มิเตอร์', setter: setMeters },
+                      { key: 'UtilityReadings_จดมิเตอร์', setter: setUtilityReadings },
+                      { key: 'DailyReports_รายงานประจำวัน', setter: setDailyReports }
+                  ];
+
+                  let currentTable = 0;
+                  const totalTables = stateSetters.length;
+
+                  for (const item of stateSetters) {
+                      currentTable++;
+                      if (d[item.key] && Array.isArray(d[item.key])) {
+                          setRestoreProgress(`กำลังอัปเดต: ${item.key.split('_')[1] || item.key} (${currentTable}/${totalTables})`);
+                          await new Promise(resolve => setTimeout(resolve, 50));
+                          try {
+                              await item.setter(d[item.key], true); // true = force overwrite
+                          } catch (e) {
+                              console.error(`Error syncing ${item.key}:`, e);
+                          }
+                      }
+                  }
+
+                  setRestoreProgress('นำเข้าข้อมูลสำเร็จ 100%!');
+                  
+                  setTimeout(() => {
+                      showAlert("สำเร็จ", "ดึงข้อมูลจาก Google Sheets ลงระบบเสร็จสมบูรณ์ ระบบจะรีเฟรชหน้าจออัตโนมัติเพื่อแสดงข้อมูลใหม่");
+                      setTimeout(() => window.location.reload(), 3000);
+                  }, 500);
+
+              } catch (error) {
+                  console.error("Import from Sheets error:", error);
+                  showAlert("เกิดข้อผิดพลาด", "ไม่สามารถดึงข้อมูลจาก Google Sheets ได้:\n" + error.message + "\n\n*โปรดตรวจสอบว่า Google Apps Script ของคุณมีฟังก์ชัน doGet() ที่รองรับและส่งค่า JSON กลับมาได้");
+              } finally {
+                  setIsImportingFromSheets(false);
+                  setRestoreProgress('');
+              }
+          },
+          'ยืนยันการดึงข้อมูล',
+          'warning'
+      );
+  };
+
   // --- NEW: Google Drive Backup Handler ---
   const handleBackupToDrive = async () => {
       // ❗ คำเตือน: นำ Web App URL ที่ได้จาก Google Apps Script สำหรับ Google Drive มาวางแทนข้อความด้านล่างนี้
@@ -4181,6 +4271,116 @@ export default function App() {
       } finally {
           setIsBackingUpToDrive(false);
       }
+  };
+
+  // --- NEW: Import Files/Images from Google Drive Handler ---
+  const handleImportFromDrive = async () => {
+      const GOOGLE_SCRIPT_DRIVE_URL = 'https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec';
+      
+      if(!GOOGLE_SCRIPT_DRIVE_URL || GOOGLE_SCRIPT_DRIVE_URL === 'YOUR_GOOGLE_SCRIPT_DRIVE_URL_HERE') {
+          alert("กรุณานำ Web App URL ของ Google Apps Script สำหรับบันทึกลง Drive มาใส่ในโค้ดก่อนใช้งานฟังก์ชันนี้");
+          return;
+      }
+
+      showConfirm(
+          'ยืนยันการกู้คืนไฟล์จาก Google Drive',
+          'ระบบจะทำการค้นหาโฟลเดอร์ Backup ล่าสุดใน Google Drive และดาวน์โหลดรูปภาพ/เอกสารกลับมายังเครื่องนี้ (อาจใช้เวลาหลายนาทีขึ้นอยู่กับจำนวนและขนาดไฟล์) ต้องการดำเนินการต่อหรือไม่?',
+          async () => {
+              setIsImportingFromDrive(true);
+              setRestoreProgress('กำลังเชื่อมต่อ Google Drive...');
+
+              try {
+                  const response = await fetch(`${GOOGLE_SCRIPT_DRIVE_URL}?action=import_from_drive`);
+                  
+                  if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                  
+                  const result = await response.json();
+
+                  if (result.status === 'success' && result.files && result.files.length > 0) {
+                      setRestoreProgress(`กำลังประมวลผลไฟล์ ${result.files.length} รายการ...`);
+                      await new Promise(resolve => setTimeout(resolve, 100)); // UI refresh
+                      
+                      const filesToSaveToIDB = {};
+                      let successCount = 0;
+                      
+                      // เตรียมอัปเดต State กรณีเป็นรูปภาพหลัก
+                      let newCompanyInfo = { ...companyInfo };
+                      let newUsers = [...users];
+                      let newAssets = [...assets];
+                      let newTools = [...tools];
+                      let newMachines = [...machines];
+                      let stateChanged = false;
+
+                      for (const file of result.files) {
+                          if (file.filename && file.data && file.mimeType) {
+                              const dataUri = `data:${file.mimeType};base64,${file.data}`;
+                              
+                              if (file.filename === 'Company_Logo.jpg') {
+                                  newCompanyInfo.logo = dataUri;
+                                  stateChanged = true;
+                              } else if (file.filename.startsWith('User_')) {
+                                  const id = file.filename.replace('User_', '').replace('.jpg', '');
+                                  newUsers = newUsers.map(u => (u.employeeId === id || u.id === id) ? {...u, photo: dataUri} : u);
+                                  stateChanged = true;
+                              } else if (file.filename.startsWith('Asset_')) {
+                                  const code = file.filename.replace('Asset_', '').replace('.jpg', '');
+                                  newAssets = newAssets.map(a => a.code === code ? {...a, photo: dataUri} : a);
+                                  stateChanged = true;
+                              } else if (file.filename.startsWith('Tool_')) {
+                                  const code = file.filename.replace('Tool_', '').replace('.jpg', '');
+                                  newTools = newTools.map(t => t.code === code ? {...t, photo: dataUri} : t);
+                                  stateChanged = true;
+                              } else if (file.filename.startsWith('Machine_')) {
+                                  const code = file.filename.replace('Machine_', '').replace('.jpg', '');
+                                  newMachines = newMachines.map(m => m.code === code ? {...m, photo: dataUri} : m);
+                                  stateChanged = true;
+                              } else if (file.filename.startsWith('Document_')) {
+                                  // ไฟล์ PDF ให้เซฟลง IndexedDB ของเครื่อง
+                                  const fileId = file.filename.replace('Document_', '').replace('.pdf', '');
+                                  filesToSaveToIDB[fileId] = dataUri;
+                              } else {
+                                  // ไฟล์รูปภาพอื่นๆ เช่น PM, รายงานประจำวัน, สัญญา บันทึกลง IndexedDB เช่นกัน
+                                  filesToSaveToIDB[file.filename] = dataUri;
+                              }
+                              successCount++;
+                          }
+                      }
+
+                      // ถ้ามีรูปภาพหลักเปลี่ยน ให้อัปเดต State โดยบังคับส่งขึ้น Cloud ให้ด้วย
+                      if (stateChanged) {
+                          setCompanyInfo(newCompanyInfo);
+                          setUsers(newUsers, true);
+                          setAssets(newAssets, true);
+                          setTools(newTools, true);
+                          setMachines(newMachines, true);
+                      }
+
+                      // บันทึกไฟล์เอกสารลงฐานข้อมูล Local (IndexedDB)
+                      if (Object.keys(filesToSaveToIDB).length > 0) {
+                          setRestoreProgress('กำลังบันทึกเอกสารลงระบบ...');
+                          await saveMultipleFilesLocally(filesToSaveToIDB);
+                      }
+
+                      setRestoreProgress('ดาวน์โหลดสำเร็จ 100%');
+                      setTimeout(() => {
+                          showAlert("สำเร็จ", `ดึงไฟล์จาก Google Drive เสร็จสมบูรณ์ (${successCount} ไฟล์)\nรูปภาพและเอกสารได้รับการอัปเดตลงระบบเรียบร้อยแล้ว`);
+                      }, 500);
+
+                  } else {
+                      showAlert("แจ้งเตือน", "ไม่พบโฟลเดอร์ Backup ใน Google Drive หรือโฟลเดอร์ล่าสุดไม่มีไฟล์");
+                  }
+
+              } catch (error) {
+                  console.error("Import from Drive error:", error);
+                  showAlert("เกิดข้อผิดพลาด", "ไม่สามารถดึงไฟล์จาก Google Drive ได้:\n" + error.message + "\n\n*โปรดตรวจสอบว่า Google Apps Script มีฟังก์ชัน doGet() ที่รองรับ action=import_from_drive");
+              } finally {
+                  setIsImportingFromDrive(false);
+                  setRestoreProgress('');
+              }
+          },
+          'เริ่มดึงไฟล์ภาพ/เอกสาร',
+          'info'
+      );
   };
   // ----------------------------------------
 
@@ -9729,6 +9929,32 @@ export default function App() {
                       </Button>
                   </Card>
 
+                  {/* Import from Google Sheets Card */}
+                  <Card className="p-6 border-t-4 border-teal-500 md:col-span-2">
+                      <div className="flex items-center gap-3 mb-4">
+                          <div className="p-3 bg-teal-100 text-teal-600 rounded-lg shadow-sm">
+                              <Download size={24} />
+                          </div>
+                          <div>
+                              <h3 className="text-lg font-bold text-gray-800">นำเข้าข้อมูลล่าสุดจาก Google Sheets</h3>
+                              <p className="text-sm text-gray-500">ดึงข้อมูลจาก Spreadsheet กลับมาที่ระบบ</p>
+                          </div>
+                      </div>
+                      <p className="text-sm text-gray-600 mb-6 bg-teal-50 p-4 rounded-lg border border-teal-100 leading-relaxed">
+                          ระบบจะทำการเชื่อมต่อและดึงข้อมูลล่าสุดที่อยู่ใน Google Sheets กลับมาอัปเดตในระบบ (เขียนทับตารางเดิม) <br/>
+                          <span className="font-bold text-red-600 flex items-center gap-1 mt-1"><AlertTriangle size={14}/> คำเตือน: ข้อมูลที่ไม่ได้ถูกซิงค์ไปที่ Sheet ก่อนหน้านี้อาจสูญหายได้</span>
+                      </p>
+                      
+                      <Button 
+                          className="w-full md:w-auto flex justify-center items-center gap-2 bg-teal-600 hover:bg-teal-700 shadow-md text-base py-3 px-6" 
+                          onClick={handleImportFromGoogleSheets}
+                          disabled={isImportingFromSheets}
+                      >
+                          {isImportingFromSheets ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />} 
+                          {isImportingFromSheets ? 'กำลังดึงข้อมูล... ' + restoreProgress : 'ดึงข้อมูลจาก Google Sheets'}
+                      </Button>
+                  </Card>
+
                   {/* Google Drive Backup Card */}
                   <Card className="p-6 border-t-4 border-indigo-500 md:col-span-2">
                       <div className="flex items-center gap-3 mb-4">
@@ -9752,6 +9978,32 @@ export default function App() {
                       >
                           {isBackingUpToDrive ? <Loader2 size={18} className="animate-spin" /> : <Cloud size={18} />} 
                           {isBackingUpToDrive ? 'กำลังส่งไฟล์ไปที่ Drive ทีละรายการ...' : 'เริ่มอัปโหลดไฟล์ไปที่ Google Drive'}
+                      </Button>
+                  </Card>
+
+                  {/* NEW: Import from Google Drive Card */}
+                  <Card className="p-6 border-t-4 border-pink-500 md:col-span-2">
+                      <div className="flex items-center gap-3 mb-4">
+                          <div className="p-3 bg-pink-100 text-pink-600 rounded-lg shadow-sm">
+                              <Image size={24} className="text-pink-600" as={ImageIcon}/>
+                          </div>
+                          <div>
+                              <h3 className="text-lg font-bold text-gray-800">กู้คืนไฟล์และรูปภาพ จาก Google Drive</h3>
+                              <p className="text-sm text-gray-500">ดึงรูปภาพและเอกสารที่เคย Backup ไว้กลับมาที่เครื่องนี้</p>
+                          </div>
+                      </div>
+                      <p className="text-sm text-gray-600 mb-6 bg-pink-50 p-4 rounded-lg border border-pink-100 leading-relaxed">
+                          ระบบจะค้นหาโฟลเดอร์ Backup ล่าสุดใน Google Drive และทำการดาวน์โหลดรูปภาพ (โลโก้, รูปพนักงาน, ทรัพย์สิน) รวมถึงไฟล์เอกสาร PDF ต่างๆ กลับมาแสดงผลในระบบ <br/>
+                          <span className="font-bold text-pink-700">*เหมาะสำหรับใช้เมื่อเปลี่ยนเครื่องคอมพิวเตอร์ใหม่ หรือไฟล์รูปภาพไม่แสดงผล</span>
+                      </p>
+                      
+                      <Button 
+                          className="w-full md:w-auto flex justify-center items-center gap-2 bg-pink-600 hover:bg-pink-700 shadow-md text-base py-3 px-6" 
+                          onClick={handleImportFromDrive}
+                          disabled={isImportingFromDrive}
+                      >
+                          {isImportingFromDrive ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />} 
+                          {isImportingFromDrive ? 'กำลังดึงข้อมูล... ' + restoreProgress : 'ดึงไฟล์และรูปภาพจาก Google Drive'}
                       </Button>
                   </Card>
               </div>
@@ -13258,348 +13510,25 @@ export default function App() {
                         {/* Dynamic Form Content */}
                         <div className="text-sm space-y-6">
                             
-                            {/* --- ข้อมูลผู้ร้องขอ (Common Section) - ซ่อนในฟอร์ม f18 --- */}
-                            {selectedFormDetails.id !== 'f18' && (
-                                <div className="mb-6">
-                                    <h3 className={`font-bold text-base mb-3 border-b pb-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>1. ข้อมูลผู้ร้องขอ (Applicant Information)</h3>
-                                    <div className="grid grid-cols-2 gap-y-4 gap-x-6">
-                                        <div className="flex items-end"><span className={`w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ชื่อ-นามสกุล:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
-                                        <div className="flex items-end"><span className={`w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เบอร์โทรศัพท์:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
-                                        <div className="flex items-end"><span className={`w-32 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>บ้านเลขที่/ห้องเลขที่:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
-                                        <div className="flex items-center gap-4">
-                                            <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>สถานะ:</span>
-                                            <label className="flex items-center gap-1"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เจ้าของร่วม</span></label>
-                                            <label className="flex items-center gap-1"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ผู้เช่า</span></label>
-                                            <label className="flex items-center gap-1"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ตัวแทน</span></label>
-                                        </div>
+                            {/* --- ข้อมูลผู้ร้องขอ (Common Section) --- */}
+                            <div className="mb-6">
+                                <h3 className={`font-bold text-base mb-3 border-b pb-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>1. ข้อมูลผู้ร้องขอ (Applicant Information)</h3>
+                                <div className="grid grid-cols-2 gap-y-4 gap-x-6">
+                                    <div className="flex items-end"><span className={`w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ชื่อ-นามสกุล:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                    <div className="flex items-end"><span className={`w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เบอร์โทรศัพท์:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                    <div className="flex items-end"><span className={`w-32 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>บ้านเลขที่/ห้องเลขที่:</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
+                                    <div className="flex items-center gap-4">
+                                        <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>สถานะ:</span>
+                                        <label className="flex items-center gap-1"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เจ้าของร่วม</span></label>
+                                        <label className="flex items-center gap-1"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ผู้เช่า</span></label>
+                                        <label className="flex items-center gap-1"><input type="checkbox" className="w-4 h-4"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ตัวแทน</span></label>
                                     </div>
                                 </div>
-                            )}
+                            </div>
 
                             {/* --- Render Form Specific Content --- */}
                             {(() => {
                                 const id = selectedFormDetails.id;
-
-                                // แบบฟอร์มส่งมอบงาน (Handover Form)
-                                if (id === 'f18') {
-                                    return (
-                                        <div className="space-y-4">
-                                            <div className="mb-2">
-                                                <h3 className={`font-bold text-base mb-2 border-b pb-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>1. ข้อมูลผู้ส่งมอบ และ ผู้รับมอบ (Handover Parties)</h3>
-                                                <div className="grid grid-cols-2 gap-y-3 gap-x-6 mb-2 text-sm">
-                                                    <div className="flex items-end"><span className={`w-32 font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ผู้ส่งมอบ (คนเก่า):</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
-                                                    <div className="flex items-end"><span className={`w-36 font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ผู้รับมอบ (คนใหม่):</span><div className="flex-1 border-b border-dotted border-gray-400"></div></div>
-                                                    <div className="flex items-end"><span className={`w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ตำแหน่ง:</span><div className="flex-1 border-b border-dotted border-gray-400 text-center">ผู้จัดการอาคาร/หมู่บ้าน</div></div>
-                                                    <div className="flex items-end"><span className={`w-24 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ตำแหน่ง:</span><div className="flex-1 border-b border-dotted border-gray-400 text-center">ผู้จัดการอาคาร/หมู่บ้าน</div></div>
-                                                    <div className="col-span-2 flex items-end"><span className={`w-40 font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เหตุผลการส่งมอบ:</span><label className="flex items-center gap-1 mr-4"><input type="checkbox"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ลาออก</span></label><label className="flex items-center gap-1 mr-4"><input type="checkbox"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>โยกย้ายหน่วยงาน</span></label><label className="flex items-center gap-1"><input type="checkbox"/> <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>อื่นๆ</span><div className="w-32 border-b border-dotted border-gray-400 ml-1"></div></label></div>
-                                                </div>
-                                            </div>
-
-                                            {/* หมวด 2: เอกสารสำคัญนิติบุคคล */}
-                                            <div className="mb-2">
-                                                <h3 className={`font-bold text-sm mb-1.5 border-b pb-1 text-blue-800 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>2. หมวดเอกสารสำคัญนิติบุคคล (Juristic Important Documents)</h3>
-                                                <table className="w-full border-collapse border border-gray-400 text-[10px] text-left">
-                                                    <thead className="bg-gray-100 text-center">
-                                                        <tr>
-                                                            <th className="border border-gray-400 p-1 w-8">ลำดับ</th>
-                                                            <th className="border border-gray-400 p-1">รายการเอกสาร (Document Item)</th>
-                                                            <th className="border border-gray-400 p-1 w-10">มี</th>
-                                                            <th className="border border-gray-400 p-1 w-10">ไม่มี</th>
-                                                            <th className="border border-gray-400 p-1 w-40">สถานที่เก็บ / หมายเหตุ</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {[
-                                                            { title: 'โฉนดที่ดิน / เอกสารสิทธิ์พื้นที่ส่วนกลาง (Title Deeds)' },
-                                                            { title: 'ใบรับรองการจดทะเบียนนิติบุคคล / บัตรประจำตัวผู้เสียภาษี (Juristic Cert. & Tax ID)' },
-                                                            { title: 'ตราประทับนิติบุคคล (Company Seal/Stamp)' },
-                                                            { title: 'ข้อบังคับนิติบุคคลอาคารชุด / หมู่บ้านจัดสรร (Rules & Regulations)' },
-                                                            { title: 'แฟ้มทะเบียนเจ้าของร่วม / ทะเบียนลูกบ้าน (Co-owner/Resident Registry)' },
-                                                            { title: 'กรมธรรม์ประกันภัยความเสี่ยงภัยทุกชนิด (IAR) / ความรับผิดชอบต่อบุคคลภายนอก' },
-                                                            { title: 'ใบอนุญาตใช้อาคาร (อ.6) / เอกสารการตรวจสอบอาคารประจำปี (รซ.1)' },
-                                                            { title: 'แฟ้มเอกสารภาษีอากร (ภ.ง.ด., ภ.พ.30, ภาษีที่ดินและสิ่งปลูกสร้าง)' },
-                                                            { title: 'แฟ้มแบบแปลนอาคาร (As-built Drawings) และ คู่มือเครื่องจักร (O&M Manuals)' },
-                                                        ].map((item, idx) => (
-                                                            <tr key={`doc-${idx}`} className="hover:bg-gray-50">
-                                                                <td className="border border-gray-400 p-1 text-center font-medium">{idx + 1}</td>
-                                                                <td className={`border border-gray-400 p-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>{item.title}</td>
-                                                                <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3 h-3 cursor-pointer"/></td>
-                                                                <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3 h-3 cursor-pointer"/></td>
-                                                                <td className="border border-gray-400 p-0"><input type="text" className="w-full h-full p-1 border-none outline-none text-[10px] bg-transparent focus:bg-yellow-50" placeholder="..." /></td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-
-                                            {/* หมวด 3: รายงานการประชุม */}
-                                            <div className="mb-2">
-                                                <h3 className={`font-bold text-sm mb-1.5 border-b pb-1 text-blue-800 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>3. หมวดรายงานการประชุม (Meeting Minutes)</h3>
-                                                <table className="w-full border-collapse border border-gray-400 text-[10px] text-left">
-                                                    <thead className="bg-gray-100 text-center">
-                                                        <tr>
-                                                            <th className="border border-gray-400 p-1 w-8">ลำดับ</th>
-                                                            <th className="border border-gray-400 p-1">รายการรายงานการประชุม (Minutes Item)</th>
-                                                            <th className="border border-gray-400 p-1 w-10">มี</th>
-                                                            <th className="border border-gray-400 p-1 w-10">ไม่มี</th>
-                                                            <th className="border border-gray-400 p-1 w-40">สถานที่เก็บ / จำนวนแฟ้ม</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {[
-                                                            { title: 'แฟ้มรายงานการประชุมใหญ่สามัญ / วิสามัญเจ้าของร่วม (AGM / EGM)' },
-                                                            { title: 'แฟ้มรายงานการประชุมคณะกรรมการนิติบุคคลฯ (Committee Meetings)' },
-                                                            { title: 'เอกสารจดทะเบียนแต่งตั้งคณะกรรมการนิติบุคคลฯ (อช. / จสก.) ฉบับล่าสุด' },
-                                                            { title: 'เอกสารจดทะเบียนแต่งตั้งผู้จัดการนิติบุคคลฯ (อช. / จสก.) ฉบับล่าสุด' },
-                                                        ].map((item, idx) => (
-                                                            <tr key={`min-${idx}`} className="hover:bg-gray-50">
-                                                                <td className="border border-gray-400 p-1 text-center font-medium">{idx + 1}</td>
-                                                                <td className={`border border-gray-400 p-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>{item.title}</td>
-                                                                <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3 h-3 cursor-pointer"/></td>
-                                                                <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3 h-3 cursor-pointer"/></td>
-                                                                <td className="border border-gray-400 p-0"><input type="text" className="w-full h-full p-1 border-none outline-none text-[10px] bg-transparent focus:bg-yellow-50" placeholder="..." /></td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-
-                                            {/* หมวด 4: สัญญาจ้างและวันเวลาทำงาน */}
-                                            <div className="mb-2">
-                                                <h3 className={`font-bold text-sm mb-1.5 border-b pb-1 text-blue-800 flex items-center justify-between ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>
-                                                    <span>4. หมวดแฟ้มสัญญาจ้างและข้อมูลการปฏิบัติงานของคู่สัญญา (Contracts & Vendors Operations)</span>
-                                                </h3>
-                                                <table className="w-full border-collapse border border-gray-400 text-[10px] text-left">
-                                                    <thead className="bg-gray-100 text-center">
-                                                        <tr>
-                                                            <th className="border border-gray-400 p-1 w-6">#</th>
-                                                            <th className="border border-gray-400 p-1 w-28">ประเภทสัญญา / บริการ</th>
-                                                            <th className="border border-gray-400 p-1 w-24">วันปฏิบัติงาน</th>
-                                                            <th className="border border-gray-400 p-1 w-16">เวลาทำงาน</th>
-                                                            <th className="border border-gray-400 p-1 w-16">จน.คน/รอบ</th>
-                                                            <th className="border border-gray-400 p-1 w-20">ชื่อบริษัทคู่สัญญา</th>
-                                                            <th className="border border-gray-400 p-1 w-8">มีแฟ้ม</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {[
-                                                            { type: 'รักษาความปลอดภัย (รปภ.)', days: 'ทุกวัน (จ.-อา.)', time: 'กะเช้า/ดึก', qty: '...... คน/กะ' },
-                                                            { type: 'รักษาความสะอาด (แม่บ้าน)', days: 'จ.-ส. (หยุดอาทิตย์)', time: '08:00-17:00', qty: '...... คน/วัน' },
-                                                            { type: 'ดูแลสวน / กวาดถนน', days: 'จ.-ส. (หยุดอาทิตย์)', time: '08:00-17:00', qty: '...... คน/วัน' },
-                                                            { type: 'ดูแลสระว่ายน้ำ (Pool)', days: '........................', time: '........-........', qty: '...... ครั้ง/ด.' },
-                                                            { type: 'จัดเก็บขยะ (กทม./เอกชน)', days: '........................', time: '........-........', qty: '...... ครั้ง/สัปดาห์' },
-                                                            { type: 'กำจัดแมลง (Pest Control)', days: 'ตามแผนงานประจำเดือน', time: '-', qty: '...... ครั้ง/ด.' },
-                                                            { type: 'บำรุงรักษาลิฟต์ (Elevator)', days: 'ตามแผนงานประจำเดือน', time: '-', qty: '1 ครั้ง/ด.' },
-                                                            { type: 'บำรุงรักษาระบบแจ้งเหตุเพลิงไหม้', days: 'ตามแผนงานประจำเดือน', time: '-', qty: '1 ครั้ง/ด.' },
-                                                            { type: 'บำรุงรักษาเครื่องกำเนิดไฟฟ้า', days: 'ตามแผนงานประจำเดือน', time: '-', qty: '1 ครั้ง/ด.' },
-                                                            { type: 'ระบบไม้กั้น / ลานจอดรถ', days: 'ตามแผนงานประจำเดือน', time: '-', qty: '1 ครั้ง/ด.' },
-                                                        ].map((item, idx) => (
-                                                            <tr key={`vendor-${idx}`} className="hover:bg-gray-50">
-                                                                <td className="border border-gray-400 p-1 text-center font-medium">{idx + 1}</td>
-                                                                <td className={`border border-gray-400 p-1 font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>{item.type}</td>
-                                                                <td className="border border-gray-400 p-0"><input type="text" className="w-full h-full p-1 border-none outline-none text-[9px] bg-transparent text-center" defaultValue={item.days} /></td>
-                                                                <td className="border border-gray-400 p-0"><input type="text" className="w-full h-full p-1 border-none outline-none text-[9px] bg-transparent text-center" defaultValue={item.time} /></td>
-                                                                <td className="border border-gray-400 p-0"><input type="text" className="w-full h-full p-1 border-none outline-none text-[9px] bg-transparent text-center" defaultValue={item.qty} /></td>
-                                                                <td className="border border-gray-400 p-0"><input type="text" className="w-full h-full p-1 border-none outline-none text-[9px] bg-transparent" placeholder="ชื่อบริษัท..." /></td>
-                                                                <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3 h-3 cursor-pointer"/></td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-
-                                            {/* หมวด 5: ทรัพย์สินและอุปกรณ์ */}
-                                            <div className="mb-2">
-                                                <h3 className={`font-bold text-sm mb-1.5 border-b pb-1 text-blue-800 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>5. หมวดทรัพย์สินและอุปกรณ์ (Assets & Tools)</h3>
-                                                <table className="w-full border-collapse border border-gray-400 text-[10px] text-left">
-                                                    <thead className="bg-gray-100 text-center">
-                                                        <tr>
-                                                            <th className="border border-gray-400 p-1 w-8">ลำดับ</th>
-                                                            <th className="border border-gray-400 p-1">รายการ (Item)</th>
-                                                            <th className="border border-gray-400 p-1 w-10">มี</th>
-                                                            <th className="border border-gray-400 p-1 w-10">ไม่มี</th>
-                                                            <th className="border border-gray-400 p-1 w-40">หมายเหตุ / จำนวน</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {[
-                                                            { title: 'สมุดบัญชีธนาคารนิติบุคคล (Bookbank) และ สมุดเช็ค ทุกบัญชี' },
-                                                            { title: 'กุญแจสำนักงาน / กุญแจตู้จดหมาย / กุญแจห้องงานระบบ' },
-                                                            { title: 'รหัสผ่านตู้เซฟประจำสำนักงานนิติบุคคล (Safe Passcode)' },
-                                                            { title: 'โทรศัพท์มือถือส่วนกลาง / วิทยุสื่อสาร / อุปกรณ์สำนักงาน (คอมฯ/ปริ้นเตอร์)' },
-                                                            { title: 'Master Keycard / บัตรสำรอง / อุปกรณ์สำหรับตั้งค่าระบบ Access Control' },
-                                                            { title: 'ทะเบียนทรัพย์สิน (Asset Register) / เครื่องมือช่าง / อุปกรณ์ฉุกเฉิน' },
-                                                        ].map((item, idx) => (
-                                                            <tr key={`asset-${idx}`} className="hover:bg-gray-50">
-                                                                <td className="border border-gray-400 p-1 text-center font-medium">{idx + 1}</td>
-                                                                <td className={`border border-gray-400 p-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>{item.title}</td>
-                                                                <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3 h-3 cursor-pointer"/></td>
-                                                                <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3 h-3 cursor-pointer"/></td>
-                                                                <td className="border border-gray-400 p-0"><input type="text" className="w-full h-full p-1 border-none outline-none text-[10px] bg-transparent focus:bg-yellow-50" placeholder="..." /></td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-
-                                            <div className="grid grid-cols-2 gap-4 mb-2 mt-4 border-t border-gray-300 pt-3">
-                                                {/* การเงิน */}
-                                                <div>
-                                                    <h3 className={`font-bold text-sm mb-1.5 border-b pb-1 text-blue-800 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>6. การเงิน (Finance)</h3>
-                                                    <div className="bg-gray-50 p-2 border border-gray-300 rounded space-y-2 text-[11px]">
-                                                        <div className="flex items-center justify-between">
-                                                            <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เงินสดย่อย (Petty Cash):</span>
-                                                            <div className="flex items-center gap-1"><div className="w-16 border-b border-dotted border-gray-500 text-right font-bold pr-1"></div> ฿</div>
-                                                        </div>
-                                                        <div className="flex items-center justify-between">
-                                                            <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เงินทดรองจ่าย (Advance):</span>
-                                                            <div className="flex items-center gap-1"><div className="w-16 border-b border-dotted border-gray-500 text-right font-bold pr-1"></div> ฿</div>
-                                                        </div>
-                                                        <div className="flex items-center justify-between">
-                                                            <span className={`${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เช็ครับล่วงหน้า (PDC) / รอนำฝาก:</span>
-                                                            <div className="flex items-center gap-1"><div className="w-16 border-b border-dotted border-gray-500 text-center font-bold"></div> ฉบับ</div>
-                                                        </div>
-                                                        <div className="flex items-center justify-between pt-1 border-t border-gray-200">
-                                                            <span className={`text-gray-800 font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>สมุดใบเสร็จ / ใบกำกับภาษี (ที่ยังไม่ใช้):</span>
-                                                            <div className="flex items-center gap-1"><div className="w-16 border-b border-dotted border-gray-500 text-center font-bold"></div> เล่ม</div>
-                                                        </div>
-                                                        <div className="flex items-center justify-between">
-                                                            <span className={`text-gray-800 font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>รายงานงบการเงิน / รับ-จ่าย เดือนล่าสุด:</span>
-                                                            <div className="flex items-center gap-1"><input type="checkbox" className="w-3 h-3"/> <span className="text-gray-500">แนบรายงาน</span></div>
-                                                        </div>
-                                                        <div className="flex items-center justify-between">
-                                                            <span className={`text-red-600 font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>รายงานสรุปลูกหนี้ค้างชำระ:</span>
-                                                            <div className="flex items-center gap-1"><input type="checkbox" className="w-3 h-3"/> <span className="text-gray-500">แนบรายงาน</span></div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                {/* รหัสผ่าน */}
-                                                <div>
-                                                    <h3 className={`font-bold text-sm mb-1.5 border-b pb-1 text-blue-800 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>7. ระบบงาน (Systems & Passwords)</h3>
-                                                    <div className="bg-gray-50 p-2 border border-gray-300 rounded space-y-1.5 flex flex-col">
-                                                        <label className="flex items-center gap-1 text-[11px] cursor-pointer"><input type="checkbox" className="w-3 h-3"/> ERP / โปรแกรมบัญชี-บริหารอาคาร</label>
-                                                        <label className="flex items-center gap-1 text-[11px] cursor-pointer"><input type="checkbox" className="w-3 h-3"/> Email นิติบุคคล & Social Media (Line/FB)</label>
-                                                        <label className="flex items-center gap-1 text-[11px] cursor-pointer"><input type="checkbox" className="w-3 h-3"/> ระบบกล้องวงจรปิด (CCTV) / ระบบไม้กั้น</label>
-                                                        <label className="flex items-center gap-1 text-[11px] cursor-pointer"><input type="checkbox" className="w-3 h-3"/> Internet Banking (Username/Password/Token)</label>
-                                                        <label className="flex items-center gap-1 text-[11px] cursor-pointer"><input type="checkbox" className="w-3 h-3"/> ระบบอินเตอร์เน็ตส่วนกลาง / รหัส Wi-Fi / Router</label>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <div className="mb-2">
-                                                <h3 className={`font-bold text-sm mb-1.5 border-b pb-1 text-blue-800 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>8. งานค้างดำเนินการ และ คดีความ (Pending Tasks & Legal)</h3>
-                                                <div className="flex flex-col gap-1.5 text-[11px]">
-                                                    <div className="flex items-start gap-2">
-                                                        <label className="mt-0.5"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></label>
-                                                        <div className="flex-1">
-                                                            <span className={`font-bold text-red-600 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>แฟ้มคดีความ / ติดต่อกรมบังคับคดี (Legal):</span>
-                                                            <span className={`ml-2 text-gray-500 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>(ระบุสถานะลูกหนี้ที่ฟ้องร้อง/อายัดทรัพย์)</span>
-                                                            <div className="w-full border-b border-dotted border-gray-400 h-4 mt-1"></div>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex items-start gap-2">
-                                                        <label className="mt-0.5"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></label>
-                                                        <div className="flex-1">
-                                                            <span className={`font-bold text-orange-600 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ลูกบ้านที่อยู่ระหว่างเจรจาประนอมหนี้ / ผ่อนชำระเป็นกรณีพิเศษ:</span>
-                                                            <div className="w-full border-b border-dotted border-gray-400 h-4 mt-1"></div>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex items-start gap-2">
-                                                        <label className="mt-0.5"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></label>
-                                                        <div className="flex-1">
-                                                            <span className={`font-bold text-blue-600 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>งานติดตามซ่อมแซม Defect จากผู้พัฒนาโครงการ (ถ้ามี):</span>
-                                                            <div className="w-full border-b border-dotted border-gray-400 h-4 mt-1"></div>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex items-start gap-2">
-                                                        <label className="mt-0.5"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></label>
-                                                        <div className="flex-1">
-                                                            <span className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>งานซ่อมแซมใหญ่ / ผู้รับเหมาที่ยังปฏิบัติงานไม่เสร็จ:</span>
-                                                            <div className="w-full border-b border-dotted border-gray-400 h-4 mt-1"></div>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex items-start gap-2">
-                                                        <label className="mt-0.5"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></label>
-                                                        <div className="flex-1">
-                                                            <span className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ข้อร้องเรียนสำคัญของลูกบ้าน / สัญญาที่ใกล้หมดอายุใน 60 วัน:</span>
-                                                            <div className="w-full border-b border-dotted border-gray-400 h-4 mt-1"></div>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex items-start gap-2">
-                                                        <label className="mt-0.5"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></label>
-                                                        <div className="flex-1">
-                                                            <span className={`font-bold text-green-700 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ส่งมอบแฟ้มสรุปแผนงาน (Action Plan) ฉบับล่าสุด</span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <div className="mb-2" style={{ pageBreakBefore: 'always' }}>
-                                                <h3 className={`font-bold text-base mb-1.5 border-b pb-1 text-blue-800 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block w-full' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>9. แผนการสอนงาน และ Checklist (1-Month Training & Handover)</h3>
-                                                <table className="w-full border-collapse border border-gray-400 text-[10px] text-left">
-                                                    <thead className="bg-blue-50 text-center">
-                                                        <tr>
-                                                            <th className="border border-gray-400 p-1 w-16">ระยะเวลา</th>
-                                                            <th className="border border-gray-400 p-1">หัวข้อการเรียนรู้ / ส่งมอบ (Training Topics)</th>
-                                                            <th className="border border-gray-400 p-1 w-20">ผู้สอน</th>
-                                                            <th className="border border-gray-400 p-1 w-12">สถานะ</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {/* Week 1 */}
-                                                        <tr>
-                                                            <td className="border border-gray-400 p-1 text-center font-bold bg-white" rowSpan="2">สัปดาห์ที่ 1<br/>(W1)</td>
-                                                            <td className={`border border-gray-400 p-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>1. แนะนำตัวคณะกรรมการ/ทีมงาน และ ศึกษากฎระเบียบข้อบังคับ/รายงานการประชุม (หมวด 2,3)</td>
-                                                            <td className="border border-gray-400 p-1 text-center text-gray-600">Area Mgr</td>
-                                                            <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></td>
-                                                        </tr>
-                                                        <tr>
-                                                            <td className={`border border-gray-400 p-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>2. ตรวจนับรายการทรัพย์สิน และ แฟ้มสัญญารับ-จ่าย คู่สัญญา (หมวด 4,5) ให้ครบถ้วน</td>
-                                                            <td className="border border-gray-400 p-1 text-center text-gray-600">Mgr คนเก่า</td>
-                                                            <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></td>
-                                                        </tr>
-                                                        {/* Week 2 */}
-                                                        <tr>
-                                                            <td className="border border-gray-400 p-1 text-center font-bold bg-gray-50" rowSpan="2">สัปดาห์ที่ 2<br/>(W2)</td>
-                                                            <td className={`border border-gray-400 p-1 bg-gray-50 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>3. เรียนรู้ระบบ ERP/บัญชี, การเบิกจ่าย, เงินสดย่อย และระบบออนไลน์ (หมวด 6,7)</td>
-                                                            <td className="border border-gray-400 p-1 text-center text-gray-600 bg-gray-50">ส่วนกลาง</td>
-                                                            <td className="border border-gray-400 p-1 text-center bg-gray-50"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></td>
-                                                        </tr>
-                                                        <tr>
-                                                            <td className={`border border-gray-400 p-1 bg-gray-50 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>4. สรุปสถานะแฟ้มคดีความ / กรมบังคับคดี / ลูกหนี้ค้างชำระ (หมวด 8)</td>
-                                                            <td className="border border-gray-400 p-1 text-center text-gray-600 bg-gray-50">Mgr คนเก่า</td>
-                                                            <td className="border border-gray-400 p-1 text-center bg-gray-50"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></td>
-                                                        </tr>
-                                                        {/* Week 3 */}
-                                                        <tr>
-                                                            <td className="border border-gray-400 p-1 text-center font-bold bg-white" rowSpan="2">สัปดาห์ที่ 3<br/>(W3)</td>
-                                                            <td className={`border border-gray-400 p-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>5. ตรวจสอบพื้นที่ส่วนกลาง (Walkthrough) ตรวจประเมินคู่สัญญา และจุดเสี่ยงในอาคาร</td>
-                                                            <td className="border border-gray-400 p-1 text-center text-gray-600">ช่างอาคาร</td>
-                                                            <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></td>
-                                                        </tr>
-                                                        <tr>
-                                                            <td className={`border border-gray-400 p-1 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>6. ตรวจสอบแผนบำรุงรักษา (PM), งานซ่อมค้าง และการจดมิเตอร์น้ำไฟ</td>
-                                                            <td className="border border-gray-400 p-1 text-center text-gray-600">หัวหน้าช่าง</td>
-                                                            <td className="border border-gray-400 p-1 text-center"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></td>
-                                                        </tr>
-                                                        {/* Week 4 */}
-                                                        <tr>
-                                                            <td className="border border-gray-400 p-1 text-center font-bold bg-green-50" rowSpan="2">สัปดาห์ที่ 4<br/>(W4)</td>
-                                                            <td className={`border border-gray-400 p-1 bg-green-50 ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>7. การจัดการข้อร้องเรียน และรับส่งมอบ Action Plan ที่ค้างอยู่ทั้งหมด</td>
-                                                            <td className="border border-gray-400 p-1 text-center text-gray-600 bg-green-50">Area Mgr</td>
-                                                            <td className="border border-gray-400 p-1 text-center bg-green-50"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></td>
-                                                        </tr>
-                                                        <tr>
-                                                            <td className={`border border-gray-400 p-1 bg-green-50 text-green-800 font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>8. เซ็นรับรองการส่งมอบงานสมบูรณ์ (Sign-off)</td>
-                                                            <td className="border border-gray-400 p-1 text-center text-gray-600 bg-green-50">Area Mgr</td>
-                                                            <td className="border border-gray-400 p-1 text-center bg-green-50"><input type="checkbox" className="w-3.5 h-3.5 cursor-pointer"/></td>
-                                                        </tr>
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        </div>
-                                    );
-                                }
 
                                 // แบบฟอร์มย้ายเข้า-ออก (Move In/Out)
                                 if (id === 'f1' || id === 'f2') {
@@ -13831,25 +13760,19 @@ export default function App() {
                                 <div className="text-center w-56">
                                     <div className="border-b border-gray-800 mb-2 h-8"></div>
                                     <div className="mb-1">( ....................................................... )</div>
-                                    <div className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>
-                                        {selectedFormDetails.id === 'f18' ? 'ผู้ส่งมอบงาน (คนเก่า)' : 'ผู้ร้องขอ / เจ้าของร่วม'}
-                                    </div>
+                                    <div className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ผู้ร้องขอ / เจ้าของร่วม</div>
                                     <div className="text-xs text-gray-500 mt-1">วันที่ ....... / ....... / ...........</div>
                                 </div>
                                 <div className="text-center w-56">
                                     <div className="border-b border-gray-800 mb-2 h-8"></div>
                                     <div className="mb-1">( ....................................................... )</div>
-                                    <div className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>
-                                        {selectedFormDetails.id === 'f18' ? 'ผู้รับมอบงาน (คนใหม่)' : 'เจ้าหน้าที่นิติบุคคลฯ'}
-                                    </div>
+                                    <div className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>เจ้าหน้าที่นิติบุคคลฯ</div>
                                     <div className="text-xs text-gray-500 mt-1">วันที่ ....... / ....... / ...........</div>
                                 </div>
                                 <div className="text-center w-56">
                                     <div className="border-b border-gray-800 mb-2 h-8"></div>
                                     <div className="mb-1">( ....................................................... )</div>
-                                    <div className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>
-                                        {selectedFormDetails.id === 'f18' ? 'ผู้จัดการพื้นที่ (พยาน/ผู้อนุมัติ)' : 'ผู้จัดการนิติบุคคลฯ (ผู้อนุมัติ)'}
-                                    </div>
+                                    <div className={`font-bold ${isEditingForm ? 'outline-dashed outline-1 outline-blue-400 bg-blue-50 cursor-text inline-block' : ''}`} contentEditable={isEditingForm} suppressContentEditableWarning>ผู้จัดการนิติบุคคลฯ (ผู้อนุมัติ)</div>
                                     <div className="text-xs text-gray-500 mt-1">วันที่ ....... / ....... / ...........</div>
                                 </div>
                             </div>
