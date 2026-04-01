@@ -1474,14 +1474,17 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
     const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
     if (!isRestore && valueToStore === stateRef.current) return;
 
-    const oldState = stateRef.current;
-    setState(valueToStore);
-    stateRef.current = valueToStore;
+    // เพิ่มการป้องกัน (Safety Guard) บังคับให้เป็น Array เสมอ ป้องกันระบบล่มหากไฟล์ Backup ผิดเพี้ยน
+    const oldState = Array.isArray(stateRef.current) ? stateRef.current : [];
+    const safeValueToStore = Array.isArray(valueToStore) ? valueToStore : [];
+
+    setState(safeValueToStore);
+    stateRef.current = safeValueToStore;
     
     if (typeof window !== 'undefined') {
         // ผลักการทำงานของ LocalStorage ไปไว้คิวหลังสุด เพื่อไม่ให้หน้าจอค้าง
         setTimeout(() => {
-            try { localStorage.setItem(collectionName, JSON.stringify(valueToStore)); } catch (e) {}
+            try { localStorage.setItem(collectionName, JSON.stringify(safeValueToStore)); } catch (e) {}
         }, 0);
     }
 
@@ -1497,13 +1500,13 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                }
 
                const newStateMap = new Map();
-               for (const n of valueToStore) {
+               for (const n of safeValueToStore) {
                    if (n && n.id) newStateMap.set(String(n.id), n);
                }
 
                // 1. เพิ่มหรืออัปเดตข้อมูล
-               for (const item of valueToStore) {
-                   if (!item.id) continue;
+               for (const item of safeValueToStore) {
+                   if (!item || !item.id) continue; // ข้ามรายการที่ไม่มี ID (ข้อมูลเสีย)
                    const strId = String(item.id);
                    
                    let needsUpdate = true;
@@ -4088,12 +4091,11 @@ export default function App() {
 
                           setRestoreProgress('ข้อมูลถูกนำเข้าและอัปโหลดเข้าสู่ระบบคลาวด์สมบูรณ์ 100% สำเร็จ!');
                           
-                          // แจ้งเตือนเสร็จสิ้นและรอรีโหลด
+                          // ลบการบังคับ Reload หน้าต่างทิ้ง เพื่อป้องกันปัญหาข้อมูลบน Firebase ดึงกลับมาทับ
                           setTimeout(() => {
-                              showAlert("สำเร็จ", "ระบบนำเข้าและอัปเดตข้อมูลเสร็จสมบูรณ์ 100% ระบบจะทำการรีเฟรชหน้าจออัตโนมัติภายใน 3 วินาที");
-                              setTimeout(() => {
-                                  window.location.reload();
-                              }, 3000);
+                              showAlert("สำเร็จ", "ระบบนำเข้าและอัปเดตข้อมูลเสร็จสมบูรณ์ 100% ข้อมูลพร้อมใช้งานทันทีโดยไม่ต้องรีเฟรชหน้า");
+                              setIsRestoring(false);
+                              setRestoreProgress('');
                           }, 500);
                           
                       } catch (err) {
