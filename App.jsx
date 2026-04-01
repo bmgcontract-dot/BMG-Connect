@@ -1371,6 +1371,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
           if (local) {
               try { 
                   const parsed = JSON.parse(local); 
+                  if (!Array.isArray(parsed)) return initialValue; // ป้องกันข้อมูลเป็น null หรือ Object
                   if (Array.isArray(parsed) && parsed.length === 0 && Array.isArray(initialValue) && initialValue.length > 0) return initialValue;
                   return parsed;
               } catch(e) { return initialValue; }
@@ -2496,7 +2497,12 @@ export default function App() {
       alert('ปลดล็อคตารางงานสำเร็จ สถานะกลับไปเป็นรอฝ่ายบุคคลอนุมัติ');
   };
 
-  const Badge = ({ status }) => { const statusText = t(status.charAt(0).toLowerCase() + status.slice(1).replace(/ /g, '')) || status; const colors = { 'Active': 'bg-green-100 text-green-800', 'Inactive': 'bg-gray-100 text-gray-800', 'Warning': 'bg-yellow-100 text-yellow-800', 'Good': 'bg-green-100 text-green-800', 'Fair': 'bg-yellow-100 text-yellow-800', 'Normal': 'bg-blue-100 text-blue-800', 'Repair': 'bg-red-100 text-red-800', 'Pending': 'bg-orange-100 text-orange-800', 'Approved': 'bg-green-100 text-green-800', 'Completed': 'bg-green-100 text-green-800', 'Expiring Soon': 'bg-orange-100 text-orange-800', 'Expired': 'bg-red-100 text-red-800' }; return <span className={`px-2 py-1 rounded-full text-xs font-semibold ${colors[status] || 'bg-gray-100 text-gray-800'}`}>{statusText}</span>; };
+  const Badge = ({ status }) => { 
+      if (!status || typeof status !== 'string') return <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded-full text-xs font-semibold">-</span>;
+      const statusText = t(status.charAt(0).toLowerCase() + status.slice(1).replace(/ /g, '')) || status; 
+      const colors = { 'Active': 'bg-green-100 text-green-800', 'Inactive': 'bg-gray-100 text-gray-800', 'Warning': 'bg-yellow-100 text-yellow-800', 'Good': 'bg-green-100 text-green-800', 'Fair': 'bg-yellow-100 text-yellow-800', 'Normal': 'bg-blue-100 text-blue-800', 'Repair': 'bg-red-100 text-red-800', 'Pending': 'bg-orange-100 text-orange-800', 'Approved': 'bg-green-100 text-green-800', 'Completed': 'bg-green-100 text-green-800', 'Expiring Soon': 'bg-orange-100 text-orange-800', 'Expired': 'bg-red-100 text-red-800' }; 
+      return <span className={`px-2 py-1 rounded-full text-xs font-semibold ${colors[status] || 'bg-gray-100 text-gray-800'}`}>{statusText}</span>; 
+  };
   
   // Helpers for PM Calendar
   const changePmMonth = (increment) => {
@@ -5323,7 +5329,8 @@ export default function App() {
 
   const UserManagement = () => {
       // Logic สำหรับการกรองและการเรียงลำดับ
-      const filteredUsers = users
+      const safeUsers = Array.isArray(users) ? users.filter(Boolean) : [];
+      const filteredUsers = safeUsers
           .filter(u => userDeptFilter ? u.department === userDeptFilter : true)
           .filter(u => userRoleFilter ? u.position === userRoleFilter : true)
           .sort((a, b) => {
