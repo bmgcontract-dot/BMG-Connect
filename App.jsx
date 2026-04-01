@@ -1954,7 +1954,7 @@ export default function App() {
 
   // --- NEW: Auto-sync Current User (อัปเดตข้อมูลผู้ใช้แบบ Real-time เผื่อมีการเปลี่ยนสิทธิ์) ---
   useEffect(() => {
-      if (currentUser && users.length > 0) {
+      if (currentUser && Array.isArray(users) && users.length > 0) {
           const freshUser = users.find(u => u.id === currentUser.id);
           if (freshUser && JSON.stringify(freshUser) !== JSON.stringify(currentUser)) {
               // ตรวจสอบว่าไม่ได้เปลี่ยนแค่ lastLogin (ป้องกัน Infinite Loop ในกรณีที่เซ็ต lastLogin)
@@ -1975,6 +1975,7 @@ export default function App() {
       // ฟังก์ชันสำหรับอัปเดตเวลาล่าสุด
       const updatePresence = () => {
           setUsers(prevUsers => {
+              if (!Array.isArray(prevUsers)) return prevUsers;
               const foundUser = prevUsers.find(u => u.id === currentUser.id);
               if (!foundUser) return prevUsers;
               
@@ -2782,7 +2783,23 @@ export default function App() {
 
   const handleLogin = (e) => { 
       e.preventDefault(); 
-      const user = users.find(u => u.username === loginForm.username && u.password === loginForm.password); 
+      
+      const inputUsername = loginForm.username.trim(); // ป้องกันการพิมพ์เว้นวรรคต่อท้าย
+      const inputPassword = loginForm.password;
+
+      // 1. ค้นหาใน Users State ปกติ
+      let user = (users || []).find(u => u.username === inputUsername && u.password === inputPassword); 
+      
+      // 2. Fallback ฉุกเฉินสำหรับ Admin ป้องกันบัญชีหายหรือเข้าไม่ได้จากปัญหา Database
+      if (!user && inputUsername === 'admin' && inputPassword === 'bosskim') {
+          user = INITIAL_USERS[0]; // ดึงบัญชี Admin หลักมาใช้
+          
+          // ถ้าไม่มีในฐานข้อมูล ให้เพิ่มกลับเข้าไปกู้คืนให้โดยอัตโนมัติ
+          if (Array.isArray(users) && !users.some(u => u.username === 'admin')) {
+              setUsers([...users, user]);
+          }
+      }
+
       if (user) { 
           // อัปเดตเวลาเข้าใช้งานล่าสุด
           const updatedUser = { ...user, lastLogin: new Date().toISOString() };
@@ -2796,13 +2813,18 @@ export default function App() {
           setLoginError(''); 
 
           // อัปเดตข้อมูลใน State เพื่อให้เวลาแสดงผลในตาราง
-          const updatedUsers = users.map(u => u.id === updatedUser.id ? updatedUser : u);
-          setUsers(updatedUsers);
+          if (Array.isArray(users)) {
+              const userExists = users.some(u => u.id === updatedUser.id);
+              if (userExists) {
+                  const updatedUsers = users.map(u => u.id === updatedUser.id ? updatedUser : u);
+                  setUsers(updatedUsers);
+              }
+          }
           
           // ตรวจสอบหน่วยงานประจำของผู้ใช้
           if (updatedUser.department && updatedUser.department !== 'Head Office') {
               // ค้นหาข้อมูลโปรเจกต์จากชื่อ department
-              const assignedProject = projects.find(p => p.name === updatedUser.department);
+              const assignedProject = (projects || []).find(p => p.name === updatedUser.department);
               if (assignedProject) {
                   setSelectedProject(assignedProject); // เปิดหน้าโครงการนั้นทันที
                   setActiveMenu('projects');
@@ -2818,7 +2840,7 @@ export default function App() {
               setActiveMenu('dashboard');
           }
       } else { 
-          setLoginError('หากไม่สามารถเข้าใช้งานได้ กรุณาติดต่อผู้ดูแลระบบ (Admin)'); 
+          setLoginError('ชื่อผู้ใช้งาน หรือ รหัสผ่านไม่ถูกต้อง (หากคุณลืมรหัสผ่าน กรุณาติดต่อผู้ดูแลระบบ)'); 
       } 
   };
   
