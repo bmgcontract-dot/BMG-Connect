@@ -4024,6 +4024,22 @@ export default function App() {
 
                           const d = importedData.data;
                           
+                          // --- Clean up large base64 data to prevent Firestore 1MB limit error during Restore ---
+                          if (Array.isArray(d.projects)) {
+                              d.projects.forEach(p => {
+                                  if (p.files) {
+                                      Object.keys(p.files).forEach(k => {
+                                          if (p.files[k] && p.files[k].data) delete p.files[k].data;
+                                      });
+                                  }
+                              });
+                          }
+                          if (Array.isArray(d.contracts)) {
+                              d.contracts.forEach(c => {
+                                  if (c.file && c.file.data) delete c.file.data;
+                              });
+                          }
+
                           // 1. กู้คืนไฟล์ PDF ต่างๆ ลง IndexedDB (รวบยอดแบบ Batch เพื่อความรวดเร็ว)
                           if (d.localFiles && Object.keys(d.localFiles).length > 0) {
                               const totalFiles = Object.keys(d.localFiles).length;
@@ -4405,22 +4421,13 @@ export default function App() {
       
       try {
           let nextList;
-          let savedProject;
+          // Deep copy เพื่อป้องกันผลกระทบกับ State ต้นฉบับเมื่อมีการลบ property
+          let savedProject = JSON.parse(JSON.stringify(newProject));
           
-          if (isEditingProject) {
-              savedProject = { ...newProject };
-              nextList = projects.map(p => p.id === newProject.id ? savedProject : p);
-              // อัปเดตข้อมูลในหน้าต่างที่กำลังเปิดอยู่
-              if (selectedProject?.id === newProject.id) {
-                  setSelectedProject(savedProject);
-              }
-          } else {
-              const id = generateId();
-              savedProject = { ...newProject, id, status: 'Active' };
-              nextList = [...projects, savedProject];
+          if (!isEditingProject) {
+              savedProject.id = generateId();
+              savedProject.status = 'Active';
           }
-          
-          setProjects(nextList);
 
           // รวบรวมไฟล์สำหรับอัปโหลดขึ้น Drive อัตโนมัติ (โลโก้ และ เอกสารโครงการ)
           let filesToUpload = [];
@@ -4432,10 +4439,21 @@ export default function App() {
                   const fileObj = savedProject.files[key];
                   if (fileObj && fileObj.data && fileObj.data.startsWith('data:')) {
                        filesToUpload.push({ name: `ProjectDoc_${savedProject.code}_${key}.pdf`, data: fileObj.data });
+                       // ลบ base64 ออกจาก object ที่จะเซฟลง Firestore เพื่อป้องกัน 1MB Limit Error
+                       delete fileObj.data;
                   }
               });
           }
 
+          if (isEditingProject) {
+              nextList = projects.map(p => p.id === savedProject.id ? savedProject : p);
+              // อัปเดตข้อมูลในหน้าต่างที่กำลังเปิดอยู่
+              if (selectedProject?.id === savedProject.id) setSelectedProject(savedProject);
+          } else {
+              nextList = [...projects, savedProject];
+          }
+          
+          setProjects(nextList);
           triggerAutoSync('Projects_โครงการ', nextList, filesToUpload);
 
           setShowAddProjectModal(false);
@@ -4457,30 +4475,14 @@ export default function App() {
       
       try {
           let nextList;
-          let savedContract;
-
-          if (isEditingContract) {
-              // อัปเดตข้อมูลสัญญาเดิม
-              savedContract = { ...newContract, category: finalCategory };
-              nextList = contracts.map(c => c.id === newContract.id ? savedContract : c);
-              // ถ้าเปิดหน้าจอรายละเอียดค้างไว้ ให้อัปเดตข้อมูลในนั้นด้วย
-              if (selectedContractView?.id === newContract.id) {
-                  setSelectedContractView(savedContract);
-              }
-          } else {
-              // เพิ่มสัญญาใหม่
-              const id = generateId();
-              savedContract = { 
-                  id, 
-                  projectId: selectedProject.id, 
-                  status: 'Active', 
-                  ...newContract,
-                  category: finalCategory
-              };
-              nextList = [...contracts, savedContract];
-          }
+          let savedContract = JSON.parse(JSON.stringify(newContract));
+          savedContract.category = finalCategory;
           
-          setContracts(nextList);
+          if (!isEditingContract) {
+              savedContract.id = generateId();
+              savedContract.projectId = selectedProject.id;
+              savedContract.status = 'Active';
+          }
 
           // --- อัปโหลดไฟล์สัญญาเข้า Drive อัตโนมัติ ---
           if (savedContract.file && savedContract.file.data && savedContract.file.data.startsWith('data:')) {
@@ -4507,8 +4509,18 @@ export default function App() {
                       console.error("Auto-upload to Drive failed", err);
                   }
               }
+              // ลบ base64 ออกจาก object ที่จะเซฟลง Firestore เพื่อป้องกัน 1MB Limit Error
+              delete savedContract.file.data;
           }
 
+          if (isEditingContract) {
+              nextList = contracts.map(c => c.id === savedContract.id ? savedContract : c);
+              if (selectedContractView?.id === savedContract.id) setSelectedContractView(savedContract);
+          } else {
+              nextList = [...contracts, savedContract];
+          }
+          
+          setContracts(nextList);
           // ซิงค์ข้อมูล Text ไปยัง Sheets
           triggerAutoSync('Contracts_สัญญา', nextList, []);
           
@@ -8261,65 +8273,76 @@ export default function App() {
                               </div>
                           </div>
 
-                          <div className="p-8 bg-gray-50 flex justify-center overflow-x-auto">
+                          <div className="p-8 bg-gray-100 flex justify-center overflow-x-auto w-full">
                               {selectedFormSystem ? (
-                                  <div id="print-blank-pm-form" className={`bg-white mx-auto box-border flex flex-col ${isExporting ? 'w-[190mm] min-w-[190mm] max-w-[190mm] p-[5mm] border-none shadow-none' : 'p-10 w-[210mm] shadow-sm border border-gray-200'}`}>
-                                      <div className="text-center mb-8">
-                                          <h2 className="text-2xl font-bold text-gray-800">แบบฟอร์มตรวจสอบบำรุงรักษาเชิงป้องกัน (PM Checklist)</h2>
-                                          <h3 className="text-lg text-gray-600 mt-2 font-medium">ระบบ: {selectedFormSystem}</h3>
+                                  <div id="print-blank-pm-form" className={`bg-white mx-auto relative box-border flex flex-col text-gray-800 ${isExporting ? 'w-[190mm] min-w-[190mm] max-w-[190mm] px-[5mm] pt-[5mm] pb-[10mm] border-none shadow-none m-0' : 'w-[210mm] min-w-[210mm] max-w-[210mm] min-h-[297mm] px-[15mm] pt-[15mm] pb-[15mm] shadow-lg border border-gray-300'}`}>
+                                      <div className="text-center mb-6 shrink-0">
+                                          <h2 className="text-xl font-bold text-gray-800">แบบฟอร์มตรวจสอบบำรุงรักษาเชิงป้องกัน (PM Checklist)</h2>
+                                          <h3 className="text-base text-gray-600 mt-2 font-medium">ระบบ: {selectedFormSystem}</h3>
                                       </div>
                                       
-                                      <div className="grid grid-cols-2 gap-x-8 gap-y-4 mb-8 text-sm text-gray-700">
-                                          <div className="flex"><span className="w-24 font-bold shrink-0">รหัสเครื่องจักร:</span> <div className="flex-1 border-b border-gray-400 border-dotted"></div></div>
-                                          <div className="flex"><span className="w-24 font-bold shrink-0">ชื่อเครื่องจักร:</span> <div className="flex-1 border-b border-gray-400 border-dotted"></div></div>
-                                          <div className="flex"><span className="w-24 font-bold shrink-0">สถานที่ติดตั้ง:</span> <div className="flex-1 border-b border-gray-400 border-dotted"></div></div>
-                                          <div className="flex"><span className="w-24 font-bold shrink-0">วันที่ตรวจสอบ:</span> <div className="flex-1 border-b border-gray-400 border-dotted"></div></div>
+                                      <div className="grid grid-cols-2 gap-x-8 gap-y-4 mb-6 text-xs text-gray-700 shrink-0">
+                                          <div className="flex items-end"><span className="w-20 font-bold shrink-0">รหัสเครื่องจักร:</span> <div className="flex-1 border-b border-gray-400 border-dotted"></div></div>
+                                          <div className="flex items-end"><span className="w-20 font-bold shrink-0">ชื่อเครื่องจักร:</span> <div className="flex-1 border-b border-gray-400 border-dotted"></div></div>
+                                          <div className="flex items-end"><span className="w-20 font-bold shrink-0">สถานที่ติดตั้ง:</span> <div className="flex-1 border-b border-gray-400 border-dotted"></div></div>
+                                          <div className="flex items-end"><span className="w-20 font-bold shrink-0">วันที่ตรวจสอบ:</span> <div className="flex-1 border-b border-gray-400 border-dotted"></div></div>
                                       </div>
 
-                                      <table className="w-full text-sm border-collapse mb-10 table-fixed break-words">
+                                      <table className="w-full text-[11px] border-collapse mb-6 table-fixed break-words flex-1">
                                           <thead className="bg-gray-100 text-gray-800">
                                               <tr>
-                                                  <th className="p-2 border border-gray-300 text-center w-[10%]">ลำดับ</th>
-                                                  <th className="p-2 border border-gray-300 text-left w-[45%]">รายละเอียดการตรวจสอบ (Inspection Item)</th>
-                                                  <th className="p-2 border border-gray-300 text-center w-[10%]">ปกติ</th>
-                                                  <th className="p-2 border border-gray-300 text-center w-[10%]">ผิดปกติ</th>
-                                                  <th className="p-2 border border-gray-300 text-center w-[10%]">N/A</th>
-                                                  <th className="p-2 border border-gray-300 text-left w-[15%]">หมายเหตุ</th>
+                                                  <th className="p-2 border border-gray-400 text-center w-[8%]">ลำดับ</th>
+                                                  <th className="p-2 border border-gray-400 text-left w-[46%]">รายละเอียดการตรวจสอบ (Inspection Item)</th>
+                                                  <th className="p-2 border border-gray-400 text-center w-[10%]">ปกติ</th>
+                                                  <th className="p-2 border border-gray-400 text-center w-[10%]">ผิดปกติ</th>
+                                                  <th className="p-2 border border-gray-400 text-center w-[8%]">N/A</th>
+                                                  <th className="p-2 border border-gray-400 text-left w-[18%]">หมายเหตุ</th>
                                               </tr>
                                           </thead>
                                           <tbody>
                                               {getChecklistForSystem(selectedFormSystem).map((item, idx) => (
                                                   <tr key={idx}>
-                                                      <td className="p-2 border border-gray-300 text-center text-gray-600">{idx + 1}</td>
-                                                      <td className="p-2 border border-gray-300 font-medium text-gray-800 break-words whitespace-normal">{item}</td>
-                                                      <td className="p-2 border border-gray-300 text-center"><div className="w-4 h-4 border border-gray-400 mx-auto"></div></td>
-                                                      <td className="p-2 border border-gray-300 text-center"><div className="w-4 h-4 border border-gray-400 mx-auto"></div></td>
-                                                      <td className="p-2 border border-gray-300 text-center"><div className="w-4 h-4 border border-gray-400 mx-auto"></div></td>
-                                                      <td className="p-2 border border-gray-300"></td>
+                                                      <td className="p-2 border border-gray-400 text-center text-gray-600 font-medium h-8">{idx + 1}</td>
+                                                      <td className="p-2 border border-gray-400 font-medium text-gray-800 break-words whitespace-normal">{item}</td>
+                                                      <td className="p-2 border border-gray-400 text-center"><div className="w-3 h-3 border border-gray-500 mx-auto"></div></td>
+                                                      <td className="p-2 border border-gray-400 text-center"><div className="w-3 h-3 border border-gray-500 mx-auto"></div></td>
+                                                      <td className="p-2 border border-gray-400 text-center"><div className="w-3 h-3 border border-gray-500 mx-auto"></div></td>
+                                                      <td className="p-2 border border-gray-400"></td>
+                                                  </tr>
+                                              ))}
+                                              {/* เพิ่มบรรทัดว่างเพื่อให้ตารางยาวสวยงาม หากเช็กลิสต์มีข้อน้อย */}
+                                              {Array.from({ length: Math.max(0, 10 - getChecklistForSystem(selectedFormSystem).length) }).map((_, idx) => (
+                                                  <tr key={`empty-${idx}`}>
+                                                      <td className="p-2 border border-gray-400 h-8 text-center text-gray-500 font-medium">{getChecklistForSystem(selectedFormSystem).length + idx + 1}</td>
+                                                      <td className="p-2 border border-gray-400"></td>
+                                                      <td className="p-2 border border-gray-400"></td>
+                                                      <td className="p-2 border border-gray-400"></td>
+                                                      <td className="p-2 border border-gray-400"></td>
+                                                      <td className="p-2 border border-gray-400"></td>
                                                   </tr>
                                               ))}
                                           </tbody>
                                       </table>
 
-                                      <div className="mb-16">
-                                          <h4 className="font-bold text-gray-800 mb-4">สรุปผล / ข้อเสนอแนะ (Remarks):</h4>
-                                          <div className="border-b border-gray-400 border-dotted mb-6 h-4"></div>
-                                          <div className="border-b border-gray-400 border-dotted mb-6 h-4"></div>
-                                          <div className="border-b border-gray-400 border-dotted mb-6 h-4"></div>
+                                      <div className="mb-8 shrink-0">
+                                          <h4 className="font-bold text-gray-800 mb-3 text-xs">สรุปผล / ข้อเสนอแนะ (Remarks):</h4>
+                                          <div className="border-b border-gray-400 border-dotted mb-5 h-4"></div>
+                                          <div className="border-b border-gray-400 border-dotted mb-5 h-4"></div>
+                                          <div className="border-b border-gray-400 border-dotted mb-5 h-4"></div>
                                       </div>
 
-                                      <div className="flex justify-between px-4 pt-8">
+                                      <div className="flex justify-between px-6 mt-auto shrink-0">
                                           <div className="text-center">
-                                              <div className="border-b border-gray-400 w-48 mb-2 h-8"></div>
-                                              <div className="text-sm text-gray-600">( .................................................... )</div>
-                                              <div className="text-sm font-bold text-gray-800 mt-1">ผู้ตรวจสอบ (Inspector)</div>
-                                              <div className="text-xs text-gray-500 mt-1">วันที่ ....... / ....... / ...........</div>
+                                              <div className="border-b border-gray-500 w-40 mb-2 h-8"></div>
+                                              <div className="text-xs text-gray-600">( .................................................... )</div>
+                                              <div className="text-[11px] font-bold text-gray-800 mt-1">ผู้ตรวจสอบ (Inspector)</div>
+                                              <div className="text-[10px] text-gray-500 mt-1">วันที่ ....... / ....... / ...........</div>
                                           </div>
                                           <div className="text-center">
-                                              <div className="border-b border-gray-400 w-48 mb-2 h-8"></div>
-                                              <div className="text-sm text-gray-600">( .................................................... )</div>
-                                              <div className="text-sm font-bold text-gray-800 mt-1">ผู้รับรอง (Manager)</div>
-                                              <div className="text-xs text-gray-500 mt-1">วันที่ ....... / ....... / ...........</div>
+                                              <div className="border-b border-gray-500 w-40 mb-2 h-8"></div>
+                                              <div className="text-xs text-gray-600">( .................................................... )</div>
+                                              <div className="text-[11px] font-bold text-gray-800 mt-1">ผู้รับรอง (Manager)</div>
+                                              <div className="text-[10px] text-gray-500 mt-1">วันที่ ....... / ....... / ...........</div>
                                           </div>
                                       </div>
                                   </div>
