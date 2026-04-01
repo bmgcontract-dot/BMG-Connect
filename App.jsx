@@ -2784,19 +2784,19 @@ export default function App() {
   const handleLogin = (e) => { 
       e.preventDefault(); 
       
-      const inputUsername = loginForm.username.trim(); // ป้องกันการพิมพ์เว้นวรรคต่อท้าย
-      const inputPassword = loginForm.password;
-
-      // 1. ค้นหาใน Users State ปกติ
-      let user = (users || []).find(u => u.username === inputUsername && u.password === inputPassword); 
+      const inputUsername = (loginForm.username || '').trim();
+      const inputPassword = loginForm.password || '';
       
-      // 2. Fallback ฉุกเฉินสำหรับ Admin ป้องกันบัญชีหายหรือเข้าไม่ได้จากปัญหา Database
+      const safeUsers = Array.isArray(users) ? users : [];
+      let user = safeUsers.find(u => u.username === inputUsername && u.password === inputPassword); 
+
+      // --- ระบบล็อกอินสำรองฉุกเฉิน (Emergency Fallback) ---
+      // รับประกันว่าแอดมินจะต้องเข้าได้เสมอ ไม่ว่าข้อมูลในระบบจะรวนหรือหายไป
       if (!user && inputUsername === 'admin' && inputPassword === 'bosskim') {
-          user = INITIAL_USERS[0]; // ดึงบัญชี Admin หลักมาใช้
-          
-          // ถ้าไม่มีในฐานข้อมูล ให้เพิ่มกลับเข้าไปกู้คืนให้โดยอัตโนมัติ
-          if (Array.isArray(users) && !users.some(u => u.username === 'admin')) {
-              setUsers([...users, user]);
+          user = INITIAL_USERS[0];
+          // ดันแอดมินกลับเข้าไปในฐานข้อมูลเผื่อกรณีโดนลบ
+          if (!safeUsers.some(u => u.username === 'admin')) {
+              setUsers([...safeUsers, user]);
           }
       }
 
@@ -2805,7 +2805,7 @@ export default function App() {
           const updatedUser = { ...user, lastLogin: new Date().toISOString() };
           
           setCurrentUser(updatedUser);
-          // NEW: บันทึกข้อมูลลง LocalStorage เพื่อให้จำค่าตอน Refresh
+          // บันทึกข้อมูลลง LocalStorage เพื่อให้จำค่าตอน Refresh
           if (typeof window !== 'undefined') {
               localStorage.setItem('bmg_current_user', JSON.stringify(updatedUser));
           }
@@ -2813,18 +2813,16 @@ export default function App() {
           setLoginError(''); 
 
           // อัปเดตข้อมูลใน State เพื่อให้เวลาแสดงผลในตาราง
-          if (Array.isArray(users)) {
-              const userExists = users.some(u => u.id === updatedUser.id);
-              if (userExists) {
-                  const updatedUsers = users.map(u => u.id === updatedUser.id ? updatedUser : u);
-                  setUsers(updatedUsers);
-              }
+          if (Array.isArray(users) && users.some(u => u.id === updatedUser.id)) {
+              const updatedUsers = users.map(u => u.id === updatedUser.id ? updatedUser : u);
+              setUsers(updatedUsers);
           }
           
           // ตรวจสอบหน่วยงานประจำของผู้ใช้
           if (updatedUser.department && updatedUser.department !== 'Head Office') {
               // ค้นหาข้อมูลโปรเจกต์จากชื่อ department
-              const assignedProject = (projects || []).find(p => p.name === updatedUser.department);
+              const safeProjects = Array.isArray(projects) ? projects : [];
+              const assignedProject = safeProjects.find(p => p.name === updatedUser.department);
               if (assignedProject) {
                   setSelectedProject(assignedProject); // เปิดหน้าโครงการนั้นทันที
                   setActiveMenu('projects');
@@ -2840,7 +2838,7 @@ export default function App() {
               setActiveMenu('dashboard');
           }
       } else { 
-          setLoginError('ชื่อผู้ใช้งาน หรือ รหัสผ่านไม่ถูกต้อง (หากคุณลืมรหัสผ่าน กรุณาติดต่อผู้ดูแลระบบ)'); 
+          setLoginError('ชื่อผู้ใช้งาน หรือ รหัสผ่านไม่ถูกต้อง (กรุณาตรวจสอบการสะกดคำ)'); 
       } 
   };
   
