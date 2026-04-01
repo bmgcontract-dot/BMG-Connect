@@ -8273,22 +8273,23 @@ export default function App() {
                               </div>
                           </div>
 
-                          <div className="p-8 bg-gray-100 flex justify-center overflow-x-auto w-full">
+                          {/* แก้ไข: ปรับคอนเทนเนอร์แม่ให้ไม่รบกวนการแคปภาพตอน Export */}
+                          <div className={isExporting ? "w-full bg-white" : "p-8 bg-gray-100 flex justify-center overflow-x-auto w-full"}>
                               {selectedFormSystem ? (
-                                  <div id="print-blank-pm-form" className={`bg-white mx-auto relative box-border flex flex-col text-gray-800 ${isExporting ? 'w-[190mm] min-w-[190mm] max-w-[190mm] px-[5mm] pt-[5mm] pb-[10mm] border-none shadow-none m-0' : 'w-[210mm] min-w-[210mm] max-w-[210mm] min-h-[297mm] px-[15mm] pt-[15mm] pb-[15mm] shadow-lg border border-gray-300'}`}>
-                                      <div className="text-center mb-6 shrink-0">
+                                  <div id="print-blank-pm-form" className={`bg-white box-border flex flex-col text-gray-800 ${isExporting ? 'w-[190mm] min-w-[190mm] max-w-[190mm] m-0 p-0 border-none shadow-none bg-transparent' : 'mx-auto relative w-[210mm] min-w-[210mm] max-w-[210mm] min-h-[297mm] px-[15mm] pt-[15mm] pb-[15mm] shadow-lg border border-gray-300'}`}>
+                                      <div className={`text-center shrink-0 ${isExporting ? 'mb-4' : 'mb-6'}`}>
                                           <h2 className="text-xl font-bold text-gray-800">แบบฟอร์มตรวจสอบบำรุงรักษาเชิงป้องกัน (PM Checklist)</h2>
                                           <h3 className="text-base text-gray-600 mt-2 font-medium">ระบบ: {selectedFormSystem}</h3>
                                       </div>
                                       
-                                      <div className="grid grid-cols-2 gap-x-8 gap-y-4 mb-6 text-xs text-gray-700 shrink-0">
+                                      <div className={`grid grid-cols-2 gap-x-8 gap-y-4 text-xs text-gray-700 shrink-0 ${isExporting ? 'mb-4' : 'mb-6'}`}>
                                           <div className="flex items-end"><span className="w-20 font-bold shrink-0">รหัสเครื่องจักร:</span> <div className="flex-1 border-b border-gray-400 border-dotted"></div></div>
                                           <div className="flex items-end"><span className="w-20 font-bold shrink-0">ชื่อเครื่องจักร:</span> <div className="flex-1 border-b border-gray-400 border-dotted"></div></div>
                                           <div className="flex items-end"><span className="w-20 font-bold shrink-0">สถานที่ติดตั้ง:</span> <div className="flex-1 border-b border-gray-400 border-dotted"></div></div>
                                           <div className="flex items-end"><span className="w-20 font-bold shrink-0">วันที่ตรวจสอบ:</span> <div className="flex-1 border-b border-gray-400 border-dotted"></div></div>
                                       </div>
 
-                                      <table className="w-full text-[11px] border-collapse mb-6 table-fixed break-words flex-1">
+                                      <table className={`w-full text-[11px] border-collapse table-fixed break-words flex-1 ${isExporting ? 'mb-4' : 'mb-6'}`}>
                                           <thead className="bg-gray-100 text-gray-800">
                                               <tr>
                                                   <th className="p-2 border border-gray-400 text-center w-[8%]">ลำดับ</th>
@@ -8324,7 +8325,7 @@ export default function App() {
                                           </tbody>
                                       </table>
 
-                                      <div className="mb-8 shrink-0">
+                                      <div className={`shrink-0 ${isExporting ? 'mb-4' : 'mb-8'}`}>
                                           <h4 className="font-bold text-gray-800 mb-3 text-xs">สรุปผล / ข้อเสนอแนะ (Remarks):</h4>
                                           <div className="border-b border-gray-400 border-dotted mb-5 h-4"></div>
                                           <div className="border-b border-gray-400 border-dotted mb-5 h-4"></div>
