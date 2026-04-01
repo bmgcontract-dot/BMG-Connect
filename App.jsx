@@ -1266,7 +1266,16 @@ function usePersistentState(key, initialValue, fbUser) {
         setIsLoaded(true);
         return; 
     }
-    if (!fbUser || !appId) return;
+    
+    // ตั้งเวลา 3 วินาที หากโหลดข้อมูลจาก Firebase ไม่ได้ให้ปลดล็อคหน้าจอทันที
+    const fallbackTimer = setTimeout(() => {
+        setIsLoaded(true);
+    }, 3000);
+
+    if (!fbUser || !appId) {
+        return () => clearTimeout(fallbackTimer);
+    }
+    
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
     
     let currentFetchId = 0;
@@ -1317,7 +1326,10 @@ function usePersistentState(key, initialValue, fbUser) {
       setIsLoaded(true);
     });
 
-    return () => unsubscribe();
+    return () => {
+        clearTimeout(fallbackTimer);
+        unsubscribe();
+    };
   }, [fbUser, key]);
 
   const setPersistentValue = async (newValue, isRestore = false) => {
@@ -1391,9 +1403,22 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
   useEffect(() => {
     if (!db) {
         setIsLoaded(true);
+        isLoadedRef.current = true;
         return;
     }
-    if (!fbUser || !appId) return;
+
+    // ตั้งเวลา 3 วินาที หากโหลด Collection ข้อมูลไม่ขึ้น ให้ข้ามไปใช้งาน Local Storage เลย
+    const fallbackTimer = setTimeout(() => {
+        if (!isLoadedRef.current) {
+            console.warn("Firebase sync timeout for collection:", collectionName);
+            setIsLoaded(true);
+            isLoadedRef.current = true;
+        }
+    }, 3000);
+
+    if (!fbUser || !appId) {
+        return () => clearTimeout(fallbackTimer);
+    }
 
     const collRef = collection(db, 'artifacts', appId, 'public', 'data', collectionName);
     const unsubscribe = onSnapshot(collRef, (snapshot) => {
@@ -1435,10 +1460,14 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
       setIsLoaded(true);
     }, (err) => {
       console.error("Collection Sync error", collectionName, err);
+      isLoadedRef.current = true;
       setIsLoaded(true);
     });
 
-    return () => unsubscribe();
+    return () => {
+        clearTimeout(fallbackTimer);
+        unsubscribe();
+    };
   }, [fbUser, collectionName]);
 
   const setPersistentValue = async (newValue, isRestore = false) => {
@@ -1559,7 +1588,15 @@ function useUserPersistentState(key, initialValue, fbUser) {
         setIsLoaded(true);
         return;
     }
-    if (!fbUser || !appId) return;
+
+    const fallbackTimer = setTimeout(() => {
+        setIsLoaded(true);
+    }, 3000);
+
+    if (!fbUser || !appId) {
+        return () => clearTimeout(fallbackTimer);
+    }
+    
     const docRef = doc(db, 'artifacts', appId, 'users', fbUser.uid, 'user_preferences', key);
     
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
@@ -1583,7 +1620,10 @@ function useUserPersistentState(key, initialValue, fbUser) {
       setIsLoaded(true);
     });
 
-    return () => unsubscribe();
+    return () => {
+        clearTimeout(fallbackTimer);
+        unsubscribe();
+    };
   }, [fbUser, key]);
 
   const setPersistentValue = async (newValue, isRestore = false) => {
@@ -2065,15 +2105,15 @@ export default function App() {
   const getPendingApprovals = () => {
       if (!currentUser) return [];
 
-      const isChiefUser = currentUser.position.includes('หัวหน้าช่าง');
-      const isManagerUser = currentUser.position.includes('ผู้จัดการ') && !currentUser.position.includes('ผู้ช่วย');
-      const isAreaManagerUser = currentUser.position.includes('ผู้จัดการพื้นที่');
-      const isHRUser = currentUser.position.includes('เจ้าหน้าที่ฝ่ายบุคคล');
+      const isChiefUser = currentUser.position?.includes('หัวหน้าช่าง');
+      const isManagerUser = currentUser.position?.includes('ผู้จัดการ') && !currentUser.position?.includes('ผู้ช่วย');
+      const isAreaManagerUser = currentUser.position?.includes('ผู้จัดการพื้นที่');
+      const isHRUser = currentUser.position?.includes('เจ้าหน้าที่ฝ่ายบุคคล');
       const isAdminUser = currentUser.username === 'admin' || currentUser.position === 'Super Admin';
 
-      // เช็คสิทธิ์การเข้าถึงโครงการของผู้ใช้
+      // เช็คสิทธิ์การเข้าถึงโครงการของผู้ใช้ (ปรับปรุงการตรวจสอบชนิดข้อมูลเพื่อป้องกัน Error)
       const accessibleDeptsStr = currentUser.accessibleDepts || '';
-      const accessibleArray = typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : accessibleDeptsStr;
+      const accessibleArray = Array.isArray(accessibleDeptsStr) ? accessibleDeptsStr : (typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : []);
       const canAccessAll = accessibleArray.includes('All') || isAdminUser;
 
       const isProjectAccessible = (projName) => {
@@ -2784,19 +2824,20 @@ export default function App() {
   const handleLogin = (e) => { 
       e.preventDefault(); 
       
-      const inputUsername = (loginForm.username || '').trim();
+      const inputUsername = (loginForm.username || '').trim(); // ป้องกันค่าว่าง
       const inputPassword = loginForm.password || '';
-      
-      const safeUsers = Array.isArray(users) ? users : [];
-      let user = safeUsers.find(u => u.username === inputUsername && u.password === inputPassword); 
 
-      // --- ระบบล็อกอินสำรองฉุกเฉิน (Emergency Fallback) ---
-      // รับประกันว่าแอดมินจะต้องเข้าได้เสมอ ไม่ว่าข้อมูลในระบบจะรวนหรือหายไป
+      // 1. ค้นหาใน Users State ปกติ (รับประกันว่า users เป็น Array เสมอ)
+      const userList = Array.isArray(users) ? users : [];
+      let user = userList.find(u => u.username === inputUsername && u.password === inputPassword); 
+      
+      // 2. Fallback ฉุกเฉินสำหรับ Admin ป้องกันบัญชีหายหรือเข้าไม่ได้จากปัญหา Database
       if (!user && inputUsername === 'admin' && inputPassword === 'bosskim') {
-          user = INITIAL_USERS[0];
-          // ดันแอดมินกลับเข้าไปในฐานข้อมูลเผื่อกรณีโดนลบ
-          if (!safeUsers.some(u => u.username === 'admin')) {
-              setUsers([...safeUsers, user]);
+          user = JSON.parse(JSON.stringify(INITIAL_USERS[0])); // ดึงบัญชี Admin หลักมาใช้ป้องกัน Reference ผิดพลาด
+          
+          // ถ้าไม่มีในฐานข้อมูล ให้เพิ่มกลับเข้าไปกู้คืนให้โดยอัตโนมัติ
+          if (!userList.some(u => u.username === 'admin')) {
+              setUsers([...userList, user]);
           }
       }
 
@@ -2805,24 +2846,24 @@ export default function App() {
           const updatedUser = { ...user, lastLogin: new Date().toISOString() };
           
           setCurrentUser(updatedUser);
-          // บันทึกข้อมูลลง LocalStorage เพื่อให้จำค่าตอน Refresh
+          // NEW: บันทึกข้อมูลลง LocalStorage เพื่อให้จำค่าตอน Refresh ทันที
           if (typeof window !== 'undefined') {
               localStorage.setItem('bmg_current_user', JSON.stringify(updatedUser));
           }
           setNewDailyReport(prev => ({...prev, reporter: `${updatedUser.firstName} ${updatedUser.lastName}`})); 
           setLoginError(''); 
 
-          // อัปเดตข้อมูลใน State เพื่อให้เวลาแสดงผลในตาราง
-          if (Array.isArray(users) && users.some(u => u.id === updatedUser.id)) {
-              const updatedUsers = users.map(u => u.id === updatedUser.id ? updatedUser : u);
+          // อัปเดตข้อมูลใน State เพื่อให้เวลาแสดงผลในตารางเป็นปัจจุบัน
+          const userExists = userList.some(u => u.id === updatedUser.id);
+          if (userExists) {
+              const updatedUsers = userList.map(u => u.id === updatedUser.id ? updatedUser : u);
               setUsers(updatedUsers);
           }
           
           // ตรวจสอบหน่วยงานประจำของผู้ใช้
           if (updatedUser.department && updatedUser.department !== 'Head Office') {
               // ค้นหาข้อมูลโปรเจกต์จากชื่อ department
-              const safeProjects = Array.isArray(projects) ? projects : [];
-              const assignedProject = safeProjects.find(p => p.name === updatedUser.department);
+              const assignedProject = (projects || []).find(p => p.name === updatedUser.department);
               if (assignedProject) {
                   setSelectedProject(assignedProject); // เปิดหน้าโครงการนั้นทันที
                   setActiveMenu('projects');
@@ -2838,7 +2879,7 @@ export default function App() {
               setActiveMenu('dashboard');
           }
       } else { 
-          setLoginError('ชื่อผู้ใช้งาน หรือ รหัสผ่านไม่ถูกต้อง (กรุณาตรวจสอบการสะกดคำ)'); 
+          setLoginError('ชื่อผู้ใช้งาน หรือ รหัสผ่านไม่ถูกต้อง (หากคุณลืมรหัสผ่าน กรุณาติดต่อผู้ดูแลระบบ)'); 
       } 
   };
   
