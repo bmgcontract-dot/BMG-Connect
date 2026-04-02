@@ -2812,8 +2812,12 @@ export default function App() {
           approvals: [...(record.approvals || []), approvalRecord]
       };
 
-      setPmHistoryList(pmHistoryList.map(h => h.id === record.id ? updatedRecord : h));
+      const nextList = pmHistoryList.map(h => h.id === record.id ? updatedRecord : h);
+      setPmHistoryList(nextList);
       setSelectedPmHistory(updatedRecord);
+      
+      // สั่งซิงค์สถานะที่เปลี่ยนไปขึ้น Google Sheets
+      triggerAutoSync('PM_History_ประวัติPM', nextList, []);
 
       // อัปเดตรายการในหน้าต่าง Dashboard ทันทีที่กดอนุมัติ
       if (selectedPmStatusDetail) {
@@ -12926,6 +12930,47 @@ export default function App() {
                 </div>
             </div>
         </div>
+      )}
+
+      {/* Global Confirm Modal (ใช้สำหรับทุกปุ่มที่มีการให้กดยืนยัน เช่น ลบ, อนุมัติ) */}
+      {confirmModal.isOpen && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 animate-fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-gray-200 transform transition-all scale-100">
+                  <div className={`p-4 flex items-center gap-3 border-b ${confirmModal.type === 'danger' ? 'bg-red-50 border-red-100' : confirmModal.type === 'warning' ? 'bg-orange-50 border-orange-100' : confirmModal.type === 'info' ? 'bg-blue-50 border-blue-100' : 'bg-gray-50 border-gray-100'}`}>
+                      <div className={`p-2 rounded-full ${confirmModal.type === 'danger' ? 'bg-red-100 text-red-600' : confirmModal.type === 'warning' ? 'bg-orange-100 text-orange-600' : confirmModal.type === 'info' ? 'bg-blue-100 text-blue-600' : 'bg-gray-200 text-gray-600'}`}>
+                          {confirmModal.type === 'info' ? <CheckCircle size={20} /> : <AlertTriangle size={20} />}
+                      </div>
+                      <h3 className={`font-bold text-lg ${confirmModal.type === 'danger' ? 'text-red-800' : confirmModal.type === 'warning' ? 'text-orange-800' : confirmModal.type === 'info' ? 'text-blue-800' : 'text-gray-800'}`}>
+                          {confirmModal.title}
+                      </h3>
+                  </div>
+                  <div className="p-6 text-gray-600 text-sm whitespace-pre-wrap leading-relaxed">
+                      {confirmModal.message}
+                  </div>
+                  <div className="p-4 bg-gray-50 border-t flex justify-end gap-2">
+                      {confirmModal.onConfirm ? (
+                          <>
+                              <Button variant="secondary" onClick={closeConfirm}>
+                                  ยกเลิก
+                              </Button>
+                              <Button 
+                                  variant={confirmModal.type === 'danger' ? 'danger' : confirmModal.type === 'warning' ? 'primary' : confirmModal.type === 'info' ? 'success' : 'primary'} 
+                                  onClick={() => {
+                                      confirmModal.onConfirm();
+                                      closeConfirm();
+                                  }}
+                              >
+                                  {confirmModal.confirmText}
+                              </Button>
+                          </>
+                      ) : (
+                          <Button variant="primary" onClick={closeConfirm}>
+                              {confirmModal.confirmText}
+                          </Button>
+                      )}
+                  </div>
+              </div>
+          </div>
       )}
 
     </div>
