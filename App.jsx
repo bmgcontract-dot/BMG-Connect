@@ -1137,7 +1137,7 @@ const compressImage = (file) => {
 
 // ... (Components Card, Button, KPICard remain same) ...
 const Card = ({ children, className = "", id, onClick }) => ( <div id={id} className={`bg-white rounded-lg shadow-sm border border-gray-200 ${className}`} onClick={onClick}> {children} </div> );
-const Button = ({ children, onClick, variant = 'primary', size = 'md', className = "", icon: Icon, disabled = false }) => { const baseStyle = "rounded-md font-medium transition-colors flex items-center justify-center gap-2"; const sizeStyles = { sm: "px-2 py-1 text-xs", md: "px-4 py-2 text-sm", lg: "px-6 py-3 text-base" }; const variants = { primary: "bg-orange-600 text-white hover:bg-orange-700 disabled:bg-gray-400", secondary: "bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400", danger: "bg-red-50 text-red-600 hover:bg-red-100", outline: "border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:border-gray-200 disabled:text-gray-300", success: "bg-green-600 text-white hover:bg-green-700" }; return ( <button onClick={onClick} disabled={disabled} className={`${baseStyle} ${sizeStyles[size]} ${variants[variant]} ${className}`}> {Icon && <Icon size={size === 'sm' ? 14 : 18} />} {children} </button> ); };
+const Button = ({ children, onClick, variant = 'primary', size = 'md', className = "", icon: Icon, disabled = false, type = "button" }) => { const baseStyle = "rounded-md font-medium transition-colors flex items-center justify-center gap-2"; const sizeStyles = { sm: "px-2 py-1 text-xs", md: "px-4 py-2 text-sm", lg: "px-6 py-3 text-base" }; const variants = { primary: "bg-orange-600 text-white hover:bg-orange-700 disabled:bg-gray-400", secondary: "bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400", danger: "bg-red-50 text-red-600 hover:bg-red-100", outline: "border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:border-gray-200 disabled:text-gray-300", success: "bg-green-600 text-white hover:bg-green-700" }; return ( <button type={type} onClick={onClick} disabled={disabled} className={`${baseStyle} ${sizeStyles[size]} ${variants[variant]} ${className}`}> {Icon && <Icon size={size === 'sm' ? 14 : 18} />} {children} </button> ); };
 
 // UPDATED: Make KPICard clickable
 const KPICard = ({ title, value, icon: Icon, color, onClick }) => ( 
@@ -2005,7 +2005,11 @@ export default function App() {
               const tempCurrent = {...currentUser, lastLogin: ''};
               if (JSON.stringify(tempFresh) !== JSON.stringify(tempCurrent)) {
                  setCurrentUser(freshUser);
-                 localStorage.setItem('bmg_current_user', JSON.stringify(freshUser));
+                 try {
+                     localStorage.setItem('bmg_current_user', JSON.stringify(freshUser));
+                 } catch (err) {
+                     console.warn("Storage quota exceeded: ไม่สามารถอัปเดต Session ชั่วคราวได้ แต่ระบบยังทำงานต่อได้", err);
+                 }
               }
           }
       }
@@ -2855,7 +2859,11 @@ export default function App() {
           setCurrentUser(updatedUser);
           // NEW: บันทึกข้อมูลลง LocalStorage เพื่อให้จำค่าตอน Refresh ทันที
           if (typeof window !== 'undefined') {
-              localStorage.setItem('bmg_current_user', JSON.stringify(updatedUser));
+              try {
+                  localStorage.setItem('bmg_current_user', JSON.stringify(updatedUser));
+              } catch (err) {
+                  console.warn("Storage quota exceeded: ไม่สามารถบันทึก Session ลงเครื่องได้", err);
+              }
           }
           setNewDailyReport(prev => ({...prev, reporter: `${updatedUser.firstName} ${updatedUser.lastName}`})); 
           setLoginError(''); 
@@ -12854,80 +12862,1039 @@ export default function App() {
         </div>
       )}
 
-      {/* NEW: PM Tasks Full List Modal */}
-      {selectedDateTasks && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] overflow-y-auto">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6 m-4 max-h-[90vh] flex flex-col animate-fade-in">
-                <div className="flex justify-between items-center mb-4 border-b pb-4 shrink-0">
-                    <div>
-                        <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                            <Calendar size={24} className="text-purple-600"/> รายการ PM ทั้งหมด
-                        </h2>
-                        <p className="text-sm text-gray-500 mt-1">
-                            ประจำวันที่ {selectedDateTasks.dateObj.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}
-                        </p>
-                    </div>
-                    <button onClick={() => setSelectedDateTasks(null)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
-                </div>
-                
-                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2">
-                    {selectedDateTasks.tasks.map(task => {
-                        const machine = machines.find(m => m.id === task.machineId);
-                        const historyRecord = pmHistoryList.find(h => h.pmPlanId === task.id && h.date === selectedDateTasks.dateString);
+      {/* Repair Form Modal */}
+      {showAddRepairModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl p-6 m-4 max-h-[95vh] overflow-y-auto relative animate-fade-in">
+            <div className="flex justify-between items-center mb-6 border-b pb-4">
+              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <Hammer className="text-orange-500" />
+                {newRepair.id ? 'แก้ไขรายการแจ้งซ่อม / อัปเดตสถานะ' : 'เพิ่มรายการแจ้งซ่อมใหม่ (New Repair Request)'}
+              </h2>
+              <button onClick={() => setShowAddRepairModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
+            </div>
+            
+            <form onSubmit={handleSaveRepair} className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* ส่วนของลูกบ้าน / ผู้แจ้ง */}
+                    <div className="space-y-4 bg-gray-50 p-4 rounded-lg border border-gray-200">
+                        <h3 className="font-bold text-gray-700 mb-2 text-sm border-b border-gray-300 pb-2">ข้อมูลผู้แจ้ง (Requester Info)</h3>
                         
-                        let itemClass = '';
-                        let statusIcon = null;
-                        let statusLabel = '';
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-600 mb-1">เลขที่แจ้งซ่อม</label>
+                                <input type="text" readOnly className="w-full border border-gray-300 rounded-md p-2 bg-gray-100 text-gray-500 text-sm font-mono" value={newRepair.code} />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-600 mb-1">ห้อง / บ้านเลขที่</label>
+                                <input type="text" required className="w-full border rounded-md p-2 text-sm bg-white" value={newRepair.roomNo} onChange={e => setNewRepair({...newRepair, roomNo: e.target.value})} placeholder="เช่น 101/5" />
+                            </div>
+                        </div>
 
-                        if (historyRecord) {
-                            if (historyRecord.approvalStatus === 'Approved') {
-                                itemClass = 'bg-green-50 border-green-500 text-green-800 hover:bg-green-100 border-l-4';
-                                statusIcon = <CheckCircle size={20} className="text-green-600" />;
-                                statusLabel = 'อนุมัติแล้ว';
-                            } else if (historyRecord.approvalStatus === 'Pending Chief' || historyRecord.approvalStatus === 'Pending Manager') {
-                                itemClass = 'bg-yellow-50 border-yellow-500 text-yellow-900 hover:bg-yellow-100 border-l-4';
-                                statusIcon = <Clock size={20} className="text-yellow-600" />;
-                                statusLabel = 'รออนุมัติ';
-                            } else {
-                                itemClass = 'bg-blue-50 border-blue-500 text-blue-800 hover:bg-blue-100 border-l-4';
-                                statusIcon = <CheckSquare size={20} className="text-blue-600" />;
-                                statusLabel = 'ดำเนินการแล้ว';
-                            }
-                        } else {
-                            itemClass = 'bg-white border-gray-300 border-dashed text-gray-700 hover:bg-gray-50 hover:border-solid hover:border-gray-400';
-                            statusIcon = <Square size={20} className="text-gray-400" />;
-                            statusLabel = 'บันทึกผล';
-                        }
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-600 mb-1">ชื่อผู้แจ้ง</label>
+                                <input type="text" required className="w-full border rounded-md p-2 text-sm bg-white" value={newRepair.requesterName} onChange={e => setNewRepair({...newRepair, requesterName: e.target.value})} placeholder="ชื่อ-นามสกุล" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-600 mb-1">เบอร์โทรติดต่อ</label>
+                                <input type="tel" className="w-full border rounded-md p-2 text-sm bg-white" value={newRepair.phone} onChange={e => setNewRepair({...newRepair, phone: e.target.value})} placeholder="เบอร์โทรศัพท์" />
+                            </div>
+                        </div>
 
-                        return (
-                            <div 
-                                key={task.id}
-                                onClick={() => {
-                                    handleOpenPmForm(task, machine, selectedDateTasks.dateString);
-                                    setSelectedDateTasks(null); // ปิด modal รายการเมื่อเปิดฟอร์ม
-                                }}
-                                className={`p-3 border rounded-lg cursor-pointer transition-colors flex items-center justify-between group shadow-sm ${itemClass}`}
+                        <div>
+                            <label className="block text-xs font-bold text-gray-600 mb-1">ประเภทงานซ่อม</label>
+                            <select className="w-full border rounded-md p-2 text-sm bg-white" value={newRepair.issueType} onChange={e => setNewRepair({...newRepair, issueType: e.target.value})} required>
+                                <option value="" disabled>-- เลือกประเภท --</option>
+                                <option value="ไฟฟ้า (Electrical)">ไฟฟ้า (Electrical)</option>
+                                <option value="ประปา (Plumbing)">ประปา (Plumbing)</option>
+                                <option value="แอร์ / ปรับอากาศ (Air Conditioning)">แอร์ / ปรับอากาศ (Air Conditioning)</option>
+                                <option value="โครงสร้าง / สถาปัตย์ (Structural)">โครงสร้าง / สถาปัตย์ (Structural)</option>
+                                <option value="อื่นๆ (ให้ระบุ)">อื่นๆ (ให้ระบุ)</option>
+                            </select>
+                            {newRepair.issueType === 'อื่นๆ (ให้ระบุ)' && (
+                                <input type="text" className="w-full border rounded-md p-2 text-sm mt-2 bg-white" placeholder="ระบุประเภทงาน..." value={newRepair.issueTypeOther} onChange={e => setNewRepair({...newRepair, issueTypeOther: e.target.value})} required />
+                            )}
+                        </div>
+
+                        <div>
+                            <label className="block text-xs font-bold text-gray-600 mb-1">รายละเอียดปัญหา (Issue Details)</label>
+                            <textarea required className="w-full border rounded-md p-2 text-sm h-20 resize-none bg-white" value={newRepair.issueDetails} onChange={e => setNewRepair({...newRepair, issueDetails: e.target.value})} placeholder="อธิบายลักษณะปัญหาที่พบ..."></textarea>
+                        </div>
+                    </div>
+
+                    {/* ส่วนของช่าง / นิติบุคคล */}
+                    <div className="space-y-4 bg-orange-50 p-4 rounded-lg border border-orange-100">
+                        <h3 className="font-bold text-orange-800 mb-2 text-sm border-b border-orange-200 pb-2">ส่วนของเจ้าหน้าที่ (Staff / Technician)</h3>
+                        
+                        <div>
+                            <label className="block text-xs font-bold text-orange-700 mb-1">สถานะการดำเนินงาน (Status)</label>
+                            <select className="w-full border border-orange-300 rounded-md p-2 text-sm bg-white" value={newRepair.inspectionResult} onChange={e => setNewRepair({...newRepair, inspectionResult: e.target.value})}>
+                                <option value="รอดำเนินการ">รอดำเนินการ (Pending)</option>
+                                <option value="ซ่อมแซมเสร็จสิ้น">ซ่อมแซมเสร็จสิ้น (Completed)</option>
+                                <option value="รออะไหล่">รออะไหล่ (Waiting for Parts)</option>
+                                <option value="ต้องจ้างผู้รับเหมาภายนอก">ต้องจ้างผู้รับเหมาภายนอก (Need Contractor)</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="block text-xs font-bold text-orange-700 mb-1">รายละเอียดการแก้ไข / สรุปผล</label>
+                            <textarea className="w-full border border-orange-300 rounded-md p-2 text-sm h-24 resize-none bg-white" value={newRepair.staffDetails} onChange={e => setNewRepair({...newRepair, staffDetails: e.target.value})} placeholder="ระบุสาเหตุ, การแก้ไข, หรือรายการอะไหล่ที่ต้องเบิก..."></textarea>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs font-bold text-orange-700 mb-1">ค่าใช้จ่าย / ค่าบริการ (บาท)</label>
+                                <input type="number" className="w-full border border-orange-300 rounded-md p-2 text-sm bg-white" value={newRepair.cost} onChange={e => setNewRepair({...newRepair, cost: e.target.value})} placeholder="0.00" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-orange-700 mb-1">ช่างผู้ดำเนินการ</label>
+                                <input type="text" className="w-full border border-orange-300 rounded-md p-2 text-sm bg-white" value={newRepair.staffName} onChange={e => setNewRepair({...newRepair, staffName: e.target.value})} placeholder="ชื่อพนักงานช่าง" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-4 border-t border-gray-200">
+                    <Button variant="secondary" onClick={() => setShowAddRepairModal(false)}>{t('cancel')}</Button>
+                    <Button type="submit" icon={Save}>{t('save')}</Button>
+                </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Selected Repair View Modal (Print Layout) */}
+      {selectedRepairView && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+            <div className={`w-full m-4 relative animate-fade-in ${isExporting ? 'bg-white shadow-none p-4 h-max overflow-visible max-w-max' : 'max-w-[210mm] bg-white rounded-lg shadow-xl p-8 max-h-[95vh] overflow-y-auto'}`}>
+                <button 
+                    onClick={() => setSelectedRepairView(null)} 
+                    className={`absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors z-10 ${isExporting ? 'hidden' : ''}`}
+                >
+                    <X size={24} />
+                </button>
+
+                <div id="print-repair-report" className={`space-y-4 bg-white text-gray-800 ${isExporting ? 'w-[186mm] min-w-[186mm] max-w-[186mm] mx-auto box-border' : 'w-full'}`}>
+                    
+                    {/* Header */}
+                    <div className="text-center border-b-2 border-gray-800 pb-4 mb-6">
+                        <h2 className="text-2xl font-bold uppercase">ใบแจ้งซ่อม (Maintenance Request Form)</h2>
+                        <div className="flex justify-between items-end mt-4">
+                            <div className="text-left">
+                                <p className="font-bold">โครงการ: {projects.find(p => p.id === selectedRepairView.projectId)?.name || '-'}</p>
+                                <p className="text-sm">วันที่แจ้ง: {selectedRepairView.date ? new Date(selectedRepairView.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'}) : '-'}</p>
+                            </div>
+                            <div className="text-right">
+                                <p className="font-mono font-bold text-lg text-red-600 border border-red-600 px-3 py-1 rounded inline-block">{selectedRepairView.code}</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Part 1: Requester */}
+                    <div className="border border-gray-800 rounded-lg overflow-hidden mb-6">
+                        <div className="bg-gray-200 text-gray-800 font-bold p-2 border-b border-gray-800 flex items-center gap-2">
+                            <span className="bg-gray-800 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">1</span>
+                            ส่วนที่ 1: ข้อมูลผู้แจ้งและรายละเอียดปัญหา (สำหรับลูกบ้าน / ผู้พักอาศัย)
+                        </div>
+                        <div className="p-4 grid grid-cols-2 gap-4 text-sm">
+                            <div><span className="font-bold">ห้อง / บ้านเลขที่ (Unit No.):</span> {selectedRepairView.roomNo || '-'}</div>
+                            <div><span className="font-bold">ชั้น (Floor):</span> {selectedRepairView.floor || '-'}</div>
+                            <div><span className="font-bold">ชื่อผู้แจ้ง (Requester Name):</span> {selectedRepairView.requesterName || '-'}</div>
+                            <div><span className="font-bold">เบอร์โทรศัพท์ (Tel):</span> {selectedRepairView.phone || '-'}</div>
+                            
+                            <div className="col-span-2 border-t border-gray-300 pt-3 mt-1">
+                                <span className="font-bold">ประเภทงานซ่อม (Category):</span> {selectedRepairView.issueType === 'อื่นๆ (ให้ระบุ)' ? selectedRepairView.issueTypeOther : selectedRepairView.issueType}
+                            </div>
+                            <div className="col-span-2">
+                                <span className="font-bold block mb-1">รายละเอียดปัญหา (Description of issue):</span>
+                                <div className="min-h-[60px] p-2 bg-gray-50 border border-gray-200 rounded whitespace-pre-wrap">{selectedRepairView.issueDetails || '-'}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Part 2: Technician */}
+                    <div className="border border-gray-800 rounded-lg overflow-hidden mb-6">
+                        <div className="bg-gray-200 text-gray-800 font-bold p-2 border-b border-gray-800 flex items-center gap-2">
+                            <span className="bg-gray-800 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">2</span>
+                            ส่วนที่ 2: บันทึกการปฏิบัติงาน (สำหรับช่างอาคาร / เจ้าหน้าที่)
+                        </div>
+                        <div className="p-4 space-y-4 text-sm">
+                            <div className="flex items-center gap-4">
+                                <span className="font-bold">สถานะการตรวจสอบ (Status):</span>
+                                <span className={`px-3 py-1 border border-gray-800 rounded-full font-bold ${
+                                    selectedRepairView.inspectionResult === 'ซ่อมแซมเสร็จสิ้น' ? 'bg-gray-200' : 'bg-white'
+                                }`}>
+                                    {selectedRepairView.inspectionResult}
+                                </span>
+                            </div>
+                            <div>
+                                <span className="font-bold block mb-1">รายละเอียดการแก้ไข / รายการอะไหล่ (Action Taken / Parts):</span>
+                                <div className="min-h-[80px] p-2 bg-gray-50 border border-gray-200 rounded whitespace-pre-wrap">{selectedRepairView.staffDetails || '-'}</div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div><span className="font-bold">ช่างผู้เข้าดำเนินการ (Technician):</span> {selectedRepairView.staffName || '-'}</div>
+                                <div><span className="font-bold">ค่าใช้จ่าย / ค่าบริการ (Cost):</span> {selectedRepairView.cost ? `${Number(selectedRepairView.cost).toLocaleString()} บาท` : 'ไม่มีค่าใช้จ่าย'}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Signatures */}
+                    <div className="grid grid-cols-2 gap-8 mt-12 px-8 text-center text-sm">
+                        <div>
+                            <div className="border-b border-gray-800 w-full mb-2 h-10"></div>
+                            <p>( .................................................... )</p>
+                            <p className="font-bold mt-1">ผู้แจ้งซ่อม / เจ้าของร่วม</p>
+                            <p className="text-xs text-gray-500 mt-1">วันที่ ....... / ....... / ...........</p>
+                        </div>
+                        <div>
+                            <div className="border-b border-gray-800 w-full mb-2 h-10 flex items-end justify-center pb-1 font-serif italic">
+                                {selectedRepairView.staffName}
+                            </div>
+                            <p>( .................................................... )</p>
+                            <p className="font-bold mt-1">เจ้าหน้าที่นิติบุคคล / ช่างอาคาร</p>
+                            <p className="text-xs text-gray-500 mt-1">วันที่ ....... / ....... / ...........</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div className={`mt-8 flex justify-between items-center gap-2 border-t pt-4 bg-white ${isExporting ? 'hidden' : ''}`}>
+                    <div>
+                        {hasPerm('proj_repair', 'edit') && !isExporting && (
+                            <Button variant="outline" icon={Edit} onClick={() => handleEditRepair(selectedRepairView)}>
+                                แก้ไขข้อมูล / อัปเดตสถานะ
+                            </Button>
+                        )}
+                    </div>
+                    <div className="flex gap-2">
+                        <Button variant="secondary" onClick={() => setSelectedRepairView(null)}>{t('close')}</Button>
+                        <Button icon={Printer} onClick={() => {
+                            const modalContainer = document.getElementById('print-repair-report')?.closest('.overflow-y-auto');
+                            if (modalContainer) modalContainer.scrollTop = 0;
+                            setTimeout(() => handleExportPDF('print-repair-report', `Repair_Form_${selectedRepairView.code}.pdf`, 'portrait', [22, 12, 20, 12]), 100);
+                        }} disabled={isExporting}>
+                            {isExporting ? t('downloading') : 'พิมพ์ใบแจ้งซ่อม (PDF)'}
+                        </Button>
+                    </div>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* Add Meter Modal */}
+      {showAddMeterModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 m-4 relative animate-fade-in">
+            <div className="flex justify-between items-center mb-6 border-b pb-4">
+              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                {newMeter.type === 'Water' ? <Droplet className="text-blue-500" /> : <Zap className="text-orange-500" />}
+                {newMeter.id ? 'แก้ไขข้อมูลมิเตอร์' : 'เพิ่มมิเตอร์ใหม่'}
+              </h2>
+              <button onClick={() => setShowAddMeterModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
+            </div>
+            
+            <form onSubmit={handleSaveMeter} className="space-y-4">
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">ประเภทมิเตอร์ (Type)</label>
+                    <select 
+                        className="w-full border rounded-md p-2 bg-white outline-none focus:ring-2 focus:ring-red-200"
+                        value={newMeter.type}
+                        onChange={e => setNewMeter({...newMeter, type: e.target.value})}
+                        required
+                    >
+                        <option value="Water">มิเตอร์น้ำประปา (Water)</option>
+                        <option value="Electricity">มิเตอร์ไฟฟ้า (Electricity)</option>
+                    </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">เลขมิเตอร์ (Code)</label>
+                        <input 
+                            type="text" 
+                            required 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-red-200"
+                            value={newMeter.code}
+                            onChange={e => setNewMeter({...newMeter, code: e.target.value})}
+                            placeholder="เช่น M-01, W-01"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">ค่ายกมา / ค่าปัจจุบัน</label>
+                        <input 
+                            type="number" 
+                            step="0.01"
+                            required 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-red-200"
+                            value={newMeter.initialValue}
+                            onChange={e => setNewMeter({...newMeter, initialValue: e.target.value})}
+                            placeholder="0.00"
+                        />
+                    </div>
+                </div>
+
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อเรียก (Name)</label>
+                    <input 
+                        type="text" 
+                        className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-red-200"
+                        value={newMeter.name}
+                        onChange={e => setNewMeter({...newMeter, name: e.target.value})}
+                        placeholder={`เช่น มิเตอร์ส่วนกลาง, ${newMeter.type === 'Water' ? 'ปั๊มน้ำ' : 'แอร์ล็อบบี้'}`}
+                    />
+                </div>
+
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">สถานที่ติดตั้ง (Location)</label>
+                    <div className="relative">
+                        <MapPin size={16} className="absolute left-2 top-2.5 text-gray-400"/>
+                        <input 
+                            type="text" 
+                            className="w-full border rounded-md pl-8 p-2 outline-none focus:ring-2 focus:ring-red-200"
+                            value={newMeter.location}
+                            onChange={e => setNewMeter({...newMeter, location: e.target.value})}
+                            placeholder="เช่น ชั้นดาดฟ้า, หน้าโครงการ"
+                        />
+                    </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-4 border-t border-gray-200 mt-6">
+                    <Button variant="secondary" onClick={() => setShowAddMeterModal(false)}>{t('cancel')}</Button>
+                    <Button type="submit" icon={Save}>{t('save')}</Button>
+                </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Action Plan Modal */}
+      {showAddActionPlanModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 m-4 relative animate-fade-in">
+            <div className="flex justify-between items-center mb-6 border-b pb-4">
+              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <CheckCircle className="text-orange-500" />
+                {newActionPlan.id ? 'แก้ไขแผนงาน' : 'เพิ่มแผนปฏิบัติการ (Action Plan)'}
+              </h2>
+              <button onClick={() => setShowAddActionPlanModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
+            </div>
+            
+            <form onSubmit={handleSaveActionPlan} className="space-y-4">
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">หัวข้องาน / ปัญหา (Issue)</label>
+                    <input 
+                        type="text" 
+                        required 
+                        className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200"
+                        value={newActionPlan.issue}
+                        onChange={e => setNewActionPlan({...newActionPlan, issue: e.target.value})}
+                        placeholder="เช่น ซ่อมแซมไฟทางเดิน, ทาสีรั้วใหม่"
+                    />
+                </div>
+
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">รายละเอียด (Details)</label>
+                    <textarea 
+                        className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 h-24 resize-none"
+                        value={newActionPlan.details}
+                        onChange={e => setNewActionPlan({...newActionPlan, details: e.target.value})}
+                        placeholder="ระบุรายละเอียดการปฏิบัติงาน..."
+                    ></textarea>
+                </div>
+
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">ผู้รับผิดชอบ (Responsible)</label>
+                    <select 
+                        className="w-full border rounded-md p-2 bg-white outline-none focus:ring-2 focus:ring-orange-200"
+                        value={newActionPlan.responsible}
+                        onChange={e => setNewActionPlan({...newActionPlan, responsible: e.target.value})}
+                        required
+                    >
+                        <option value="" disabled>-- เลือกผู้รับผิดชอบ --</option>
+                        {EMPLOYEE_POSITIONS.map(pos => <option key={pos} value={pos}>{pos}</option>)}
+                    </select>
+                    {newActionPlan.responsible.startsWith('อื่นๆ') && (
+                        <input 
+                            type="text" 
+                            className="mt-2 w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 bg-gray-50"
+                            placeholder="ระบุชื่อผู้รับผิดชอบหรือหน่วยงาน..."
+                            value={newActionPlan.otherResponsible}
+                            onChange={e => setNewActionPlan({...newActionPlan, otherResponsible: e.target.value})}
+                            required
+                        />
+                    )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">วันที่เริ่ม (Start Date)</label>
+                        <input 
+                            type="date" 
+                            required 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200"
+                            value={newActionPlan.startDate}
+                            onChange={e => setNewActionPlan({...newActionPlan, startDate: e.target.value})}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">กำหนดเสร็จ (Deadline)</label>
+                        <input 
+                            type="date" 
+                            required 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200"
+                            value={newActionPlan.deadline}
+                            onChange={e => setNewActionPlan({...newActionPlan, deadline: e.target.value})}
+                        />
+                    </div>
+                </div>
+
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">สถานะ (Status)</label>
+                    <select 
+                        className="w-full border rounded-md p-2 bg-white outline-none focus:ring-2 focus:ring-orange-200"
+                        value={newActionPlan.status}
+                        onChange={e => setNewActionPlan({...newActionPlan, status: e.target.value})}
+                    >
+                        <option value="Pending">รอดำเนินการ</option>
+                        <option value="In Progress">อยู่ระหว่างดำเนินการ</option>
+                        <option value="Completed">ดำเนินการแล้วเสร็จ</option>
+                        <option value="Cancelled">ยกเลิกดำเนินการ</option>
+                    </select>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-4 border-t border-gray-200 mt-6">
+                    <Button variant="secondary" onClick={() => setShowAddActionPlanModal(false)}>{t('cancel')}</Button>
+                    <Button type="submit" icon={Save}>{t('save')}</Button>
+                </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Audit Modal */}
+      {showAddAuditModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl p-6 m-4 relative animate-fade-in max-h-[95vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-6 border-b pb-4 sticky top-0 bg-white z-10">
+              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <ClipboardCheck className="text-purple-500" />
+                บันทึกผลการตรวจสอบ (New Audit)
+              </h2>
+              <button onClick={() => setShowAddAuditModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
+            </div>
+            
+            <form onSubmit={handleSaveAudit} className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 bg-gray-50 p-4 rounded-lg border border-gray-200">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">โครงการ / หน่วยงาน</label>
+                        <select 
+                            className="w-full border rounded-md p-2 bg-white outline-none focus:ring-2 focus:ring-purple-200"
+                            value={newAudit.projectId}
+                            onChange={e => setNewAudit({...newAudit, projectId: e.target.value})}
+                            required
+                        >
+                            <option value="" disabled>-- เลือกโครงการ --</option>
+                            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">วันที่ประเมิน</label>
+                        <input 
+                            type="date" 
+                            required 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-purple-200"
+                            value={newAudit.date}
+                            onChange={e => setNewAudit({...newAudit, date: e.target.value})}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">ผู้ประเมิน</label>
+                        <input 
+                            type="text" 
+                            required 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-purple-200"
+                            value={newAudit.inspector}
+                            onChange={e => setNewAudit({...newAudit, inspector: e.target.value})}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">ประเภทการตรวจ</label>
+                        <select 
+                            className="w-full border rounded-md p-2 bg-white outline-none focus:ring-2 focus:ring-purple-200"
+                            value={newAudit.type}
+                            onChange={e => setNewAudit({...newAudit, type: e.target.value})}
+                        >
+                            <option value="Internal Audit">Internal Audit (ตรวจภายใน)</option>
+                            <option value="External Audit">External Audit (หน่วยงานภายนอก)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div className="space-y-6">
+                    <div className="bg-purple-50 text-purple-800 p-3 rounded-lg text-sm font-bold flex justify-between items-center shadow-sm">
+                        <span>คะแนนรวม: {calculateTotalAuditScore()} / 235</span>
+                        <span>{Math.round((calculateTotalAuditScore() / 235) * 100)}%</span>
+                    </div>
+
+                    {AUDIT_FORM_TEMPLATE.map((category, catIdx) => (
+                        <div key={catIdx} className="border border-gray-200 rounded-lg overflow-hidden">
+                            <div className="bg-gray-100 p-3 font-bold text-gray-800 border-b border-gray-200">
+                                {category.title}
+                            </div>
+                            <div className="p-0 overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-gray-50 text-gray-600">
+                                        <tr>
+                                            <th className="p-2 text-center w-10">#</th>
+                                            <th className="p-2 text-left">รายการตรวจประเมิน</th>
+                                            <th className="p-2 text-center w-40">ระดับคะแนน (1-5)</th>
+                                            <th className="p-2 text-left w-64">หมายเหตุ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                        {category.items.map((item, itemIdx) => (
+                                            <tr key={itemIdx} className="hover:bg-gray-50">
+                                                <td className="p-2 text-center text-gray-500">{itemIdx + 1}</td>
+                                                <td className="p-2 text-gray-700">{item}</td>
+                                                <td className="p-2 text-center">
+                                                    <select 
+                                                        className="w-full border border-gray-300 rounded p-1.5 outline-none focus:border-purple-500 text-center"
+                                                        value={newAudit.scores[`${catIdx}_${itemIdx}`] || ''}
+                                                        onChange={(e) => handleAuditScoreChange(catIdx, itemIdx, e.target.value)}
+                                                        required
+                                                    >
+                                                        <option value="" disabled>-</option>
+                                                        <option value="5">5 - ดีเยี่ยม</option>
+                                                        <option value="4">4 - ดีมาก</option>
+                                                        <option value="3">3 - ดี</option>
+                                                        <option value="2">2 - พอใช้</option>
+                                                        <option value="1">1 - ปรับปรุง</option>
+                                                        <option value="0">0 - ไม่มีผลงาน</option>
+                                                    </select>
+                                                </td>
+                                                <td className="p-2">
+                                                    <input 
+                                                        type="text" 
+                                                        className="w-full border border-gray-300 rounded p-1.5 outline-none focus:border-purple-500 text-xs"
+                                                        placeholder="ระบุข้อเสนอแนะ..."
+                                                        value={newAudit.remarks[`${catIdx}_${itemIdx}`] || ''}
+                                                        onChange={(e) => handleAuditRemarkChange(catIdx, itemIdx, e.target.value)}
+                                                    />
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">สรุปผลการตรวจและข้อเสนอแนะรวม (Overall Remarks)</label>
+                    <textarea 
+                        className="w-full border rounded-md p-3 outline-none focus:ring-2 focus:ring-purple-200 h-24 resize-none"
+                        value={newAudit.additionalComments}
+                        onChange={e => setNewAudit({...newAudit, additionalComments: e.target.value})}
+                        placeholder="ข้อคิดเห็นเพิ่มเติมจากผู้ตรวจ..."
+                    ></textarea>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-4 border-t border-gray-200 sticky bottom-0 bg-white pb-2">
+                    <Button variant="secondary" onClick={() => setShowAddAuditModal(false)}>{t('cancel')}</Button>
+                    <Button type="submit" icon={Save}>{t('save')}</Button>
+                </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Selected Audit Report View Modal */}
+      {selectedAuditReport && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl m-4 relative animate-fade-in max-h-[95vh] overflow-y-auto">
+            <button onClick={() => setSelectedAuditReport(null)} className="absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors z-10"><X size={24} /></button>
+
+            <div id="print-audit-detail" className="p-8 bg-white text-gray-800">
+                <div className="text-center border-b-2 border-gray-800 pb-4 mb-6">
+                    <h2 className="text-2xl font-bold uppercase">รายงานการตรวจสอบคุณภาพ (Audit Report)</h2>
+                    <h3 className="text-lg text-gray-600 mt-1">{selectedAuditReport.category}</h3>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 mb-6 text-sm">
+                    <div><span className="font-bold">โครงการ (Project):</span> {projects.find(p => p.id === selectedAuditReport.projectId)?.name || '-'}</div>
+                    <div className="text-right"><span className="font-bold">วันที่ตรวจ (Date):</span> {new Date(selectedAuditReport.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'})}</div>
+                    <div><span className="font-bold">ผู้ตรวจประเมิน (Inspector):</span> {selectedAuditReport.inspector}</div>
+                    <div className="text-right">
+                        <span className="font-bold">ผลการประเมินรวม:</span> 
+                        <span className={`ml-2 px-3 py-1 rounded-full font-bold ${selectedAuditReport.score >= 90 ? 'bg-green-100 text-green-800' : selectedAuditReport.score >= 70 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
+                            {selectedAuditReport.rawScore ? `${selectedAuditReport.rawScore}/235` : `${selectedAuditReport.score}%`}
+                        </span>
+                    </div>
+                </div>
+
+                <div className="space-y-6">
+                    {AUDIT_FORM_TEMPLATE.map((category, catIdx) => (
+                        <div key={catIdx} className="border border-gray-300 rounded-lg overflow-hidden">
+                            <div className="bg-gray-100 p-2 px-3 font-bold text-gray-800 border-b border-gray-300 text-sm">
+                                {category.title}
+                            </div>
+                            <table className="w-full text-xs">
+                                <thead className="bg-gray-50 text-gray-600 border-b border-gray-200">
+                                    <tr>
+                                        <th className="p-2 text-center w-8">#</th>
+                                        <th className="p-2 text-left">รายการตรวจประเมิน</th>
+                                        <th className="p-2 text-center w-20">คะแนน</th>
+                                        <th className="p-2 text-left w-64">ข้อเสนอแนะ / หมายเหตุ</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200">
+                                    {category.items.map((item, itemIdx) => {
+                                        const score = selectedAuditReport.itemScores?.[`${catIdx}_${itemIdx}`] || '-';
+                                        const remark = selectedAuditReport.itemRemarks?.[`${catIdx}_${itemIdx}`] || '-';
+                                        return (
+                                            <tr key={itemIdx}>
+                                                <td className="p-2 text-center text-gray-500">{itemIdx + 1}</td>
+                                                <td className="p-2 text-gray-700">{item}</td>
+                                                <td className="p-2 text-center font-bold text-gray-800">{score}</td>
+                                                <td className="p-2 text-gray-600">{remark}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    ))}
+                </div>
+
+                <div className="mt-8 border border-gray-300 rounded-lg p-4 bg-gray-50">
+                    <h3 className="font-bold text-gray-800 mb-2 text-sm">สรุปผลและข้อคิดเห็นเพิ่มเติมจากผู้ตรวจ:</h3>
+                    <p className="text-sm text-gray-700 whitespace-pre-wrap">{selectedAuditReport.remarks || '-'}</p>
+                </div>
+            </div>
+
+            <div className="flex justify-end gap-2 p-4 border-t border-gray-200 bg-white rounded-b-lg">
+                <Button variant="secondary" onClick={() => setSelectedAuditReport(null)}>{t('close')}</Button>
+                <Button icon={Printer} onClick={() => {
+                    const container = document.getElementById('print-audit-detail')?.closest('.overflow-y-auto');
+                    if (container) container.scrollTop = 0;
+                    setTimeout(() => handleExportPDF('print-audit-detail', `Audit_Report_${selectedAuditReport.date}.pdf`, 'portrait', [22, 10, 20, 10]), 100);
+                }}>พิมพ์รายงาน PDF</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Ranking Modals */}
+      {showAuditRankingModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]">
+                <div className="p-4 border-b flex justify-between items-center bg-blue-50">
+                    <h2 className="text-xl font-bold text-blue-800 flex items-center gap-2"><BarChart3 size={24}/> จัดอันดับคะแนน Audit เฉลี่ย</h2>
+                    <button onClick={() => setShowAuditRankingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                </div>
+                <div className="p-0 overflow-y-auto">
+                    <table className="w-full text-sm text-left">
+                        <thead className="bg-gray-100 text-gray-600 sticky top-0">
+                            <tr>
+                                <th className="p-3 text-center w-16">อันดับ</th>
+                                <th className="p-3">โครงการ / หน่วยงาน</th>
+                                <th className="p-3 text-center w-32">คะแนนเฉลี่ย (%)</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                            {(() => {
+                                const rankData = projects.map(p => {
+                                    const pAudits = audits.filter(a => a.projectId === p.id);
+                                    const avg = pAudits.length > 0 ? (pAudits.reduce((sum, a) => sum + a.score, 0) / pAudits.length) : 0;
+                                    return { id: p.id, name: p.name, avgScore: parseFloat(avg.toFixed(1)) };
+                                }).filter(d => d.avgScore > 0).sort((a, b) => b.avgScore - a.avgScore);
+
+                                if (rankData.length === 0) return <tr><td colSpan="3" className="p-8 text-center text-gray-500">ไม่มีข้อมูล</td></tr>;
+
+                                return rankData.map((d, i) => (
+                                    <tr key={d.id} className={d.id === selectedProject?.id ? 'bg-blue-50/50' : 'hover:bg-gray-50'}>
+                                        <td className="p-3 text-center font-bold text-gray-500">{i + 1}</td>
+                                        <td className={`p-3 font-medium ${d.id === selectedProject?.id ? 'text-blue-700' : 'text-gray-800'}`}>{d.name} {d.id === selectedProject?.id && '(หน่วยงานนี้)'}</td>
+                                        <td className="p-3 text-center font-bold text-blue-600">{d.avgScore}%</td>
+                                    </tr>
+                                ));
+                            })()}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {showReportRankingModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]">
+                <div className="p-4 border-b flex justify-between items-center bg-purple-50">
+                    <h2 className="text-xl font-bold text-purple-800 flex items-center gap-2"><BarChart3 size={24}/> จัดอันดับการส่งรายงานประจำวัน (เดือนนี้)</h2>
+                    <button onClick={() => setShowReportRankingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                </div>
+                <div className="p-0 overflow-y-auto">
+                    <table className="w-full text-sm text-left">
+                        <thead className="bg-gray-100 text-gray-600 sticky top-0">
+                            <tr>
+                                <th className="p-3 text-center w-16">อันดับ</th>
+                                <th className="p-3">โครงการ / หน่วยงาน</th>
+                                <th className="p-3 text-center w-32">จำนวนวันส่งแล้ว</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                            {(() => {
+                                const currentMonthStr = new Date().toISOString().slice(0, 7);
+                                const rankData = projects.map(p => {
+                                    const pReports = dailyReports.filter(r => r.projectId === p.id && r.date.startsWith(currentMonthStr));
+                                    const uniqueDays = new Set(pReports.map(r => r.date)).size;
+                                    return { id: p.id, name: p.name, submittedDays: uniqueDays };
+                                }).sort((a, b) => b.submittedDays - a.submittedDays);
+
+                                if (rankData.length === 0) return <tr><td colSpan="3" className="p-8 text-center text-gray-500">ไม่มีข้อมูล</td></tr>;
+
+                                return rankData.map((d, i) => (
+                                    <tr key={d.id} className={d.id === selectedProject?.id ? 'bg-purple-50/50' : 'hover:bg-gray-50'}>
+                                        <td className="p-3 text-center font-bold text-gray-500">{i + 1}</td>
+                                        <td className={`p-3 font-medium ${d.id === selectedProject?.id ? 'text-purple-700' : 'text-gray-800'}`}>{d.name} {d.id === selectedProject?.id && '(หน่วยงานนี้)'}</td>
+                                        <td className="p-3 text-center font-bold text-purple-600">{d.submittedDays} วัน</td>
+                                    </tr>
+                                ));
+                            })()}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* Role Permissions Template Modal */}
+      {showRolePermModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl p-6 relative flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center mb-6 border-b pb-4 shrink-0">
+              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <Shield className="text-orange-500" />
+                ตั้งค่าสิทธิ์เริ่มต้นตามตำแหน่ง (Role Permissions Template)
+              </h2>
+              <button onClick={() => setShowRolePermModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
+            </div>
+
+            <div className="mb-4 shrink-0">
+                <label className="block text-sm font-bold text-gray-700 mb-2">เลือกตำแหน่งที่ต้องการตั้งค่า</label>
+                <select 
+                    className="w-full md:w-1/2 border border-gray-300 rounded-md p-2 bg-white outline-none focus:border-orange-500"
+                    value={editingRole}
+                    onChange={e => {
+                        setEditingRole(e.target.value);
+                        setEditingRolePerms(getMergedPermissions(rolePermissions[e.target.value]));
+                    }}
+                >
+                    {EMPLOYEE_POSITIONS.map(pos => <option key={pos} value={pos}>{pos}</option>)}
+                </select>
+                <p className="text-xs text-gray-500 mt-2">หมายเหตุ: การตั้งค่านี้จะเป็น "แม่แบบ" สำหรับดึงสิทธิ์ไปใช้เมื่อมีการเพิ่มพนักงานใหม่ในตำแหน่งนี้</p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto border border-gray-200 rounded-lg">
+                <table className="w-full text-sm text-left">
+                    <thead className="bg-gray-100 text-gray-700 sticky top-0">
+                        <tr>
+                            <th className="p-3 border-b">โมดูล (Module)</th>
+                            <th className="p-3 border-b text-center w-16">ดู</th>
+                            <th className="p-3 border-b text-center w-16">บันทึก</th>
+                            <th className="p-3 border-b text-center w-16">แก้ไข</th>
+                            <th className="p-3 border-b text-center w-16">อนุมัติ</th>
+                            <th className="p-3 border-b text-center w-16">ลบ</th>
+                            <th className="p-3 border-b text-center w-16">พิมพ์</th>
+                            <th className="p-3 border-b text-center w-20 bg-gray-200">All</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                        {AVAILABLE_MENUS.map(menu => {
+                            const renderRow = (item, isSub = false) => {
+                                const perms = editingRolePerms[item.id] || {};
+                                const isAll = perms.view && perms.save && perms.edit && perms.approve && perms.delete && perms.print;
+                                return (
+                                    <tr key={item.id} className={`hover:bg-gray-50 ${isSub ? 'bg-gray-50/30' : ''}`}>
+                                        <td className={`p-3 font-medium text-gray-800 ${isSub ? 'pl-8 text-xs text-gray-600 border-l-2 border-orange-200' : ''}`}>
+                                            {isSub && <span className="mr-2 text-gray-400">└</span>}
+                                            {t(item.label)}
+                                        </td>
+                                        {['view', 'save', 'edit', 'approve', 'delete', 'print'].map(ptype => (
+                                            <td key={ptype} className="p-3 text-center">
+                                                <input 
+                                                    type="checkbox" 
+                                                    className="w-4 h-4 accent-orange-600 cursor-pointer" 
+                                                    checked={!!perms[ptype]} 
+                                                    onChange={(e) => handleRolePermissionChange(item.id, ptype, e.target.checked)} 
+                                                />
+                                            </td>
+                                        ))}
+                                        <td className="p-3 text-center bg-gray-50 border-l border-gray-100">
+                                            <input 
+                                                type="checkbox" 
+                                                className="w-4 h-4 accent-orange-600 cursor-pointer" 
+                                                checked={isAll} 
+                                                onChange={(e) => handleRolePermissionAll(item.id, e.target.checked)} 
+                                            />
+                                        </td>
+                                    </tr>
+                                );
+                            };
+                            return (
+                                <React.Fragment key={menu.id}>
+                                    {renderRow(menu)}
+                                    {menu.submenus && menu.submenus.map(sub => renderRow(sub, true))}
+                                </React.Fragment>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4 mt-4 border-t shrink-0">
+                <Button variant="secondary" onClick={() => setShowRolePermModal(false)}>{t('cancel')}</Button>
+                <Button onClick={() => {
+                    setRolePermissions(prev => ({ ...prev, [editingRole]: editingRolePerms }));
+                    setShowRolePermModal(false);
+                    alert(`บันทึกแม่แบบสิทธิ์สำหรับตำแหน่ง ${editingRole} สำเร็จ`);
+                }} icon={Save}>{t('save')}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Form Modal */}
+      {showAddFormModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
+                <div className="flex justify-between items-center mb-6 border-b pb-4">
+                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                        <Folder className="text-blue-500" />
+                        {newFormItem.id ? 'แก้ไขข้อมูลแบบฟอร์ม' : 'เพิ่มแบบฟอร์มใหม่'}
+                    </h2>
+                    <button onClick={() => setShowAddFormModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                </div>
+                <form onSubmit={handleSaveFormItem} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">หมวดหมู่แบบฟอร์ม</label>
+                        <select 
+                            className="w-full border rounded-md p-2 outline-none focus:border-blue-500"
+                            value={newFormItem.category}
+                            onChange={e => setNewFormItem({...newFormItem, category: e.target.value})}
+                        >
+                            <option value="งานบริการลูกบ้าน (Resident Services)">งานบริการลูกบ้าน (Resident Services)</option>
+                            <option value="งานผู้รับเหมาและซ่อมบำรุง (Contractor & Maint.)">งานผู้รับเหมาและซ่อมบำรุง (Contractor & Maint.)</option>
+                            <option value="งานบริหารและนิติบุคคล (Juristic & Mgmt.)">งานบริหารและนิติบุคคล (Juristic & Mgmt.)</option>
+                            <option value="งานบุคคลและภายใน (Internal)">งานบุคคลและภายใน (Internal)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">ชื่อแบบฟอร์ม</label>
+                        <input 
+                            type="text" 
+                            required 
+                            className="w-full border rounded-md p-2 outline-none focus:border-blue-500"
+                            value={newFormItem.name}
+                            onChange={e => setNewFormItem({...newFormItem, name: e.target.value})}
+                        />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">รูปแบบ (Format)</label>
+                            <select 
+                                className="w-full border rounded-md p-2 outline-none focus:border-blue-500"
+                                value={newFormItem.format}
+                                onChange={e => setNewFormItem({...newFormItem, format: e.target.value})}
                             >
-                                <div>
-                                    <div className="font-bold text-sm flex items-center gap-2">
-                                        <span className="truncate">{machine?.name || 'Unknown'}</span>
-                                    </div>
-                                    <div className="text-xs font-mono mt-0.5 flex items-center gap-1 opacity-70">
-                                        <Settings size={12} /> {machine?.code || '-'}
-                                    </div>
+                                <option value="PDF">PDF</option>
+                                <option value="Excel">Excel / Spreadsheet</option>
+                                <option value="Word">Word Document</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">ขนาดโดยประมาณ</label>
+                            <input 
+                                type="text" 
+                                className="w-full border rounded-md p-2 outline-none focus:border-blue-500"
+                                value={newFormItem.size}
+                                onChange={e => setNewFormItem({...newFormItem, size: e.target.value})}
+                                placeholder="เช่น 150 KB"
+                            />
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">รายละเอียด / คำอธิบาย</label>
+                        <textarea 
+                            className="w-full border rounded-md p-2 h-20 resize-none outline-none focus:border-blue-500"
+                            value={newFormItem.description}
+                            onChange={e => setNewFormItem({...newFormItem, description: e.target.value})}
+                        ></textarea>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-4 border-t">
+                        <Button variant="secondary" onClick={() => setShowAddFormModal(false)}>ยกเลิก</Button>
+                        <Button type="submit" icon={Save}>บันทึกข้อมูล</Button>
+                    </div>
+                </form>
+            </div>
+        </div>
+      )}
+
+      {/* Form Document View/Edit Modal */}
+      {selectedFormDetails && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 animate-fade-in backdrop-blur-sm">
+            <div className={`bg-white rounded-xl shadow-2xl w-full flex flex-col relative transition-all ${isExporting ? 'max-w-[210mm] max-h-none overflow-visible p-8 shadow-none m-0' : 'max-w-5xl max-h-[95vh] overflow-hidden'}`}>
+                {!isExporting && (
+                    <div className="p-4 border-b flex justify-between items-center bg-gray-50 shrink-0">
+                        <div>
+                            <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                                <FileText className="text-blue-500" />
+                                {selectedFormDetails.name}
+                            </h2>
+                            <p className="text-sm text-gray-500 mt-1">{selectedFormDetails.category} | อัปเดตล่าสุด: {selectedFormDetails.lastUpdated}</p>
+                        </div>
+                        <button onClick={() => { setSelectedFormDetails(null); setIsEditingForm(false); }} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                    </div>
+                )}
+                
+                {/* Simulated Document Area */}
+                <div className={`bg-gray-200 flex-1 overflow-y-auto flex justify-center py-8 ${isExporting ? 'py-0 bg-white' : ''}`}>
+                    <div id="print-document-form" className={`bg-white shadow-lg relative ${isExporting ? 'w-full shadow-none' : 'w-[210mm] min-h-[297mm] px-[20mm] py-[20mm] border border-gray-300'}`}>
+                        {/* Header */}
+                        <div className="text-center mb-8">
+                            <h1 className="text-2xl font-bold mb-2">นิติบุคคลอาคารชุด / หมู่บ้าน {selectedProject?.name || '................................'}</h1>
+                            <h2 className="text-xl font-bold">{selectedFormDetails.name.split(' (')[0]}</h2>
+                        </div>
+                        
+                        {/* Document Content Simulation */}
+                        <div className="space-y-6 text-sm text-gray-800 leading-relaxed">
+                            <div className="flex justify-end mb-4">
+                                <div>วันที่ <span className={isEditingForm ? "border-b border-blue-500 outline-none w-32 inline-block" : "border-b border-dotted border-gray-500 px-8"} contentEditable={isEditingForm}></span></div>
+                            </div>
+                            
+                            <p>เรื่อง <span className="ml-4 font-bold border-b border-gray-400 pb-1 px-4">{selectedFormDetails.name.split(' (')[0]}</span></p>
+                            <p>เรียน ผู้จัดการ / คณะกรรมการนิติบุคคลฯ</p>
+                            
+                            <div className="ml-8 space-y-4">
+                                <p className="flex items-center gap-2">
+                                    ข้าพเจ้า <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none" : "border-dotted border-gray-500"}`} contentEditable={isEditingForm}></span>
+                                </p>
+                                <div className="flex items-center gap-4">
+                                    เจ้าของร่วม / ผู้พักอาศัย ห้องเลขที่ / บ้านเลขที่ <span className={`w-32 border-b ${isEditingForm ? "border-blue-500 outline-none" : "border-dotted border-gray-500"}`} contentEditable={isEditingForm}></span>
                                 </div>
-                                <div className="flex flex-col items-center opacity-80 group-hover:opacity-100 transition-opacity shrink-0">
-                                    {statusIcon}
-                                    <span className="text-[10px] mt-1 font-bold">{statusLabel}</span>
+                                <p className="flex items-center gap-2">
+                                    เบอร์โทรศัพท์ติดต่อ <span className={`w-48 border-b ${isEditingForm ? "border-blue-500 outline-none" : "border-dotted border-gray-500"}`} contentEditable={isEditingForm}></span>
+                                    อีเมล <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none" : "border-dotted border-gray-500"}`} contentEditable={isEditingForm}></span>
+                                </p>
+                                
+                                <p className="mt-6 font-bold">มีความประสงค์เพื่อ:</p>
+                                <div className={`w-full min-h-[100px] border p-4 ${isEditingForm ? "border-blue-300 bg-blue-50 outline-none rounded" : "border-gray-300"}`} contentEditable={isEditingForm}>
+                                    {isEditingForm ? "" : (selectedFormDetails.description || "ระบุรายละเอียดความประสงค์ที่นี่...")}
+                                </div>
+                                
+                                <p className="mt-4">โดยมีรายละเอียดเพิ่มเติมดังนี้:</p>
+                                <div className="space-y-3">
+                                    <div className="flex items-center gap-2">1. <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none" : "border-dotted border-gray-500"}`} contentEditable={isEditingForm}></span></div>
+                                    <div className="flex items-center gap-2">2. <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none" : "border-dotted border-gray-500"}`} contentEditable={isEditingForm}></span></div>
+                                    <div className="flex items-center gap-2">3. <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none" : "border-dotted border-gray-500"}`} contentEditable={isEditingForm}></span></div>
+                                </div>
+                                
+                                <p className="mt-6 pt-4 border-t border-gray-200">ข้าพเจ้าขอรับรองว่าข้อความเบื้องต้นเป็นความจริงทุกประการ และยินดีปฏิบัติตามระเบียบของนิติบุคคลฯ อย่างเคร่งครัด</p>
+                            </div>
+
+                            <div className="mt-20 flex justify-between px-8 text-center">
+                                <div>
+                                    <div className="border-b border-gray-500 w-48 mb-2 h-6"></div>
+                                    <p>( ........................................................ )</p>
+                                    <p className="mt-1">ผู้ยื่นคำร้อง</p>
+                                </div>
+                                <div>
+                                    <div className="border-b border-gray-500 w-48 mb-2 h-6"></div>
+                                    <p>( ........................................................ )</p>
+                                    <p className="mt-1">ผู้รับเรื่อง / เจ้าหน้าที่นิติบุคคล</p>
                                 </div>
                             </div>
-                        );
-                    })}
+                        </div>
+                    </div>
                 </div>
-                
-                <div className="mt-4 pt-4 border-t border-gray-200 flex justify-end shrink-0">
-                    <Button variant="secondary" onClick={() => setSelectedPmStatusDetail(null)}>{t('close')}</Button>
+
+                {!isExporting && (
+                    <div className="p-4 border-t bg-gray-50 flex justify-between items-center shrink-0">
+                        <div>
+                            {isEditingForm ? (
+                                <span className="text-orange-600 font-bold text-sm animate-pulse flex items-center gap-1"><Edit size={16}/> โหมดกรอกข้อความ (พิมพ์ในช่องว่างได้เลย)</span>
+                            ) : (
+                                <span className="text-gray-500 text-sm">คลิก "กรอกแบบฟอร์ม" เพื่อพิมพ์ข้อมูลลงในช่องว่างก่อนสั่งพรินต์</span>
+                            )}
+                        </div>
+                        <div className="flex gap-2">
+                            {isEditingForm ? (
+                                <Button variant="secondary" onClick={() => setIsEditingForm(false)}>เสร็จสิ้น / ดูตัวอย่าง</Button>
+                            ) : (
+                                <Button variant="outline" icon={Edit} onClick={() => setIsEditingForm(true)} className="border-blue-500 text-blue-600 hover:bg-blue-50">กรอกแบบฟอร์ม</Button>
+                            )}
+                            <Button icon={Printer} onClick={() => {
+                                setIsEditingForm(false);
+                                setTimeout(() => handleExportPDF('print-document-form', `${selectedFormDetails.name}.pdf`, 'portrait', [10, 10, 10, 10]), 100);
+                            }} disabled={isEditingForm}>พิมพ์ / ดาวน์โหลด PDF</Button>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+      )}
+
+      {/* Add Other Data Modal */}
+      {showAddOtherModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
+                <div className="flex justify-between items-center mb-6 border-b pb-4">
+                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                        <Layers className="text-orange-500" />
+                        {newOther.id ? 'แก้ไขข้อมูล' : 'เพิ่มข้อมูลอื่นๆ'}
+                    </h2>
+                    <button onClick={() => setShowAddOtherModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
                 </div>
+                <form onSubmit={handleSaveOther} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">หัวข้อ (Title)</label>
+                        <input 
+                            type="text" 
+                            required 
+                            className="w-full border rounded-md p-2 outline-none focus:border-orange-500"
+                            value={newOther.title}
+                            onChange={e => setNewOther({...newOther, title: e.target.value})}
+                            placeholder="เช่น รหัสผ่าน Wi-Fi ส่วนกลาง, ลิงก์โฟลเดอร์แบบแปลนอาคาร"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">รายละเอียด (Details)</label>
+                        <textarea 
+                            className="w-full border rounded-md p-2 h-24 resize-none outline-none focus:border-orange-500"
+                            value={newOther.details}
+                            onChange={e => setNewOther({...newOther, details: e.target.value})}
+                            placeholder="ระบุรายละเอียด หรือข้อความที่ต้องการบันทึก..."
+                        ></textarea>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">แนบลิงก์ (URL/Link) - ถ้ามี</label>
+                        <div className="relative">
+                            <LinkIcon size={16} className="absolute left-3 top-2.5 text-gray-400"/>
+                            <input 
+                                type="url" 
+                                className="w-full border rounded-md pl-9 p-2 outline-none focus:border-orange-500"
+                                value={newOther.link}
+                                onChange={e => setNewOther({...newOther, link: e.target.value})}
+                                placeholder="https://..."
+                            />
+                        </div>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-4 border-t mt-6">
+                        <Button variant="secondary" onClick={() => setShowAddOtherModal(false)}>ยกเลิก</Button>
+                        <Button type="submit" icon={Save}>บันทึกข้อมูล</Button>
+                    </div>
+                </form>
             </div>
         </div>
       )}
