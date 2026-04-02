@@ -3887,6 +3887,21 @@ export default function App() {
           return;
       }
       
+      // ตรวจสอบว่าให้คะแนนครบทุกข้อหรือไม่ (ป้องกันปัญหากดปุ่มแล้วนิ่งจาก HTML5 Validation)
+      let missingCount = 0;
+      AUDIT_FORM_TEMPLATE.forEach((category, catIdx) => {
+          category.items.forEach((item, itemIdx) => {
+              if (!newAudit.scores[`${catIdx}_${itemIdx}`]) {
+                  missingCount++;
+              }
+          });
+      });
+
+      if (missingCount > 0) {
+          alert(`กรุณาให้คะแนนประเมินให้ครบทุกหัวข้อ (พบหัวข้อที่ยังไม่ได้ให้คะแนนจำนวน ${missingCount} ข้อ)`);
+          return;
+      }
+      
       const totalScore = calculateTotalAuditScore();
       const percentScore = Math.round((totalScore / 235) * 100);
       
@@ -3905,7 +3920,10 @@ export default function App() {
           itemRemarks: newAudit.remarks // บันทึกหมายเหตุรายข้อ
       };
       
-      setAudits([auditToSave, ...audits]);
+      const nextList = [auditToSave, ...(Array.isArray(audits) ? audits : [])];
+      setAudits(nextList);
+      triggerAutoSync('Audits_ประเมินคุณภาพ', nextList, []);
+
       setShowAddAuditModal(false);
       setNewAudit({
           projectId: '',
@@ -13358,10 +13376,9 @@ export default function App() {
                                                 <td className="p-2 text-gray-700">{item}</td>
                                                 <td className="p-2 text-center">
                                                     <select 
-                                                        className="w-full border border-gray-300 rounded p-1.5 outline-none focus:border-purple-500 text-center"
+                                                        className={`w-full border rounded p-1.5 outline-none focus:border-purple-500 text-center transition-colors ${!newAudit.scores[`${catIdx}_${itemIdx}`] ? 'border-red-300 bg-red-50 text-red-600' : 'border-gray-300'}`}
                                                         value={newAudit.scores[`${catIdx}_${itemIdx}`] || ''}
                                                         onChange={(e) => handleAuditScoreChange(catIdx, itemIdx, e.target.value)}
-                                                        required
                                                     >
                                                         <option value="" disabled>-</option>
                                                         <option value="5">5 - ดีเยี่ยม</option>
@@ -13760,59 +13777,69 @@ export default function App() {
                 
                 {/* Simulated Document Area */}
                 <div className={`bg-gray-200 flex-1 overflow-y-auto flex justify-center py-8 ${isExporting ? 'py-0 bg-white' : ''}`}>
-                    <div id="print-document-form" className={`bg-white shadow-lg relative ${isExporting ? 'w-full shadow-none' : 'w-[210mm] min-h-[297mm] px-[20mm] py-[20mm] border border-gray-300'}`}>
+                    <div id="print-document-form" className={`bg-white shadow-lg relative text-gray-800 ${isExporting ? 'w-full shadow-none' : 'w-[210mm] min-h-[297mm] px-[15mm] pt-[15mm] pb-[20mm] border border-gray-300'}`}>
                         {/* Header */}
-                        <div className="text-center mb-8">
+                        <div className="text-center mb-8 mt-4">
                             <h1 className="text-2xl font-bold mb-2">นิติบุคคลอาคารชุด / หมู่บ้าน {selectedProject?.name || '................................'}</h1>
-                            <h2 className="text-xl font-bold">{selectedFormDetails.name.split(' (')[0]}</h2>
+                            <h2 className="text-xl font-bold text-gray-700">{selectedFormDetails.name.split(' (')[0]}</h2>
                         </div>
                         
                         {/* Document Content Simulation */}
-                        <div className="space-y-6 text-sm text-gray-800 leading-relaxed">
-                            <div className="flex justify-end mb-4">
-                                <div>วันที่ <span className={isEditingForm ? "border-b border-blue-500 outline-none w-32 inline-block" : "border-b border-dotted border-gray-500 px-8"} contentEditable={isEditingForm}></span></div>
+                        <div className="space-y-6 text-base leading-relaxed px-4">
+                            <div className="flex justify-end mb-6">
+                                <div className="flex items-end gap-2">
+                                     <span className="font-bold">วันที่</span> 
+                                     <span className={isEditingForm ? "border-b border-blue-500 outline-none bg-blue-50 w-40 inline-block text-center min-h-[24px]" : "border-b border-dotted border-gray-500 w-40 inline-block text-center min-h-[24px]"} contentEditable={isEditingForm}></span>
+                                </div>
                             </div>
                             
-                            <p>เรื่อง <span className="ml-4 font-bold border-b border-gray-400 pb-1 px-4">{selectedFormDetails.name.split(' (')[0]}</span></p>
-                            <p>เรียน ผู้จัดการ / คณะกรรมการนิติบุคคลฯ</p>
+                            <p className="flex items-center gap-2">
+                                <span className="font-bold">เรื่อง</span> 
+                                <span className="ml-2 font-bold border-b border-gray-400 pb-1 flex-1">{selectedFormDetails.name.split(' (')[0]}</span>
+                            </p>
+                            <p className="font-bold">เรียน ผู้จัดการ / คณะกรรมการนิติบุคคลฯ</p>
                             
-                            <div className="ml-8 space-y-4">
-                                <p className="flex items-center gap-2">
-                                    ข้าพเจ้า <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none" : "border-dotted border-gray-500"}`} contentEditable={isEditingForm}></span>
-                                </p>
-                                <div className="flex items-center gap-4">
-                                    เจ้าของร่วม / ผู้พักอาศัย ห้องเลขที่ / บ้านเลขที่ <span className={`w-32 border-b ${isEditingForm ? "border-blue-500 outline-none" : "border-dotted border-gray-500"}`} contentEditable={isEditingForm}></span>
+                            <div className="ml-4 md:ml-8 space-y-5">
+                                <div className="flex items-center gap-2">
+                                    <span className="font-bold whitespace-nowrap">ข้าพเจ้า</span> 
+                                    <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2`} contentEditable={isEditingForm}></span>
                                 </div>
-                                <p className="flex items-center gap-2">
-                                    เบอร์โทรศัพท์ติดต่อ <span className={`w-48 border-b ${isEditingForm ? "border-blue-500 outline-none" : "border-dotted border-gray-500"}`} contentEditable={isEditingForm}></span>
-                                    อีเมล <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none" : "border-dotted border-gray-500"}`} contentEditable={isEditingForm}></span>
-                                </p>
+                                <div className="flex items-center gap-4 flex-wrap">
+                                    <span className="font-bold whitespace-nowrap">เจ้าของร่วม / ผู้พักอาศัย ห้องเลขที่ / บ้านเลขที่</span> 
+                                    <span className={`w-40 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2 text-center`} contentEditable={isEditingForm}></span>
+                                </div>
+                                <div className="flex items-center gap-4 flex-wrap">
+                                    <span className="font-bold whitespace-nowrap">เบอร์โทรศัพท์ติดต่อ</span> 
+                                    <span className={`w-48 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2 text-center`} contentEditable={isEditingForm}></span>
+                                    <span className="font-bold whitespace-nowrap">อีเมล</span> 
+                                    <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2 text-center`} contentEditable={isEditingForm}></span>
+                                </div>
                                 
-                                <p className="mt-6 font-bold">มีความประสงค์เพื่อ:</p>
-                                <div className={`w-full min-h-[100px] border p-4 ${isEditingForm ? "border-blue-300 bg-blue-50 outline-none rounded" : "border-gray-300"}`} contentEditable={isEditingForm}>
+                                <p className="mt-8 font-bold">มีความประสงค์เพื่อ:</p>
+                                <div className={`w-full min-h-[120px] border p-4 leading-relaxed ${isEditingForm ? "border-blue-300 bg-blue-50 outline-none rounded" : "border-gray-300"}`} contentEditable={isEditingForm}>
                                     {isEditingForm ? "" : (selectedFormDetails.description || "ระบุรายละเอียดความประสงค์ที่นี่...")}
                                 </div>
                                 
-                                <p className="mt-4">โดยมีรายละเอียดเพิ่มเติมดังนี้:</p>
-                                <div className="space-y-3">
-                                    <div className="flex items-center gap-2">1. <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none" : "border-dotted border-gray-500"}`} contentEditable={isEditingForm}></span></div>
-                                    <div className="flex items-center gap-2">2. <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none" : "border-dotted border-gray-500"}`} contentEditable={isEditingForm}></span></div>
-                                    <div className="flex items-center gap-2">3. <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none" : "border-dotted border-gray-500"}`} contentEditable={isEditingForm}></span></div>
+                                <p className="mt-6 font-bold">โดยมีรายละเอียดเพิ่มเติมดังนี้:</p>
+                                <div className="space-y-4">
+                                    <div className="flex items-end gap-2">1. <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2`} contentEditable={isEditingForm}></span></div>
+                                    <div className="flex items-end gap-2">2. <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2`} contentEditable={isEditingForm}></span></div>
+                                    <div className="flex items-end gap-2">3. <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2`} contentEditable={isEditingForm}></span></div>
                                 </div>
                                 
-                                <p className="mt-6 pt-4 border-t border-gray-200">ข้าพเจ้าขอรับรองว่าข้อความเบื้องต้นเป็นความจริงทุกประการ และยินดีปฏิบัติตามระเบียบของนิติบุคคลฯ อย่างเคร่งครัด</p>
+                                <p className="mt-10 pt-6 border-t border-gray-200 text-center font-bold">ข้าพเจ้าขอรับรองว่าข้อความเบื้องต้นเป็นความจริงทุกประการ และยินดีปฏิบัติตามระเบียบของนิติบุคคลฯ อย่างเคร่งครัด</p>
                             </div>
 
-                            <div className="mt-20 flex justify-between px-8 text-center">
-                                <div>
-                                    <div className="border-b border-gray-500 w-48 mb-2 h-6"></div>
-                                    <p>( ........................................................ )</p>
-                                    <p className="mt-1">ผู้ยื่นคำร้อง</p>
+                            <div className="mt-16 flex justify-between px-4 md:px-8 text-center pb-8">
+                                <div className="w-56 md:w-64">
+                                    <div className="border-b border-gray-500 w-full mb-2 h-6"></div>
+                                    <p className="text-sm">( ........................................................ )</p>
+                                    <p className="mt-2 font-bold">ผู้ยื่นคำร้อง</p>
                                 </div>
-                                <div>
-                                    <div className="border-b border-gray-500 w-48 mb-2 h-6"></div>
-                                    <p>( ........................................................ )</p>
-                                    <p className="mt-1">ผู้รับเรื่อง / เจ้าหน้าที่นิติบุคคล</p>
+                                <div className="w-56 md:w-64">
+                                    <div className="border-b border-gray-500 w-full mb-2 h-6"></div>
+                                    <p className="text-sm">( ........................................................ )</p>
+                                    <p className="mt-2 font-bold">ผู้รับเรื่อง / เจ้าหน้าที่นิติบุคคล</p>
                                 </div>
                             </div>
                         </div>
@@ -13820,12 +13847,12 @@ export default function App() {
                 </div>
 
                 {!isExporting && (
-                    <div className="p-4 border-t bg-gray-50 flex justify-between items-center shrink-0">
+                    <div className="p-4 border-t bg-gray-50 flex justify-between items-center shrink-0 rounded-b-xl">
                         <div>
                             {isEditingForm ? (
                                 <span className="text-orange-600 font-bold text-sm animate-pulse flex items-center gap-1"><Edit size={16}/> โหมดกรอกข้อความ (พิมพ์ในช่องว่างได้เลย)</span>
                             ) : (
-                                <span className="text-gray-500 text-sm">คลิก "กรอกแบบฟอร์ม" เพื่อพิมพ์ข้อมูลลงในช่องว่างก่อนสั่งพรินต์</span>
+                                <span className="text-gray-500 text-sm">คลิก "กรอกแบบฟอร์ม" เพื่อพิมพ์ข้อมูลลงในช่องว่างก่อนสั่งพิมพ์</span>
                             )}
                         </div>
                         <div className="flex gap-2">
@@ -13836,7 +13863,7 @@ export default function App() {
                             )}
                             <Button icon={Printer} onClick={() => {
                                 setIsEditingForm(false);
-                                setTimeout(() => handleExportPDF('print-document-form', `${selectedFormDetails.name}.pdf`, 'portrait', [10, 10, 10, 10]), 100);
+                                setTimeout(() => handleExportPDF('print-document-form', `${selectedFormDetails.name}.pdf`, 'portrait', [22, 10, 20, 10]), 100);
                             }} disabled={isEditingForm}>พิมพ์ / ดาวน์โหลด PDF</Button>
                         </div>
                     </div>
