@@ -2112,10 +2112,10 @@ export default function App() {
   const getPendingApprovals = () => {
       if (!currentUser) return [];
 
-      const isChiefUser = currentUser.position?.includes('หัวหน้าช่าง');
-      const isManagerUser = currentUser.position?.includes('ผู้จัดการ') && !currentUser.position?.includes('ผู้ช่วย');
-      const isAreaManagerUser = currentUser.position?.includes('ผู้จัดการพื้นที่');
-      const isHRUser = currentUser.position?.includes('เจ้าหน้าที่ฝ่ายบุคคล');
+      const isChiefUser = (currentUser?.position || '').includes('หัวหน้าช่าง');
+      const isManagerUser = (currentUser?.position || '').includes('ผู้จัดการ') && !(currentUser?.position || '').includes('ผู้ช่วย');
+      const isAreaManagerUser = (currentUser?.position || '').includes('ผู้จัดการพื้นที่');
+      const isHRUser = (currentUser?.position || '').includes('เจ้าหน้าที่ฝ่ายบุคคล');
       const isAdminUser = currentUser.username === 'admin' || currentUser.position === 'Super Admin';
 
       // เช็คสิทธิ์การเข้าถึงโครงการของผู้ใช้ (ปรับปรุงการตรวจสอบชนิดข้อมูลเพื่อป้องกัน Error)
@@ -2173,7 +2173,7 @@ export default function App() {
       });
 
       // 3. นับจำนวนรายการแจ้งซ่อมที่รอดำเนินการ (สำหรับช่าง)
-      const isTechnicianUser = currentUser.position.includes('ช่าง') || isAdminUser;
+      const isTechnicianUser = (currentUser?.position || '').includes('ช่าง') || isAdminUser;
       
       repairs.forEach(repair => {
           const proj = projects.find(p => p.id === repair.projectId);
@@ -2433,8 +2433,8 @@ export default function App() {
           const approvalKey = `${selectedProject.id}_${currentMonth}`;
           const currentApproval = scheduleApprovals[approvalKey] || {};
           
-          const isManager = currentUser?.position.includes('ผู้จัดการอาคาร') || currentUser?.position.includes('ผู้จัดการหมู่บ้าน');
-          const isAreaManager = currentUser?.position.includes('ผู้จัดการพื้นที่');
+          const isManager = (currentUser?.position || '').includes('ผู้จัดการอาคาร') || (currentUser?.position || '').includes('ผู้จัดการหมู่บ้าน');
+          const isAreaManager = (currentUser?.position || '').includes('ผู้จัดการพื้นที่');
           const isAdmin = currentUser?.username === 'admin';
           
           let nextStatus = 'Pending Manager';
@@ -2472,9 +2472,9 @@ export default function App() {
       const currentApproval = scheduleApprovals[approvalKey];
       if (!currentApproval) return;
 
-      const isHR = currentUser?.position.includes('เจ้าหน้าที่ฝ่ายบุคคล') || currentUser?.username === 'admin';
-      const isManager = currentUser?.position.includes('ผู้จัดการอาคาร') || currentUser?.position.includes('ผู้จัดการหมู่บ้าน') || currentUser?.username === 'admin';
-      const isAreaManager = currentUser?.position.includes('ผู้จัดการพื้นที่') || currentUser?.username === 'admin';
+      const isHR = (currentUser?.position || '').includes('เจ้าหน้าที่ฝ่ายบุคคล') || currentUser?.username === 'admin';
+      const isManager = (currentUser?.position || '').includes('ผู้จัดการอาคาร') || (currentUser?.position || '').includes('ผู้จัดการหมู่บ้าน') || currentUser?.username === 'admin';
+      const isAreaManager = (currentUser?.position || '').includes('ผู้จัดการพื้นที่') || currentUser?.username === 'admin';
 
       let nextStatus = currentApproval.status;
       let updates = {};
@@ -2681,8 +2681,8 @@ export default function App() {
       const overallStatus = failCount > 0 ? 'Fail' : 'Pass';
 
       // --- NEW: Approval Flow Logic ---
-      const isChief = (user) => user?.position.includes('หัวหน้าช่าง');
-      const isManager = (user) => user?.position.includes('ผู้จัดการ') && !user?.position.includes('ผู้ช่วย');
+      const isChief = (user) => (user?.position || '').includes('หัวหน้าช่าง');
+      const isManager = (user) => (user?.position || '').includes('ผู้จัดการ') && !(user?.position || '').includes('ผู้ช่วย');
       const isAdmin = (user) => user?.username === 'admin' || user?.position === 'Super Admin';
 
       const projectStaff = users.filter(u => u.department === selectedProject.name);
@@ -2779,8 +2779,8 @@ export default function App() {
 
   // --- NEW: Handle PM Approval Actions ---
   const handleApprovePmAction = (record, action) => {
-      const isChiefUser = currentUser?.position.includes('หัวหน้าช่าง');
-      const isManagerUser = currentUser?.position.includes('ผู้จัดการ') && !currentUser?.position.includes('ผู้ช่วย');
+      const isChiefUser = (currentUser?.position || '').includes('หัวหน้าช่าง');
+      const isManagerUser = (currentUser?.position || '').includes('ผู้จัดการ') && !(currentUser?.position || '').includes('ผู้ช่วย');
       const isAdminUser = currentUser?.username === 'admin' || currentUser?.position === 'Super Admin';
 
       let nextStatus = record.approvalStatus;
@@ -4501,7 +4501,7 @@ export default function App() {
   const handleSaveContract = async (e) => {
       e.preventDefault();
       setIsSavingContract(true);
-      const finalCategory = newContract.category.includes('อื่นๆ') ? newContract.customCategory : newContract.category;
+      const finalCategory = (newContract.category || '').includes('อื่นๆ') ? newContract.customCategory : newContract.category;
       
       try {
           let nextList;
@@ -6260,17 +6260,17 @@ export default function App() {
         const projectStaff = users.filter(u => u.department === selectedProject.name);
         return {
         managers: projectStaff.filter(u => 
-            (u.position.toLowerCase().includes('manager') || u.position.includes('ผู้จัดการ')) &&
-            !u.position.toLowerCase().includes('assistant') && !u.position.includes('ผู้ช่วย')
+            ((u.position || '').toLowerCase().includes('manager') || (u.position || '').includes('ผู้จัดการ')) &&
+            !(u.position || '').toLowerCase().includes('assistant') && !(u.position || '').includes('ผู้ช่วย')
         ),
         supervisors: projectStaff.filter(u => 
-            u.position.toLowerCase().includes('chief') || u.position.includes('หัวหน้า') || 
-            u.position.toLowerCase().includes('assistant') || u.position.includes('ผู้ช่วย')
+            ((u.position || '').toLowerCase().includes('chief') || (u.position || '').includes('หัวหน้า')) || 
+            ((u.position || '').toLowerCase().includes('assistant') || (u.position || '').includes('ผู้ช่วย'))
         ),
         staff: projectStaff.filter(u => 
-            !u.position.toLowerCase().includes('manager') && !u.position.includes('ผู้จัดการ') &&
-            !u.position.toLowerCase().includes('chief') && !u.position.includes('หัวหน้า') &&
-            !u.position.toLowerCase().includes('assistant') && !u.position.includes('ผู้ช่วย')
+            !((u.position || '').toLowerCase().includes('manager') || (u.position || '').includes('ผู้จัดการ')) &&
+            !((u.position || '').toLowerCase().includes('chief') || (u.position || '').includes('หัวหน้า')) &&
+            !((u.position || '').toLowerCase().includes('assistant') || (u.position || '').includes('ผู้ช่วย'))
         )
         };
     };
