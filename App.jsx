@@ -3041,12 +3041,27 @@ export default function App() {
               }
               
               try {
+                  // FIX: เลื่อน Scroll กลับไปบนสุดเสมอ เพื่อป้องกันบัคจับภาพแล้วเป็นกระดาษขาวของ html-to-image
+                  window.scrollTo(0, 0);
+                  let parent = element.parentElement;
+                  while(parent) {
+                      parent.scrollTop = 0;
+                      parent.scrollLeft = 0;
+                      parent = parent.parentElement;
+                  }
+
+                  // FIX: บังคับระบุขนาด Width และ Height เป้าหมายที่ชัดเจน
+                  const targetWidth = element.scrollWidth;
+                  const targetHeight = element.scrollHeight;
+
                   // ใช้ htmlToImage (Native Browser Rendering) ขจัดปัญหาภาษาไทยทับกันโดยสิ้นเชิง
                   const dataUrl = await window.htmlToImage.toJpeg(element, {
                       quality: 1.0,
                       pixelRatio: 2, // ความคมชัด x2
                       backgroundColor: '#ffffff',
-                      style: { transform: 'none', transformOrigin: 'top left' }
+                      width: targetWidth,
+                      height: targetHeight,
+                      style: { transform: 'none', transformOrigin: 'top left', margin: '0', padding: '0' }
                   });
 
                   const { jsPDF } = window.jspdf;
@@ -3128,12 +3143,25 @@ export default function App() {
               }
               
               try {
+                  window.scrollTo(0, 0);
+                  let parent = element.parentElement;
+                  while(parent) {
+                      parent.scrollTop = 0;
+                      parent.scrollLeft = 0;
+                      parent = parent.parentElement;
+                  }
+
+                  const targetWidth = element.scrollWidth;
+                  const targetHeight = element.scrollHeight;
+
                   // ใช้ htmlToImage เพื่อสร้างรูปภาพ
                   const dataUrl = await window.htmlToImage.toJpeg(element, {
                       quality: 1.0,
                       pixelRatio: 2, // เพิ่มความคมชัดเป็น 2 เท่า
                       backgroundColor: '#ffffff',
-                      style: { transform: 'none', transformOrigin: 'top left' }
+                      width: targetWidth,
+                      height: targetHeight,
+                      style: { transform: 'none', transformOrigin: 'top left', margin: '0', padding: '0' }
                   });
 
                   // สั่งดาวน์โหลด
@@ -3164,6 +3192,11 @@ export default function App() {
   const exportSchedulePDF = async () => {
       // เรียกใช้แกนหลักใหม่ได้เลย 
       handleExportPDF('print-schedule-area', `Work_Schedule_${selectedProject?.name || 'Project'}_${currentMonth}.pdf`, 'landscape', [22, 10, 20, 10]);
+  };
+
+  // ฟังก์ชันพิเศษสำหรับดาวน์โหลดตารางงานเป็นรูปภาพ
+  const exportScheduleImage = async () => {
+      handleExportImage('print-schedule-area', `Work_Schedule_${selectedProject?.name || 'Project'}_${currentMonth}.jpg`);
   };
 
   // New Handlers for Daily Report
@@ -7045,8 +7078,8 @@ export default function App() {
 
             return (
             <Card 
-                className={`${isExporting ? 'border-none shadow-none bg-white mx-auto' : 'min-w-full overflow-hidden'}`} 
-                style={isExporting ? { width: '277mm', minWidth: '277mm', maxWidth: '277mm', boxSizing: 'border-box' } : {}}
+                className={`${isExporting ? 'border-none shadow-none bg-white mx-auto overflow-visible block' : 'min-w-full overflow-hidden'}`} 
+                style={isExporting ? { width: '277mm', minWidth: '277mm', maxWidth: '277mm', boxSizing: 'border-box', position: 'relative' } : {}}
                 id="print-schedule-area"
             >
                 <div className={`p-4 border-b flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white ${isExporting ? 'pb-2 pt-0 px-2' : ''}`}>
@@ -7076,6 +7109,9 @@ export default function App() {
                             <button onClick={() => changeMonth(1)} className={`p-1 hover:bg-white rounded shadow-sm transition ${isExporting ? 'hidden' : ''}`}><ChevronRight size={18}/></button>
                         </div>
                         <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
+                            <Button variant="outline" size="sm" icon={isExporting ? Loader2 : ImageIcon} onClick={exportScheduleImage} disabled={isExporting} className="border-blue-500 text-blue-600 hover:bg-blue-50">
+                                {isExporting ? 'กำลังประมวลผล...' : 'ดาวน์โหลดรูปภาพ'}
+                            </Button>
                             <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={exportSchedulePDF} disabled={isExporting}>
                                 {isExporting ? 'กำลังประมวลผล...' : t('printPDF')}
                             </Button>
@@ -7115,7 +7151,7 @@ export default function App() {
                     </div>
                 </div>
                 
-                <div id="schedule-table-container" className={`w-full overflow-hidden pb-4 bg-white rounded-b-lg ${isExporting ? 'px-2' : ''}`}>
+                <div id="schedule-table-container" className={`w-full bg-white rounded-b-lg ${isExporting ? 'px-2 pb-2 overflow-visible block' : 'overflow-hidden pb-4'}`}>
                     {(() => {
                         const [year, month] = currentMonth.split('-').map(Number);
                         const daysInMonth = getDaysInMonth(year, month);
@@ -7196,9 +7232,9 @@ export default function App() {
                                                 const colorClass = shiftData ? shiftData.color : '';
 
                                                 return (
-                                                    <td key={dateString} className="p-0 border-r border-gray-200 text-center align-middle h-full bg-blue-50/20">
+                                                    <td key={dateString} className={`p-0 border-r border-gray-200 text-center align-middle bg-blue-50/20 ${isExporting ? 'h-auto' : 'h-full'}`}>
                                                         {isExporting ? (
-                                                            <div className={`w-full h-full min-h-[22px] flex items-center justify-center p-0 text-[8px] font-bold uppercase ${colorClass}`}>{val}</div>
+                                                            <div className={`w-full min-h-[22px] flex items-center justify-center p-0 text-[8px] font-bold uppercase ${colorClass}`}>{val}</div>
                                                         ) : (
                                                             <input 
                                                                 type="text" 
@@ -7234,9 +7270,9 @@ export default function App() {
                                                 const colorClass = shiftData ? shiftData.color : '';
 
                                                 return (
-                                                    <td key={`${dateString}_act`} className="p-0 border-r border-gray-200 text-center align-middle h-full bg-green-50/20">
+                                                    <td key={`${dateString}_act`} className={`p-0 border-r border-gray-200 text-center align-middle bg-green-50/20 ${isExporting ? 'h-auto' : 'h-full'}`}>
                                                         {isExporting ? (
-                                                            <div className={`w-full h-full min-h-[22px] flex items-center justify-center p-0 text-[8px] font-bold uppercase ${colorClass}`}>{actVal}</div>
+                                                            <div className={`w-full min-h-[22px] flex items-center justify-center p-0 text-[8px] font-bold uppercase ${colorClass}`}>{actVal}</div>
                                                         ) : (
                                                             <input 
                                                                 type="text" 
