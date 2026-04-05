@@ -3749,23 +3749,18 @@ export default function App() {
   };
   // ----------------------------------------------------
 
-  // --- NEW: Meters Import Handler ---
+  // --- NEW: Utility Meters Import Handler ---
   const handleImportMetersCSV = (event) => {
       const file = event.target.files[0];
       if (!file) return;
       const reader = new FileReader();
-      
       reader.readAsArrayBuffer(file);
-      
       reader.onload = (e) => {
           try {
               const buffer = e.target.result;
               let text = '';
-              try {
-                  text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
-              } catch (err) {
-                  text = new TextDecoder('windows-874').decode(buffer);
-              }
+              try { text = new TextDecoder('utf-8', { fatal: true }).decode(buffer); } 
+              catch (err) { text = new TextDecoder('windows-874').decode(buffer); }
 
               const lines = text.split(/\r?\n/);
               if (lines.length < 2) return alert('ไฟล์ CSV ไม่มีข้อมูล หรือมีแค่หัวตาราง');
@@ -3776,48 +3771,47 @@ export default function App() {
               };
 
               const headers = parseCSVLine(lines[0]);
-              const newMeters = [];
+              const newMetersList = [];
               
               for (let i = 1; i < lines.length; i++) {
                   if (!lines[i].trim()) continue;
-                  
                   const values = parseCSVLine(lines[i]);
                   const rowObj = {};
-                  headers.forEach((header, index) => {
-                      rowObj[header] = values[index];
-                  });
+                  headers.forEach((header, index) => rowObj[header] = values[index]);
                   
-                  // เช็คว่ามี code และ name หรือไม่
-                  if (rowObj.code && rowObj.name) {
-                      let mType = 'Water';
-                      if (rowObj.type && (rowObj.type.toLowerCase().includes('elec') || rowObj.type.includes('ไฟ'))) {
-                          mType = 'Electricity';
+                  const code = rowObj['รหัสมิเตอร์'] || rowObj['Code'] || rowObj['รหัส (Code)'];
+                  const name = rowObj['ชื่อมิเตอร์'] || rowObj['Name'] || rowObj['ชื่อเรียก'];
+                  const typeStr = rowObj['ประเภท'] || rowObj['Type'] || rowObj['ประเภท (Type)'];
+                  
+                  if (code && name) {
+                      let type = 'Water';
+                      if (typeStr && (typeStr.includes('ไฟ') || typeStr.toLowerCase().includes('elec'))) {
+                          type = 'Electricity';
                       }
+                      const initialVal = parseFloat(rowObj['ค่ายกมา'] || rowObj['Initial Value'] || rowObj['ค่าปัจจุบัน'] || 0) || 0;
                       
-                      const initVal = parseFloat(rowObj.initialValue || rowObj.lastReading || 0) || 0;
-
-                      newMeters.push({
+                      newMetersList.push({
                           id: generateId(),
                           projectId: selectedProject.id,
-                          type: mType,
-                          code: rowObj.code,
-                          name: rowObj.name,
-                          location: rowObj.location || '',
-                          lastReading: initVal,
+                          type: type,
+                          code: code,
+                          name: name,
+                          location: rowObj['สถานที่ติดตั้ง'] || rowObj['Location'] || '',
+                          lastReading: initialVal,
                           lastDate: new Date().toISOString().split('T')[0]
                       });
                   }
               }
               
-              if (newMeters.length > 0) {
-                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูลมิเตอร์ที่ถูกต้อง ${newMeters.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
-                      const nextList = [...meters, ...newMeters];
+              if (newMetersList.length > 0) {
+                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูลมิเตอร์ที่ถูกต้อง ${newMetersList.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
+                      const nextList = [...meters, ...newMetersList];
                       setMeters(nextList);
                       triggerAutoSync('UtilityMeters_มิเตอร์', nextList, []);
-                      alert('นำเข้าข้อมูลทะเบียนมิเตอร์สำเร็จแล้ว!');
+                      alert('นำเข้าข้อมูลมิเตอร์สำเร็จแล้ว!');
                   }, 'ยืนยันการนำเข้า', 'info');
               } else {
-                  alert('ไม่พบข้อมูลที่ถูกต้อง (กรุณาตรวจสอบว่ามีคอลัมน์ "code" และ "name" ในไฟล์ CSV)');
+                  alert('ไม่พบข้อมูลที่ถูกต้อง (ต้องมีคอลัมน์ "รหัสมิเตอร์" และ "ชื่อมิเตอร์")');
               }
           } catch (error) {
               alert('เกิดข้อผิดพลาดในการอ่านไฟล์ CSV โปรดตรวจสอบรูปแบบไฟล์');
@@ -3832,18 +3826,13 @@ export default function App() {
       const file = event.target.files[0];
       if (!file) return;
       const reader = new FileReader();
-      
       reader.readAsArrayBuffer(file);
-      
       reader.onload = (e) => {
           try {
               const buffer = e.target.result;
               let text = '';
-              try {
-                  text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
-              } catch (err) {
-                  text = new TextDecoder('windows-874').decode(buffer);
-              }
+              try { text = new TextDecoder('utf-8', { fatal: true }).decode(buffer); } 
+              catch (err) { text = new TextDecoder('windows-874').decode(buffer); }
 
               const lines = text.split(/\r?\n/);
               if (lines.length < 2) return alert('ไฟล์ CSV ไม่มีข้อมูล หรือมีแค่หัวตาราง');
@@ -3854,55 +3843,66 @@ export default function App() {
               };
 
               const headers = parseCSVLine(lines[0]);
-              const newReadingsList = [];
-              const projectMeters = meters.filter(m => m.projectId === selectedProject.id);
-              let currentMetersState = JSON.parse(JSON.stringify(meters)); // Deep copy to update lastReading
-
+              const newReadings = [];
+              const updatedMetersMap = new Map();
+              const projMeters = meters.filter(m => m.projectId === selectedProject.id);
+              
               for (let i = 1; i < lines.length; i++) {
                   if (!lines[i].trim()) continue;
-                  
                   const values = parseCSVLine(lines[i]);
                   const rowObj = {};
-                  headers.forEach((header, index) => {
-                      rowObj[header] = values[index];
-                  });
+                  headers.forEach((header, index) => rowObj[header] = values[index]);
                   
-                  // เช็คว่ามี code, date, currentValue หรือไม่
-                  if (rowObj.code && rowObj.currentValue && rowObj.date) {
-                      const meterIndex = currentMetersState.findIndex(m => m.projectId === selectedProject.id && m.code === rowObj.code);
-                      if (meterIndex >= 0) {
-                          const meter = currentMetersState[meterIndex];
-                          const currentValNum = parseFloat(rowObj.currentValue);
-                          const prevVal = meter.lastReading || 0;
+                  // รองรับทั้งชื่อคอลัมน์แบบภาษาไทยและภาษาอังกฤษ
+                  const meterCode = rowObj['รหัสมิเตอร์'] || rowObj['Code'] || rowObj['รหัส (Code)'];
+                  const dateStr = rowObj['วันที่จด'] || rowObj['Date'] || rowObj['วันที่จด (Date)'];
+                  const currentValStr = rowObj['เลขปัจจุบัน'] || rowObj['Current'] || rowObj['เลขปัจจุบัน (Current)'];
+                  
+                  if (meterCode && dateStr && currentValStr) {
+                      const meter = projMeters.find(m => m.code === meterCode);
+                      if (meter) {
+                          const currentValNum = parseFloat(currentValStr.replace(/,/g, '')); // ลบลูกน้ำออกเผื่อผู้ใช้ก็อปปี้มา
+                          if (isNaN(currentValNum)) continue;
+                          
+                          // ดึงค่ายกมา (prevValue) จาก State ล่าสุด หรือจาก Map ที่เพิ่งอัปเดตในลูปเดียวกัน
+                          const prevVal = updatedMetersMap.has(meter.id) ? updatedMetersMap.get(meter.id).lastReading : meter.lastReading;
                           const usage = currentValNum - prevVal;
-
-                          newReadingsList.push({
+                          
+                          newReadings.push({
                               id: generateId(),
                               meterId: meter.id,
-                              date: rowObj.date, // ต้องเป็น YYYY-MM-DD
+                              date: dateStr,
                               value: currentValNum,
                               prevValue: prevVal,
                               usage: usage,
                               recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System Import'
                           });
                           
-                          // อัปเดตค่ายกมาใน memory เพื่อให้คำนวณถูกถ้านำเข้าหลายเดือนพร้อมกัน
-                          currentMetersState[meterIndex].lastReading = currentValNum;
-                          currentMetersState[meterIndex].lastDate = rowObj.date;
+                          // อัปเดต Map เพื่อจำค่ายกมาสำหรับลูปถัดไป (กรณีนำเข้าข้อมูลของมิเตอร์ตัวเดิมหลายเดือนพร้อมกัน)
+                          updatedMetersMap.set(meter.id, {
+                              ...meter,
+                              lastReading: currentValNum,
+                              lastDate: dateStr
+                          });
                       }
                   }
               }
               
-              if (newReadingsList.length > 0) {
-                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูลการจดมิเตอร์ที่ถูกต้อง ${newReadingsList.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
-                      const nextReadings = [...utilityReadings, ...newReadingsList];
+              if (newReadings.length > 0) {
+                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูลการจดมิเตอร์ที่ตรงกับทะเบียนในระบบ ${newReadings.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
+                      const nextReadings = [...utilityReadings, ...newReadings];
                       setUtilityReadings(nextReadings);
-                      setMeters(currentMetersState);
+                      
+                      // อัปเดตข้อมูลมิเตอร์ (ค่ายกมาล่าสุด) ในตาราง Meter
+                      const nextMeters = meters.map(m => updatedMetersMap.has(m.id) ? { ...m, ...updatedMetersMap.get(m.id) } : m);
+                      setMeters(nextMeters);
+                      
                       triggerAutoSync('UtilityReadings_จดมิเตอร์', nextReadings, []);
+                      triggerAutoSync('UtilityMeters_มิเตอร์', nextMeters, []);
                       alert('นำเข้าข้อมูลการจดมิเตอร์สำเร็จแล้ว!');
                   }, 'ยืนยันการนำเข้า', 'info');
               } else {
-                  alert('ไม่พบข้อมูลที่ถูกต้อง (ตรวจสอบว่ามีคอลัมน์ "code", "date" (YYYY-MM-DD), และ "currentValue")');
+                  alert('ไม่พบข้อมูลที่จับคู่กับมิเตอร์ในระบบได้ (โปรดตรวจสอบ "รหัสมิเตอร์" ในไฟล์ CSV ให้ตรงกับรหัสในทะเบียนมิเตอร์ของระบบ)');
               }
           } catch (error) {
               alert('เกิดข้อผิดพลาดในการอ่านไฟล์ CSV โปรดตรวจสอบรูปแบบไฟล์');
@@ -8848,8 +8848,49 @@ export default function App() {
                       </div>
 
                       {/* Action Buttons */}
-                      <div className="flex gap-2">
-                          <Button variant="outline" size="sm" className="flex items-center gap-2"><FileText size={16}/> CSV</Button>
+                      <div className={`flex gap-2 flex-wrap justify-end ${isExporting ? 'hidden' : ''}`}>
+                          {hasPerm('proj_utilities', 'save') && utilitySubTab === 'registry' && (
+                              <label className="cursor-pointer flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs rounded-md font-medium transition-colors bg-green-600 text-white hover:bg-green-700 shadow-sm" title="นำเข้า CSV ทะเบียนมิเตอร์ (คอลัมน์: รหัสมิเตอร์, ชื่อมิเตอร์, ประเภท, สถานที่ติดตั้ง, ค่ายกมา)">
+                                  <Upload size={14} /> นำเข้า CSV
+                                  <input type="file" accept=".csv" className="hidden" onChange={handleImportMetersCSV} />
+                              </label>
+                          )}
+                          {hasPerm('proj_utilities', 'save') && utilitySubTab === 'record' && (
+                              <label className="cursor-pointer flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs rounded-md font-medium transition-colors bg-green-600 text-white hover:bg-green-700 shadow-sm" title="นำเข้า CSV การจดมิเตอร์ (คอลัมน์: รหัสมิเตอร์, วันที่จด, เลขปัจจุบัน)">
+                                  <Upload size={14} /> นำเข้า CSV
+                                  <input type="file" accept=".csv" className="hidden" onChange={handleImportUtilityReadingsCSV} />
+                              </label>
+                          )}
+                          <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => {
+                              if (utilitySubTab === 'registry') {
+                                  const dataToExport = meters.filter(m => m.projectId === selectedProject.id).map(m => ({
+                                      'ประเภท (Type)': m.type === 'Water' ? 'น้ำประปา' : 'ไฟฟ้า',
+                                      'รหัส (Code)': m.code,
+                                      'ชื่อมิเตอร์ (Name)': m.name,
+                                      'สถานที่ติดตั้ง (Location)': m.location,
+                                      'ค่าปัจจุบัน (Current Value)': m.lastReading,
+                                      'วันที่จดล่าสุด (Last Update)': m.lastDate || '-'
+                                  }));
+                                  exportToCSV(dataToExport, `Utility_Meters_${selectedProject?.code}`);
+                              } else {
+                                  const projMeters = meters.filter(m => m.projectId === selectedProject.id);
+                                  const meterIds = projMeters.map(m => m.id);
+                                  const dataToExport = utilityReadings.filter(r => meterIds.includes(r.meterId)).map(r => {
+                                      const meter = projMeters.find(m => m.id === r.meterId);
+                                      return {
+                                          'วันที่จด (Date)': r.date,
+                                          'ประเภท (Type)': meter?.type === 'Water' ? 'น้ำประปา' : 'ไฟฟ้า',
+                                          'รหัส (Code)': meter?.code || '-',
+                                          'ชื่อมิเตอร์ (Name)': meter?.name || '-',
+                                          'เลขก่อนหน้า (Prev)': r.prevValue,
+                                          'เลขปัจจุบัน (Current)': r.value,
+                                          'จำนวนหน่วย (Usage)': r.usage,
+                                          'ผู้บันทึก (Recorder)': r.recorder || '-'
+                                      };
+                                  });
+                                  exportToCSV(dataToExport, `Utility_Readings_${selectedProject?.code}`);
+                              }
+                          }}><Download size={16}/> CSV</Button>
                           <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExportPDF('utility-print-area', 'Utility_Report.pdf')} disabled={isExporting}>
                               {isExporting ? <Loader2 size={16} className="animate-spin" /> : <PrinterIcon size={16}/>} PDF
                           </Button>
@@ -8863,19 +8904,11 @@ export default function App() {
                               <div className="col-span-1 border border-red-100 rounded-xl overflow-hidden bg-white shadow-sm flex flex-col h-fit">
                                   <div className="bg-[#fff5f5] text-[#9b2c2c] font-bold p-4 border-b border-red-100 flex justify-between items-center">
                                       <span>{utilityForm.id ? 'แก้ไขการจดบันทึก' : 'บันทึกการจดมิเตอร์'}</span>
-                                      <div className="flex items-center gap-2">
-                                          {!utilityForm.id && hasPerm('proj_utilities', 'save') && (
-                                              <label className="cursor-pointer flex items-center justify-center gap-1 px-2 py-1 text-[10px] rounded border border-red-300 font-medium transition-colors bg-white text-red-700 hover:bg-red-50" title="นำเข้าข้อมูลจากไฟล์ .csv (code, date, currentValue)">
-                                                  <Upload size={12} /> นำเข้า CSV
-                                                  <input type="file" accept=".csv" className="hidden" onChange={handleImportUtilityReadingsCSV} />
-                                              </label>
-                                          )}
-                                          {utilityForm.meterId && !utilityForm.id && (
-                                              <span className="text-xs bg-red-100 text-red-800 px-2 py-1 rounded-full font-medium shrink-0">
-                                                  {meters.filter(m => m.projectId === selectedProject.id).findIndex(m => m.id === utilityForm.meterId) + 1} / {meters.filter(m => m.projectId === selectedProject.id).length}
-                                              </span>
-                                          )}
-                                      </div>
+                                      {utilityForm.meterId && !utilityForm.id && (
+                                          <span className="text-xs bg-red-100 text-red-800 px-2 py-1 rounded-full font-medium">
+                                              {meters.filter(m => m.projectId === selectedProject.id).findIndex(m => m.id === utilityForm.meterId) + 1} / {meters.filter(m => m.projectId === selectedProject.id).length}
+                                          </span>
+                                      )}
                                       {utilityForm.id && (
                                           <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded-full font-medium animate-pulse">
                                               โหมดแก้ไข
@@ -9067,15 +9100,7 @@ export default function App() {
                                   <h3 className="font-bold text-gray-700 flex items-center gap-2">
                                       <Box size={20} className="text-red-500" /> ทะเบียนมิเตอร์ทั้งหมด
                                   </h3>
-                                  <div className="flex gap-2">
-                                      {hasPerm('proj_utilities', 'save') && (
-                                          <label className="cursor-pointer flex items-center justify-center gap-1 px-3 py-1.5 text-xs rounded-md font-medium transition-colors bg-white border border-red-300 text-red-700 hover:bg-red-50 shadow-sm" title="นำเข้าข้อมูลจากไฟล์ .csv">
-                                              <Upload size={14} /> นำเข้า CSV
-                                              <input type="file" accept=".csv" className="hidden" onChange={handleImportMetersCSV} />
-                                          </label>
-                                      )}
-                                      {hasPerm('proj_utilities', 'save') && <Button size="sm" icon={Plus} onClick={() => { setNewMeter({ id: null, type: 'Water', code: '', name: '', location: '', initialValue: '' }); setShowAddMeterModal(true); }} className="bg-red-600 hover:bg-red-700">เพิ่มมิเตอร์</Button>}
-                                  </div>
+                                  {hasPerm('proj_utilities', 'save') && <Button size="sm" icon={Plus} onClick={() => { setNewMeter({ id: null, type: 'Water', code: '', name: '', location: '', initialValue: '' }); setShowAddMeterModal(true); }} className="bg-red-600 hover:bg-red-700">เพิ่มมิเตอร์</Button>}
                               </div>
                               <div className="overflow-x-auto">
                                   {meters.filter(m => m.projectId === selectedProject.id).length > 0 ? (
