@@ -1895,6 +1895,10 @@ export default function App() {
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
   
+  // --- NEW: State สำหรับเลือกช่วงเวลาวิเคราะห์ ---
+  const [utilityAnalysisRange, setUtilityAnalysisRange] = useState('monthly'); // 'monthly', 'yearly'
+  const [utilityAnalysisYear, setUtilityAnalysisYear] = useState(() => new Date().getFullYear().toString());
+  
   // --- NEW: State สำหรับวิเคราะห์กราฟ ---
   const [hiddenAnalysisMeters, setHiddenAnalysisMeters] = useState(new Set());
   const [waterAnalysisMode, setWaterAnalysisMode] = useState('combined'); // 'combined', 'separate'
@@ -9215,7 +9219,8 @@ export default function App() {
                                                                   <td className="p-3 text-blue-600 font-medium">
                                                                       {(() => {
                                                                           const d = new Date(r.date);
-                                                                          return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear() + 543}`;
+                                                                          // แก้ไข: แสดงเป็น ค.ศ. (เอา + 543 ออก)
+                                                                          return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
                                                                       })()}
                                                                   </td>
                                                                   <td className="p-3 text-right text-gray-500">{r.prevValue.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
@@ -9315,7 +9320,8 @@ export default function App() {
                                                               <div className="text-xs text-gray-500 mt-0.5 flex items-center justify-end gap-1">
                                                                   <Calendar size={10}/> {(() => {
                                                                       const d = new Date(m.lastDate);
-                                                                      return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear() + 543}`;
+                                                                      // แก้ไข: แสดงเป็น ค.ศ. (เอา + 543 ออก)
+                                                                      return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
                                                                   })()}
                                                               </div>
                                                           )}
@@ -9354,13 +9360,30 @@ export default function App() {
                                   </h3>
                                   <div className="flex flex-wrap items-center gap-3">
                                       <div className="flex items-center gap-2">
-                                          <label className="text-xs font-bold text-gray-500">ประจำเดือน:</label>
-                                          <input 
-                                              type="month" 
+                                          <label className="text-xs font-bold text-gray-500">ช่วงเวลา:</label>
+                                          <select 
                                               className="border border-gray-300 rounded-md p-1.5 text-sm focus:ring-2 focus:ring-red-200 outline-none bg-white transition-colors cursor-pointer"
-                                              value={utilityAnalysisMonth}
-                                              onChange={(e) => setUtilityAnalysisMonth(e.target.value)}
-                                          />
+                                              value={utilityAnalysisRange}
+                                              onChange={(e) => setUtilityAnalysisRange(e.target.value)}
+                                          >
+                                              <option value="monthly">รายเดือน</option>
+                                              <option value="yearly">รายปี</option>
+                                          </select>
+                                          {utilityAnalysisRange === 'monthly' ? (
+                                              <input 
+                                                  type="month" 
+                                                  className="border border-gray-300 rounded-md p-1.5 text-sm focus:ring-2 focus:ring-red-200 outline-none bg-white transition-colors cursor-pointer"
+                                                  value={utilityAnalysisMonth}
+                                                  onChange={(e) => setUtilityAnalysisMonth(e.target.value)}
+                                              />
+                                          ) : (
+                                              <input 
+                                                  type="number" 
+                                                  className="border border-gray-300 rounded-md p-1.5 text-sm focus:ring-2 focus:ring-red-200 outline-none bg-white transition-colors cursor-pointer w-24 text-center"
+                                                  value={utilityAnalysisYear}
+                                                  onChange={(e) => setUtilityAnalysisYear(e.target.value)}
+                                              />
+                                          )}
                                       </div>
                                       <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border border-gray-200">
                                           <button 
@@ -9389,10 +9412,16 @@ export default function App() {
                                   const activeElecMeters = elecMeters.filter(m => !hiddenAnalysisMeters.has(m.id));
 
                                   const projectMeterIds = projectMeters.map(m => m.id);
-                                  const projectReadings = utilityReadings.filter(r => 
-                                      projectMeterIds.includes(r.meterId) && 
-                                      r.date.startsWith(utilityAnalysisMonth)
-                                  );
+                                  
+                                  // ปรับการกรองข้อมูลให้รองรับทั้งแบบรายเดือนและรายปี
+                                  const projectReadings = utilityReadings.filter(r => {
+                                      if (!projectMeterIds.includes(r.meterId)) return false;
+                                      if (utilityAnalysisRange === 'monthly') {
+                                          return r.date.startsWith(utilityAnalysisMonth);
+                                      } else {
+                                          return r.date.startsWith(utilityAnalysisYear);
+                                      }
+                                  });
 
                                   const chartDataMap = {};
                                   projectReadings.forEach(r => {
@@ -9400,7 +9429,10 @@ export default function App() {
                                       if (!meter) return;
                                       
                                       const dateObj = new Date(r.date);
-                                      const displayDate = dateObj.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+                                      const monthNames = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+                                      const displayDate = utilityAnalysisRange === 'yearly' 
+                                          ? `${dateObj.getDate()} ${monthNames[dateObj.getMonth()]} ${dateObj.getFullYear()}`
+                                          : `${dateObj.getDate()} ${monthNames[dateObj.getMonth()]}`;
                                       
                                       if (!chartDataMap[r.date]) {
                                           chartDataMap[r.date] = { rawDate: r.date, date: displayDate };
@@ -9418,7 +9450,7 @@ export default function App() {
                                           <div className="text-center text-gray-400 py-20 flex flex-col items-center border-2 border-dashed border-gray-200 rounded-xl bg-gray-50">
                                               <BarChart3 size={48} className="text-gray-300 mb-4"/>
                                               <p className="font-bold text-lg">ยังไม่มีข้อมูลสำหรับการวิเคราะห์</p>
-                                              <p className="text-sm">ไม่พบประวัติการจดมิเตอร์ในเดือน {new Date(utilityAnalysisMonth + '-01').toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })}</p>
+                                              <p className="text-sm">ไม่พบประวัติการจดมิเตอร์ใน{utilityAnalysisRange === 'monthly' ? `เดือน ${new Date(utilityAnalysisMonth + '-01').toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })}` : `ปี ค.ศ. ${utilityAnalysisYear}`}</p>
                                           </div>
                                       );
                                   }
