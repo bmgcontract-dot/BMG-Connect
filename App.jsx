@@ -3675,7 +3675,14 @@ export default function App() {
       } else {
           // โหมดบันทึกใหม่ (Create Mode)
           const prevVal = meter ? meter.lastReading : 0;
-          const usage = currentValNum - prevVal;
+          let usage = currentValNum - prevVal;
+          
+          // --- FIX: ป้องกันกราฟพุ่งทะลุในวันแรกที่จด (หากมิเตอร์นั้นค่ายกมาเป็น 0) ---
+          if (prevVal === 0 && currentValNum > 0) {
+              usage = 0; // ให้วันแรกเป็นฐาน (Baseline) ไม่นำมาคิดการใช้งาน
+          } else if (usage < 0) {
+              usage = 0;
+          }
 
           const newReading = {
               id: generateId(),
@@ -3981,8 +3988,15 @@ export default function App() {
                               const currentValNum = parseFloat(currentValStr.replace(/,/g, ''));
                               if (!isNaN(currentValNum)) {
                                   const prevVal = updatedMetersMap.has(meter.id) ? updatedMetersMap.get(meter.id).lastReading : meter.lastReading;
+                                  
                                   let usage = currentValNum - prevVal;
-                                  if (usage < 0) usage = 0; // ป้องกันค่าติดลบหากใส่สลับ
+                                  
+                                  // --- FIX: ป้องกันกราฟพุ่งทะลุในวันแรกที่นำเข้า ---
+                                  if (prevVal === 0 && currentValNum > 0) {
+                                      usage = 0; // ให้วันแรกเป็นฐาน (Baseline)
+                                  } else if (usage < 0) {
+                                      usage = 0; // ป้องกันค่าติดลบหากพิมพ์ผิด
+                                  }
                                   
                                   newReadings.push({
                                       id: generateId(),
@@ -4022,8 +4036,15 @@ export default function App() {
                               const currentValNum = parseFloat(currentValStr.replace(/,/g, ''));
                               if (!isNaN(currentValNum)) {
                                   const prevVal = updatedMetersMap.has(meter.id) ? updatedMetersMap.get(meter.id).lastReading : meter.lastReading;
+                                  
                                   let usage = currentValNum - prevVal;
-                                  if (usage < 0) usage = 0;
+                                  
+                                  // --- FIX: ป้องกันกราฟพุ่งทะลุในวันแรกที่นำเข้า ---
+                                  if (prevVal === 0 && currentValNum > 0) {
+                                      usage = 0; // ให้วันแรกเป็นฐาน (Baseline)
+                                  } else if (usage < 0) {
+                                      usage = 0;
+                                  }
                                   
                                   newReadings.push({
                                       id: generateId(),
