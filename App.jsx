@@ -7078,8 +7078,8 @@ export default function App() {
 
             return (
             <Card 
-                className={`${isExporting ? 'border-none shadow-none bg-white mx-auto overflow-visible block' : 'min-w-full overflow-hidden'}`} 
-                style={isExporting ? { width: '277mm', minWidth: '277mm', maxWidth: '277mm', boxSizing: 'border-box', position: 'relative' } : {}}
+                className={`${isExporting ? 'border-none shadow-none bg-white mx-auto overflow-visible block w-max min-w-[277mm]' : 'min-w-full overflow-hidden'}`} 
+                style={isExporting ? { padding: '20px', boxSizing: 'border-box', position: 'relative' } : {}}
                 id="print-schedule-area"
             >
                 <div className={`p-4 border-b flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white ${isExporting ? 'pb-2 pt-0 px-2' : ''}`}>
@@ -7232,25 +7232,24 @@ export default function App() {
                                                 const colorClass = shiftData ? shiftData.color : '';
 
                                                 return (
-                                                    <td key={dateString} className={`p-0 border-r border-gray-200 text-center align-middle bg-blue-50/20 ${isExporting ? 'h-auto' : 'h-full'}`}>
-                                                        {isExporting ? (
-                                                            <div className={`w-full min-h-[22px] flex items-center justify-center p-0 text-[8px] font-bold uppercase ${colorClass}`}>{val}</div>
-                                                        ) : (
-                                                            <input 
-                                                                type="text" 
-                                                                className={`w-full h-full min-h-[26px] md:min-h-[28px] text-center text-[9px] xl:text-[10px] 2xl:text-xs p-0 m-0 focus:outline-none focus:ring-inset focus:ring-1 focus:ring-orange-500 uppercase transition-colors block ${colorClass} ${!canEditPlan ? 'cursor-not-allowed opacity-70' : selectedShift ? 'cursor-pointer' : 'cursor-text'}`}
-                                                                value={val}
-                                                                onClick={() => {
-                                                                    if (canEditPlan && selectedShift) {
-                                                                        updateSchedule(user.id, dateString, selectedShift, 'plan');
-                                                                    }
-                                                                }}
-                                                                onChange={(e) => canEditPlan && updateSchedule(user.id, dateString, e.target.value.toUpperCase(), 'plan')}
-                                                                readOnly={!canEditPlan || !!selectedShift}
-                                                                disabled={!canEditPlan}
-                                                                title={!canEditPlan ? "ตาราง Plan ถูกอนุมัติหรือล็อคแล้ว" : "ตารางแผนงาน (Plan)"}
-                                                            />
-                                                        )}
+                                                    <td key={dateString} className={`p-0 border-r border-gray-200 text-center align-middle bg-blue-50/20 relative ${isExporting ? 'h-auto' : 'h-full'}`}>
+                                                        <div className={`${isExporting ? 'flex' : 'hidden'} w-full min-h-[22px] items-center justify-center p-0 text-[8px] font-bold uppercase ${colorClass}`}>
+                                                            {val}
+                                                        </div>
+                                                        <input 
+                                                            type="text" 
+                                                            className={`${isExporting ? 'hidden' : 'block'} w-full h-full min-h-[26px] md:min-h-[28px] text-center text-[9px] xl:text-[10px] 2xl:text-xs p-0 m-0 focus:outline-none focus:ring-inset focus:ring-1 focus:ring-orange-500 uppercase transition-colors ${colorClass} ${!canEditPlan ? 'cursor-not-allowed opacity-70' : selectedShift ? 'cursor-pointer' : 'cursor-text'}`}
+                                                            value={val}
+                                                            onClick={() => {
+                                                                if (canEditPlan && selectedShift) {
+                                                                    updateSchedule(user.id, dateString, selectedShift, 'plan');
+                                                                }
+                                                            }}
+                                                            onChange={(e) => canEditPlan && updateSchedule(user.id, dateString, e.target.value.toUpperCase(), 'plan')}
+                                                            readOnly={!canEditPlan || !!selectedShift}
+                                                            disabled={!canEditPlan}
+                                                            title={!canEditPlan ? "ตาราง Plan ถูกอนุมัติหรือล็อคแล้ว" : "ตารางแผนงาน (Plan)"}
+                                                        />
                                                     </td>
                                                 );
                                             })}
@@ -7270,25 +7269,24 @@ export default function App() {
                                                 const colorClass = shiftData ? shiftData.color : '';
 
                                                 return (
-                                                    <td key={`${dateString}_act`} className={`p-0 border-r border-gray-200 text-center align-middle bg-green-50/20 ${isExporting ? 'h-auto' : 'h-full'}`}>
-                                                        {isExporting ? (
-                                                            <div className={`w-full min-h-[22px] flex items-center justify-center p-0 text-[8px] font-bold uppercase ${colorClass}`}>{actVal}</div>
-                                                        ) : (
-                                                            <input 
-                                                                type="text" 
-                                                                className={`w-full h-full min-h-[26px] md:min-h-[28px] text-center text-[9px] xl:text-[10px] 2xl:text-xs p-0 m-0 focus:outline-none focus:ring-inset focus:ring-1 focus:ring-green-500 uppercase transition-colors block ${colorClass} ${!canEditAct ? 'cursor-not-allowed opacity-70' : selectedShift ? 'cursor-pointer' : 'cursor-text'}`}
-                                                                value={actVal}
-                                                                onClick={() => {
-                                                                    if (canEditAct && selectedShift) {
-                                                                        updateSchedule(user.id, dateString, selectedShift, 'act');
-                                                                    }
-                                                                }}
-                                                                onChange={(e) => canEditAct && updateSchedule(user.id, dateString, e.target.value.toUpperCase(), 'act')}
-                                                                readOnly={!canEditAct || !!selectedShift}
-                                                                disabled={!canEditAct}
-                                                                title={!canEditAct ? "ตารางถูกล็อคแล้วโดยฝ่ายบุคคล" : "แก้ไขตารางตามการเข้างานจริง (Actual)"}
-                                                            />
-                                                        )}
+                                                    <td key={`${dateString}_act`} className={`p-0 border-r border-gray-200 text-center align-middle bg-green-50/20 relative ${isExporting ? 'h-auto' : 'h-full'}`}>
+                                                        <div className={`${isExporting ? 'flex' : 'hidden'} w-full min-h-[22px] items-center justify-center p-0 text-[8px] font-bold uppercase ${colorClass}`}>
+                                                            {actVal}
+                                                        </div>
+                                                        <input 
+                                                            type="text" 
+                                                            className={`${isExporting ? 'hidden' : 'block'} w-full h-full min-h-[26px] md:min-h-[28px] text-center text-[9px] xl:text-[10px] 2xl:text-xs p-0 m-0 focus:outline-none focus:ring-inset focus:ring-1 focus:ring-green-500 uppercase transition-colors ${colorClass} ${!canEditAct ? 'cursor-not-allowed opacity-70' : selectedShift ? 'cursor-pointer' : 'cursor-text'}`}
+                                                            value={actVal}
+                                                            onClick={() => {
+                                                                if (canEditAct && selectedShift) {
+                                                                    updateSchedule(user.id, dateString, selectedShift, 'act');
+                                                                }
+                                                            }}
+                                                            onChange={(e) => canEditAct && updateSchedule(user.id, dateString, e.target.value.toUpperCase(), 'act')}
+                                                            readOnly={!canEditAct || !!selectedShift}
+                                                            disabled={!canEditAct}
+                                                            title={!canEditAct ? "ตารางถูกล็อคแล้วโดยฝ่ายบุคคล" : "แก้ไขตารางตามการเข้างานจริง (Actual)"}
+                                                        />
                                                     </td>
                                                 );
                                             })}
