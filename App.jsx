@@ -1138,7 +1138,7 @@ const compressImage = (file) => {
 };
 
 // --- NEW: Helper for parsing CSV dates (จัดการแก้ไขปัญหาปี พ.ศ. และรูปแบบ ว/ด/ป จาก Excel) ---
-const normalizeImportedDate = (rawStr) => {
+const normalizeImportedDate = (rawStr, isMDY = false) => {
     if (!rawStr || typeof rawStr !== 'string') return '';
     let dStr = rawStr.trim();
     if (!dStr) return '';
@@ -1155,10 +1155,16 @@ const normalizeImportedDate = (rawStr) => {
             m = parseInt(parts[1], 10); 
             d = parseInt(parts[2], 10); 
         } else { 
-            d = parseInt(parts[0], 10); 
-            m = parseInt(parts[1], 10); 
+            if (isMDY) {
+                m = parseInt(parts[0], 10); 
+                d = parseInt(parts[1], 10); 
+            } else {
+                d = parseInt(parts[0], 10); 
+                m = parseInt(parts[1], 10); 
+            }
             y = parseInt(parts[2], 10); 
         }
+        
         if (isNaN(d) || isNaN(m) || isNaN(y)) return '';
         
         // แปลงปี พ.ศ. เป็น ค.ศ. (เช่น 2569 -> 2026)
@@ -1167,6 +1173,13 @@ const normalizeImportedDate = (rawStr) => {
         else if (y < 100) {
              if (y > 40) y = y + 2500 - 543; // สมมติว่าเป็น พ.ศ. 25xx
              else y = y + 2000; // สมมติว่าเป็น ค.ศ. 20xx
+        }
+
+        // กรณีฉุกเฉิน: ถ้าเดือนเกิน 12 ให้สลับวันกับเดือนอัตโนมัติ
+        if (m > 12 && d <= 12) {
+             const temp = m;
+             m = d;
+             d = temp;
         }
 
         return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -3926,8 +3939,24 @@ export default function App() {
               let dataLines = lines.slice(1).filter(l => l.trim()).map(parseCSVLine);
               if (dateColName) {
                   const dateIdx = headers.indexOf(dateColName);
+                  
+                  // --- NEW: Detect Date Format (D/M/Y vs M/D/Y) by scanning all dates ---
+                  let isMDY = false;
+                  for (let row of dataLines) {
+                      const dStr = row[dateIdx]?.trim();
+                      if (dStr) {
+                          const parts = dStr.split(/[\/\-]/);
+                          if (parts.length === 3) {
+                              const p0 = parseInt(parts[0], 10);
+                              const p1 = parseInt(parts[1], 10);
+                              if (p0 > 12) { isMDY = false; break; } // First part is > 12, must be Day -> D/M/Y
+                              if (p1 > 12) { isMDY = true; break; }  // Second part is > 12, must be Day -> M/D/Y
+                          }
+                      }
+                  }
+
                   dataLines = dataLines.map(row => {
-                      row[dateIdx] = normalizeImportedDate(row[dateIdx]);
+                      row[dateIdx] = normalizeImportedDate(row[dateIdx], isMDY);
                       return row;
                   }).filter(row => row[dateIdx] !== ''); // ทิ้งแถวที่แปลวันที่ไม่ได้ออกไป
               }
@@ -9186,7 +9215,7 @@ export default function App() {
                                                                   <td className="p-3 text-blue-600 font-medium">
                                                                       {(() => {
                                                                           const d = new Date(r.date);
-                                                                          return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+                                                                          return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear() + 543}`;
                                                                       })()}
                                                                   </td>
                                                                   <td className="p-3 text-right text-gray-500">{r.prevValue.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
@@ -9286,7 +9315,7 @@ export default function App() {
                                                               <div className="text-xs text-gray-500 mt-0.5 flex items-center justify-end gap-1">
                                                                   <Calendar size={10}/> {(() => {
                                                                       const d = new Date(m.lastDate);
-                                                                      return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+                                                                      return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear() + 543}`;
                                                                   })()}
                                                               </div>
                                                           )}
