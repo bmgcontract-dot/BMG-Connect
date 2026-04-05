@@ -9184,7 +9184,10 @@ export default function App() {
                                                           {meterReadings.sort((a,b) => new Date(b.date) - new Date(a.date)).map(r => (
                                                               <tr key={r.id} className="hover:bg-gray-50 transition-colors">
                                                                   <td className="p-3 text-blue-600 font-medium">
-                                                                      {new Date(r.date).toLocaleDateString('th-TH')}
+                                                                      {(() => {
+                                                                          const d = new Date(r.date);
+                                                                          return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+                                                                      })()}
                                                                   </td>
                                                                   <td className="p-3 text-right text-gray-500">{r.prevValue.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
                                                                   <td className="p-3 text-right font-bold text-gray-800">{r.value.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
@@ -9281,7 +9284,10 @@ export default function App() {
                                                           </div>
                                                           {m.lastDate && (
                                                               <div className="text-xs text-gray-500 mt-0.5 flex items-center justify-end gap-1">
-                                                                  <Calendar size={10}/> {new Date(m.lastDate).toLocaleDateString('th-TH')}
+                                                                  <Calendar size={10}/> {(() => {
+                                                                      const d = new Date(m.lastDate);
+                                                                      return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+                                                                  })()}
                                                               </div>
                                                           )}
                                                       </td>
