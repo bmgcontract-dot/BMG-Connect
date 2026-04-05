@@ -3772,6 +3772,7 @@ export default function App() {
 
               const headers = parseCSVLine(lines[0]);
               const newMetersList = [];
+              const projMeters = meters.filter(m => m.projectId === selectedProject.id);
               
               for (let i = 1; i < lines.length; i++) {
                   if (!lines[i].trim()) continue;
@@ -3784,6 +3785,11 @@ export default function App() {
                   const typeStr = rowObj['ประเภท'] || rowObj['Type'] || rowObj['ประเภท (Type)'];
                   
                   if (code && name) {
+                      // ตรวจสอบว่ามิเตอร์รหัสนี้มีอยู่ในระบบแล้วหรือยัง ถ้ามีให้ข้าม
+                      if (projMeters.some(m => m.code === code) || newMetersList.some(m => m.code === code)) {
+                          continue;
+                      }
+
                       let type = 'Water';
                       if (typeStr && (typeStr.includes('ไฟ') || typeStr.toLowerCase().includes('elec'))) {
                           type = 'Electricity';
@@ -3804,14 +3810,14 @@ export default function App() {
               }
               
               if (newMetersList.length > 0) {
-                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูลมิเตอร์ที่ถูกต้อง ${newMetersList.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
+                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูลมิเตอร์ที่ถูกต้องและไม่ซ้ำในระบบ ${newMetersList.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
                       const nextList = [...meters, ...newMetersList];
                       setMeters(nextList);
                       triggerAutoSync('UtilityMeters_มิเตอร์', nextList, []);
                       alert('นำเข้าข้อมูลมิเตอร์สำเร็จแล้ว!');
                   }, 'ยืนยันการนำเข้า', 'info');
               } else {
-                  alert('ไม่พบข้อมูลที่ถูกต้อง (ต้องมีคอลัมน์ "รหัสมิเตอร์" และ "ชื่อมิเตอร์")');
+                  alert('ไม่พบข้อมูลมิเตอร์ใหม่ที่ถูกต้อง (โปรดตรวจสอบไฟล์ CSV หรือมิเตอร์อาจมีอยู่ในระบบแล้ว)');
               }
           } catch (error) {
               alert('เกิดข้อผิดพลาดในการอ่านไฟล์ CSV โปรดตรวจสอบรูปแบบไฟล์');
@@ -3821,7 +3827,7 @@ export default function App() {
       event.target.value = '';
   };
 
-  // --- NEW: Utility Readings Import Handler ---
+  // --- NEW: Utility Readings Import Handler (Support Wide & Long Formats) ---
   const handleImportUtilityReadingsCSV = (event) => {
       const file = event.target.files[0];
       if (!file) return;
@@ -3846,54 +3852,113 @@ export default function App() {
               const newReadings = [];
               const updatedMetersMap = new Map();
               const projMeters = meters.filter(m => m.projectId === selectedProject.id);
+
+              // ตรวจหาคอลัมน์วันที่
+              const dateColName = headers.find(h => h.includes('วันที่') || h.includes('Date') || h.includes('date'));
               
-              for (let i = 1; i < lines.length; i++) {
-                  if (!lines[i].trim()) continue;
-                  const values = parseCSVLine(lines[i]);
-                  const rowObj = {};
-                  headers.forEach((header, index) => rowObj[header] = values[index]);
-                  
-                  // รองรับทั้งชื่อคอลัมน์แบบภาษาไทยและภาษาอังกฤษ
-                  const meterCode = rowObj['รหัสมิเตอร์'] || rowObj['Code'] || rowObj['รหัส (Code)'];
-                  const dateStr = rowObj['วันที่จด'] || rowObj['Date'] || rowObj['วันที่จด (Date)'];
-                  const currentValStr = rowObj['เลขปัจจุบัน'] || rowObj['Current'] || rowObj['เลขปัจจุบัน (Current)'];
-                  
-                  if (meterCode && dateStr && currentValStr) {
-                      const meter = projMeters.find(m => m.code === meterCode);
-                      if (meter) {
-                          const currentValNum = parseFloat(currentValStr.replace(/,/g, '')); // ลบลูกน้ำออกเผื่อผู้ใช้ก็อปปี้มา
-                          if (isNaN(currentValNum)) continue;
-                          
-                          // ดึงค่ายกมา (prevValue) จาก State ล่าสุด หรือจาก Map ที่เพิ่งอัปเดตในลูปเดียวกัน
-                          const prevVal = updatedMetersMap.has(meter.id) ? updatedMetersMap.get(meter.id).lastReading : meter.lastReading;
-                          const usage = currentValNum - prevVal;
-                          
-                          newReadings.push({
-                              id: generateId(),
-                              meterId: meter.id,
-                              date: dateStr,
-                              value: currentValNum,
-                              prevValue: prevVal,
-                              usage: usage,
-                              recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System Import'
-                          });
-                          
-                          // อัปเดต Map เพื่อจำค่ายกมาสำหรับลูปถัดไป (กรณีนำเข้าข้อมูลของมิเตอร์ตัวเดิมหลายเดือนพร้อมกัน)
-                          updatedMetersMap.set(meter.id, {
-                              ...meter,
-                              lastReading: currentValNum,
-                              lastDate: dateStr
-                          });
-                      }
+              // ตรวจสอบว่าเป็นรูปแบบ Wide Format (แยกคอลัมน์เป็นรหัสมิเตอร์) หรือ Long Format
+              const meterCols = [];
+              headers.forEach((h, idx) => {
+                  if (h !== dateColName) {
+                      const meter = projMeters.find(m => h === m.code || h.includes(`(${m.code})`) || h === m.name);
+                      if (meter) meterCols.push({ idx, meter });
                   }
+              });
+
+              const isWideFormat = meterCols.length > 0;
+              const codeColName = headers.find(h => h.includes('รหัส') || h.includes('Code') || h.includes('code'));
+              const currentValColName = headers.find(h => h.includes('ปัจจุบัน') || h.includes('Current') || h.includes('current'));
+
+              const dataLines = lines.slice(1).filter(l => l.trim()).map(parseCSVLine);
+
+              if (isWideFormat && dateColName) {
+                  // ---- รูปแบบแยกคอลัมน์ตามรหัสมิเตอร์ (Wide Format) ----
+                  const dateIdx = headers.indexOf(dateColName);
+                  // เรียงตามวันที่เก่าไปใหม่
+                  dataLines.sort((a, b) => new Date(a[dateIdx]) - new Date(b[dateIdx]));
+
+                  dataLines.forEach(values => {
+                      const dateStr = values[dateIdx];
+                      if (!dateStr) return;
+
+                      meterCols.forEach(({ idx, meter }) => {
+                          const currentValStr = values[idx];
+                          if (currentValStr && currentValStr.trim() !== '') {
+                              const currentValNum = parseFloat(currentValStr.replace(/,/g, ''));
+                              if (!isNaN(currentValNum)) {
+                                  const prevVal = updatedMetersMap.has(meter.id) ? updatedMetersMap.get(meter.id).lastReading : meter.lastReading;
+                                  let usage = currentValNum - prevVal;
+                                  if (usage < 0) usage = 0; // ป้องกันค่าติดลบหากใส่สลับ
+                                  
+                                  newReadings.push({
+                                      id: generateId(),
+                                      meterId: meter.id,
+                                      date: dateStr,
+                                      value: currentValNum,
+                                      prevValue: prevVal,
+                                      usage: usage,
+                                      recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System Import'
+                                  });
+                                  
+                                  updatedMetersMap.set(meter.id, {
+                                      ...meter,
+                                      lastReading: currentValNum,
+                                      lastDate: dateStr
+                                  });
+                              }
+                          }
+                      });
+                  });
+              } else if (dateColName && codeColName && currentValColName) {
+                  // ---- รูปแบบเรียงลงมา (Long Format) ----
+                  const dateIdx = headers.indexOf(dateColName);
+                  const codeIdx = headers.indexOf(codeColName);
+                  const valIdx = headers.indexOf(currentValColName);
+
+                  dataLines.sort((a, b) => new Date(a[dateIdx]) - new Date(b[dateIdx]));
+
+                  dataLines.forEach(values => {
+                      const meterCode = values[codeIdx];
+                      const dateStr = values[dateIdx];
+                      const currentValStr = values[valIdx];
+                      
+                      if (meterCode && dateStr && currentValStr) {
+                          const meter = projMeters.find(m => m.code === meterCode);
+                          if (meter) {
+                              const currentValNum = parseFloat(currentValStr.replace(/,/g, ''));
+                              if (!isNaN(currentValNum)) {
+                                  const prevVal = updatedMetersMap.has(meter.id) ? updatedMetersMap.get(meter.id).lastReading : meter.lastReading;
+                                  let usage = currentValNum - prevVal;
+                                  if (usage < 0) usage = 0;
+                                  
+                                  newReadings.push({
+                                      id: generateId(),
+                                      meterId: meter.id,
+                                      date: dateStr,
+                                      value: currentValNum,
+                                      prevValue: prevVal,
+                                      usage: usage,
+                                      recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System Import'
+                                  });
+                                  
+                                  updatedMetersMap.set(meter.id, {
+                                      ...meter,
+                                      lastReading: currentValNum,
+                                      lastDate: dateStr
+                                  });
+                              }
+                          }
+                      }
+                  });
+              } else {
+                  return alert('รูปแบบไฟล์ไม่ถูกต้อง:\n1. แบบแยกคอลัมน์ (Wide): ต้องมีคอลัมน์ "วันที่" และ "รหัสมิเตอร์" เป็นชื่อคอลัมน์ด้านบน\n2. แบบบรรทัด (Long): ต้องมีคอลัมน์ "รหัส (Code)", "วันที่" และ "เลขปัจจุบัน"');
               }
               
               if (newReadings.length > 0) {
-                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูลการจดมิเตอร์ที่ตรงกับทะเบียนในระบบ ${newReadings.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
+                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูลการจดมิเตอร์ ${newReadings.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
                       const nextReadings = [...utilityReadings, ...newReadings];
                       setUtilityReadings(nextReadings);
                       
-                      // อัปเดตข้อมูลมิเตอร์ (ค่ายกมาล่าสุด) ในตาราง Meter
                       const nextMeters = meters.map(m => updatedMetersMap.has(m.id) ? { ...m, ...updatedMetersMap.get(m.id) } : m);
                       setMeters(nextMeters);
                       
@@ -3902,7 +3967,7 @@ export default function App() {
                       alert('นำเข้าข้อมูลการจดมิเตอร์สำเร็จแล้ว!');
                   }, 'ยืนยันการนำเข้า', 'info');
               } else {
-                  alert('ไม่พบข้อมูลที่จับคู่กับมิเตอร์ในระบบได้ (โปรดตรวจสอบ "รหัสมิเตอร์" ในไฟล์ CSV ให้ตรงกับรหัสในทะเบียนมิเตอร์ของระบบ)');
+                  alert('ไม่พบข้อมูลที่สามารถจับคู่กับมิเตอร์ในระบบได้');
               }
           } catch (error) {
               alert('เกิดข้อผิดพลาดในการอ่านไฟล์ CSV โปรดตรวจสอบรูปแบบไฟล์');
@@ -8856,7 +8921,7 @@ export default function App() {
                               </label>
                           )}
                           {hasPerm('proj_utilities', 'save') && utilitySubTab === 'record' && (
-                              <label className="cursor-pointer flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs rounded-md font-medium transition-colors bg-green-600 text-white hover:bg-green-700 shadow-sm" title="นำเข้า CSV การจดมิเตอร์ (คอลัมน์: รหัสมิเตอร์, วันที่จด, เลขปัจจุบัน)">
+                              <label className="cursor-pointer flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs rounded-md font-medium transition-colors bg-green-600 text-white hover:bg-green-700 shadow-sm" title="นำเข้า CSV การจดมิเตอร์ (รองรับแบบแยกคอลัมน์ตามรหัสมิเตอร์ หรือ แบบเรียงบรรทัด)">
                                   <Upload size={14} /> นำเข้า CSV
                                   <input type="file" accept=".csv" className="hidden" onChange={handleImportUtilityReadingsCSV} />
                               </label>
