@@ -1137,6 +1137,46 @@ const compressImage = (file) => {
     });
 };
 
+// --- NEW: Helper for parsing CSV dates (จัดการแก้ไขปัญหาปี พ.ศ. และรูปแบบ ว/ด/ป จาก Excel) ---
+const normalizeImportedDate = (rawStr) => {
+    if (!rawStr || typeof rawStr !== 'string') return '';
+    let dStr = rawStr.trim();
+    if (!dStr) return '';
+    
+    // หากเป็นรูปแบบมาตรฐาน YYYY-MM-DD อยู่แล้ว ให้ส่งกลับได้เลย
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dStr)) return dStr;
+    
+    // จัดการรูปแบบ DD/MM/YYYY หรือ D/M/YYYY หรือ YYYY/MM/DD
+    const parts = dStr.split(/[\/\-]/);
+    if (parts.length === 3) {
+        let d, m, y;
+        if (parts[0].length === 4) { 
+            y = parseInt(parts[0], 10); 
+            m = parseInt(parts[1], 10); 
+            d = parseInt(parts[2], 10); 
+        } else { 
+            d = parseInt(parts[0], 10); 
+            m = parseInt(parts[1], 10); 
+            y = parseInt(parts[2], 10); 
+        }
+        if (isNaN(d) || isNaN(m) || isNaN(y)) return '';
+        
+        // แปลงปี พ.ศ. เป็น ค.ศ. (เช่น 2569 -> 2026)
+        if (y > 2400) y -= 543;
+        // จัดการกรณีใส่ปีมาแค่ 2 หลัก
+        else if (y < 100) {
+             if (y > 40) y = y + 2500 - 543; // สมมติว่าเป็น พ.ศ. 25xx
+             else y = y + 2000; // สมมติว่าเป็น ค.ศ. 20xx
+        }
+
+        return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+    
+    // ทางเลือกสุดท้าย: พึ่งพาตัวแปลง Date ของ JavaScript
+    const parsed = new Date(dStr);
+    return isNaN(parsed.getTime()) ? '' : parsed.toISOString().split('T')[0];
+};
+
 // ... (Components Card, Button, KPICard remain same) ...
 const Card = ({ children, className = "", id, onClick }) => ( <div id={id} className={`bg-white rounded-lg shadow-sm border border-gray-200 ${className}`} onClick={onClick}> {children} </div> );
 const Button = ({ children, onClick, variant = 'primary', size = 'md', className = "", icon: Icon, disabled = false, type = "button" }) => { const baseStyle = "rounded-md font-medium transition-colors flex items-center justify-center gap-2"; const sizeStyles = { sm: "px-2 py-1 text-xs", md: "px-4 py-2 text-sm", lg: "px-6 py-3 text-base" }; const variants = { primary: "bg-orange-600 text-white hover:bg-orange-700 disabled:bg-gray-400", secondary: "bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400", danger: "bg-red-50 text-red-600 hover:bg-red-100", outline: "border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:border-gray-200 disabled:text-gray-300", success: "bg-green-600 text-white hover:bg-green-700" }; return ( <button type={type} onClick={onClick} disabled={disabled} className={`${baseStyle} ${sizeStyles[size]} ${variants[variant]} ${className}`}> {Icon && <Icon size={size === 'sm' ? 14 : 18} />} {children} </button> ); };
@@ -3882,12 +3922,20 @@ export default function App() {
               const codeColName = headers.find(h => h.includes('รหัส') || h.includes('Code') || h.includes('code'));
               const currentValColName = headers.find(h => h.includes('ปัจจุบัน') || h.includes('Current') || h.includes('current'));
 
-              const dataLines = lines.slice(1).filter(l => l.trim()).map(parseCSVLine);
+              // NEW: ดัดแปลงแก้ไขรูปแบบวันที่จาก CSV ให้เป็น YYYY-MM-DD เพื่อการเรียงลำดับที่แม่นยำ
+              let dataLines = lines.slice(1).filter(l => l.trim()).map(parseCSVLine);
+              if (dateColName) {
+                  const dateIdx = headers.indexOf(dateColName);
+                  dataLines = dataLines.map(row => {
+                      row[dateIdx] = normalizeImportedDate(row[dateIdx]);
+                      return row;
+                  }).filter(row => row[dateIdx] !== ''); // ทิ้งแถวที่แปลวันที่ไม่ได้ออกไป
+              }
 
               if (isWideFormat && dateColName) {
                   // ---- รูปแบบแยกคอลัมน์ตามรหัสมิเตอร์ (Wide Format) ----
                   const dateIdx = headers.indexOf(dateColName);
-                  // เรียงตามวันที่เก่าไปใหม่
+                  // เรียงตามวันที่เก่าไปใหม่ (ซึ่งตอนนี้วันที่ถูกฟอร์แมตมาตรฐานแล้ว)
                   dataLines.sort((a, b) => new Date(a[dateIdx]) - new Date(b[dateIdx]));
 
                   dataLines.forEach(values => {
@@ -4036,8 +4084,8 @@ export default function App() {
                           issue: rowObj.issue || '',
                           details: rowObj.details || '',
                           responsible: rowObj.responsible || '',
-                          startDate: rowObj.startDate || new Date().toISOString().split('T')[0],
-                          deadline: rowObj.deadline || '',
+                          startDate: normalizeImportedDate(rowObj.startDate) || new Date().toISOString().split('T')[0],
+                          deadline: normalizeImportedDate(rowObj.deadline) || '',
                           status: rowObj.status || 'Pending'
                       });
                   }
