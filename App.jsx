@@ -3032,7 +3032,6 @@ export default function App() {
           // สร้างไฟล์ภาพหัวกระดาษรอไว้
           const headerImg = await generateHeaderImage(selectedProject, companyInfo, orientation);
           
-          // ขยายเวลาดีเลย์เป็น 1.5 วินาที เพื่อให้ React สลับ DOM เป็นโหมด Print (ซ่อนปุ่ม) และ Browser Render (Reflow) จนเสร็จ
           setTimeout(async () => { 
               const element = document.getElementById(elementId); 
               if(!element) { 
@@ -3055,29 +3054,15 @@ export default function App() {
                   const targetWidth = element.scrollWidth;
                   const targetHeight = element.scrollHeight;
 
-                  // FIX: ปัญหาดาวน์โหลดได้ไฟล์ PDF หน้าขาว (มักเกิดจาก React เปลี่ยน DOM เป็นโหมด Print แล้วเบราว์เซอร์ยัง Render ไม่เสร็จสมบูรณ์ หรือติดปัญหา Safari/iOS)
-                  // ทำการ Warm-up Engine ก่อน 1 ครั้ง เพื่อบังคับให้เบราว์เซอร์วาด Layout ให้สมบูรณ์ก่อนแคปเจอร์จริง
-                  try {
-                      await window.htmlToImage.toJpeg(element, { quality: 0.1, pixelRatio: 1, width: 10, height: 10 });
-                  } catch (e) {
-                      console.warn("Warm-up render warning", e);
-                  }
-
                   // ใช้ htmlToImage (Native Browser Rendering) ขจัดปัญหาภาษาไทยทับกันโดยสิ้นเชิง
                   const dataUrl = await window.htmlToImage.toJpeg(element, {
                       quality: 1.0,
                       pixelRatio: 2, // ความคมชัด x2
                       backgroundColor: '#ffffff',
-                      useCORS: true,
-                      allowTaint: true,
                       width: targetWidth,
                       height: targetHeight,
-                      style: { transform: 'scale(1)', transformOrigin: 'top left', margin: '0', padding: '0' }
+                      style: { transform: 'none', transformOrigin: 'top left', margin: '0', padding: '0' }
                   });
-
-                  if (!dataUrl || dataUrl === 'data:,') {
-                      throw new Error("Failed to generate image data (Empty Data URL)");
-                  }
 
                   const { jsPDF } = window.jspdf;
                   const pdf = new jsPDF({ orientation: orientation, unit: 'mm', format: 'a4' });
@@ -3128,10 +3113,10 @@ export default function App() {
 
               } catch (err) {
                   console.error("PDF Engine Error:", err);
-                  alert("เกิดข้อผิดพลาดระหว่างการสร้าง PDF: " + err.message);
+                  alert("เกิดข้อผิดพลาดระหว่างการสร้าง PDF");
                   setIsExporting(false);
               }
-          }, 1500); // ดีเลย์เพื่อซ่อน UI ปุ่มต่างๆ
+          }, 800); // ดีเลย์เพื่อซ่อน UI ปุ่มต่างๆ
       } catch (err) {
           console.error(err);
           setIsExporting(false);
@@ -3149,7 +3134,6 @@ export default function App() {
       try {
           await document.fonts.ready;
           
-          // ขยายเวลาดีเลย์เป็น 1.5 วินาที เพื่อให้ React และ Browser วาดหน้าจอโหมด Print ให้เสร็จก่อน
           setTimeout(async () => { 
               const element = document.getElementById(elementId); 
               if(!element) { 
@@ -3170,28 +3154,15 @@ export default function App() {
                   const targetWidth = element.scrollWidth;
                   const targetHeight = element.scrollHeight;
 
-                  // FIX: ปัญหาดาวน์โหลดได้ภาพขาว
-                  try {
-                      await window.htmlToImage.toJpeg(element, { quality: 0.1, pixelRatio: 1, width: 10, height: 10 });
-                  } catch (e) {
-                      console.warn("Warm-up render warning", e);
-                  }
-
                   // ใช้ htmlToImage เพื่อสร้างรูปภาพ
                   const dataUrl = await window.htmlToImage.toJpeg(element, {
                       quality: 1.0,
                       pixelRatio: 2, // เพิ่มความคมชัดเป็น 2 เท่า
                       backgroundColor: '#ffffff',
-                      useCORS: true,
-                      allowTaint: true,
                       width: targetWidth,
                       height: targetHeight,
-                      style: { transform: 'scale(1)', transformOrigin: 'top left', margin: '0', padding: '0' }
+                      style: { transform: 'none', transformOrigin: 'top left', margin: '0', padding: '0' }
                   });
-
-                  if (!dataUrl || dataUrl === 'data:,') {
-                      throw new Error("Failed to generate image data (Empty Data URL)");
-                  }
 
                   // สั่งดาวน์โหลด
                   const a = document.createElement('a');
@@ -3204,10 +3175,10 @@ export default function App() {
                   setIsExporting(false);
               } catch (err) {
                   console.error("Image Engine Error:", err);
-                  alert("เกิดข้อผิดพลาดระหว่างการสร้างรูปภาพ: " + err.message);
+                  alert("เกิดข้อผิดพลาดระหว่างการสร้างรูปภาพ");
                   setIsExporting(false);
               }
-          }, 1500); // ดีเลย์เพื่อซ่อน UI ปุ่มต่างๆ ก่อนแคปหน้าจอ
+          }, 800); // ดีเลย์เพื่อซ่อน UI ปุ่มต่างๆ ก่อนแคปหน้าจอ
       } catch (err) {
           console.error(err);
           setIsExporting(false);
@@ -7188,14 +7159,14 @@ export default function App() {
                         const dayNamesEn = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
                         
                         return (
-                            <table className={`border-collapse table-fixed w-full ${isExporting ? 'text-[8.5px]' : 'text-[9px] xl:text-[10px] 2xl:text-xs'}`}>
+                            <table className={`border-collapse table-fixed w-full ${isExporting ? 'text-[7.5px]' : 'text-[9px] xl:text-[10px] 2xl:text-xs'}`}>
                                 <thead>
                                     <tr className="bg-gray-100 border-b border-gray-300">
                                         <th className="border-r border-gray-300 text-center p-1 w-[3%]" rowSpan="2">{t('col_seq')}</th>
-                                        <th className="border-r border-gray-300 text-center p-1 w-[6%] truncate" rowSpan="2">{t('col_empId')}</th>
-                                        <th className="border-r border-gray-300 text-left px-1.5 p-1 w-[13%] truncate" rowSpan="2">{t('col_name')}</th>
-                                        <th className="border-r border-gray-300 text-left px-1.5 p-1 w-[10%] truncate" rowSpan="2">{t('col_role')}</th>
-                                        <th className="border-r border-gray-300 text-center p-1 w-[4%] text-[10px]" rowSpan="2">ประเภท</th>
+                                        <th className="border-r border-gray-300 text-center p-1 w-[5%] truncate" rowSpan="2">{t('col_empId')}</th>
+                                        <th className="border-r border-gray-300 text-left px-1.5 p-1 w-[12%] truncate" rowSpan="2">{t('col_name')}</th>
+                                        <th className="border-r border-gray-300 text-left px-1.5 p-1 w-[8%] truncate" rowSpan="2">{t('col_role')}</th>
+                                        <th className="border-r border-gray-300 text-center p-1 w-[3%] text-[8px]" rowSpan="2">ประเภท</th>
                                         {daysInMonth.map(date => (
                                             <th key={date.getDate()} className="border-r border-gray-300 text-center font-normal text-gray-600 p-0.5">
                                                 {date.getDate()}
@@ -7263,7 +7234,7 @@ export default function App() {
                                                 return (
                                                     <td key={dateString} className={`p-0 border-r border-gray-200 text-center align-middle bg-blue-50/20 ${isExporting ? 'h-auto' : 'h-full'}`}>
                                                         {isExporting ? (
-                                                            <div className={`w-full min-h-[22px] flex items-center justify-center p-0 text-[8px] font-bold uppercase ${colorClass}`}>{val}</div>
+                                                            <div className={`w-full min-h-[18px] flex items-center justify-center p-0 text-[7px] font-bold uppercase ${colorClass}`}>{val}</div>
                                                         ) : (
                                                             <input 
                                                                 type="text" 
@@ -7301,7 +7272,7 @@ export default function App() {
                                                 return (
                                                     <td key={`${dateString}_act`} className={`p-0 border-r border-gray-200 text-center align-middle bg-green-50/20 ${isExporting ? 'h-auto' : 'h-full'}`}>
                                                         {isExporting ? (
-                                                            <div className={`w-full min-h-[22px] flex items-center justify-center p-0 text-[8px] font-bold uppercase ${colorClass}`}>{actVal}</div>
+                                                            <div className={`w-full min-h-[18px] flex items-center justify-center p-0 text-[7px] font-bold uppercase ${colorClass}`}>{actVal}</div>
                                                         ) : (
                                                             <input 
                                                                 type="text" 
@@ -7348,10 +7319,10 @@ export default function App() {
                                 onClick={() => !isExporting && setSelectedShift(selectedShift === shift.id ? null : shift.id)}
                                 className={`flex items-center gap-1.5 transition-all select-none ${isExporting ? 'text-[8.5px]' : 'text-xs cursor-pointer hover:bg-gray-200 p-1 rounded'} ${selectedShift === shift.id && !isExporting ? 'ring-2 ring-orange-500 bg-white shadow-md scale-105' : ''}`}
                             >
-                                <span className={`inline-block text-center rounded font-bold border ${shift.color} ${isExporting ? 'w-6 py-0' : 'w-8 py-0.5'}`}>
+                                <span className={`inline-block text-center rounded font-bold border ${shift.color} ${isExporting ? 'w-5 py-0 text-[7px]' : 'w-8 py-0.5'}`}>
                                     {shift.id}
                                 </span>
-                                <span className="text-gray-600 truncate" title={lang === 'th' ? shift.label_th : shift.label_en}>
+                                <span className={`text-gray-600 truncate ${isExporting ? 'text-[7.5px]' : ''}`} title={lang === 'th' ? shift.label_th : shift.label_en}>
                                     {lang === 'th' ? (shift.label_th.split(' - ')[1] || shift.label_th) : (shift.label_en.split(' - ')[1] || shift.label_en)}
                                 </span>
                             </div>
@@ -7377,7 +7348,7 @@ export default function App() {
                 </div>
 
                 {/* Signatures Area - Dynamically populated based on Workflow */}
-                <div className={`bg-white flex justify-between ${isExporting ? 'px-8 p-2 mt-1' : 'px-10 p-8 mt-6 pt-10 border-t border-gray-200'}`}>
+                <div className={`bg-white flex justify-between ${isExporting ? 'px-4 p-2 mt-1' : 'px-10 p-8 mt-6 pt-10 border-t border-gray-200'}`}>
                     {(() => {
                         const approval = scheduleApprovals[`${selectedProject.id}_${currentMonth}`] || {};
                         return (
