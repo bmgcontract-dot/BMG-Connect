@@ -3032,7 +3032,7 @@ export default function App() {
           // สร้างไฟล์ภาพหัวกระดาษรอไว้
           const headerImg = await generateHeaderImage(selectedProject, companyInfo, orientation);
           
-          // FIX: เพิ่มเวลาหน่วงให้ React Render สลับ DOM เสร็จสมบูรณ์ (ป้องกันตารางว่างเปล่า)
+          // ขยายเวลาดีเลย์เป็น 1.5 วินาที เพื่อให้ React สลับ DOM เป็นโหมด Print (ซ่อนปุ่ม) และ Browser Render (Reflow) จนเสร็จ
           setTimeout(async () => { 
               const element = document.getElementById(elementId); 
               if(!element) { 
@@ -3051,14 +3051,33 @@ export default function App() {
                       parent = parent.parentElement;
                   }
 
+                  // FIX: บังคับระบุขนาด Width และ Height เป้าหมายที่ชัดเจน
+                  const targetWidth = element.scrollWidth;
+                  const targetHeight = element.scrollHeight;
+
+                  // FIX: ปัญหาดาวน์โหลดได้ไฟล์ PDF หน้าขาว (มักเกิดจาก React เปลี่ยน DOM เป็นโหมด Print แล้วเบราว์เซอร์ยัง Render ไม่เสร็จสมบูรณ์ หรือติดปัญหา Safari/iOS)
+                  // ทำการ Warm-up Engine ก่อน 1 ครั้ง เพื่อบังคับให้เบราว์เซอร์วาด Layout ให้สมบูรณ์ก่อนแคปเจอร์จริง
+                  try {
+                      await window.htmlToImage.toJpeg(element, { quality: 0.1, pixelRatio: 1, width: 10, height: 10 });
+                  } catch (e) {
+                      console.warn("Warm-up render warning", e);
+                  }
+
                   // ใช้ htmlToImage (Native Browser Rendering) ขจัดปัญหาภาษาไทยทับกันโดยสิ้นเชิง
                   const dataUrl = await window.htmlToImage.toJpeg(element, {
                       quality: 1.0,
                       pixelRatio: 2, // ความคมชัด x2
                       backgroundColor: '#ffffff',
-                      // ไม่บังคับ width/height ปล่อยให้คำนวณตาม Layout จริงที่แสดงผล
-                      style: { transform: 'none', transformOrigin: 'top left', margin: '0', padding: '0' }
+                      useCORS: true,
+                      allowTaint: true,
+                      width: targetWidth,
+                      height: targetHeight,
+                      style: { transform: 'scale(1)', transformOrigin: 'top left', margin: '0', padding: '0' }
                   });
+
+                  if (!dataUrl || dataUrl === 'data:,') {
+                      throw new Error("Failed to generate image data (Empty Data URL)");
+                  }
 
                   const { jsPDF } = window.jspdf;
                   const pdf = new jsPDF({ orientation: orientation, unit: 'mm', format: 'a4' });
@@ -3109,10 +3128,10 @@ export default function App() {
 
               } catch (err) {
                   console.error("PDF Engine Error:", err);
-                  alert("เกิดข้อผิดพลาดระหว่างการสร้าง PDF");
+                  alert("เกิดข้อผิดพลาดระหว่างการสร้าง PDF: " + err.message);
                   setIsExporting(false);
               }
-          }, 1500); // FIX: เพิ่มเป็น 1500ms เพื่อให้เวลาเปลี่ยน DOM เสร็จชัวร์ๆ
+          }, 1500); // ดีเลย์เพื่อซ่อน UI ปุ่มต่างๆ
       } catch (err) {
           console.error(err);
           setIsExporting(false);
@@ -3130,7 +3149,7 @@ export default function App() {
       try {
           await document.fonts.ready;
           
-          // FIX: เพิ่มเวลาหน่วงให้สอดคล้องกัน
+          // ขยายเวลาดีเลย์เป็น 1.5 วินาที เพื่อให้ React และ Browser วาดหน้าจอโหมด Print ให้เสร็จก่อน
           setTimeout(async () => { 
               const element = document.getElementById(elementId); 
               if(!element) { 
@@ -3148,13 +3167,31 @@ export default function App() {
                       parent = parent.parentElement;
                   }
 
+                  const targetWidth = element.scrollWidth;
+                  const targetHeight = element.scrollHeight;
+
+                  // FIX: ปัญหาดาวน์โหลดได้ภาพขาว
+                  try {
+                      await window.htmlToImage.toJpeg(element, { quality: 0.1, pixelRatio: 1, width: 10, height: 10 });
+                  } catch (e) {
+                      console.warn("Warm-up render warning", e);
+                  }
+
                   // ใช้ htmlToImage เพื่อสร้างรูปภาพ
                   const dataUrl = await window.htmlToImage.toJpeg(element, {
                       quality: 1.0,
                       pixelRatio: 2, // เพิ่มความคมชัดเป็น 2 เท่า
                       backgroundColor: '#ffffff',
-                      style: { transform: 'none', transformOrigin: 'top left', margin: '0', padding: '0' }
+                      useCORS: true,
+                      allowTaint: true,
+                      width: targetWidth,
+                      height: targetHeight,
+                      style: { transform: 'scale(1)', transformOrigin: 'top left', margin: '0', padding: '0' }
                   });
+
+                  if (!dataUrl || dataUrl === 'data:,') {
+                      throw new Error("Failed to generate image data (Empty Data URL)");
+                  }
 
                   // สั่งดาวน์โหลด
                   const a = document.createElement('a');
@@ -3167,10 +3204,10 @@ export default function App() {
                   setIsExporting(false);
               } catch (err) {
                   console.error("Image Engine Error:", err);
-                  alert("เกิดข้อผิดพลาดระหว่างการสร้างรูปภาพ");
+                  alert("เกิดข้อผิดพลาดระหว่างการสร้างรูปภาพ: " + err.message);
                   setIsExporting(false);
               }
-          }, 1500); // FIX: เพิ่มเป็น 1500ms
+          }, 1500); // ดีเลย์เพื่อซ่อน UI ปุ่มต่างๆ ก่อนแคปหน้าจอ
       } catch (err) {
           console.error(err);
           setIsExporting(false);
@@ -7070,8 +7107,8 @@ export default function App() {
 
             return (
             <Card 
-                className={`${isExporting ? 'border-none shadow-none bg-white mx-auto overflow-visible block w-max min-w-[277mm]' : 'min-w-full overflow-hidden'}`} 
-                style={isExporting ? { padding: '20px', boxSizing: 'border-box', position: 'relative' } : {}}
+                className={`${isExporting ? 'border-none shadow-none bg-white mx-auto overflow-visible block' : 'min-w-full overflow-hidden'}`} 
+                style={isExporting ? { width: '277mm', minWidth: '277mm', maxWidth: '277mm', boxSizing: 'border-box', position: 'relative' } : {}}
                 id="print-schedule-area"
             >
                 <div className={`p-4 border-b flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white ${isExporting ? 'pb-2 pt-0 px-2' : ''}`}>
@@ -7225,11 +7262,8 @@ export default function App() {
 
                                                 return (
                                                     <td key={dateString} className={`p-0 border-r border-gray-200 text-center align-middle bg-blue-50/20 ${isExporting ? 'h-auto' : 'h-full'}`}>
-                                                        {/* FIX: ใช้ Conditional Rendering เพื่อถอด Input ออกไปเลยตอนพิมพ์ ป้องกันการวาดทับกัน */}
                                                         {isExporting ? (
-                                                            <div className={`w-full min-h-[22px] flex items-center justify-center p-0 text-[8px] font-bold uppercase ${colorClass}`}>
-                                                                {val}
-                                                            </div>
+                                                            <div className={`w-full min-h-[22px] flex items-center justify-center p-0 text-[8px] font-bold uppercase ${colorClass}`}>{val}</div>
                                                         ) : (
                                                             <input 
                                                                 type="text" 
@@ -7266,11 +7300,8 @@ export default function App() {
 
                                                 return (
                                                     <td key={`${dateString}_act`} className={`p-0 border-r border-gray-200 text-center align-middle bg-green-50/20 ${isExporting ? 'h-auto' : 'h-full'}`}>
-                                                        {/* FIX: ใช้ Conditional Rendering เช่นเดียวกันกับฝั่ง Plan */}
                                                         {isExporting ? (
-                                                            <div className={`w-full min-h-[22px] flex items-center justify-center p-0 text-[8px] font-bold uppercase ${colorClass}`}>
-                                                                {actVal}
-                                                            </div>
+                                                            <div className={`w-full min-h-[22px] flex items-center justify-center p-0 text-[8px] font-bold uppercase ${colorClass}`}>{actVal}</div>
                                                         ) : (
                                                             <input 
                                                                 type="text" 
@@ -10851,8 +10882,7 @@ export default function App() {
         .sunset-theme tr:hover td { background-color: #FFFDE7 !important; }
       `}</style>
       {Sidebar()}
-      {/* FIX: นำการจัดตำแหน่งแบบ Absolute ออกไปก่อนในขณะที่ Export เพื่อป้องกันการที่ Layout พังจากการถูกบังคับตำแหน่ง และใช้ Background ให้เหมาะสม */}
-      <main className={`flex-1 transition-all flex flex-col min-w-0 ${isExporting ? 'ml-0 p-0 bg-white' : (isSidebarOpen ? 'lg:ml-64' : 'lg:ml-0')}`}>
+      <main className={`flex-1 transition-all flex flex-col min-w-0 ${isExporting ? 'ml-0 p-0 bg-white w-max min-w-full absolute top-0 left-0 z-[9999]' : (isSidebarOpen ? 'lg:ml-64' : 'lg:ml-0')}`}>
         
         {/* Header (Hamburger Menu) */}
         {!isExporting && (
