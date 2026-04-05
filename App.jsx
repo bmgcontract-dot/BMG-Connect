@@ -3032,6 +3032,7 @@ export default function App() {
           // สร้างไฟล์ภาพหัวกระดาษรอไว้
           const headerImg = await generateHeaderImage(selectedProject, companyInfo, orientation);
           
+          // FIX: เพิ่มเวลาหน่วงให้ React Render สลับ DOM เสร็จสมบูรณ์ (ป้องกันตารางว่างเปล่า)
           setTimeout(async () => { 
               const element = document.getElementById(elementId); 
               if(!element) { 
@@ -3050,17 +3051,12 @@ export default function App() {
                       parent = parent.parentElement;
                   }
 
-                  // FIX: บังคับระบุขนาด Width และ Height เป้าหมายที่ชัดเจน
-                  const targetWidth = element.scrollWidth;
-                  const targetHeight = element.scrollHeight;
-
                   // ใช้ htmlToImage (Native Browser Rendering) ขจัดปัญหาภาษาไทยทับกันโดยสิ้นเชิง
                   const dataUrl = await window.htmlToImage.toJpeg(element, {
                       quality: 1.0,
                       pixelRatio: 2, // ความคมชัด x2
                       backgroundColor: '#ffffff',
-                      width: targetWidth,
-                      height: targetHeight,
+                      // ไม่บังคับ width/height ปล่อยให้คำนวณตาม Layout จริงที่แสดงผล
                       style: { transform: 'none', transformOrigin: 'top left', margin: '0', padding: '0' }
                   });
 
@@ -3116,7 +3112,7 @@ export default function App() {
                   alert("เกิดข้อผิดพลาดระหว่างการสร้าง PDF");
                   setIsExporting(false);
               }
-          }, 800); // ดีเลย์เพื่อซ่อน UI ปุ่มต่างๆ
+          }, 1500); // FIX: เพิ่มเป็น 1500ms เพื่อให้เวลาเปลี่ยน DOM เสร็จชัวร์ๆ
       } catch (err) {
           console.error(err);
           setIsExporting(false);
@@ -3134,6 +3130,7 @@ export default function App() {
       try {
           await document.fonts.ready;
           
+          // FIX: เพิ่มเวลาหน่วงให้สอดคล้องกัน
           setTimeout(async () => { 
               const element = document.getElementById(elementId); 
               if(!element) { 
@@ -3151,16 +3148,11 @@ export default function App() {
                       parent = parent.parentElement;
                   }
 
-                  const targetWidth = element.scrollWidth;
-                  const targetHeight = element.scrollHeight;
-
                   // ใช้ htmlToImage เพื่อสร้างรูปภาพ
                   const dataUrl = await window.htmlToImage.toJpeg(element, {
                       quality: 1.0,
                       pixelRatio: 2, // เพิ่มความคมชัดเป็น 2 เท่า
                       backgroundColor: '#ffffff',
-                      width: targetWidth,
-                      height: targetHeight,
                       style: { transform: 'none', transformOrigin: 'top left', margin: '0', padding: '0' }
                   });
 
@@ -3178,7 +3170,7 @@ export default function App() {
                   alert("เกิดข้อผิดพลาดระหว่างการสร้างรูปภาพ");
                   setIsExporting(false);
               }
-          }, 800); // ดีเลย์เพื่อซ่อน UI ปุ่มต่างๆ ก่อนแคปหน้าจอ
+          }, 1500); // FIX: เพิ่มเป็น 1500ms
       } catch (err) {
           console.error(err);
           setIsExporting(false);
@@ -7232,24 +7224,28 @@ export default function App() {
                                                 const colorClass = shiftData ? shiftData.color : '';
 
                                                 return (
-                                                    <td key={dateString} className={`p-0 border-r border-gray-200 text-center align-middle bg-blue-50/20 relative ${isExporting ? 'h-auto' : 'h-full'}`}>
-                                                        <div className={`${isExporting ? 'flex' : 'hidden'} w-full min-h-[22px] items-center justify-center p-0 text-[8px] font-bold uppercase ${colorClass}`}>
-                                                            {val}
-                                                        </div>
-                                                        <input 
-                                                            type="text" 
-                                                            className={`${isExporting ? 'hidden' : 'block'} w-full h-full min-h-[26px] md:min-h-[28px] text-center text-[9px] xl:text-[10px] 2xl:text-xs p-0 m-0 focus:outline-none focus:ring-inset focus:ring-1 focus:ring-orange-500 uppercase transition-colors ${colorClass} ${!canEditPlan ? 'cursor-not-allowed opacity-70' : selectedShift ? 'cursor-pointer' : 'cursor-text'}`}
-                                                            value={val}
-                                                            onClick={() => {
-                                                                if (canEditPlan && selectedShift) {
-                                                                    updateSchedule(user.id, dateString, selectedShift, 'plan');
-                                                                }
-                                                            }}
-                                                            onChange={(e) => canEditPlan && updateSchedule(user.id, dateString, e.target.value.toUpperCase(), 'plan')}
-                                                            readOnly={!canEditPlan || !!selectedShift}
-                                                            disabled={!canEditPlan}
-                                                            title={!canEditPlan ? "ตาราง Plan ถูกอนุมัติหรือล็อคแล้ว" : "ตารางแผนงาน (Plan)"}
-                                                        />
+                                                    <td key={dateString} className={`p-0 border-r border-gray-200 text-center align-middle bg-blue-50/20 ${isExporting ? 'h-auto' : 'h-full'}`}>
+                                                        {/* FIX: ใช้ Conditional Rendering เพื่อถอด Input ออกไปเลยตอนพิมพ์ ป้องกันการวาดทับกัน */}
+                                                        {isExporting ? (
+                                                            <div className={`w-full min-h-[22px] flex items-center justify-center p-0 text-[8px] font-bold uppercase ${colorClass}`}>
+                                                                {val}
+                                                            </div>
+                                                        ) : (
+                                                            <input 
+                                                                type="text" 
+                                                                className={`w-full h-full min-h-[26px] md:min-h-[28px] text-center text-[9px] xl:text-[10px] 2xl:text-xs p-0 m-0 focus:outline-none focus:ring-inset focus:ring-1 focus:ring-orange-500 uppercase transition-colors block ${colorClass} ${!canEditPlan ? 'cursor-not-allowed opacity-70' : selectedShift ? 'cursor-pointer' : 'cursor-text'}`}
+                                                                value={val}
+                                                                onClick={() => {
+                                                                    if (canEditPlan && selectedShift) {
+                                                                        updateSchedule(user.id, dateString, selectedShift, 'plan');
+                                                                    }
+                                                                }}
+                                                                onChange={(e) => canEditPlan && updateSchedule(user.id, dateString, e.target.value.toUpperCase(), 'plan')}
+                                                                readOnly={!canEditPlan || !!selectedShift}
+                                                                disabled={!canEditPlan}
+                                                                title={!canEditPlan ? "ตาราง Plan ถูกอนุมัติหรือล็อคแล้ว" : "ตารางแผนงาน (Plan)"}
+                                                            />
+                                                        )}
                                                     </td>
                                                 );
                                             })}
@@ -7269,24 +7265,28 @@ export default function App() {
                                                 const colorClass = shiftData ? shiftData.color : '';
 
                                                 return (
-                                                    <td key={`${dateString}_act`} className={`p-0 border-r border-gray-200 text-center align-middle bg-green-50/20 relative ${isExporting ? 'h-auto' : 'h-full'}`}>
-                                                        <div className={`${isExporting ? 'flex' : 'hidden'} w-full min-h-[22px] items-center justify-center p-0 text-[8px] font-bold uppercase ${colorClass}`}>
-                                                            {actVal}
-                                                        </div>
-                                                        <input 
-                                                            type="text" 
-                                                            className={`${isExporting ? 'hidden' : 'block'} w-full h-full min-h-[26px] md:min-h-[28px] text-center text-[9px] xl:text-[10px] 2xl:text-xs p-0 m-0 focus:outline-none focus:ring-inset focus:ring-1 focus:ring-green-500 uppercase transition-colors ${colorClass} ${!canEditAct ? 'cursor-not-allowed opacity-70' : selectedShift ? 'cursor-pointer' : 'cursor-text'}`}
-                                                            value={actVal}
-                                                            onClick={() => {
-                                                                if (canEditAct && selectedShift) {
-                                                                    updateSchedule(user.id, dateString, selectedShift, 'act');
-                                                                }
-                                                            }}
-                                                            onChange={(e) => canEditAct && updateSchedule(user.id, dateString, e.target.value.toUpperCase(), 'act')}
-                                                            readOnly={!canEditAct || !!selectedShift}
-                                                            disabled={!canEditAct}
-                                                            title={!canEditAct ? "ตารางถูกล็อคแล้วโดยฝ่ายบุคคล" : "แก้ไขตารางตามการเข้างานจริง (Actual)"}
-                                                        />
+                                                    <td key={`${dateString}_act`} className={`p-0 border-r border-gray-200 text-center align-middle bg-green-50/20 ${isExporting ? 'h-auto' : 'h-full'}`}>
+                                                        {/* FIX: ใช้ Conditional Rendering เช่นเดียวกันกับฝั่ง Plan */}
+                                                        {isExporting ? (
+                                                            <div className={`w-full min-h-[22px] flex items-center justify-center p-0 text-[8px] font-bold uppercase ${colorClass}`}>
+                                                                {actVal}
+                                                            </div>
+                                                        ) : (
+                                                            <input 
+                                                                type="text" 
+                                                                className={`w-full h-full min-h-[26px] md:min-h-[28px] text-center text-[9px] xl:text-[10px] 2xl:text-xs p-0 m-0 focus:outline-none focus:ring-inset focus:ring-1 focus:ring-green-500 uppercase transition-colors block ${colorClass} ${!canEditAct ? 'cursor-not-allowed opacity-70' : selectedShift ? 'cursor-pointer' : 'cursor-text'}`}
+                                                                value={actVal}
+                                                                onClick={() => {
+                                                                    if (canEditAct && selectedShift) {
+                                                                        updateSchedule(user.id, dateString, selectedShift, 'act');
+                                                                    }
+                                                                }}
+                                                                onChange={(e) => canEditAct && updateSchedule(user.id, dateString, e.target.value.toUpperCase(), 'act')}
+                                                                readOnly={!canEditAct || !!selectedShift}
+                                                                disabled={!canEditAct}
+                                                                title={!canEditAct ? "ตารางถูกล็อคแล้วโดยฝ่ายบุคคล" : "แก้ไขตารางตามการเข้างานจริง (Actual)"}
+                                                            />
+                                                        )}
                                                     </td>
                                                 );
                                             })}
@@ -10851,7 +10851,8 @@ export default function App() {
         .sunset-theme tr:hover td { background-color: #FFFDE7 !important; }
       `}</style>
       {Sidebar()}
-      <main className={`flex-1 transition-all flex flex-col min-w-0 ${isExporting ? 'ml-0 p-0 bg-white w-max min-w-full absolute top-0 left-0 z-[9999]' : (isSidebarOpen ? 'lg:ml-64' : 'lg:ml-0')}`}>
+      {/* FIX: นำการจัดตำแหน่งแบบ Absolute ออกไปก่อนในขณะที่ Export เพื่อป้องกันการที่ Layout พังจากการถูกบังคับตำแหน่ง และใช้ Background ให้เหมาะสม */}
+      <main className={`flex-1 transition-all flex flex-col min-w-0 ${isExporting ? 'ml-0 p-0 bg-white' : (isSidebarOpen ? 'lg:ml-64' : 'lg:ml-0')}`}>
         
         {/* Header (Hamburger Menu) */}
         {!isExporting && (
