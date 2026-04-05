@@ -7079,23 +7079,23 @@ export default function App() {
             return (
             <Card 
                 className={`${isExporting ? 'border-none shadow-none bg-white mx-auto overflow-visible block' : 'min-w-full overflow-hidden'}`} 
-                style={isExporting ? { width: '277mm', minWidth: '277mm', maxWidth: '277mm', boxSizing: 'border-box', position: 'relative' } : {}}
+                style={isExporting ? { width: '277mm', minWidth: '277mm', maxWidth: '277mm', boxSizing: 'border-box', position: 'relative', margin: 0, padding: 0 } : {}}
                 id="print-schedule-area"
             >
-                <div className={`p-4 border-b flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white ${isExporting ? 'pb-2 pt-0 px-2' : ''}`}>
+                <div className={`p-4 border-b flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white ${isExporting ? 'pb-1 pt-0 px-0 mb-1 border-b-0' : ''}`}>
                     <div className="flex items-center gap-3">
-                        <h3 className={`font-bold flex items-center gap-2 text-gray-800 ${isExporting ? 'text-base' : 'text-lg'}`}>
+                        <h3 className={`font-bold flex items-center gap-2 text-gray-800 ${isExporting ? 'text-sm' : 'text-lg'}`}>
                             <Calendar size={20} className={isExporting ? 'hidden' : ''} />
                             {isExporting ? `ตารางการทำงาน (Work Schedule) - ${selectedProject.name}` : t('workSchedule')}
                         </h3>
                         {/* Status Badge */}
                         {(() => {
-                            if (!approval.status) return <span className="bg-gray-100 text-gray-500 px-2 py-0.5 rounded text-xs font-bold border">ฉบับร่าง (ยังไม่บันทึก)</span>;
-                            if (approval.isLocked) return <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-bold border border-red-200 shadow-sm flex items-center gap-1"><Lock size={12}/> ล็อคตารางแล้ว</span>;
-                            if (approval.status === 'Pending Manager') return <span className="bg-orange-100 text-orange-700 px-2 py-0.5 rounded text-xs font-bold border border-orange-200 shadow-sm flex items-center gap-1"><Clock size={12}/> รอผู้จัดการอนุมัติ</span>;
-                            if (approval.status === 'Pending Area Manager') return <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs font-bold border border-purple-200 shadow-sm flex items-center gap-1"><Clock size={12}/> รอผู้จัดการพื้นที่อนุมัติ</span>;
-                            if (approval.status === 'Pending HR') return <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-bold border border-blue-200 shadow-sm flex items-center gap-1"><Clock size={12}/> รอฝ่ายบุคคลอนุมัติ</span>;
-                            if (approval.status === 'Approved') return <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs font-bold border border-green-200 shadow-sm flex items-center gap-1"><CheckCircle size={12}/> อนุมัติสมบูรณ์</span>;
+                            if (!approval.status) return <span className={`bg-gray-100 text-gray-500 px-2 py-0.5 rounded font-bold border ${isExporting ? 'text-[8px]' : 'text-xs'}`}>ฉบับร่าง (ยังไม่บันทึก)</span>;
+                            if (approval.isLocked) return <span className={`bg-red-100 text-red-700 px-2 py-0.5 rounded font-bold border border-red-200 shadow-sm flex items-center gap-1 ${isExporting ? 'text-[8px]' : 'text-xs'}`}><Lock size={isExporting ? 10 : 12}/> ล็อคตารางแล้ว</span>;
+                            if (approval.status === 'Pending Manager') return <span className={`bg-orange-100 text-orange-700 px-2 py-0.5 rounded font-bold border border-orange-200 shadow-sm flex items-center gap-1 ${isExporting ? 'text-[8px]' : 'text-xs'}`}><Clock size={isExporting ? 10 : 12}/> รอผู้จัดการอนุมัติ</span>;
+                            if (approval.status === 'Pending Area Manager') return <span className={`bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-bold border border-purple-200 shadow-sm flex items-center gap-1 ${isExporting ? 'text-[8px]' : 'text-xs'}`}><Clock size={isExporting ? 10 : 12}/> รอผู้จัดการพื้นที่อนุมัติ</span>;
+                            if (approval.status === 'Pending HR') return <span className={`bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold border border-blue-200 shadow-sm flex items-center gap-1 ${isExporting ? 'text-[8px]' : 'text-xs'}`}><Clock size={isExporting ? 10 : 12}/> รอฝ่ายบุคคลอนุมัติ</span>;
+                            if (approval.status === 'Approved') return <span className={`bg-green-100 text-green-700 px-2 py-0.5 rounded font-bold border border-green-200 shadow-sm flex items-center gap-1 ${isExporting ? 'text-[8px]' : 'text-xs'}`}><CheckCircle size={isExporting ? 10 : 12}/> อนุมัติสมบูรณ์</span>;
                             return null;
                         })()}
                     </div>
@@ -7103,7 +7103,7 @@ export default function App() {
                     <div className="flex items-center gap-4 w-full xl:w-auto">
                         <div className={`flex items-center rounded-lg p-1 ${isExporting ? '' : 'bg-gray-100'}`}>
                             <button onClick={() => changeMonth(-1)} className={`p-1 hover:bg-white rounded shadow-sm transition ${isExporting ? 'hidden' : ''}`}><ChevronLeft size={18}/></button>
-                            <span className={`px-4 font-semibold text-gray-700 ${isExporting ? 'text-xs' : 'text-sm'}`}>
+                            <span className={`px-4 font-semibold text-gray-700 ${isExporting ? 'text-[10px] px-2' : 'text-sm'}`}>
                                 ประจำเดือน: {new Date(currentMonth + '-01').toLocaleDateString(lang === 'th' ? 'th-TH' : 'en-US', { month: 'long', year: 'numeric' })}
                             </span>
                             <button onClick={() => changeMonth(1)} className={`p-1 hover:bg-white rounded shadow-sm transition ${isExporting ? 'hidden' : ''}`}><ChevronRight size={18}/></button>
@@ -7151,7 +7151,7 @@ export default function App() {
                     </div>
                 </div>
                 
-                <div id="schedule-table-container" className={`w-full bg-white rounded-b-lg ${isExporting ? 'px-2 pb-2 overflow-visible block' : 'overflow-hidden pb-4'}`}>
+                <div id="schedule-table-container" className={`w-full bg-white rounded-b-lg ${isExporting ? 'px-0 pb-1 overflow-visible block' : 'overflow-hidden pb-4'}`}>
                     {(() => {
                         const [year, month] = currentMonth.split('-').map(Number);
                         const daysInMonth = getDaysInMonth(year, month);
@@ -7159,23 +7159,23 @@ export default function App() {
                         const dayNamesEn = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
                         
                         return (
-                            <table className={`border-collapse table-fixed w-full ${isExporting ? 'text-[7.5px]' : 'text-[9px] xl:text-[10px] 2xl:text-xs'}`}>
+                            <table className={`border-collapse table-fixed w-full ${isExporting ? 'text-[7px]' : 'text-[9px] xl:text-[10px] 2xl:text-xs'}`}>
                                 <thead>
                                     <tr className="bg-gray-100 border-b border-gray-300">
-                                        <th className="border-r border-gray-300 text-center p-1 w-[3%]" rowSpan="2">{t('col_seq')}</th>
-                                        <th className="border-r border-gray-300 text-center p-1 w-[5%] truncate" rowSpan="2">{t('col_empId')}</th>
-                                        <th className="border-r border-gray-300 text-left px-1.5 p-1 w-[12%] truncate" rowSpan="2">{t('col_name')}</th>
-                                        <th className="border-r border-gray-300 text-left px-1.5 p-1 w-[8%] truncate" rowSpan="2">{t('col_role')}</th>
-                                        <th className="border-r border-gray-300 text-center p-1 w-[3%] text-[8px]" rowSpan="2">ประเภท</th>
+                                        <th className={`border-r border-gray-300 text-center ${isExporting ? 'p-0 w-[2.5%]' : 'p-1 w-[3%]'}`} rowSpan="2">{t('col_seq')}</th>
+                                        <th className={`border-r border-gray-300 text-center ${isExporting ? 'p-0 w-[4.5%]' : 'p-1 w-[5%]'} truncate`} rowSpan="2">{t('col_empId')}</th>
+                                        <th className={`border-r border-gray-300 text-left ${isExporting ? 'p-0 px-0.5 w-[10%]' : 'px-1.5 p-1 w-[12%]'} truncate`} rowSpan="2">{t('col_name')}</th>
+                                        <th className={`border-r border-gray-300 text-left ${isExporting ? 'p-0 px-0.5 w-[7%]' : 'px-1.5 p-1 w-[8%]'} truncate`} rowSpan="2">{t('col_role')}</th>
+                                        <th className={`border-r border-gray-300 text-center ${isExporting ? 'p-0 w-[2.5%] text-[6px]' : 'p-1 w-[3%] text-[8px]'}`} rowSpan="2">ประเภท</th>
                                         {daysInMonth.map(date => (
-                                            <th key={date.getDate()} className="border-r border-gray-300 text-center font-normal text-gray-600 p-0.5">
+                                            <th key={date.getDate()} className={`border-r border-gray-300 text-center font-normal text-gray-600 ${isExporting ? 'p-0 text-[7px]' : 'p-0.5'}`}>
                                                 {date.getDate()}
                                             </th>
                                         ))}
                                     </tr>
                                     <tr className="bg-gray-50 border-b border-gray-300">
                                         {daysInMonth.map(date => (
-                                            <th key={date.getDate()} className={`border-r border-gray-300 text-center font-bold p-0 text-[7px] md:text-[8px] xl:text-[9px] ${date.getDay() === 0 || date.getDay() === 6 ? 'text-red-500 bg-red-50' : 'text-gray-700'}`}>
+                                            <th key={date.getDate()} className={`border-r border-gray-300 text-center font-bold p-0 ${isExporting ? 'text-[6px]' : 'text-[7px] md:text-[8px] xl:text-[9px]'} ${date.getDay() === 0 || date.getDay() === 6 ? 'text-red-500 bg-red-50' : 'text-gray-700'}`}>
                                                 {lang === 'th' ? dayNamesTh[date.getDay()] : dayNamesEn[date.getDay()]}
                                             </th>
                                         ))}
@@ -7202,7 +7202,7 @@ export default function App() {
                                         title={!isExporting ? "คลิกค้างที่แถวแล้วลากเพื่อสลับตำแหน่ง (Drag & Drop)" : ""}
                                     >
                                         <tr className="hover:bg-gray-50 border-b border-gray-200">
-                                            <td className="border-r border-gray-300 text-center text-gray-500 p-1 truncate" rowSpan="2">
+                                            <td className={`border-r border-gray-300 text-center text-gray-500 truncate ${isExporting ? 'p-0 text-[6.5px]' : 'p-1'}`} rowSpan="2">
                                                 <div className="flex items-center justify-center gap-1.5">
                                                     {!isExporting && (
                                                         <div className="flex flex-col gap-[2px] opacity-30 hover:opacity-100 cursor-grab" title="ลากเพื่อสลับตำแหน่ง">
@@ -7214,14 +7214,14 @@ export default function App() {
                                                     {index + 1}
                                                 </div>
                                             </td>
-                                            <td className="border-r border-gray-300 text-center text-gray-600 font-mono p-1 truncate" rowSpan="2">{user.employeeId || '-'}</td>
-                                            <td className="border-r border-gray-300 font-medium text-gray-800 p-1 px-1.5 truncate" title={`${user.firstName} ${user.lastName}`} rowSpan="2">
+                                            <td className={`border-r border-gray-300 text-center text-gray-600 font-mono truncate ${isExporting ? 'p-0 text-[6.5px]' : 'p-1'}`} rowSpan="2">{user.employeeId || '-'}</td>
+                                            <td className={`border-r border-gray-300 font-medium text-gray-800 truncate ${isExporting ? 'p-0 px-0.5 text-[6.5px]' : 'p-1 px-1.5'}`} title={`${user.firstName} ${user.lastName}`} rowSpan="2">
                                                 {user.firstName} {user.lastName}
                                             </td>
-                                            <td className="border-r border-gray-300 text-gray-600 p-1 px-1.5 truncate" title={user.position} rowSpan="2">
+                                            <td className={`border-r border-gray-300 text-gray-600 truncate ${isExporting ? 'p-0 px-0.5 text-[6px]' : 'p-1 px-1.5'}`} title={user.position} rowSpan="2">
                                                 {user.position}
                                             </td>
-                                            <td className="border-r border-gray-200 text-center font-bold text-[9px] bg-blue-50 text-blue-700 p-0">
+                                            <td className={`border-r border-gray-200 text-center font-bold bg-blue-50 text-blue-700 p-0 ${isExporting ? 'text-[6px]' : 'text-[9px]'}`}>
                                                 PLAN
                                             </td>
                                             {daysInMonth.map(date => {
@@ -7234,7 +7234,7 @@ export default function App() {
                                                 return (
                                                     <td key={dateString} className={`p-0 border-r border-gray-200 text-center align-middle bg-blue-50/20 ${isExporting ? 'h-auto' : 'h-full'}`}>
                                                         {isExporting ? (
-                                                            <div className={`w-full min-h-[18px] flex items-center justify-center p-0 text-[7px] font-bold uppercase ${colorClass}`}>{val}</div>
+                                                            <div className={`w-full min-h-[14px] flex items-center justify-center p-0 text-[6.5px] font-bold uppercase ${colorClass}`}>{val}</div>
                                                         ) : (
                                                             <input 
                                                                 type="text" 
@@ -7256,7 +7256,7 @@ export default function App() {
                                             })}
                                         </tr>
                                         <tr className="hover:bg-gray-50">
-                                            <td className="border-r border-gray-200 text-center font-bold text-[9px] bg-green-50 text-green-700 p-0">
+                                            <td className={`border-r border-gray-200 text-center font-bold bg-green-50 text-green-700 p-0 ${isExporting ? 'text-[6px]' : 'text-[9px]'}`}>
                                                 ACT
                                             </td>
                                             {daysInMonth.map(date => {
@@ -7272,7 +7272,7 @@ export default function App() {
                                                 return (
                                                     <td key={`${dateString}_act`} className={`p-0 border-r border-gray-200 text-center align-middle bg-green-50/20 ${isExporting ? 'h-auto' : 'h-full'}`}>
                                                         {isExporting ? (
-                                                            <div className={`w-full min-h-[18px] flex items-center justify-center p-0 text-[7px] font-bold uppercase ${colorClass}`}>{actVal}</div>
+                                                            <div className={`w-full min-h-[14px] flex items-center justify-center p-0 text-[6.5px] font-bold uppercase ${colorClass}`}>{actVal}</div>
                                                         ) : (
                                                             <input 
                                                                 type="text" 
@@ -7301,9 +7301,9 @@ export default function App() {
                 </div>
 
                 {/* Shift Legend */}
-                <div className={`border-t border-gray-200 ${isExporting ? 'bg-white pt-2 pb-1 px-2' : 'p-4 bg-gray-50'}`}>
-                    <div className="flex justify-between items-center mb-2">
-                        <h4 className={`font-bold text-gray-700 flex items-center gap-2 ${isExporting ? 'text-[11px]' : 'text-sm'}`}>
+                <div className={`border-t border-gray-200 ${isExporting ? 'bg-white pt-1.5 pb-0.5 px-0 mt-1' : 'p-4 bg-gray-50'}`}>
+                    <div className="flex justify-between items-center mb-1">
+                        <h4 className={`font-bold text-gray-700 flex items-center gap-2 ${isExporting ? 'text-[9px]' : 'text-sm'}`}>
                             คำอธิบายสัญลักษณ์ (Shift Legend) 
                         </h4>
                         {!isExporting && (
@@ -7312,17 +7312,17 @@ export default function App() {
                             </div>
                         )}
                     </div>
-                    <div className={`grid ${isExporting ? 'grid-cols-7 gap-y-1' : 'grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-y-2'} gap-x-2`}>
+                    <div className={`grid ${isExporting ? 'grid-cols-7 gap-y-0.5 gap-x-1' : 'grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-y-2 gap-x-2'}`}>
                         {SHIFTS.map(shift => (
                             <div 
                                 key={shift.id} 
                                 onClick={() => !isExporting && setSelectedShift(selectedShift === shift.id ? null : shift.id)}
                                 className={`flex items-center gap-1.5 transition-all select-none ${isExporting ? 'text-[8.5px]' : 'text-xs cursor-pointer hover:bg-gray-200 p-1 rounded'} ${selectedShift === shift.id && !isExporting ? 'ring-2 ring-orange-500 bg-white shadow-md scale-105' : ''}`}
                             >
-                                <span className={`inline-block text-center rounded font-bold border ${shift.color} ${isExporting ? 'w-5 py-0 text-[7px]' : 'w-8 py-0.5'}`}>
+                                <span className={`inline-block text-center rounded font-bold border ${shift.color} ${isExporting ? 'w-4 py-0 text-[6px]' : 'w-8 py-0.5'}`}>
                                     {shift.id}
                                 </span>
-                                <span className={`text-gray-600 truncate ${isExporting ? 'text-[7.5px]' : ''}`} title={lang === 'th' ? shift.label_th : shift.label_en}>
+                                <span className={`text-gray-600 truncate ${isExporting ? 'text-[6px]' : ''}`} title={lang === 'th' ? shift.label_th : shift.label_en}>
                                     {lang === 'th' ? (shift.label_th.split(' - ')[1] || shift.label_th) : (shift.label_en.split(' - ')[1] || shift.label_en)}
                                 </span>
                             </div>
@@ -7331,10 +7331,10 @@ export default function App() {
                 </div>
 
                 {/* Note Area */}
-                <div className={`bg-white border-t border-gray-200 ${isExporting ? 'pt-2 pb-0 px-2' : 'p-4'}`}>
-                    <label className={`block font-bold text-gray-700 mb-2 ${isExporting ? 'text-[11px]' : 'text-sm'}`}>รายละเอียดเพิ่มเติม / Note:</label>
+                <div className={`bg-white ${isExporting ? 'pt-1 pb-0 px-0' : 'p-4 border-t border-gray-200'}`}>
+                    <label className={`block font-bold text-gray-700 mb-0.5 ${isExporting ? 'text-[9px]' : 'text-sm'}`}>รายละเอียดเพิ่มเติม / Note:</label>
                     {isExporting ? (
-                        <div className="w-full rounded-md p-2 text-[10px] min-h-[30px] whitespace-pre-wrap text-gray-800 bg-gray-50 border border-gray-200">
+                        <div className="w-full rounded p-1 text-[8px] min-h-[20px] whitespace-pre-wrap text-gray-800 border border-gray-300">
                             {scheduleNote || '-'}
                         </div>
                     ) : (
@@ -7348,46 +7348,46 @@ export default function App() {
                 </div>
 
                 {/* Signatures Area - Dynamically populated based on Workflow */}
-                <div className={`bg-white flex justify-between ${isExporting ? 'px-4 p-2 mt-1' : 'px-10 p-8 mt-6 pt-10 border-t border-gray-200'}`}>
+                <div className={`bg-white flex justify-between ${isExporting ? 'px-2 pt-2 pb-0 mt-0' : 'px-10 p-8 mt-6 pt-10 border-t border-gray-200'}`}>
                     {(() => {
                         const approval = scheduleApprovals[`${selectedProject.id}_${currentMonth}`] || {};
                         return (
                             <>
-                                <div className="text-center w-1/3 px-2">
-                                    <div className="border-b border-gray-400 mb-1.5 h-6 flex items-end justify-center pb-1">
-                                        <span className="font-medium text-blue-800 font-serif italic text-base truncate w-full" title={approval.preparedBy || `${currentUser?.firstName} ${currentUser?.lastName}`}>
+                                <div className="text-center w-1/3 px-1">
+                                    <div className={`border-b border-gray-400 flex items-end justify-center pb-0.5 ${isExporting ? 'mb-1 h-4' : 'mb-1.5 h-6'}`}>
+                                        <span className={`font-medium text-blue-800 font-serif italic truncate w-full ${isExporting ? 'text-[10px]' : 'text-base'}`} title={approval.preparedBy || `${currentUser?.firstName} ${currentUser?.lastName}`}>
                                             {approval.preparedBy || `${currentUser?.firstName} ${currentUser?.lastName}`}
                                         </span>
                                     </div>
-                                    <div className={`font-medium text-gray-600 truncate w-full ${isExporting ? 'text-[11px]' : 'text-sm'}`}>
+                                    <div className={`font-medium text-gray-600 truncate w-full ${isExporting ? 'text-[8px]' : 'text-sm'}`}>
                                         ( {approval.preparedBy || `${currentUser?.firstName} ${currentUser?.lastName}`} )
                                     </div>
-                                    <div className={`text-gray-500 mt-1 ${isExporting ? 'text-[10px]' : 'text-sm'}`}>ผู้จัดทำ (Prepared By)</div>
-                                    <div className={`text-gray-400 font-medium truncate w-full ${isExporting ? 'text-[9px]' : 'text-xs'}`}>{approval.preparedByRole || currentUser?.position || '-'}</div>
+                                    <div className={`text-gray-500 ${isExporting ? 'text-[7px] mt-0.5' : 'text-sm mt-1'}`}>ผู้จัดทำ (Prepared By)</div>
+                                    <div className={`text-gray-400 font-medium truncate w-full ${isExporting ? 'text-[7px]' : 'text-xs'}`}>{approval.preparedByRole || currentUser?.position || '-'}</div>
                                 </div>
-                                <div className="text-center w-1/3 px-2">
-                                    <div className="border-b border-gray-400 mb-1.5 h-6 flex items-end justify-center pb-1">
-                                        <span className="font-medium text-blue-800 font-serif italic text-base truncate w-full" title={approval.managerApprovedBy || ''}>
+                                <div className="text-center w-1/3 px-1">
+                                    <div className={`border-b border-gray-400 flex items-end justify-center pb-0.5 ${isExporting ? 'mb-1 h-4' : 'mb-1.5 h-6'}`}>
+                                        <span className={`font-medium text-blue-800 font-serif italic truncate w-full ${isExporting ? 'text-[10px]' : 'text-base'}`} title={approval.managerApprovedBy || ''}>
                                             {approval.managerApprovedBy || ''}
                                         </span>
                                     </div>
-                                    <div className={`font-medium text-gray-600 truncate w-full ${isExporting ? 'text-[11px]' : 'text-sm'}`}>
+                                    <div className={`font-medium text-gray-600 truncate w-full ${isExporting ? 'text-[8px]' : 'text-sm'}`}>
                                         ( {approval.managerApprovedBy || '.......................................................'} )
                                     </div>
-                                    <div className={`text-gray-500 mt-1 ${isExporting ? 'text-[10px]' : 'text-sm'}`}>ผู้ตรวจสอบ (Checked By)</div>
-                                    <div className={`text-gray-400 font-medium ${isExporting ? 'text-[9px]' : 'text-xs'}`}>{approval.managerApprovedByRole || 'ผู้จัดการอาคาร/หมู่บ้าน'}</div>
+                                    <div className={`text-gray-500 ${isExporting ? 'text-[7px] mt-0.5' : 'text-sm mt-1'}`}>ผู้ตรวจสอบ (Checked By)</div>
+                                    <div className={`text-gray-400 font-medium ${isExporting ? 'text-[7px]' : 'text-xs'}`}>{approval.managerApprovedByRole || 'ผู้จัดการอาคาร/หมู่บ้าน'}</div>
                                 </div>
-                                <div className="text-center w-1/3 px-2">
-                                    <div className="border-b border-gray-400 mb-1.5 h-6 flex items-end justify-center pb-1">
-                                        <span className="font-medium text-blue-800 font-serif italic text-base truncate w-full" title={approval.hrApprovedBy || ''}>
+                                <div className="text-center w-1/3 px-1">
+                                    <div className={`border-b border-gray-400 flex items-end justify-center pb-0.5 ${isExporting ? 'mb-1 h-4' : 'mb-1.5 h-6'}`}>
+                                        <span className={`font-medium text-blue-800 font-serif italic truncate w-full ${isExporting ? 'text-[10px]' : 'text-base'}`} title={approval.hrApprovedBy || ''}>
                                             {approval.hrApprovedBy || ''}
                                         </span>
                                     </div>
-                                    <div className={`font-medium text-gray-600 truncate w-full ${isExporting ? 'text-[11px]' : 'text-sm'}`}>
+                                    <div className={`font-medium text-gray-600 truncate w-full ${isExporting ? 'text-[8px]' : 'text-sm'}`}>
                                         ( {approval.hrApprovedBy || '.......................................................'} )
                                     </div>
-                                    <div className={`text-gray-500 mt-1 ${isExporting ? 'text-[10px]' : 'text-sm'}`}>ผู้อนุมัติ (Approved By)</div>
-                                    <div className={`text-gray-400 font-medium ${isExporting ? 'text-[9px]' : 'text-xs'}`}>เจ้าหน้าที่ฝ่ายบุคคล</div>
+                                    <div className={`text-gray-500 ${isExporting ? 'text-[7px] mt-0.5' : 'text-sm mt-1'}`}>ผู้อนุมัติ (Approved By)</div>
+                                    <div className={`text-gray-400 font-medium ${isExporting ? 'text-[7px]' : 'text-xs'}`}>เจ้าหน้าที่ฝ่ายบุคคล</div>
                                 </div>
                             </>
                         );
