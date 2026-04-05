@@ -3691,6 +3691,19 @@ export default function App() {
       });
   };
 
+  const handleDeleteAllUtilityReadings = (meterId) => {
+      showConfirm('ยืนยันการลบประวัติทั้งหมด', 'คุณต้องการลบประวัติการจดมิเตอร์ของอุปกรณ์นี้ "ทั้งหมด" ใช่หรือไม่?\n(ค่ายกมาจะถูกรีเซ็ตเป็น 0)', () => {
+          const newReadings = utilityReadings.filter(r => r.meterId !== meterId);
+          setUtilityReadings(newReadings);
+          
+          setMeters(meters.map(m => 
+              m.id === meterId 
+                  ? { ...m, lastReading: 0, lastDate: null }
+                  : m
+          ));
+      });
+  };
+
   const handleSaveMeter = (e) => {
       e.preventDefault();
       const initVal = parseFloat(newMeter.initialValue) || 0;
@@ -9077,79 +9090,86 @@ export default function App() {
 
                               {/* Right Column (Placeholder or History) */}
                               <div className="col-span-1 lg:col-span-2 border-2 border-dashed border-gray-200 rounded-xl bg-[#fafafa] flex flex-col items-center justify-center min-h-[450px]">
-                                  {utilityForm.meterId ? (
+                                  {utilityForm.meterId ? (() => {
+                                      const meterReadings = utilityReadings.filter(r => r.meterId === utilityForm.meterId);
+                                      
+                                      // กำหนดสิทธิ์: ให้สิทธิ์เฉพาะ Admin, ผู้จัดการ (ไม่รวมผู้ช่วย) และ หัวหน้าช่าง (ไม่รวมผู้ช่วย)
+                                      const canManageRecord = currentUser?.username === 'admin' || 
+                                          (currentUser?.position?.includes('ผู้จัดการ') && !currentUser?.position?.includes('ผู้ช่วย')) || 
+                                          (currentUser?.position?.includes('หัวหน้าช่าง') && !currentUser?.position?.includes('ผู้ช่วย'));
+                                      
+                                      return (
                                       <div className="w-full h-full p-6 flex flex-col">
                                           <div className="flex justify-between items-center mb-4 border-b pb-2">
-                                              <h3 className="font-bold text-gray-700">ประวัติการจด (History)</h3>
+                                              <div className="flex items-center gap-3">
+                                                  <h3 className="font-bold text-gray-700">ประวัติการจด (History)</h3>
+                                                  {canManageRecord && meterReadings.length > 0 && (
+                                                      <button 
+                                                          onClick={() => handleDeleteAllUtilityReadings(utilityForm.meterId)}
+                                                          className="text-[10px] bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 px-2 py-1 rounded border border-red-200 transition-colors flex items-center gap-1 shadow-sm"
+                                                          title="ลบประวัติของมิเตอร์นี้ทั้งหมด"
+                                                      >
+                                                          <Trash2 size={12}/> ลบทั้งหมด
+                                                      </button>
+                                                  )}
+                                              </div>
                                               <span className="text-sm font-mono font-bold text-red-600 bg-red-50 px-2 py-1 rounded">
                                                   {meters.find(m => m.id === utilityForm.meterId)?.code}
                                               </span>
                                           </div>
                                           <div className="flex-1 overflow-auto">
-                                              {(() => {
-                                                  const meterReadings = utilityReadings.filter(r => r.meterId === utilityForm.meterId);
-                                                  
-                                                  // กำหนดสิทธิ์: ให้สิทธิ์เฉพาะ Admin, ผู้จัดการ (ไม่รวมผู้ช่วย) และ หัวหน้าช่าง (ไม่รวมผู้ช่วย)
-                                                  const canManageRecord = currentUser?.username === 'admin' || 
-                                                      (currentUser?.position?.includes('ผู้จัดการ') && !currentUser?.position?.includes('ผู้ช่วย')) || 
-                                                      (currentUser?.position?.includes('หัวหน้าช่าง') && !currentUser?.position?.includes('ผู้ช่วย'));
-
-                                                  if (meterReadings.length > 0) {
-                                                      return (
-                                                          <table className="w-full text-sm text-left">
-                                                              <thead className="bg-white text-gray-600 border-b border-gray-200">
-                                                                  <tr>
-                                                                      <th className="p-3">วันที่จด</th>
-                                                                      <th className="p-3 text-right">เลขก่อนหน้า</th>
-                                                                      <th className="p-3 text-right">เลขปัจจุบัน</th>
-                                                                      <th className="p-3 text-right">จำนวนหน่วยที่ใช้</th>
-                                                                      <th className="p-3 text-center">ผู้บันทึก</th>
-                                                                      {canManageRecord && (
-                                                                          <th className="p-3 text-center w-20">จัดการ</th>
-                                                                      )}
-                                                                  </tr>
-                                                              </thead>
-                                                              <tbody className="divide-y divide-gray-100">
-                                                                  {meterReadings.sort((a,b) => new Date(b.date) - new Date(a.date)).map(r => (
-                                                                      <tr key={r.id} className="hover:bg-gray-50 transition-colors">
-                                                                          <td className="p-3 text-blue-600 font-medium">
-                                                                              {new Date(r.date).toLocaleDateString('th-TH')}
-                                                                          </td>
-                                                                          <td className="p-3 text-right text-gray-500">{r.prevValue.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                                                                          <td className="p-3 text-right font-bold text-gray-800">{r.value.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                                                                          <td className="p-3 text-right font-bold text-red-600">+{r.usage.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                                                                          <td className="p-3 text-center text-gray-500 text-xs">
-                                                                              <span className="bg-gray-100 px-2 py-1 rounded border border-gray-200">{r.recorder}</span>
-                                                                          </td>
-                                                                          {canManageRecord && (
-                                                                              <td className="p-3 text-center">
-                                                                                  <div className="flex justify-center items-center gap-1">
-                                                                                      <button onClick={() => handleEditUtilityReading(r)} className="text-gray-400 hover:text-blue-600 p-1.5 rounded-md hover:bg-blue-50 transition-colors" title="แก้ไขข้อมูล">
-                                                                                          <Edit size={14} />
-                                                                                      </button>
-                                                                                      <button onClick={() => handleDeleteUtilityReading(r.id, r.meterId)} className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors" title="ลบข้อมูล">
-                                                                                          <Trash2 size={14} />
-                                                                                      </button>
-                                                                                  </div>
-                                                                              </td>
-                                                                          )}
-                                                                      </tr>
-                                                                  ))}
-                                                              </tbody>
-                                                          </table>
-                                                      );
-                                                  } else {
-                                                      return (
-                                                          <div className="text-center text-gray-400 py-20 flex flex-col items-center">
-                                                              <ClipboardList size={48} className="text-gray-300 mb-2"/>
-                                                              <p>ยังไม่มีประวัติการจดสำหรับมิเตอร์นี้</p>
-                                                          </div>
-                                                      );
-                                                  }
-                                              })()}
+                                              {meterReadings.length > 0 ? (
+                                                  <table className="w-full text-sm text-left">
+                                                      <thead className="bg-white text-gray-600 border-b border-gray-200">
+                                                          <tr>
+                                                              <th className="p-3">วันที่จด</th>
+                                                              <th className="p-3 text-right">เลขก่อนหน้า</th>
+                                                              <th className="p-3 text-right">เลขปัจจุบัน</th>
+                                                              <th className="p-3 text-right">จำนวนหน่วยที่ใช้</th>
+                                                              <th className="p-3 text-center">ผู้บันทึก</th>
+                                                              {canManageRecord && (
+                                                                  <th className="p-3 text-center w-20">จัดการ</th>
+                                                              )}
+                                                          </tr>
+                                                      </thead>
+                                                      <tbody className="divide-y divide-gray-100">
+                                                          {meterReadings.sort((a,b) => new Date(b.date) - new Date(a.date)).map(r => (
+                                                              <tr key={r.id} className="hover:bg-gray-50 transition-colors">
+                                                                  <td className="p-3 text-blue-600 font-medium">
+                                                                      {new Date(r.date).toLocaleDateString('th-TH')}
+                                                                  </td>
+                                                                  <td className="p-3 text-right text-gray-500">{r.prevValue.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                                                                  <td className="p-3 text-right font-bold text-gray-800">{r.value.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                                                                  <td className="p-3 text-right font-bold text-red-600">+{r.usage.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                                                                  <td className="p-3 text-center text-gray-500 text-xs">
+                                                                      <span className="bg-gray-100 px-2 py-1 rounded border border-gray-200">{r.recorder}</span>
+                                                                  </td>
+                                                                  {canManageRecord && (
+                                                                      <td className="p-3 text-center">
+                                                                          <div className="flex justify-center items-center gap-1">
+                                                                              <button onClick={() => handleEditUtilityReading(r)} className="text-gray-400 hover:text-blue-600 p-1.5 rounded-md hover:bg-blue-50 transition-colors" title="แก้ไขข้อมูล">
+                                                                                  <Edit size={14} />
+                                                                              </button>
+                                                                              <button onClick={() => handleDeleteUtilityReading(r.id, r.meterId)} className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors" title="ลบข้อมูล">
+                                                                                  <Trash2 size={14} />
+                                                                              </button>
+                                                                          </div>
+                                                                      </td>
+                                                                  )}
+                                                              </tr>
+                                                          ))}
+                                                      </tbody>
+                                                  </table>
+                                              ) : (
+                                                  <div className="text-center text-gray-400 py-20 flex flex-col items-center">
+                                                      <ClipboardList size={48} className="text-gray-300 mb-2"/>
+                                                      <p>ยังไม่มีประวัติการจดสำหรับมิเตอร์นี้</p>
+                                                  </div>
+                                              )}
                                           </div>
                                       </div>
-                                  ) : (
+                                      );
+                                  })() : (
                                       <div className="text-center text-gray-400 flex flex-col items-center">
                                           <Zap size={64} className="mb-4 text-gray-300 -rotate-12" strokeWidth={1.5} />
                                           <p className="font-bold text-lg text-gray-500">กรุณาเลือกมิเตอร์เพื่อดูประวัติ</p>
