@@ -334,11 +334,14 @@ const STANDARD_FORMS = [
 
 // Shift Codes
 const SHIFTS = [
+  { id: 'MT', label_th: 'MT - ผลัดเช้า (07.00-16.00)', label_en: 'MT - Morning (07.00-16.00)', time: '07:00 - 16:00', color: 'bg-green-50 text-green-700 border-green-200' },
   { id: 'M1', label_th: 'M1 - ผลัดเช้า (08.00-17.00)', label_en: 'M1 - Morning (08.00-17.00)', time: '08:00 - 17:00', color: 'bg-green-50 text-green-700 border-green-200' },
   { id: 'M2', label_th: 'M2 - ผลัดเช้า (08.30-17.30)', label_en: 'M2 - Morning (08.30-17.30)', time: '08:30 - 17:30', color: 'bg-green-50 text-green-700 border-green-200' },
   { id: 'M3', label_th: 'M3 - ผลัดเช้า (09.00-18.00)', label_en: 'M3 - Morning (09.00-18.00)', time: '09:00 - 18:00', color: 'bg-green-50 text-green-700 border-green-200' },
   { id: 'M4', label_th: 'M4 - วันเช้า (10.00-19.00)', label_en: 'M4 - Day (10.00-19.00)', time: '10:00 - 19:00', color: 'bg-green-50 text-green-700 border-green-200' },
+  { id: 'AT', label_th: 'AT - ผลัดบ่าย (13.00-22.00)', label_en: 'AT - Afternoon (13.00-22.00)', time: '13:00 - 22:00', color: 'bg-orange-50 text-orange-700 border-orange-200' },
   { id: 'A', label_th: 'A - ผลัดบ่าย (14.00-23.00)', label_en: 'A - Afternoon (14.00-23.00)', time: '14:00 - 23:00', color: 'bg-orange-50 text-orange-700 border-orange-200' },
+  { id: 'NT', label_th: 'NT - ผลัดดึก (22.00-07.00)', label_en: 'NT - Night (22.00-07.00)', time: '22:00 - 07:00', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
   { id: 'N', label_th: 'N - ผลัดดึก (23.00-08.00)', label_en: 'N - Night (23.00-08.00)', time: '23:00 - 08:00', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
   { id: 'O', label_th: 'O - วันหยุดประจำสัปดาห์', label_en: 'O - Weekly Off', time: '-', color: 'bg-gray-100 text-gray-600 border-gray-200' },
   { id: 'H', label_th: 'H - วันหยุดนักขัตฤกษ์', label_en: 'H - Public Holiday', time: '-', color: 'bg-red-50 text-red-700 border-red-200' },
