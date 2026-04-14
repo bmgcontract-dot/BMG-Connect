@@ -1857,6 +1857,7 @@ export default function App() {
   const [isEditingMachine, setIsEditingMachine] = useState(false);
   const [isSavingMachine, setIsSavingMachine] = useState(false); // NEW: State สำหรับแสดง Loading ตอนอัปโหลดรูปเข้า Drive
   const [pmSubTab, setPmSubTab] = useState('history'); // 'registry', 'plan', 'calendar', 'form', 'history', 'yearly_summary'
+  const [meetingSubTab, setMeetingSubTab] = useState('plan'); // NEW: State สำหรับแท็บย่อยในหน้าประชุม
   const [pmYearlySummaryYear, setPmYearlySummaryYear] = useState(() => new Date().getFullYear().toString()); // NEW: State สำหรับปีของหน้ารายปี
   const [newMachine, setNewMachine] = useState({
       code: '',
@@ -10781,6 +10782,34 @@ export default function App() {
           {/* NEW: Meetings Tab */}
           {projectTab === 'meeting' && (
               <div className="space-y-6 animate-fade-in">
+                  {/* Sub-tabs Navigation for Meetings */}
+                  <div className="flex gap-2 mb-4 overflow-x-auto pb-2 custom-scrollbar">
+                      {[
+                          { id: 'plan', label: 'แผนการจัดประชุม', icon: Calendar },
+                          { id: 'invitation', label: 'หนังสือเชิญประชุม', icon: Mail },
+                          { id: 'proxy', label: 'ใบมอบฉันทะ', icon: FileText },
+                          { id: 'attendance', label: 'ใบลงชื่อเข้าร่วมประชุม', icon: Users },
+                          { id: 'ballot', label: 'ใบลงคะแนน', icon: CheckSquare },
+                          { id: 'voting_system', label: 'ระบบนับคะแนน', icon: BarChart3 },
+                          { id: 'resolutions', label: 'สรุปมติการประชุม', icon: ClipboardCheck },
+                          { id: 'land_dept_docs', label: 'เอกสารนำส่งกรมที่ดิน', icon: Building2 }
+                      ].map(sub => (
+                          <button
+                              key={sub.id}
+                              onClick={() => setMeetingSubTab(sub.id)}
+                              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors border shadow-sm ${
+                                  meetingSubTab === sub.id 
+                                  ? 'bg-teal-50 border-teal-500 text-teal-700' 
+                                  : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                              }`}
+                          >
+                              <sub.icon size={16} className={meetingSubTab === sub.id ? 'text-teal-600' : 'text-gray-400'} />
+                              {sub.label}
+                          </button>
+                      ))}
+                  </div>
+
+                  {meetingSubTab === 'plan' && (
                   <Card id="print-meeting-area">
                       <div className="p-4 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white">
                           <h3 className="font-bold flex items-center gap-2 text-gray-800">
@@ -10901,6 +10930,17 @@ export default function App() {
                           </table>
                       </div>
                   </Card>
+                  )}
+
+                  {meetingSubTab !== 'plan' && (
+                      <Card className="p-12 flex flex-col items-center justify-center text-center border-dashed border-2 min-h-[400px] bg-gray-50">
+                          <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mb-4 shadow-sm border border-gray-200">
+                              <Hammer className="text-gray-400" size={32} />
+                          </div>
+                          <h3 className="text-xl font-bold text-gray-700 mb-2">ระบบกำลังอยู่ระหว่างการพัฒนา</h3>
+                          <p className="text-gray-500 max-w-md">โมดูลย่อยนี้จะเปิดให้ใช้งานในเวอร์ชันถัดไป (Coming Soon)</p>
+                      </Card>
+                  )}
               </div>
           )}
 
