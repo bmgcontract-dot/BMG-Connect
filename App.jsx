@@ -9,7 +9,7 @@ import {
   XCircle, Image as ImageIcon, File, Hourglass, Phone, Mail, LayoutGrid, List, ChevronDown, Save,
   ChevronLeft, ChevronRight, MousePointer2, FileCheck, DollarSign, Camera,
   MapPin, Box, PenTool, Printer as PrinterIcon, History, Folder, Lock,
-  Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2, Bell
+  Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2, Bell, Megaphone, Radio
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
@@ -334,14 +334,11 @@ const STANDARD_FORMS = [
 
 // Shift Codes
 const SHIFTS = [
-  { id: 'MT', label_th: 'MT - ผลัดเช้า (07.00-16.00)', label_en: 'MT - Morning (07.00-16.00)', time: '07:00 - 16:00', color: 'bg-green-50 text-green-700 border-green-200' },
   { id: 'M1', label_th: 'M1 - ผลัดเช้า (08.00-17.00)', label_en: 'M1 - Morning (08.00-17.00)', time: '08:00 - 17:00', color: 'bg-green-50 text-green-700 border-green-200' },
   { id: 'M2', label_th: 'M2 - ผลัดเช้า (08.30-17.30)', label_en: 'M2 - Morning (08.30-17.30)', time: '08:30 - 17:30', color: 'bg-green-50 text-green-700 border-green-200' },
   { id: 'M3', label_th: 'M3 - ผลัดเช้า (09.00-18.00)', label_en: 'M3 - Morning (09.00-18.00)', time: '09:00 - 18:00', color: 'bg-green-50 text-green-700 border-green-200' },
   { id: 'M4', label_th: 'M4 - วันเช้า (10.00-19.00)', label_en: 'M4 - Day (10.00-19.00)', time: '10:00 - 19:00', color: 'bg-green-50 text-green-700 border-green-200' },
-  { id: 'AT', label_th: 'AT - ผลัดบ่าย (13.00-22.00)', label_en: 'AT - Afternoon (13.00-22.00)', time: '13:00 - 22:00', color: 'bg-orange-50 text-orange-700 border-orange-200' },
   { id: 'A', label_th: 'A - ผลัดบ่าย (14.00-23.00)', label_en: 'A - Afternoon (14.00-23.00)', time: '14:00 - 23:00', color: 'bg-orange-50 text-orange-700 border-orange-200' },
-  { id: 'NT', label_th: 'NT - ผลัดดึก (22.00-07.00)', label_en: 'NT - Night (22.00-07.00)', time: '22:00 - 07:00', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
   { id: 'N', label_th: 'N - ผลัดดึก (23.00-08.00)', label_en: 'N - Night (23.00-08.00)', time: '23:00 - 08:00', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
   { id: 'O', label_th: 'O - วันหยุดประจำสัปดาห์', label_en: 'O - Weekly Off', time: '-', color: 'bg-gray-100 text-gray-600 border-gray-200' },
   { id: 'H', label_th: 'H - วันหยุดนักขัตฤกษ์', label_en: 'H - Public Holiday', time: '-', color: 'bg-red-50 text-red-700 border-red-200' },
@@ -373,10 +370,12 @@ const AVAILABLE_MENUS = [
         { id: 'proj_audit', label: 'tab_audit' },
         { id: 'proj_forms', label: 'tab_forms' },
         { id: 'proj_contractors', label: 'menu_contractors' },
+        { id: 'proj_meeting', label: 'tab_meeting' },
         { id: 'proj_others', label: 'tab_others' }
     ]
   },
   { id: 'audits', label: 'menu_audits' },
+  { id: 'announcements', label: 'menu_announcements' },
   { id: 'manual', label: 'menu_manual' },
   { id: 'settings', label: 'menu_settings' }
 ];
@@ -434,6 +433,7 @@ const PROJECT_TABS = [
   { id: 'audit', label: 'tab_audit', icon: ClipboardCheck, color: 'purple' },
   { id: 'forms', label: 'tab_forms', icon: Folder, color: 'blue' },
   { id: 'contractors', label: 'menu_contractors', icon: Search, color: 'gray' },
+  { id: 'meeting', label: 'tab_meeting', icon: Megaphone, color: 'teal' },
   { id: 'others', label: 'tab_others', icon: Layers, color: 'gray' },
 ];
 
@@ -456,6 +456,7 @@ const TRANSLATIONS = {
     menu_users: "จัดการผู้ใช้งาน",
     menu_projects: "โครงการ / หน่วยงาน",
     menu_audits: "ตรวจสอบภายใน (Audit)",
+    menu_announcements: "ประกาศ / ข่าวสาร",
     menu_contractors: "ค้นหา supplier",
     menu_manual: "คู่มือการใช้งาน",
     menu_settings: "ตั้งค่าระบบ",
@@ -577,6 +578,7 @@ const TRANSLATIONS = {
     tab_action: "Action Plan",
     tab_audit: "Audit",
     tab_forms: "แบบฟอร์มมาตรฐาน",
+    tab_meeting: "ประชุมใหญ่ / กรรมการ",
     tab_others: "อื่นๆ (Others)",
 
     // Project Detail Content
@@ -646,6 +648,7 @@ const TRANSLATIONS = {
     saveSuccess: "บันทึกสำเร็จ",
     close: "ปิด",
     downloadPDF: "ดาวน์โหลด PDF",
+    addMeeting: "เพิ่มกำหนดการประชุม",
     
     // PM Tabs
     pm_registry: "ทะเบียนเครื่องจักร",
@@ -736,6 +739,7 @@ const TRANSLATIONS = {
     menu_users: "User Management",
     menu_projects: "Projects / Units",
     menu_audits: "Internal Audit",
+    menu_announcements: "Announcements",
     menu_contractors: "Search Supplier",
     menu_manual: "User Manual",
     menu_settings: "Settings",
@@ -842,6 +846,7 @@ const TRANSLATIONS = {
     tab_action: "Action Plan",
     tab_audit: "Audit",
     tab_forms: "Standard Forms",
+    tab_meeting: "Meetings",
     tab_others: "Others",
     projectKPI: "Project KPI",
     recentAlerts: "Recent Alerts",
@@ -956,6 +961,7 @@ const TRANSLATIONS = {
     registerAsset: "Register Asset",
     assetDetails: "Additional Details",
     downloadPDF: "Download PDF",
+    addMeeting: "Add Meeting",
     pm_dashboard: "Dashboard",
     pm_registry: "Registry",
     pm_plan: "Plan",
@@ -987,6 +993,8 @@ const INITIAL_PM_PLANS = [];
 const INITIAL_PM_HISTORY = [];
 const INITIAL_REPAIRS = [];
 const INITIAL_OTHERS = [];
+const INITIAL_MEETINGS = [];
+const INITIAL_ANNOUNCEMENTS = [];
 
 // NEW: Custom 3D Bar Shapes
 const ThreeDBar = (props) => {
@@ -1974,6 +1982,37 @@ export default function App() {
   const [showAddFormModal, setShowAddFormModal] = useState(false);
   const [newFormItem, setNewFormItem] = useState({ id: null, category: 'งานบริหารและนิติบุคคล (Juristic & Mgmt.)', name: '', format: 'PDF', size: '100 KB', description: '' });
 
+  // Announcements State
+  const [showAddAnnouncementModal, setShowAddAnnouncementModal] = useState(false);
+  const [isEditingAnnouncement, setIsEditingAnnouncement] = useState(false);
+  const [newAnnouncement, setNewAnnouncement] = useState({
+      id: null,
+      title: '',
+      content: '',
+      date: new Date().toISOString().split('T')[0],
+      endDate: '',
+      priority: 'Normal', // Normal, High
+      projectId: 'All', // 'All' or specific Project ID
+      author: '',
+      image: null
+  });
+
+  // Meetings State
+  const [showAddMeetingModal, setShowAddMeetingModal] = useState(false);
+  const [isEditingMeeting, setIsEditingMeeting] = useState(false);
+  const [selectedMeetingView, setSelectedMeetingView] = useState(null);
+  const [newMeeting, setNewMeeting] = useState({
+      id: null,
+      title: '',
+      type: 'AGM', // AGM, EGM, Committee
+      date: new Date().toISOString().split('T')[0],
+      time: '09:00',
+      location: '',
+      agenda: '',
+      status: 'Scheduled', // Scheduled, Completed, Postponed, Cancelled
+      minutesFile: null
+  });
+
   // Audit Form State
   const [showAddAuditModal, setShowAddAuditModal] = useState(false);
   const [selectedAuditReport, setSelectedAuditReport] = useState(null); // NEW: State สำหรับเก็บข้อมูล Audit ที่ถูกคลิกดูรายละเอียด
@@ -2015,6 +2054,8 @@ export default function App() {
   const [actionPlans, setActionPlans] = usePersistentCollection('bmg_actionPlans', INITIAL_ACTION_PLANS, fbUser);
   const [othersData, setOthersData] = usePersistentCollection('bmg_othersData', INITIAL_OTHERS, fbUser);
   const [formsList, setFormsList] = usePersistentCollection('bmg_forms_list', STANDARD_FORMS, fbUser);
+  const [meetingsList, setMeetingsList] = usePersistentCollection('bmg_meetings', INITIAL_MEETINGS, fbUser);
+  const [announcements, setAnnouncements] = usePersistentCollection('bmg_announcements', INITIAL_ANNOUNCEMENTS, fbUser);
 
   // คงใช้ usePersistentState สำหรับข้อมูลที่เป็น Object เดี่ยวๆ
   const [schedules, setSchedules] = usePersistentState('bmg_schedules', {}, fbUser);
@@ -4245,6 +4286,90 @@ export default function App() {
       alert(t('saveSuccess'));
   };
 
+  // Meetings Handlers
+  const handleMeetingFileUpload = (e) => {
+      const file = e.target.files[0];
+      if (file) {
+          const reader = new FileReader();
+          reader.onloadend = async () => {
+              const fileId = generateId();
+              await saveFileLocally(fileId, reader.result);
+              setNewMeeting(prev => ({ ...prev, minutesFile: { name: file.name, fileId: fileId, isLocal: true, data: reader.result } }));
+          };
+          reader.readAsDataURL(file);
+      }
+  };
+
+  const handleSaveMeeting = async (e) => {
+      e.preventDefault();
+      
+      try {
+          let nextList;
+          let savedMeeting = JSON.parse(JSON.stringify(newMeeting));
+          
+          if (!isEditingMeeting) {
+              savedMeeting.id = generateId();
+              savedMeeting.projectId = selectedProject.id;
+          }
+
+          // --- อัปโหลดไฟล์รายงานการประชุมเข้า Drive อัตโนมัติ ---
+          if (savedMeeting.minutesFile && savedMeeting.minutesFile.data && savedMeeting.minutesFile.data.startsWith('data:')) {
+              setAutoSyncMessage('กำลังอัปโหลดไฟล์รายงานการประชุมลง Google Drive...');
+              const GOOGLE_SCRIPT_DRIVE_URL = 'https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec';
+              
+              const match = savedContract.minutesFile.data.match(/^data:(.+);base64,(.+)$/);
+              if (match) {
+                  const payload = {
+                      filename: `Meeting_${savedMeeting.id}_${savedMeeting.minutesFile.name}`,
+                      mimeType: match[1],
+                      data: match[2],
+                      folderName: `Meetings_${selectedProject.code}`
+                  };
+                  
+                  try {
+                      await fetch(GOOGLE_SCRIPT_DRIVE_URL, {
+                          method: 'POST',
+                          mode: 'no-cors',
+                          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                          body: JSON.stringify(payload)
+                      });
+                  } catch (err) {
+                      console.error("Auto-upload to Drive failed", err);
+                  }
+              }
+              // ลบ base64 ออกจาก object ที่จะเซฟลง Firestore เพื่อป้องกัน 1MB Limit Error
+              delete savedMeeting.minutesFile.data;
+          }
+
+          if (isEditingMeeting) {
+              nextList = meetingsList.map(m => m.id === savedMeeting.id ? savedMeeting : m);
+              if (selectedMeetingView?.id === savedMeeting.id) setSelectedMeetingView(savedMeeting);
+          } else {
+              nextList = [...meetingsList, savedMeeting];
+          }
+          
+          setMeetingsList(nextList);
+          triggerAutoSync('Meetings_ประชุม', nextList, []);
+          
+          setShowAddMeetingModal(false);
+          setIsEditingMeeting(false);
+          setNewMeeting({ id: null, title: '', type: 'AGM', date: new Date().toISOString().split('T')[0], time: '09:00', location: '', agenda: '', status: 'Scheduled', minutesFile: null });
+          alert('บันทึกข้อมูลการประชุมเรียบร้อยแล้ว');
+      } catch (error) {
+          console.error(error);
+          alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+      } finally {
+          setTimeout(() => setAutoSyncMessage(''), 3000);
+      }
+  };
+
+  const handleEditMeeting = (meeting) => {
+      setSelectedMeetingView(null);
+      setNewMeeting({ ...meeting });
+      setIsEditingMeeting(true);
+      setShowAddMeetingModal(true);
+  };
+
   // Audit Handlers
   const handleAuditScoreChange = (catIdx, itemIdx, score) => {
       setNewAudit(prev => ({
@@ -4339,6 +4464,56 @@ export default function App() {
       alert(t('saveSuccess'));
   };
 
+  // --- NEW: Handlers สำหรับประกาศ/ข่าวสาร (Announcements) ---
+  const handleSaveAnnouncement = (e) => {
+      e.preventDefault();
+      let nextList;
+      const dataToSave = { 
+          ...newAnnouncement, 
+          author: newAnnouncement.author || `${currentUser?.firstName} ${currentUser?.lastName}` 
+      };
+
+      if (isEditingAnnouncement) {
+          nextList = announcements.map(a => a.id === dataToSave.id ? dataToSave : a);
+      } else {
+          const id = generateId();
+          nextList = [{ ...dataToSave, id, created_at: new Date().toISOString() }, ...announcements];
+      }
+
+      setAnnouncements(nextList);
+      
+      let filesToUpload = [];
+      if (dataToSave.image && dataToSave.image.startsWith('data:image')) {
+          filesToUpload.push({ name: `Announcement_${dataToSave.id}.jpg`, data: dataToSave.image });
+      }
+      triggerAutoSync('Announcements_ประกาศ', nextList, filesToUpload); // Sync to Google Sheets if configured
+
+      setShowAddAnnouncementModal(false);
+      setIsEditingAnnouncement(false);
+      setNewAnnouncement({ id: null, title: '', content: '', date: new Date().toISOString().split('T')[0], endDate: '', priority: 'Normal', projectId: 'All', author: '', image: null });
+      alert(t('saveSuccess'));
+  };
+
+  const handleAnnouncementImageUpload = async (e) => {
+      const file = e.target.files[0];
+      if (file) {
+          const compressedBase64 = await compressImage(file);
+          setNewAnnouncement(prev => ({ ...prev, image: compressedBase64 }));
+      }
+  };
+
+  const handleEditAnnouncement = (ann) => {
+      setNewAnnouncement({ ...ann });
+      setIsEditingAnnouncement(true);
+      setShowAddAnnouncementModal(true);
+  };
+
+  const handleDeleteAnnouncement = (id) => {
+      showConfirm('ยืนยันการลบ', 'คุณต้องการลบประกาศนี้ใช่หรือไม่?', () => {
+          setAnnouncements(prev => prev.filter(a => a.id !== id));
+      });
+  };
+
   // --- NEW: Backup & Restore Handlers ---
   const handleExportBackup = async () => {
       setIsBackingUp(true);
@@ -4365,6 +4540,7 @@ export default function App() {
                   actionPlans,
                   contractors,
                   formsList,
+                  meetingsList,
                   audits,
                   dailyReports,
                   schedules,
@@ -4372,6 +4548,7 @@ export default function App() {
                   scheduleApprovals,
                   projectStaffOrder,
                   othersData,
+                  announcements,
                   theme,
                   rolePermissions, 
                   localFiles // แนบไฟล์เอกสารจากฐานข้อมูลจำลอง (IndexedDB) เข้าไปด้วย
@@ -4479,6 +4656,7 @@ export default function App() {
                               { key: 'แผนปฏิบัติการ (Action Plan)', setter: setActionPlans, data: d.actionPlans },
                               { key: 'รายชื่อผู้รับเหมา', setter: setContractors, data: d.contractors },
                               { key: 'แบบฟอร์มมาตรฐาน', setter: setFormsList, data: d.formsList },
+                              { key: 'บันทึกการประชุม', setter: setMeetingsList, data: d.meetingsList },
                               { key: 'ผลการประเมิน (Audit)', setter: setAudits, data: d.audits },
                               { key: 'รายงานประจำวัน', setter: setDailyReports, data: d.dailyReports },
                               { key: 'ตารางงาน', setter: setSchedules, data: d.schedules },
@@ -4486,6 +4664,7 @@ export default function App() {
                               { key: 'สถานะอนุมัติตารางงาน', setter: setScheduleApprovals, data: d.scheduleApprovals },
                               { key: 'ลำดับพนักงาน', setter: setProjectStaffOrder, data: d.projectStaffOrder },
                               { key: 'ข้อมูลอื่นๆ', setter: setOthersData, data: d.othersData },
+                              { key: 'ประกาศและข่าวสาร', setter: setAnnouncements, data: d.announcements },
                               { key: 'สิทธิ์การใช้งานระบบ', setter: setRolePermissions, data: d.rolePermissions }
                           ];
 
@@ -4569,10 +4748,12 @@ export default function App() {
               'PM_History_ประวัติPM': pmHistoryList.map(h => ({...h, images: h.images?.length ? 'Photos attached' : ''})),
               'Repairs_แจ้งซ่อม': repairs,
               'ActionPlans_แผนงาน': actionPlans,
+              'Meetings_ประชุม': meetingsList,
               'Audits_ประเมินคุณภาพ': audits,
               'UtilityMeters_มิเตอร์': meters,
               'UtilityReadings_จดมิเตอร์': utilityReadings,
-              'DailyReports_รายงานประจำวัน': dailyReports
+              'DailyReports_รายงานประจำวัน': dailyReports,
+              'Announcements_ประกาศ': announcements
           };
 
           // แก้ไขปัญหา CORS Error: ใช้ mode 'no-cors' เพื่อส่งออกข้อมูลเบื้องหลังโดยไม่รออ่าน Response จาก Google
@@ -5175,6 +5356,7 @@ export default function App() {
                   {(canAccessMultiple && hasPerm('users')) && <SidebarItem icon={Users} label={t('menu_users')} id="users" colorTheme="green" />}
                   {(canAccessMultiple && hasPerm('projects')) && <SidebarItem icon={Building2} label={t('menu_projects')} id="projects" colorTheme="orange" />}
                   {(canAccessMultiple && hasPerm('audits')) && <SidebarItem icon={ClipboardCheck} label={t('menu_audits')} id="audits" colorTheme="purple" />}
+                  {(canAccessMultiple && hasPerm('announcements')) && <SidebarItem icon={Radio} label={t('menu_announcements')} id="announcements" colorTheme="red" />}
                   
                   {/* คู่มือการใช้งาน แสดงให้ทุกคนเห็น */}
                   <SidebarItem icon={BookOpen} label={t('menu_manual')} id="manual" colorTheme="pink" />
@@ -6085,6 +6267,119 @@ export default function App() {
                       </table>
                   </div>
               </Card>
+          </div>
+      );
+  };
+
+  const AnnouncementsView = () => {
+      // คัดกรองประกาศที่ผู้ใช้งานสามารถมองเห็นได้
+      const visibleAnnouncements = announcements.filter(a => {
+          if (currentUser?.username === 'admin') return true; // Admin เห็นทั้งหมด
+          if (a.projectId === 'All') return true; // ประกาศรวม เห็นทุกคน
+          
+          // ตรวจสอบว่าพนักงานอยู่สังกัดโครงการนี้ หรือมีสิทธิ์เข้าถึงโครงการนี้หรือไม่
+          const accessibleDeptsStr = currentUser?.accessibleDepts || '';
+          const accessibleArray = typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : accessibleDeptsStr;
+          
+          if (accessibleArray.includes('All')) return true;
+          
+          const project = projects.find(p => p.id === a.projectId);
+          if (!project) return false;
+
+          return project.name === currentUser?.department || accessibleArray.includes(project.name);
+      });
+
+      return (
+          <div className="space-y-6 animate-fade-in">
+              <ReportHeader />
+              <header className="flex justify-between items-center mb-6">
+                  <div>
+                      <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                          <Radio className="text-red-500" size={28} />
+                          {t('menu_announcements')}
+                      </h1>
+                      <p className="text-gray-500">กระดานข่าวสารและประกาศแจ้งเตือนภายในองค์กร</p>
+                  </div>
+                  <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
+                      {hasPerm('announcements', 'save') && (
+                          <Button icon={Plus} onClick={() => {
+                              setNewAnnouncement({ id: null, title: '', content: '', date: new Date().toISOString().split('T')[0], endDate: '', priority: 'Normal', projectId: 'All', author: '', image: null });
+                              setIsEditingAnnouncement(false);
+                              setShowAddAnnouncementModal(true);
+                          }}>
+                              สร้างประกาศ
+                          </Button>
+                      )}
+                  </div>
+              </header>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {visibleAnnouncements.length > 0 ? visibleAnnouncements.sort((a,b) => new Date(b.date) - new Date(a.date)).map(ann => {
+                      const todayLocal = new Date();
+                      todayLocal.setHours(0,0,0,0);
+                      const endD = ann.endDate ? new Date(ann.endDate) : null;
+                      if(endD) endD.setHours(0,0,0,0);
+                      const isExpired = endD && todayLocal > endD;
+
+                      return (
+                      <Card key={ann.id} className="p-0 overflow-hidden flex flex-col h-full hover:shadow-md transition-shadow group relative">
+                          {/* Top Highlight Bar based on Priority */}
+                          <div className={`h-2 w-full ${ann.priority === 'High' ? 'bg-red-500' : 'bg-blue-500'}`}></div>
+                          
+                          {ann.image && (
+                              <div className="w-full h-48 bg-gray-100 border-b border-gray-100 relative overflow-hidden">
+                                  <img src={ann.image} className="w-full h-full object-cover" />
+                              </div>
+                          )}
+                          
+                          <div className="p-5 flex flex-col flex-1">
+                              <div className="flex justify-between items-start mb-3">
+                                  <div className="flex flex-wrap gap-2">
+                                      {ann.priority === 'High' && (
+                                          <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                                              <AlertTriangle size={10} /> ด่วน
+                                          </span>
+                                      )}
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${ann.projectId === 'All' ? 'bg-gray-100 text-gray-600 border-gray-200' : 'bg-orange-50 text-orange-700 border-orange-200'}`}>
+                                          {ann.projectId === 'All' ? 'ทุกหน่วยงาน (All)' : projects.find(p => p.id === ann.projectId)?.name || 'Unknown'}
+                                      </span>
+                                      {isExpired && (
+                                          <span className="bg-gray-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                                              หมดอายุแล้ว
+                                          </span>
+                                      )}
+                                  </div>
+                                  
+                                  {/* Actions Menu */}
+                                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      {hasPerm('announcements', 'edit') && (
+                                          <button onClick={() => handleEditAnnouncement(ann)} className="text-gray-400 hover:text-blue-600 p-1 bg-gray-50 hover:bg-blue-50 rounded transition-colors"><Edit size={14}/></button>
+                                      )}
+                                      {hasPerm('announcements', 'delete') && (
+                                          <button onClick={() => handleDeleteAnnouncement(ann.id)} className="text-gray-400 hover:text-red-600 p-1 bg-gray-50 hover:bg-red-50 rounded transition-colors"><Trash2 size={14}/></button>
+                                      )}
+                                  </div>
+                              </div>
+                              
+                              <h3 className={`font-bold text-lg mb-2 leading-tight ${isExpired ? 'text-gray-400' : 'text-gray-800'}`}>{ann.title}</h3>
+                              <div className={`text-sm whitespace-pre-wrap flex-1 mb-4 ${isExpired ? 'text-gray-400' : 'text-gray-600'}`}>
+                                  {ann.content}
+                              </div>
+                              
+                              <div className="mt-auto pt-3 border-t border-gray-100 flex justify-between items-center text-xs text-gray-400">
+                                  <div className="flex items-center gap-1"><Calendar size={12}/> {new Date(ann.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })}</div>
+                                  <div className="flex items-center gap-1"><User size={12}/> {ann.author}</div>
+                              </div>
+                          </div>
+                      </Card>
+                      );
+                  }) : (
+                      <div className="col-span-full py-20 flex flex-col items-center justify-center text-gray-400 bg-white rounded-xl border border-dashed border-gray-300">
+                          <Radio size={48} className="mb-4 text-gray-300" />
+                          <p className="text-lg font-bold text-gray-500">ไม่มีประกาศหรือข่าวสารในขณะนี้</p>
+                      </div>
+                  )}
+              </div>
           </div>
       );
   };
@@ -10346,6 +10641,132 @@ export default function App() {
           {/* New Contractors/Suppliers Tab */}
           {projectTab === 'contractors' && ContractorVendorList()}
 
+          {/* NEW: Meetings Tab */}
+          {projectTab === 'meeting' && (
+              <div className="space-y-6 animate-fade-in">
+                  <Card id="print-meeting-area">
+                      <div className="p-4 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white">
+                          <h3 className="font-bold flex items-center gap-2 text-gray-800">
+                              <Megaphone size={20} className="text-teal-600" /> บันทึกการประชุมใหญ่ และ กรรมการ (Meetings)
+                          </h3>
+                          <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
+                              <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(meetingsList.filter(m => m.projectId === selectedProject.id), 'meetings_list')}>{t('exportCSV')}</Button>
+                              <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-meeting-area', `Meetings_${selectedProject?.code || 'List'}.pdf`, 'landscape')} disabled={isExporting}>
+                                  {isExporting ? t('downloading') : t('downloadPDF')}
+                              </Button>
+                              {hasPerm('proj_meeting', 'save') && <Button size="sm" icon={Plus} onClick={() => {
+                                  setNewMeeting({ id: null, title: '', type: 'AGM', date: new Date().toISOString().split('T')[0], time: '09:00', location: '', agenda: '', status: 'Scheduled', minutesFile: null });
+                                  setIsEditingMeeting(false);
+                                  setShowAddMeetingModal(true);
+                              }}>{t('addMeeting')}</Button>}
+                          </div>
+                      </div>
+
+                      <div className={isExporting ? "pb-4" : "overflow-x-auto"}>
+                          <table className="w-full text-sm text-left">
+                              <thead className="bg-gray-50 text-gray-600">
+                                  <tr>
+                                      <th className="p-3 border-b text-center w-12">{t('col_seq')}</th>
+                                      <th className="p-3 border-b">หัวข้อการประชุม</th>
+                                      <th className="p-3 border-b">ประเภท</th>
+                                      <th className="p-3 border-b">วันที่ / เวลา</th>
+                                      <th className="p-3 border-b">สถานที่</th>
+                                      <th className="p-3 border-b text-center">สถานะ</th>
+                                      <th className={`p-3 border-b text-center w-24 ${isExporting ? 'hidden' : ''}`}>จัดการ</th>
+                                  </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100 bg-white">
+                                  {meetingsList.filter(m => m.projectId === selectedProject.id).length > 0 ? (
+                                      meetingsList.filter(m => m.projectId === selectedProject.id)
+                                      .sort((a,b) => new Date(b.date) - new Date(a.date))
+                                      .map((meet, index) => (
+                                          <tr key={meet.id} className="hover:bg-gray-50 transition-colors cursor-pointer group" onClick={() => setSelectedMeetingView(meet)}>
+                                              <td className="p-3 text-center text-gray-500">{index + 1}</td>
+                                              <td className="p-3">
+                                                  <div className="font-bold text-gray-800 group-hover:text-teal-600 transition-colors flex items-center gap-1.5">
+                                                      {meet.title}
+                                                      <Search size={14} className={`text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity ${isExporting ? 'hidden' : ''}`} />
+                                                  </div>
+                                                  <div className="text-xs text-gray-500 mt-0.5 line-clamp-1">{meet.agenda}</div>
+                                              </td>
+                                              <td className="p-3">
+                                                  <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${
+                                                      meet.type === 'AGM' ? 'bg-purple-100 text-purple-700 border border-purple-200' :
+                                                      meet.type === 'EGM' ? 'bg-orange-100 text-orange-700 border border-orange-200' :
+                                                      'bg-blue-100 text-blue-700 border border-blue-200'
+                                                  }`}>
+                                                      {meet.type === 'AGM' ? 'สามัญประจำปี (AGM)' : meet.type === 'EGM' ? 'วิสามัญ (EGM)' : 'คณะกรรมการ (Committee)'}
+                                                  </span>
+                                              </td>
+                                              <td className="p-3">
+                                                  <div className="text-gray-800 font-medium flex items-center gap-1">
+                                                      <Calendar size={14} className="text-gray-400"/>
+                                                      {new Date(meet.date).toLocaleDateString('th-TH')}
+                                                  </div>
+                                                  <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                                                      <Clock size={12} className="text-gray-400"/> {meet.time} น.
+                                                  </div>
+                                              </td>
+                                              <td className="p-3 text-gray-600 flex items-center gap-1">
+                                                  <MapPin size={14} className="text-gray-400 shrink-0"/> <span className="line-clamp-1">{meet.location || '-'}</span>
+                                              </td>
+                                              <td className="p-3 text-center">
+                                                  <span className={`px-2 py-1 rounded-md text-xs font-bold border inline-block w-24 text-center ${
+                                                      meet.status === 'Completed' ? 'bg-green-50 border-green-200 text-green-700' : 
+                                                      meet.status === 'Postponed' ? 'bg-orange-50 border-orange-200 text-orange-700' : 
+                                                      meet.status === 'Cancelled' ? 'bg-gray-100 border-gray-300 text-gray-600' :
+                                                      'bg-blue-50 border-blue-200 text-blue-700'
+                                                  }`}>
+                                                      {meet.status === 'Completed' ? 'เสร็จสิ้น' : meet.status === 'Postponed' ? 'เลื่อน' : meet.status === 'Cancelled' ? 'ยกเลิก' : 'รอดำเนินการ'}
+                                                  </span>
+                                              </td>
+                                              <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`} onClick={(e) => e.stopPropagation()}>
+                                                  <div className="flex items-center justify-center gap-1">
+                                                      {(meet.minutesFileUrl || (meet.minutesFile && (meet.minutesFile.data || meet.minutesFile.isLocal))) && (
+                                                          <button 
+                                                              onClick={() => handleDownloadFile(meet.minutesFile || { fileUrl: meet.minutesFileUrl, name: `Meeting_Minutes_${meet.date}.pdf` })}
+                                                              className="text-teal-600 hover:text-teal-800 p-1.5 rounded-md hover:bg-teal-50 transition-colors"
+                                                              title="ดาวน์โหลดรายงานการประชุม"
+                                                          >
+                                                              <Download size={16} />
+                                                          </button>
+                                                      )}
+                                                      {hasPerm('proj_meeting', 'edit') && (
+                                                          <button 
+                                                              onClick={() => handleEditMeeting(meet)}
+                                                              className="text-gray-400 hover:text-blue-600 p-1.5 rounded-md hover:bg-blue-50 transition-colors"
+                                                              title="แก้ไขข้อมูล"
+                                                          >
+                                                              <Edit size={16} />
+                                                          </button>
+                                                      )}
+                                                      {hasPerm('proj_meeting', 'delete') && (
+                                                          <button 
+                                                              onClick={() => showConfirm('ยืนยันการลบ', `คุณต้องการลบข้อมูลการประชุม "${meet.title}" ใช่หรือไม่?`, () => setMeetingsList(prev => prev.filter(m => m.id !== meet.id)))}
+                                                              className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
+                                                              title="ลบข้อมูล"
+                                                          >
+                                                              <Trash2 size={16} />
+                                                          </button>
+                                                      )}
+                                                  </div>
+                                              </td>
+                                          </tr>
+                                      ))
+                                  ) : (
+                                      <tr>
+                                          <td colSpan="7" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">
+                                              ยังไม่มีข้อมูลการประชุม คลิก "เพิ่มกำหนดการประชุม" เพื่อเริ่มต้น
+                                          </td>
+                                      </tr>
+                                  )}
+                              </tbody>
+                          </table>
+                      </div>
+                  </Card>
+              </div>
+          )}
+
           {/* NEW: Others Tab */}
           {projectTab === 'others' && (
               <div className="space-y-6 animate-fade-in">
@@ -11312,6 +11733,7 @@ export default function App() {
               {activeMenu === 'users' && UserManagement()}
               {activeMenu === 'projects' && ProjectList()}
               {activeMenu === 'audits' && GlobalAuditList()}
+              {activeMenu === 'announcements' && AnnouncementsView()}
               {activeMenu === 'manual' && ManualView()}
               {activeMenu === 'settings' && SettingsView()}
             </>
@@ -14709,6 +15131,347 @@ export default function App() {
                         <Button type="submit" icon={Save}>บันทึกข้อมูล</Button>
                     </div>
                 </form>
+            </div>
+        </div>
+      )}
+
+      {/* Add Announcement Modal */}
+      {showAddAnnouncementModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+                <div className="flex justify-between items-center mb-6 border-b pb-4">
+                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                        <Radio className="text-red-500" />
+                        {isEditingAnnouncement ? 'แก้ไขประกาศ' : 'สร้างประกาศใหม่'}
+                    </h2>
+                    <button onClick={() => setShowAddAnnouncementModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                </div>
+                <form onSubmit={handleSaveAnnouncement} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">หัวข้อประกาศ (Title)</label>
+                        <input 
+                            type="text" 
+                            required 
+                            className="w-full border rounded-md p-2 outline-none focus:border-red-500"
+                            value={newAnnouncement.title}
+                            onChange={e => setNewAnnouncement({...newAnnouncement, title: e.target.value})}
+                            placeholder="ระบุหัวข้อข่าวสารหรือเรื่องที่ต้องการแจ้ง..."
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">รายละเอียด (Content)</label>
+                        <textarea 
+                            required
+                            className="w-full border rounded-md p-2 h-32 resize-none outline-none focus:border-red-500"
+                            value={newAnnouncement.content}
+                            onChange={e => setNewAnnouncement({...newAnnouncement, content: e.target.value})}
+                            placeholder="พิมพ์รายละเอียดที่นี่..."
+                        ></textarea>
+                    </div>
+
+                    {/* แนบรูปภาพ */}
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-2">แนบรูปภาพ (Image)</label>
+                        <div className="flex items-center gap-4">
+                            <div className="w-24 h-24 bg-gray-100 rounded-lg border border-dashed border-gray-300 flex items-center justify-center overflow-hidden">
+                                {newAnnouncement.image ? (
+                                    <img src={newAnnouncement.image} alt="Preview" className="w-full h-full object-cover" />
+                                ) : (
+                                    <ImageIcon className="text-gray-300" size={32} />
+                                )}
+                            </div>
+                            <div className="flex flex-col gap-2">
+                                <label className="cursor-pointer bg-white border border-gray-300 px-4 py-2 rounded-md text-sm hover:bg-gray-50 transition-colors flex items-center gap-2 justify-center">
+                                    <Upload size={16}/> อัปโหลดรูป
+                                    <input type="file" accept="image/*" className="hidden" onChange={handleAnnouncementImageUpload} />
+                                </label>
+                                {newAnnouncement.image && (
+                                    <button type="button" onClick={() => setNewAnnouncement({...newAnnouncement, image: null})} className="text-red-500 text-xs hover:underline">
+                                        ลบรูปภาพ
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">วันที่แจ้ง (Start Date)</label>
+                            <input 
+                                type="date" 
+                                required 
+                                className="w-full border rounded-md p-2 outline-none focus:border-red-500"
+                                value={newAnnouncement.date}
+                                onChange={e => setNewAnnouncement({...newAnnouncement, date: e.target.value})}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">วันสิ้นสุดประกาศ</label>
+                            <input 
+                                type="date" 
+                                className="w-full border rounded-md p-2 outline-none focus:border-red-500 bg-white"
+                                value={newAnnouncement.endDate || ''}
+                                onChange={e => setNewAnnouncement({...newAnnouncement, endDate: e.target.value})}
+                            />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">ระดับความสำคัญ</label>
+                            <select 
+                                className="w-full border rounded-md p-2 outline-none focus:border-red-500 bg-white"
+                                value={newAnnouncement.priority}
+                                onChange={e => setNewAnnouncement({...newAnnouncement, priority: e.target.value})}
+                            >
+                                <option value="Normal">ทั่วไป (Normal)</option>
+                                <option value="High">ด่วน (High Priority)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">เป้าหมายโครงการ</label>
+                            <select 
+                                className="w-full border rounded-md p-2 outline-none focus:border-red-500 bg-white"
+                                value={newAnnouncement.projectId}
+                                onChange={e => setNewAnnouncement({...newAnnouncement, projectId: e.target.value})}
+                            >
+                                <option value="All">แจ้งทุกหน่วยงาน (All Projects)</option>
+                                <optgroup label="เลือกเฉพาะโครงการ">
+                                    {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                </optgroup>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <p className="text-xs text-gray-500 mt-1">* หากเลือกเฉพาะโครงการ พนักงานที่อยู่โครงการอื่นจะไม่เห็นประกาศนี้</p>
+                    
+                    <div className="flex justify-end gap-2 pt-4 border-t mt-6">
+                        <Button variant="secondary" onClick={() => setShowAddAnnouncementModal(false)}>ยกเลิก</Button>
+                        <Button type="submit" icon={Save}>บันทึกประกาศ</Button>
+                    </div>
+                </form>
+            </div>
+        </div>
+      )}
+
+      {/* Add Meeting Modal */}
+      {showAddMeetingModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
+                <div className="flex justify-between items-center mb-6 border-b pb-4">
+                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                        <Megaphone className="text-teal-600" />
+                        {isEditingMeeting ? 'แก้ไขข้อมูลการประชุม' : 'เพิ่มกำหนดการประชุม'}
+                    </h2>
+                    <button onClick={() => setShowAddMeetingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                </div>
+                <form onSubmit={handleSaveMeeting} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">หัวข้อการประชุม (Title)</label>
+                        <input 
+                            type="text" 
+                            required 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
+                            value={newMeeting.title}
+                            onChange={e => setNewMeeting({...newMeeting, title: e.target.value})}
+                            placeholder="เช่น ประชุมใหญ่สามัญเจ้าของร่วม ประจำปี 2567"
+                        />
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">ประเภทการประชุม (Type)</label>
+                            <select 
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
+                                value={newMeeting.type}
+                                onChange={e => setNewMeeting({...newMeeting, type: e.target.value})}
+                            >
+                                <option value="AGM">ประชุมใหญ่สามัญ (AGM)</option>
+                                <option value="EGM">ประชุมใหญ่วิสามัญ (EGM)</option>
+                                <option value="Committee">ประชุมคณะกรรมการ (Committee)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">สถานที่ (Location)</label>
+                            <input 
+                                type="text" 
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
+                                value={newMeeting.location}
+                                onChange={e => setNewMeeting({...newMeeting, location: e.target.value})}
+                                placeholder="เช่น ห้องประชุมชั้น 1, ผ่านระบบ Zoom"
+                            />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        <div className="col-span-1 md:col-span-1">
+                            <label className="block text-sm font-bold text-gray-700 mb-1">วันที่ (Date)</label>
+                            <input 
+                                type="date" 
+                                required
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
+                                value={newMeeting.date}
+                                onChange={e => setNewMeeting({...newMeeting, date: e.target.value})}
+                            />
+                        </div>
+                        <div className="col-span-1 md:col-span-1">
+                            <label className="block text-sm font-bold text-gray-700 mb-1">เวลา (Time)</label>
+                            <input 
+                                type="time" 
+                                required
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
+                                value={newMeeting.time}
+                                onChange={e => setNewMeeting({...newMeeting, time: e.target.value})}
+                            />
+                        </div>
+                        <div className="col-span-2 md:col-span-1">
+                            <label className="block text-sm font-bold text-gray-700 mb-1">สถานะ (Status)</label>
+                            <select 
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
+                                value={newMeeting.status}
+                                onChange={e => setNewMeeting({...newMeeting, status: e.target.value})}
+                            >
+                                <option value="Scheduled">รอดำเนินการ (Scheduled)</option>
+                                <option value="Completed">เสร็จสิ้น (Completed)</option>
+                                <option value="Postponed">เลื่อน (Postponed)</option>
+                                <option value="Cancelled">ยกเลิก (Cancelled)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">วาระการประชุม (Agenda)</label>
+                        <textarea 
+                            className="w-full border rounded-md p-2 h-24 resize-none outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
+                            value={newMeeting.agenda}
+                            onChange={e => setNewMeeting({...newMeeting, agenda: e.target.value})}
+                            placeholder="วาระที่ 1: ...&#10;วาระที่ 2: ..."
+                        ></textarea>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">แนบรายงานการประชุม (Minutes - PDF)</label>
+                        <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:bg-teal-50 cursor-pointer relative transition-colors group">
+                            <input type="file" accept=".pdf" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleMeetingFileUpload} title="คลิกเพื่ออัปโหลดหรือเปลี่ยนไฟล์" />
+                            {newMeeting.minutesFile ? (
+                                <div className="text-teal-600 flex flex-col items-center justify-center gap-1">
+                                    <div className="flex items-center gap-2 font-bold"><FileCheck size={20}/> {newMeeting.minutesFile.name}</div>
+                                    <span className="text-xs text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity">คลิกเพื่อเปลี่ยนไฟล์ใหม่</span>
+                                </div>
+                            ) : (
+                                <div className="text-gray-500 flex flex-col items-center gap-1"><Upload size={24}/><span className="text-xs font-medium">คลิกเพื่ออัปโหลดไฟล์ PDF</span></div>
+                            )}
+                        </div>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-4 border-t mt-6">
+                        <Button variant="secondary" onClick={() => setShowAddMeetingModal(false)}>ยกเลิก</Button>
+                        <Button type="submit" icon={Save}>บันทึกข้อมูล</Button>
+                    </div>
+                </form>
+            </div>
+        </div>
+      )}
+
+      {/* Selected Meeting Details View Modal */}
+      {selectedMeetingView && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in overflow-y-auto">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-8 max-h-[95vh] overflow-y-auto relative">
+                <button 
+                    onClick={() => setSelectedMeetingView(null)} 
+                    className="absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors"
+                >
+                    <X size={24} />
+                </button>
+
+                <div className="mb-6 border-b pb-4 pr-8">
+                    <div className="flex items-center gap-2 mb-2">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                            selectedMeetingView.type === 'AGM' ? 'bg-purple-100 text-purple-700' :
+                            selectedMeetingView.type === 'EGM' ? 'bg-orange-100 text-orange-700' :
+                            'bg-blue-100 text-blue-700'
+                        }`}>
+                            {selectedMeetingView.type === 'AGM' ? 'สามัญประจำปี (AGM)' : selectedMeetingView.type === 'EGM' ? 'วิสามัญ (EGM)' : 'คณะกรรมการ (Committee)'}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                            selectedMeetingView.status === 'Completed' ? 'bg-green-50 border-green-200 text-green-700' : 
+                            selectedMeetingView.status === 'Postponed' ? 'bg-orange-50 border-orange-200 text-orange-700' : 
+                            selectedMeetingView.status === 'Cancelled' ? 'bg-gray-100 border-gray-300 text-gray-600' :
+                            'bg-blue-50 border-blue-200 text-blue-700'
+                        }`}>
+                            {selectedMeetingView.status === 'Completed' ? 'เสร็จสิ้น' : selectedMeetingView.status === 'Postponed' ? 'เลื่อน' : selectedMeetingView.status === 'Cancelled' ? 'ยกเลิก' : 'รอดำเนินการ'}
+                        </span>
+                    </div>
+                    <h2 className="text-2xl font-bold text-gray-800 leading-tight">
+                        {selectedMeetingView.title}
+                    </h2>
+                </div>
+
+                <div className="space-y-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-gray-50 p-5 rounded-xl border border-gray-100 text-sm">
+                        <div className="flex items-start gap-3">
+                            <div className="p-2 bg-white rounded-lg shadow-sm border border-gray-200 text-blue-600 shrink-0"><Calendar size={18}/></div>
+                            <div>
+                                <span className="block text-xs font-bold text-gray-500 mb-0.5">วันที่ประชุม</span>
+                                <span className="font-bold text-gray-800">{new Date(selectedMeetingView.date).toLocaleDateString('th-TH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'})}</span>
+                            </div>
+                        </div>
+                        <div className="flex items-start gap-3">
+                            <div className="p-2 bg-white rounded-lg shadow-sm border border-gray-200 text-orange-600 shrink-0"><Clock size={18}/></div>
+                            <div>
+                                <span className="block text-xs font-bold text-gray-500 mb-0.5">เวลา</span>
+                                <span className="font-bold text-gray-800">{selectedMeetingView.time} น.</span>
+                            </div>
+                        </div>
+                        <div className="flex items-start gap-3 sm:col-span-2">
+                            <div className="p-2 bg-white rounded-lg shadow-sm border border-gray-200 text-red-500 shrink-0"><MapPin size={18}/></div>
+                            <div>
+                                <span className="block text-xs font-bold text-gray-500 mb-0.5">สถานที่</span>
+                                <span className="font-bold text-gray-800">{selectedMeetingView.location || 'ไม่ได้ระบุสถานที่'}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3 className="font-bold text-gray-800 mb-2 border-b pb-2 flex items-center gap-2">
+                            <ClipboardList size={18} className="text-gray-400"/> วาระการประชุม (Agenda)
+                        </h3>
+                        <div className="bg-white border border-gray-200 rounded-lg p-4 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed min-h-[100px]">
+                            {selectedMeetingView.agenda || <span className="text-gray-400 italic">ไม่มีรายละเอียดวาระการประชุม</span>}
+                        </div>
+                    </div>
+
+                    <div className="border-t border-gray-200 pt-6">
+                        <h3 className="font-bold text-gray-800 mb-3 text-sm flex items-center gap-2">
+                            <FileCheck size={18} className="text-teal-600"/> รายงานการประชุม (Meeting Minutes)
+                        </h3>
+                        {(selectedMeetingView.minutesFileUrl || (selectedMeetingView.minutesFile && (selectedMeetingView.minutesFile.data || selectedMeetingView.minutesFile.isLocal))) ? (
+                            <div className="flex items-center justify-between bg-teal-50 border border-teal-100 p-4 rounded-xl shadow-sm hover:shadow transition-shadow">
+                                <div className="flex items-center gap-3 overflow-hidden pr-4">
+                                    <div className="p-2 bg-white rounded-lg shadow-sm text-red-500 shrink-0"><FileText size={24}/></div>
+                                    <div className="flex flex-col min-w-0">
+                                        <span className="truncate text-teal-900 font-bold text-sm leading-tight">{selectedMeetingView.minutesFile?.name || `รายงานการประชุม_${selectedMeetingView.date}.pdf`}</span>
+                                        <span className="text-[10px] text-teal-600 mt-0.5">PDF Document</span>
+                                    </div>
+                                </div>
+                                <Button 
+                                    className="shrink-0 flex items-center gap-2 bg-teal-600 hover:bg-teal-700 shadow-sm"
+                                    onClick={() => handleDownloadFile(selectedMeetingView.minutesFile || { fileUrl: selectedMeetingView.minutesFileUrl, name: `Meeting_Minutes_${selectedMeetingView.date}.pdf` })}
+                                >
+                                    <Download size={16} /> <span className="hidden sm:inline">ดาวน์โหลดไฟล์</span>
+                                </Button>
+                            </div>
+                        ) : (
+                            <div className="text-gray-400 bg-gray-50 p-6 rounded-xl text-center text-sm border border-dashed border-gray-300 flex flex-col items-center justify-center gap-2">
+                                <File size={32} className="text-gray-300"/>
+                                <p>ยังไม่มีไฟล์รายงานการประชุมแนบในระบบ</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                <div className="mt-8 flex justify-end gap-2 pt-4 border-t border-gray-200">
+                    {hasPerm('proj_meeting', 'edit') && (
+                        <Button variant="outline" icon={Edit} onClick={() => handleEditMeeting(selectedMeetingView)}>
+                            แก้ไขข้อมูล
+                        </Button>
+                    )}
+                    <Button variant="secondary" onClick={() => setSelectedMeetingView(null)}>ปิดหน้าต่าง</Button>
+                </div>
             </div>
         </div>
       )}
