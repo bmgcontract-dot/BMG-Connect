@@ -2156,6 +2156,71 @@ export default function App() {
   // --- NEW: Auto-Sync State (สถานะการซิงค์อัตโนมัติ) ---
   const [autoSyncMessage, setAutoSyncMessage] = useState('');
 
+  // --- NEW: Global Announcement Popup State ---
+  const [dismissedAnnouncements, setDismissedAnnouncements] = useState(() => {
+      if (typeof window !== 'undefined') {
+          try {
+              return JSON.parse(localStorage.getItem('bmg_dismissed_announcements') || '[]');
+          } catch(e) { return []; }
+      }
+      return [];
+  });
+  const [activePopupAnnouncement, setActivePopupAnnouncement] = useState(null);
+
+  // Effect to check and show popup announcements
+  useEffect(() => {
+      if (!currentUser || announcements.length === 0) return;
+
+      const todayLocal = new Date();
+      todayLocal.setHours(0,0,0,0);
+
+      const accessibleDeptsStr = currentUser?.accessibleDepts || '';
+      const accessibleArray = typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : accessibleDeptsStr;
+      const canAccessAll = accessibleArray.includes('All') || currentUser.username === 'admin';
+
+      const validAnnouncements = announcements.filter(a => {
+          if (dismissedAnnouncements.includes(a.id)) return false;
+
+          const startD = new Date(a.date);
+          startD.setHours(0,0,0,0);
+          if (todayLocal < startD) return false;
+
+          if (a.endDate) {
+              const endD = new Date(a.endDate);
+              endD.setHours(0,0,0,0);
+              if (todayLocal > endD) return false;
+          }
+
+          if (a.projectId === 'All' || canAccessAll) return true;
+          const project = projects.find(p => p.id === a.projectId);
+          if (!project) return false;
+          return project.name === currentUser.department || accessibleArray.includes(project.name);
+      });
+
+      validAnnouncements.sort((a, b) => {
+          if (a.priority === 'High' && b.priority !== 'High') return -1;
+          if (b.priority === 'High' && a.priority !== 'High') return 1;
+          return new Date(b.date) - new Date(a.date);
+      });
+
+      if (validAnnouncements.length > 0) {
+          setActivePopupAnnouncement(validAnnouncements[0]);
+      } else {
+          setActivePopupAnnouncement(null);
+      }
+  }, [announcements, currentUser, dismissedAnnouncements, projects]);
+
+  const handleDismissAnnouncement = () => {
+      if (activePopupAnnouncement) {
+          const newDismissed = [...dismissedAnnouncements, activePopupAnnouncement.id];
+          setDismissedAnnouncements(newDismissed);
+          if (typeof window !== 'undefined') {
+              localStorage.setItem('bmg_dismissed_announcements', JSON.stringify(newDismissed));
+          }
+          setActivePopupAnnouncement(null);
+      }
+  };
+
   // --- NEW: Helper Function สำหรับ Auto-Sync ไปยัง Google Sheets/Drive ---
   const triggerAutoSync = (tableName, dataList, files = []) => {
       const GOOGLE_SCRIPT_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbzmNdR7LVpfUossHkcNH_onBPTG2dw6GuJzh5JilthkMwW-Sdr4s0lFjPKwSsCBTg/exec';
@@ -15512,6 +15577,63 @@ export default function App() {
                               {confirmModal.confirmText}
                           </Button>
                       )}
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* Global Announcement Popup Modal */}
+      {activePopupAnnouncement && !isExporting && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 animate-fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col relative transform transition-all scale-100 border border-gray-200">
+                  
+                  {/* Priority Top Bar */}
+                  <div className={`h-2 w-full ${activePopupAnnouncement.priority === 'High' ? 'bg-red-500' : 'bg-blue-500'}`}></div>
+                  
+                  <button 
+                      onClick={handleDismissAnnouncement} 
+                      className="absolute top-4 right-4 text-gray-500 hover:text-red-500 bg-white/80 rounded-full p-1.5 transition-colors z-10 backdrop-blur-md shadow-sm"
+                  >
+                      <X size={20} />
+                  </button>
+
+                  {activePopupAnnouncement.image && (
+                      <div className="w-full h-48 sm:h-64 bg-gray-100 relative overflow-hidden shrink-0">
+                          <img src={activePopupAnnouncement.image} className="w-full h-full object-cover" alt="Announcement" />
+                      </div>
+                  )}
+
+                  <div className="p-6 md:p-8 flex flex-col flex-1 max-h-[60vh] overflow-y-auto custom-scrollbar">
+                      <div className="flex items-center gap-2 mb-3">
+                          {activePopupAnnouncement.priority === 'High' && (
+                              <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
+                                  <AlertTriangle size={10} /> ด่วน
+                              </span>
+                          )}
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-orange-50 text-orange-700 border-orange-200 shrink-0 flex items-center gap-1">
+                              <Radio size={10} /> ประกาศใหม่
+                          </span>
+                          <span className="text-xs text-gray-500 ml-auto flex items-center gap-1 shrink-0">
+                              <Calendar size={12}/> {new Date(activePopupAnnouncement.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}
+                          </span>
+                      </div>
+
+                      <h2 className="text-xl md:text-2xl font-bold text-gray-800 mb-4 leading-tight">
+                          {activePopupAnnouncement.title}
+                      </h2>
+                      
+                      <div className="text-sm md:text-base text-gray-600 whitespace-pre-wrap leading-relaxed">
+                          {activePopupAnnouncement.content}
+                      </div>
+                  </div>
+
+                  <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center shrink-0">
+                      <div className="text-xs text-gray-400 flex items-center gap-1">
+                          <User size={12}/> {activePopupAnnouncement.author}
+                      </div>
+                      <Button onClick={handleDismissAnnouncement}>
+                          รับทราบ (Acknowledge)
+                      </Button>
                   </div>
               </div>
           </div>
