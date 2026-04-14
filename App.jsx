@@ -2166,6 +2166,7 @@ export default function App() {
       return [];
   });
   const [activePopupAnnouncement, setActivePopupAnnouncement] = useState(null);
+  const [selectedAnnouncementView, setSelectedAnnouncementView] = useState(null); // NEW: State สำหรับแสดงรายละเอียดประกาศเมื่อคลิก
 
   // Effect to check and show popup announcements
   useEffect(() => {
@@ -5582,6 +5583,28 @@ export default function App() {
           return counts;
       }).filter(p => (p.pending + p.inProgress + p.completed + p.cancelled) > 0);
 
+      // NEW: ดึงประกาศล่าสุดสำหรับแสดงใน Dashboard
+      const visibleAnnouncementsDashboard = announcements.filter(a => {
+          const todayLocal = new Date();
+          todayLocal.setHours(0,0,0,0);
+          const startD = new Date(a.date);
+          startD.setHours(0,0,0,0);
+          if (todayLocal < startD) return false;
+          if (a.endDate) {
+              const endD = new Date(a.endDate);
+              endD.setHours(0,0,0,0);
+              if (todayLocal > endD) return false;
+          }
+          if (currentUser?.username === 'admin') return true;
+          if (a.projectId === 'All') return true;
+          const accessibleDeptsStr = currentUser?.accessibleDepts || '';
+          const accessibleArray = typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : accessibleDeptsStr;
+          if (accessibleArray.includes('All')) return true;
+          const project = projects.find(p => p.id === a.projectId);
+          if (!project) return false;
+          return project.name === currentUser?.department || accessibleArray.includes(project.name);
+      }).sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0, 3); // แสดงแค่ 3 รายการล่าสุด
+
       // NEW: 6. สถานะ PM แยกตามหน่วยงาน (เดือนปัจจุบัน)
       const pmStatusData = visibleProjectsDashboard.map(p => {
           const pPlans = pmPlans.filter(plan => plan.projectId === p.id && plan.status === 'Active');
@@ -5808,6 +5831,55 @@ export default function App() {
                   <KPICard title="คะแนน Audit เฉลี่ยรวม" value={`${totalAuditsAvg}%`} icon={ClipboardCheck} color="purple" onClick={() => setSelectedKpiDetail('audits')} />
                   <KPICard title="งาน Action Plan ที่ค้างอยู่" value={totalPendingAPs} icon={Wrench} color="orange" onClick={() => setSelectedKpiDetail('actionPlans')} />
               </div>
+
+              {/* NEW: Announcements Banner / List on Dashboard */}
+              {visibleAnnouncementsDashboard.length > 0 && (
+                  <Card className="p-0 overflow-hidden relative group">
+                      <div className="bg-blue-50 border-b border-blue-100 p-4 flex justify-between items-center">
+                          <h3 className="font-bold text-blue-800 flex items-center gap-2">
+                              <Radio size={20} className="text-blue-600" /> ประกาศและข่าวสารล่าสุด
+                          </h3>
+                          <button 
+                              className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                              onClick={() => setActiveMenu('announcements')}
+                          >
+                              ดูทั้งหมด <ArrowRight size={14} />
+                          </button>
+                      </div>
+                      <div className="divide-y divide-gray-100">
+                          {visibleAnnouncementsDashboard.map(ann => (
+                              <div 
+                                  key={ann.id} 
+                                  className="p-4 flex items-center justify-between hover:bg-blue-50/50 cursor-pointer transition-colors group/item"
+                                  onClick={() => setSelectedAnnouncementView(ann)}
+                              >
+                                  <div className="flex items-center gap-4 flex-1 min-w-0">
+                                      {ann.image ? (
+                                          <div className="w-12 h-12 rounded bg-gray-200 shrink-0 overflow-hidden border border-gray-200">
+                                              <img src={ann.image} className="w-full h-full object-cover" alt="" />
+                                          </div>
+                                      ) : (
+                                          <div className="w-12 h-12 rounded bg-blue-100 text-blue-500 flex items-center justify-center shrink-0 border border-blue-200">
+                                              <Radio size={20} />
+                                          </div>
+                                      )}
+                                      <div className="flex-1 min-w-0">
+                                          <div className="flex items-center gap-2 mb-1">
+                                              {ann.priority === 'High' && <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded-full">ด่วน</span>}
+                                              <h4 className="font-bold text-gray-800 truncate group-hover/item:text-blue-600 transition-colors">{ann.title}</h4>
+                                          </div>
+                                          <p className="text-sm text-gray-500 truncate">{ann.content}</p>
+                                      </div>
+                                  </div>
+                                  <div className="hidden md:flex flex-col items-end shrink-0 ml-4">
+                                      <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded">{new Date(ann.date).toLocaleDateString('th-TH', { month: 'short', day: 'numeric' })}</span>
+                                      <span className="text-[10px] text-gray-400 mt-1.5 flex items-center gap-1"><User size={10}/> {ann.author}</span>
+                                  </div>
+                              </div>
+                          ))}
+                      </div>
+                  </Card>
+              )}
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* 1. Projects by Type */}
@@ -6387,7 +6459,7 @@ export default function App() {
                       const isExpired = endD && todayLocal > endD;
 
                       return (
-                      <Card key={ann.id} className="p-0 overflow-hidden flex flex-col h-full hover:shadow-md transition-shadow group relative">
+                      <Card key={ann.id} className="p-0 overflow-hidden flex flex-col h-full hover:shadow-md transition-all group relative cursor-pointer hover:border-blue-300" onClick={() => setSelectedAnnouncementView(ann)}>
                           {/* Top Highlight Bar based on Priority */}
                           <div className={`h-2 w-full ${ann.priority === 'High' ? 'bg-red-500' : 'bg-blue-500'}`}></div>
                           
@@ -6418,16 +6490,16 @@ export default function App() {
                                   {/* Actions Menu */}
                                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                       {hasPerm('announcements', 'edit') && (
-                                          <button onClick={() => handleEditAnnouncement(ann)} className="text-gray-400 hover:text-blue-600 p-1 bg-gray-50 hover:bg-blue-50 rounded transition-colors"><Edit size={14}/></button>
+                                          <button onClick={(e) => { e.stopPropagation(); handleEditAnnouncement(ann); }} className="text-gray-400 hover:text-blue-600 p-1 bg-gray-50 hover:bg-blue-50 rounded transition-colors"><Edit size={14}/></button>
                                       )}
                                       {hasPerm('announcements', 'delete') && (
-                                          <button onClick={() => handleDeleteAnnouncement(ann.id)} className="text-gray-400 hover:text-red-600 p-1 bg-gray-50 hover:bg-red-50 rounded transition-colors"><Trash2 size={14}/></button>
+                                          <button onClick={(e) => { e.stopPropagation(); handleDeleteAnnouncement(ann.id); }} className="text-gray-400 hover:text-red-600 p-1 bg-gray-50 hover:bg-red-50 rounded transition-colors"><Trash2 size={14}/></button>
                                       )}
                                   </div>
                               </div>
                               
-                              <h3 className={`font-bold text-lg mb-2 leading-tight ${isExpired ? 'text-gray-400' : 'text-gray-800'}`}>{ann.title}</h3>
-                              <div className={`text-sm whitespace-pre-wrap flex-1 mb-4 ${isExpired ? 'text-gray-400' : 'text-gray-600'}`}>
+                              <h3 className={`font-bold text-lg mb-2 leading-tight group-hover:text-blue-600 transition-colors ${isExpired ? 'text-gray-400' : 'text-gray-800'}`}>{ann.title}</h3>
+                              <div className={`text-sm whitespace-pre-wrap flex-1 mb-4 line-clamp-3 ${isExpired ? 'text-gray-400' : 'text-gray-600'}`}>
                                   {ann.content}
                               </div>
                               
@@ -15633,6 +15705,63 @@ export default function App() {
                       </div>
                       <Button onClick={handleDismissAnnouncement}>
                           รับทราบ (Acknowledge)
+                      </Button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* Selected Announcement View Modal (Manual Click) */}
+      {selectedAnnouncementView && !isExporting && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 animate-fade-in" onClick={() => setSelectedAnnouncementView(null)}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col relative transform transition-all scale-100 border border-gray-200" onClick={e => e.stopPropagation()}>
+                  
+                  {/* Priority Top Bar */}
+                  <div className={`h-2 w-full ${selectedAnnouncementView.priority === 'High' ? 'bg-red-500' : 'bg-blue-500'}`}></div>
+                  
+                  <button 
+                      onClick={() => setSelectedAnnouncementView(null)} 
+                      className="absolute top-4 right-4 text-gray-500 hover:text-red-500 bg-white/80 rounded-full p-1.5 transition-colors z-10 backdrop-blur-md shadow-sm"
+                  >
+                      <X size={20} />
+                  </button>
+
+                  {selectedAnnouncementView.image && (
+                      <div className="w-full h-48 sm:h-72 bg-gray-100 relative overflow-hidden shrink-0 border-b border-gray-200">
+                          <img src={selectedAnnouncementView.image} className="w-full h-full object-contain bg-gray-900" alt="Announcement" />
+                      </div>
+                  )}
+
+                  <div className="p-6 md:p-8 flex flex-col flex-1 max-h-[65vh] overflow-y-auto custom-scrollbar">
+                      <div className="flex items-center gap-2 mb-3">
+                          {selectedAnnouncementView.priority === 'High' && (
+                              <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
+                                  <AlertTriangle size={10} /> ด่วน
+                              </span>
+                          )}
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${selectedAnnouncementView.projectId === 'All' ? 'bg-gray-100 text-gray-600 border-gray-200' : 'bg-orange-50 text-orange-700 border-orange-200'} shrink-0 flex items-center gap-1`}>
+                              <Radio size={10} /> {selectedAnnouncementView.projectId === 'All' ? 'ทุกหน่วยงาน' : 'เฉพาะหน่วยงาน'}
+                          </span>
+                          <span className="text-xs font-bold text-gray-500 ml-auto flex items-center gap-1 shrink-0 bg-gray-100 px-2 py-1 rounded-md">
+                              <Calendar size={12}/> {new Date(selectedAnnouncementView.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}
+                          </span>
+                      </div>
+
+                      <h2 className="text-xl md:text-3xl font-bold text-gray-800 mb-4 leading-tight border-b pb-4">
+                          {selectedAnnouncementView.title}
+                      </h2>
+                      
+                      <div className="text-sm md:text-base text-gray-700 whitespace-pre-wrap leading-relaxed">
+                          {selectedAnnouncementView.content}
+                      </div>
+                  </div>
+
+                  <div className="p-4 bg-gray-50 border-t border-gray-200 flex justify-between items-center shrink-0">
+                      <div className="text-xs font-medium text-gray-500 flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-full border border-gray-200 shadow-sm">
+                          <User size={14} className="text-blue-500"/> ผู้ประกาศ: <span className="font-bold text-gray-800">{selectedAnnouncementView.author}</span>
+                      </div>
+                      <Button variant="secondary" onClick={() => setSelectedAnnouncementView(null)}>
+                          ปิดหน้าต่าง
                       </Button>
                   </div>
               </div>
