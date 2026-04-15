@@ -2014,6 +2014,39 @@ export default function App() {
       minutesFile: null
   });
 
+  // --- NEW: Meeting Gantt Plans State ---
+  const INITIAL_GANTT_PLANS = [];
+  const [meetingGanttPlans, setMeetingGanttPlans] = usePersistentCollection('bmg_meeting_gantt_plans', INITIAL_GANTT_PLANS, fbUser);
+  const [editingGanttPlan, setEditingGanttPlan] = useState(null);
+  const [ganttPaintMode, setGanttPaintMode] = useState(null); // 'add', 'remove', null
+  const [ganttSelectedColor, setGanttSelectedColor] = useState('bg-orange-500');
+
+  const GANTT_COLORS = [
+      'bg-orange-500', 'bg-blue-500', 'bg-green-500', 'bg-red-500', 'bg-purple-500', 'bg-gray-800'
+  ];
+
+  const DEFAULT_GANTT_TASKS = [
+      { id: generateId(), seq: '1', text: 'ประชาสัมพันธ์การประชุม/กำหนดการ/เอกสาร', isHeader: true, days: {}, remark: '' },
+      { id: generateId(), seq: '1.1', text: 'ติดประกาศ/ประชาสัมพันธ์', isHeader: false, days: {}, remark: '' },
+      { id: generateId(), seq: '1.2', text: 'ส่งหนังสือเชิญประชุม และรายงานการประชุมใหญ่', isHeader: false, days: {}, remark: '' },
+      { id: generateId(), seq: '2', text: 'จัดเตรียมเอกสารประกอบการประชุม เอกสารลงทะเบียน ใบลงมติแต่งตั้งต่างๆ', isHeader: true, days: {}, remark: '' },
+      { id: generateId(), seq: '3', text: 'จัดเตรียมวิธีการดำเนินการประชุม', isHeader: true, days: {}, remark: '' },
+      { id: generateId(), seq: '3.1', text: 'กำหนดวิธีการดำเนินการประชุม', isHeader: false, days: {}, remark: '' },
+      { id: generateId(), seq: '3.2', text: 'กำหนดขั้นตอน และบุคลากร', isHeader: false, days: {}, remark: '' },
+      { id: generateId(), seq: '4', text: 'ประชุมร่วมผู้เกี่ยวข้องเพื่อซักซ้อม ทำความเข้าใจ', isHeader: true, days: {}, remark: '' },
+      { id: generateId(), seq: '5', text: 'ประชุมใหญ่', isHeader: true, days: {}, remark: '' },
+      { id: generateId(), seq: '6', text: 'ทำสรุปรายงานการประชุม', isHeader: true, days: {}, remark: '' },
+      { id: generateId(), seq: '7', text: 'เสนอประธาน ผู้จัดการนิติบุคคลฯ ลงนามรับรองรายงาน', isHeader: true, days: {}, remark: '' },
+      { id: generateId(), seq: '8', text: 'จดทะเบียนแจ้งเปลี่ยนแปลง', isHeader: true, days: {}, remark: '' }
+  ];
+
+  // Stop painting when mouse is released anywhere
+  useEffect(() => {
+      const stopPainting = () => setGanttPaintMode(null);
+      window.addEventListener('mouseup', stopPainting);
+      return () => window.removeEventListener('mouseup', stopPainting);
+  }, []);
+
   // Audit Form State
   const [showAddAuditModal, setShowAddAuditModal] = useState(false);
   const [selectedAuditReport, setSelectedAuditReport] = useState(null); // NEW: State สำหรับเก็บข้อมูล Audit ที่ถูกคลิกดูรายละเอียด
@@ -2057,6 +2090,19 @@ export default function App() {
   const [formsList, setFormsList] = usePersistentCollection('bmg_forms_list', STANDARD_FORMS, fbUser);
   const [meetingsList, setMeetingsList] = usePersistentCollection('bmg_meetings', INITIAL_MEETINGS, fbUser);
   const [announcements, setAnnouncements] = usePersistentCollection('bmg_announcements', INITIAL_ANNOUNCEMENTS, fbUser);
+
+  // --- NEW: Meeting Invitations State ---
+  const [meetingInvitations, setMeetingInvitations] = usePersistentCollection('bmg_meeting_invitations', [], fbUser);
+  const [showAddInvitationModal, setShowAddInvitationModal] = useState(false);
+  const [newInvitation, setNewInvitation] = useState({
+      id: null,
+      meetingId: '',
+      title: 'ขอเชิญเข้าร่วมประชุม',
+      issueDate: new Date().toISOString().split('T')[0],
+      recipient: 'เจ้าของร่วม / สมาชิก / คณะกรรมการ',
+      content: '',
+      signatory: ''
+  });
 
   // คงใช้ usePersistentState สำหรับข้อมูลที่เป็น Object เดี่ยวๆ
   const [schedules, setSchedules] = usePersistentState('bmg_schedules', {}, fbUser);
@@ -4435,6 +4481,29 @@ export default function App() {
       setNewMeeting({ ...meeting });
       setIsEditingMeeting(true);
       setShowAddMeetingModal(true);
+  };
+
+  // --- NEW: Meeting Invitation Handlers ---
+  const handleSaveInvitation = (e) => {
+      e.preventDefault();
+      let nextList;
+      const dataToSave = { ...newInvitation };
+      
+      if (!dataToSave.signatory && currentUser) {
+          dataToSave.signatory = `${currentUser.firstName} ${currentUser.lastName}`;
+      }
+
+      if (dataToSave.id) {
+          nextList = meetingInvitations.map(inv => inv.id === dataToSave.id ? dataToSave : inv);
+      } else {
+          const id = generateId();
+          nextList = [{ ...dataToSave, id, projectId: selectedProject.id }, ...meetingInvitations];
+      }
+      
+      setMeetingInvitations(nextList);
+      triggerAutoSync('Meeting_Invitations_หนังสือเชิญ', nextList, []);
+      setShowAddInvitationModal(false);
+      alert('บันทึกหนังสือเชิญประชุมเรียบร้อยแล้ว');
   };
 
   // Audit Handlers
@@ -10785,7 +10854,8 @@ export default function App() {
                   {/* Sub-tabs Navigation for Meetings */}
                   <div className="flex gap-2 mb-4 overflow-x-auto pb-2 custom-scrollbar">
                       {[
-                          { id: 'plan', label: 'แผนการจัดประชุม', icon: Calendar },
+                          { id: 'plan', label: 'แผนการจัดประชุม (ตารางระบายสี)', icon: LayoutGrid },
+                          { id: 'meeting_list', label: 'บันทึก/รายการประชุม', icon: Megaphone },
                           { id: 'invitation', label: 'หนังสือเชิญประชุม', icon: Mail },
                           { id: 'proxy', label: 'ใบมอบฉันทะ', icon: FileText },
                           { id: 'attendance', label: 'ใบลงชื่อเข้าร่วมประชุม', icon: Users },
@@ -10796,7 +10866,7 @@ export default function App() {
                       ].map(sub => (
                           <button
                               key={sub.id}
-                              onClick={() => setMeetingSubTab(sub.id)}
+                              onClick={() => { setMeetingSubTab(sub.id); setEditingGanttPlan(null); }}
                               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors border shadow-sm ${
                                   meetingSubTab === sub.id 
                                   ? 'bg-teal-50 border-teal-500 text-teal-700' 
@@ -10809,7 +10879,376 @@ export default function App() {
                       ))}
                   </div>
 
+                  {/* --- TAB: แผนการจัดประชุม (Gantt Chart) --- */}
                   {meetingSubTab === 'plan' && (
+                      <div className="animate-fade-in">
+                          {!editingGanttPlan ? (
+                              <Card>
+                                  <div className="p-4 border-b flex justify-between items-center bg-white">
+                                      <div>
+                                          <h3 className="font-bold flex items-center gap-2 text-gray-800">
+                                              <LayoutGrid size={20} className="text-teal-600" /> แผนการจัดประชุมใหญ่ (Meeting Plans)
+                                          </h3>
+                                          <p className="text-sm text-gray-500 mt-1">ตารางวางแผนการทำงานล่วงหน้าสำหรับจัดประชุม</p>
+                                      </div>
+                                      <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
+                                          {hasPerm('proj_meeting', 'save') && (
+                                              <Button size="sm" icon={Plus} onClick={() => {
+                                                  setEditingGanttPlan({
+                                                      isNew: true,
+                                                      title: 'แผนการจัดประชุมใหญ่',
+                                                      meetingDateInfo: 'นัดที่ 1) วันที่ _____ เดือน _____________ พ.ศ. _______',
+                                                      month: getLocalMonthStr(),
+                                                      tasks: JSON.parse(JSON.stringify(DEFAULT_GANTT_TASKS)) // Deep copy
+                                                  });
+                                              }}>สร้างแผนงานใหม่</Button>
+                                          )}
+                                      </div>
+                                  </div>
+                                  <div className="overflow-x-auto">
+                                      <table className="w-full text-sm text-left">
+                                          <thead className="bg-gray-50 text-gray-600 uppercase">
+                                              <tr>
+                                                  <th className="p-4 text-center w-16">ลำดับ</th>
+                                                  <th className="p-4">ชื่อแผนงาน</th>
+                                                  <th className="p-4 w-48 text-center">ประจำเดือน</th>
+                                                  <th className="p-4 w-48 text-center">แก้ไขล่าสุด</th>
+                                                  <th className="p-4 text-center w-32">จัดการ</th>
+                                              </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-gray-100 bg-white">
+                                              {meetingGanttPlans.filter(p => p.projectId === selectedProject.id).length > 0 ? (
+                                                  meetingGanttPlans.filter(p => p.projectId === selectedProject.id).map((plan, index) => (
+                                                      <tr key={plan.id} className="hover:bg-teal-50 cursor-pointer transition-colors group" onClick={() => setEditingGanttPlan(JSON.parse(JSON.stringify(plan)))}>
+                                                          <td className="p-4 text-center text-gray-500">{index + 1}</td>
+                                                          <td className="p-4">
+                                                              <div className="font-bold text-gray-800 group-hover:text-teal-600 transition-colors flex items-center gap-2">
+                                                                  {plan.title}
+                                                                  <Edit size={14} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                              </div>
+                                                              <div className="text-xs text-gray-500 mt-1">{plan.meetingDateInfo}</div>
+                                                          </td>
+                                                          <td className="p-4 text-center">
+                                                              <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded font-medium">
+                                                                  {new Date(plan.month + '-01').toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })}
+                                                              </span>
+                                                          </td>
+                                                          <td className="p-4 text-center text-gray-500 text-xs">
+                                                              {plan.updatedAt ? new Date(plan.updatedAt).toLocaleString('th-TH') : '-'}
+                                                          </td>
+                                                          <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
+                                                              <div className="flex items-center justify-center gap-1">
+                                                                  {hasPerm('proj_meeting', 'delete') && (
+                                                                      <button 
+                                                                          onClick={() => showConfirm('ยืนยันการลบ', `คุณต้องการลบแผนงาน "${plan.title}" ใช่หรือไม่?`, () => setMeetingGanttPlans(prev => prev.filter(p => p.id !== plan.id)))}
+                                                                          className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
+                                                                          title="ลบแผนงาน"
+                                                                      >
+                                                                          <Trash2 size={16} />
+                                                                      </button>
+                                                                  )}
+                                                              </div>
+                                                          </td>
+                                                      </tr>
+                                                  ))
+                                              ) : (
+                                                  <tr>
+                                                      <td colSpan="5" className="p-12 text-center text-gray-400 bg-gray-50 border-b border-dashed">
+                                                          <div className="flex flex-col items-center">
+                                                              <LayoutGrid size={40} className="mb-3 text-gray-300" />
+                                                              <p className="font-bold text-gray-500 text-base">ยังไม่มีการสร้างแผนงาน</p>
+                                                              <p className="text-xs mt-1">คลิก "สร้างแผนงานใหม่" เพื่อเริ่มต้นวางแผนการจัดประชุม</p>
+                                                          </div>
+                                                      </td>
+                                                  </tr>
+                                              )}
+                                          </tbody>
+                                      </table>
+                                  </div>
+                              </Card>
+                          ) : (
+                              <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col relative overflow-hidden">
+                                  {/* Editor Toolbar */}
+                                  <div className={`p-4 border-b flex flex-wrap justify-between items-center bg-gray-50 gap-4 ${isExporting ? 'hidden' : ''}`}>
+                                      <div className="flex items-center gap-3">
+                                          <button onClick={() => setEditingGanttPlan(null)} className="flex items-center gap-1 text-gray-500 hover:text-gray-800 transition-colors bg-white px-3 py-1.5 rounded-md border shadow-sm">
+                                              <ChevronLeft size={16}/> กลับ
+                                          </button>
+                                          <div className="h-6 border-l border-gray-300"></div>
+                                          <div className="flex items-center gap-1.5 bg-white p-1 rounded-md border shadow-sm">
+                                              <span className="text-xs font-bold text-gray-500 pl-2">สีระบาย:</span>
+                                              {GANTT_COLORS.map(color => (
+                                                  <button 
+                                                      key={color}
+                                                      onClick={() => setGanttSelectedColor(color)}
+                                                      className={`w-6 h-6 rounded-full ${color} border-2 transition-transform ${ganttSelectedColor === color ? 'border-gray-800 scale-110 shadow-md z-10' : 'border-transparent hover:scale-110'}`}
+                                                      title="เลือกสี"
+                                                  />
+                                              ))}
+                                          </div>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                          <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-gantt-area', `Meeting_Plan_${selectedProject.code}.pdf`, 'landscape', [15, 10, 15, 10])} disabled={isExporting}>
+                                              {isExporting ? t('downloading') : t('printPDF')}
+                                          </Button>
+                                          {hasPerm('proj_meeting', 'save') && (
+                                              <Button size="sm" icon={Save} className="bg-teal-600 hover:bg-teal-700" onClick={() => {
+                                                  let nextList;
+                                                  const dataToSave = { ...editingGanttPlan, updatedAt: new Date().toISOString() };
+                                                  if (editingGanttPlan.isNew) {
+                                                      dataToSave.id = generateId();
+                                                      dataToSave.projectId = selectedProject.id;
+                                                      delete dataToSave.isNew;
+                                                      nextList = [dataToSave, ...meetingGanttPlans];
+                                                  } else {
+                                                      nextList = meetingGanttPlans.map(p => p.id === editingGanttPlan.id ? dataToSave : p);
+                                                  }
+                                                  setMeetingGanttPlans(nextList);
+                                                  setEditingGanttPlan(dataToSave); // Update current editing state with saved ID
+                                                  alert('บันทึกแผนงานสำเร็จ');
+                                              }}>
+                                                  บันทึกแผนงาน
+                                              </Button>
+                                          )}
+                                      </div>
+                                  </div>
+
+                                  {/* Print Area Container */}
+                                  <div className="overflow-x-auto w-full bg-gray-200 flex justify-center pb-8" style={{ minHeight: 'calc(100vh - 250px)' }}>
+                                      <div id="print-gantt-area" className={`bg-white shadow-xl flex flex-col text-black ${isExporting ? 'w-[277mm] min-w-[277mm] max-w-[277mm] shadow-none m-0' : 'mt-8 w-max min-w-[277mm] max-w-max'}`}>
+                                          
+                                          {/* Form Header */}
+                                          <div className={`px-8 pt-8 pb-4 text-center shrink-0 ${isExporting ? 'px-4 pt-4' : ''}`}>
+                                              <h1 className="text-xl font-bold mb-1">
+                                                  นิติบุคคลอาคารชุด / หมู่บ้าน {selectedProject?.name || '...................................................'}
+                                              </h1>
+                                              {isExporting ? (
+                                                  <h2 className="text-2xl font-bold">{editingGanttPlan.title}</h2>
+                                              ) : (
+                                                  <input 
+                                                      type="text" 
+                                                      className="text-2xl font-bold text-center border-b border-dashed border-gray-400 hover:bg-gray-50 focus:bg-white outline-none w-1/2 min-w-[300px] transition-colors"
+                                                      value={editingGanttPlan.title}
+                                                      onChange={e => setEditingGanttPlan({...editingGanttPlan, title: e.target.value})}
+                                                      placeholder="ตั้งชื่อแผนการจัดประชุม..."
+                                                  />
+                                              )}
+                                          </div>
+
+                                          {/* Table Section */}
+                                          <div className={`px-6 pb-6 flex-1 ${isExporting ? 'px-4' : ''}`}>
+                                              {(() => {
+                                                  const [year, month] = editingGanttPlan.month.split('-').map(Number);
+                                                  const daysInMonth = new Date(year, month, 0).getDate();
+                                                  const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+                                                  // Functions for Grid Interaction
+                                                  const handleCellMouseDown = (taskIdx, day) => {
+                                                      if (!hasPerm('proj_meeting', 'save') || isExporting) return;
+                                                      const newPlan = { ...editingGanttPlan, tasks: [...editingGanttPlan.tasks] };
+                                                      const task = { ...newPlan.tasks[taskIdx], days: { ...newPlan.tasks[taskIdx].days } };
+                                                      
+                                                      const currentCellColor = task.days[day];
+                                                      let newMode;
+
+                                                      if (currentCellColor === ganttSelectedColor) {
+                                                          // Clicking same color -> Remove
+                                                          newMode = 'remove';
+                                                          delete task.days[day];
+                                                      } else {
+                                                          // Empty or different color -> Paint new color
+                                                          newMode = 'add';
+                                                          task.days[day] = ganttSelectedColor;
+                                                      }
+
+                                                      setGanttPaintMode(newMode);
+                                                      newPlan.tasks[taskIdx] = task;
+                                                      setEditingGanttPlan(newPlan);
+                                                  };
+
+                                                  const handleCellMouseEnter = (taskIdx, day) => {
+                                                      if (!ganttPaintMode || !hasPerm('proj_meeting', 'save') || isExporting) return;
+                                                      const newPlan = { ...editingGanttPlan, tasks: [...editingGanttPlan.tasks] };
+                                                      const task = { ...newPlan.tasks[taskIdx], days: { ...newPlan.tasks[taskIdx].days } };
+
+                                                      if (ganttPaintMode === 'add') {
+                                                          task.days[day] = ganttSelectedColor;
+                                                      } else if (ganttPaintMode === 'remove') {
+                                                          delete task.days[day];
+                                                      }
+
+                                                      newPlan.tasks[taskIdx] = task;
+                                                      setEditingGanttPlan(newPlan);
+                                                  };
+
+                                                  const handleUpdateTask = (idx, field, value) => {
+                                                      const newTasks = [...editingGanttPlan.tasks];
+                                                      newTasks[idx] = { ...newTasks[idx], [field]: value };
+                                                      setEditingGanttPlan({ ...editingGanttPlan, tasks: newTasks });
+                                                  };
+
+                                                  const handleAddRow = (idx) => {
+                                                      const newTasks = [...editingGanttPlan.tasks];
+                                                      newTasks.splice(idx + 1, 0, { id: generateId(), seq: '', text: '', isHeader: false, days: {}, remark: '' });
+                                                      setEditingGanttPlan({ ...editingGanttPlan, tasks: newTasks });
+                                                  };
+
+                                                  const handleDeleteRow = (idx) => {
+                                                      const newTasks = [...editingGanttPlan.tasks];
+                                                      newTasks.splice(idx, 1);
+                                                      setEditingGanttPlan({ ...editingGanttPlan, tasks: newTasks });
+                                                  };
+
+                                                  return (
+                                                      <table className="w-full border-collapse border border-gray-800 text-[11px]" style={{ tableLayout: 'fixed' }}>
+                                                          <thead className="bg-gray-100 text-gray-800">
+                                                              <tr>
+                                                                  <th className="border border-gray-800 p-1 text-center w-[5%]" rowSpan="2">ลำดับ</th>
+                                                                  <th className="border border-gray-800 p-1 text-center w-[30%]" rowSpan="2">รายการ</th>
+                                                                  <th className="border border-gray-800 p-1 text-center w-[50%]" colSpan={daysInMonth}>
+                                                                      <div className="flex items-center justify-center gap-2">
+                                                                          เดือน 
+                                                                          {isExporting ? (
+                                                                              <span className="font-bold underline">{new Date(editingGanttPlan.month + '-01').toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })}</span>
+                                                                          ) : (
+                                                                              <input 
+                                                                                  type="month" 
+                                                                                  className="bg-white border border-gray-300 rounded px-1 text-[11px] outline-none cursor-pointer"
+                                                                                  value={editingGanttPlan.month}
+                                                                                  onChange={e => setEditingGanttPlan({...editingGanttPlan, month: e.target.value})}
+                                                                              />
+                                                                          )}
+                                                                      </div>
+                                                                  </th>
+                                                                  <th className="border border-gray-800 p-1 text-center w-[15%]" rowSpan="2">หมายเหตุ</th>
+                                                              </tr>
+                                                              <tr>
+                                                                  {daysArray.map(d => (
+                                                                      <th key={d} className="border border-gray-800 p-0.5 text-center font-normal w-auto">{d}</th>
+                                                                  ))}
+                                                              </tr>
+                                                          </thead>
+                                                          <tbody>
+                                                              {/* Custom Meeting Info Row */}
+                                                              <tr>
+                                                                  <td colSpan={daysInMonth + 3} className="border border-gray-800 p-1 font-bold bg-gray-50/50">
+                                                                      {isExporting ? (
+                                                                          <span>{editingGanttPlan.meetingDateInfo}</span>
+                                                                      ) : (
+                                                                          <input 
+                                                                              type="text" 
+                                                                              className="w-full bg-transparent outline-none font-bold"
+                                                                              value={editingGanttPlan.meetingDateInfo}
+                                                                              onChange={e => setEditingGanttPlan({...editingGanttPlan, meetingDateInfo: e.target.value})}
+                                                                              placeholder="ระบุรายละเอียดนัดหมาย..."
+                                                                          />
+                                                                      )}
+                                                                  </td>
+                                                              </tr>
+
+                                                              {/* Tasks Rows */}
+                                                              {editingGanttPlan.tasks.map((task, idx) => (
+                                                                  <tr key={task.id} className={`group ${task.isHeader ? 'bg-gray-50 font-bold' : 'hover:bg-blue-50/30'}`}>
+                                                                      <td className="border border-gray-800 p-0 text-center align-middle relative">
+                                                                          {isExporting ? (
+                                                                              <span>{task.seq}</span>
+                                                                          ) : (
+                                                                              <input type="text" className={`w-full h-full p-1 text-center bg-transparent outline-none ${task.isHeader ? 'font-bold' : ''}`} value={task.seq} onChange={e => handleUpdateTask(idx, 'seq', e.target.value)} />
+                                                                          )}
+                                                                          
+                                                                          {/* Row Actions overlay */}
+                                                                          {!isExporting && hasPerm('proj_meeting', 'edit') && (
+                                                                              <div className="absolute -left-6 top-1/2 transform -translate-y-1/2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                                  <button onClick={() => handleAddRow(idx)} className="bg-white text-green-600 rounded-full border shadow-sm hover:scale-110"><Plus size={12}/></button>
+                                                                                  <button onClick={() => handleDeleteRow(idx)} className="bg-white text-red-600 rounded-full border shadow-sm hover:scale-110"><Trash2 size={12}/></button>
+                                                                              </div>
+                                                                          )}
+                                                                      </td>
+                                                                      <td className="border border-gray-800 p-0 align-middle">
+                                                                          <div className="flex items-center h-full">
+                                                                              {!isExporting && hasPerm('proj_meeting', 'edit') && (
+                                                                                  <button 
+                                                                                      onClick={() => handleUpdateTask(idx, 'isHeader', !task.isHeader)}
+                                                                                      className={`shrink-0 ml-1 p-0.5 rounded transition-colors ${task.isHeader ? 'text-blue-600 bg-blue-100' : 'text-gray-300 hover:bg-gray-200'}`}
+                                                                                      title="สลับเป็นหัวข้อหลัก / หัวข้อย่อย"
+                                                                                  >
+                                                                                      <List size={12}/>
+                                                                                  </button>
+                                                                              )}
+                                                                              {isExporting ? (
+                                                                                  <span className={`p-1 flex-1 block ${task.isHeader ? 'font-bold' : 'pl-4'}`}>{task.text}</span>
+                                                                              ) : (
+                                                                                  <input 
+                                                                                      type="text" 
+                                                                                      className={`w-full h-full p-1 bg-transparent outline-none ${task.isHeader ? 'font-bold' : 'pl-4'}`} 
+                                                                                      value={task.text} 
+                                                                                      onChange={e => handleUpdateTask(idx, 'text', e.target.value)} 
+                                                                                      placeholder="พิมพ์รายการ..."
+                                                                                  />
+                                                                              )}
+                                                                          </div>
+                                                                      </td>
+                                                                      
+                                                                      {/* Days Grid */}
+                                                                      {daysArray.map(d => (
+                                                                          <td 
+                                                                              key={d} 
+                                                                              className={`border border-gray-800 p-0 transition-colors ${task.days[d] ? task.days[d] : ''} ${!isExporting && hasPerm('proj_meeting', 'save') ? 'cursor-pointer hover:bg-black/10' : ''}`}
+                                                                              onMouseDown={() => handleCellMouseDown(idx, d.toString())}
+                                                                              onMouseEnter={() => handleCellMouseEnter(idx, d.toString())}
+                                                                              style={{ height: '24px' }}
+                                                                          ></td>
+                                                                      ))}
+
+                                                                      <td className="border border-gray-800 p-0 align-middle">
+                                                                          {isExporting ? (
+                                                                              <span className="p-1 block truncate text-[9px]">{task.remark}</span>
+                                                                          ) : (
+                                                                              <input 
+                                                                                  type="text" 
+                                                                                  className="w-full h-full p-1 text-[9px] bg-transparent outline-none" 
+                                                                                  value={task.remark} 
+                                                                                  onChange={e => handleUpdateTask(idx, 'remark', e.target.value)} 
+                                                                                  placeholder="หมายเหตุ..."
+                                                                              />
+                                                                          )}
+                                                                      </td>
+                                                                  </tr>
+                                                              ))}
+                                                              
+                                                              {!isExporting && hasPerm('proj_meeting', 'edit') && (
+                                                                  <tr>
+                                                                      <td colSpan={daysInMonth + 3} className="border border-gray-800 p-0 bg-gray-50/50 hover:bg-gray-100 transition-colors cursor-pointer text-center" onClick={() => handleAddRow(editingGanttPlan.tasks.length - 1)}>
+                                                                          <div className="flex items-center justify-center gap-1 text-gray-500 font-bold py-2">
+                                                                              <Plus size={14}/> เพิ่มรายการใหม่ต่อท้าย
+                                                                          </div>
+                                                                      </td>
+                                                                  </tr>
+                                                              )}
+                                                          </tbody>
+                                                      </table>
+                                                  );
+                                              })()}
+                                          </div>
+                                          
+                                          {/* Legend Footer */}
+                                          <div className={`px-8 pb-8 pt-2 flex items-center gap-4 text-[10px] text-gray-500 shrink-0 ${isExporting ? 'px-4 pb-4' : ''}`}>
+                                              <div className="font-bold text-gray-700">คำอธิบายสี (Color Legend):</div>
+                                              <div className="flex items-center gap-1"><div className="w-3 h-3 bg-orange-500 border border-gray-800"></div> แผนงานหลัก</div>
+                                              <div className="flex items-center gap-1"><div className="w-3 h-3 bg-blue-500 border border-gray-800"></div> นัดหมายสำคัญ</div>
+                                              <div className="flex items-center gap-1"><div className="w-3 h-3 bg-green-500 border border-gray-800"></div> ดำเนินการแล้ว</div>
+                                              <div className="flex items-center gap-1"><div className="w-3 h-3 bg-red-500 border border-gray-800"></div> เร่งด่วน / ล่าช้า</div>
+                                              {!isExporting && <div className="ml-auto flex items-center gap-1 text-blue-600 bg-blue-50 px-2 py-1 rounded"><MousePointer2 size={12}/> คลิกหรือลากเมาส์ในตารางเพื่อระบายสี (Click & Drag to paint)</div>}
+                                          </div>
+                                      </div>
+                                  </div>
+                              </div>
+                          )}
+                      </div>
+                  )}
+
+                  {/* --- TAB: บันทึก/รายการประชุม (Old 'plan' tab) --- */}
+                  {meetingSubTab === 'meeting_list' && (
                   <Card id="print-meeting-area">
                       <div className="p-4 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white">
                           <h3 className="font-bold flex items-center gap-2 text-gray-800">
@@ -10932,7 +11371,97 @@ export default function App() {
                   </Card>
                   )}
 
-                  {meetingSubTab !== 'plan' && (
+                  {/* --- TAB: หนังสือเชิญประชุม --- */}
+                  {meetingSubTab === 'invitation' && (
+                  <Card id="print-invitation-area">
+                      <div className="p-4 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white">
+                          <h3 className="font-bold flex items-center gap-2 text-gray-800">
+                              <Mail size={20} className="text-teal-600" /> หนังสือเชิญประชุม (Meeting Invitations)
+                          </h3>
+                          <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
+                              <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(meetingInvitations.filter(m => m.projectId === selectedProject.id), 'invitations_list')}>{t('exportCSV')}</Button>
+                              {hasPerm('proj_meeting', 'save') && <Button size="sm" icon={Plus} className="bg-teal-600 hover:bg-teal-700" onClick={() => {
+                                  setNewInvitation({ 
+                                      id: null, meetingId: '', title: 'ขอเชิญเข้าร่วมประชุม', 
+                                      issueDate: new Date().toISOString().split('T')[0], 
+                                      recipient: 'เจ้าของร่วม / สมาชิก / คณะกรรมการ', 
+                                      content: '', signatory: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : '' 
+                                  });
+                                  setShowAddInvitationModal(true);
+                              }}>สร้างหนังสือเชิญประชุม</Button>}
+                          </div>
+                      </div>
+
+                      <div className={isExporting ? "pb-4" : "overflow-x-auto"}>
+                          <table className="w-full text-sm text-left">
+                              <thead className="bg-gray-50 text-gray-600">
+                                  <tr>
+                                      <th className="p-3 border-b text-center w-12">{t('col_seq')}</th>
+                                      <th className="p-3 border-b w-32 text-center">วันที่ออกหนังสือ</th>
+                                      <th className="p-3 border-b">เรื่อง (Title)</th>
+                                      <th className="p-3 border-b">เรียน (To)</th>
+                                      <th className="p-3 border-b">อ้างอิงการประชุม</th>
+                                      <th className={`p-3 border-b text-center w-24 ${isExporting ? 'hidden' : ''}`}>จัดการ</th>
+                                  </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100 bg-white">
+                                  {meetingInvitations.filter(m => m.projectId === selectedProject.id).length > 0 ? (
+                                      meetingInvitations.filter(m => m.projectId === selectedProject.id)
+                                      .map((inv, index) => {
+                                          const relatedMeeting = meetingsList.find(m => m.id === inv.meetingId);
+                                          return (
+                                          <tr key={inv.id} className="hover:bg-gray-50 transition-colors">
+                                              <td className="p-3 text-center text-gray-500">{index + 1}</td>
+                                              <td className="p-3 text-center text-gray-600 font-medium">
+                                                  {new Date(inv.issueDate).toLocaleDateString('th-TH')}
+                                              </td>
+                                              <td className="p-3 font-bold text-gray-800">{inv.title}</td>
+                                              <td className="p-3 text-gray-600">{inv.recipient}</td>
+                                              <td className="p-3 text-gray-500 text-xs">
+                                                  {relatedMeeting ? (
+                                                      <div className="line-clamp-2" title={relatedMeeting.title}>{relatedMeeting.title}</div>
+                                                  ) : (
+                                                      <span className="text-gray-400">- ไม่ได้ระบุ -</span>
+                                                  )}
+                                              </td>
+                                              <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`}>
+                                                  <div className="flex items-center justify-center gap-1">
+                                                      {hasPerm('proj_meeting', 'edit') && (
+                                                          <button 
+                                                              onClick={() => { setNewInvitation(inv); setShowAddInvitationModal(true); }}
+                                                              className="text-gray-400 hover:text-blue-600 p-1.5 rounded-md hover:bg-blue-50 transition-colors"
+                                                              title="แก้ไขข้อมูล"
+                                                          >
+                                                              <Edit size={16} />
+                                                          </button>
+                                                      )}
+                                                      {hasPerm('proj_meeting', 'delete') && (
+                                                          <button 
+                                                              onClick={() => showConfirm('ยืนยันการลบ', `คุณต้องการลบหนังสือเชิญ "${inv.title}" ใช่หรือไม่?`, () => setMeetingInvitations(prev => prev.filter(m => m.id !== inv.id)))}
+                                                              className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
+                                                              title="ลบข้อมูล"
+                                                          >
+                                                              <Trash2 size={16} />
+                                                          </button>
+                                                      )}
+                                                  </div>
+                                              </td>
+                                          </tr>
+                                      )})
+                                  ) : (
+                                      <tr>
+                                          <td colSpan="6" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">
+                                              ยังไม่มีข้อมูลหนังสือเชิญประชุม คลิก "สร้างหนังสือเชิญประชุม" เพื่อเริ่มต้น
+                                          </td>
+                                      </tr>
+                                  )}
+                              </tbody>
+                          </table>
+                      </div>
+                  </Card>
+                  )}
+
+                  {!['plan', 'meeting_list', 'invitation'].includes(meetingSubTab) && (
                       <Card className="p-12 flex flex-col items-center justify-center text-center border-dashed border-2 min-h-[400px] bg-gray-50">
                           <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mb-4 shadow-sm border border-gray-200">
                               <Hammer className="text-gray-400" size={32} />
@@ -15538,6 +16067,99 @@ export default function App() {
                     <div className="flex justify-end gap-2 pt-4 border-t mt-6">
                         <Button variant="secondary" onClick={() => setShowAddMeetingModal(false)}>ยกเลิก</Button>
                         <Button type="submit" icon={Save}>บันทึกข้อมูล</Button>
+                    </div>
+                </form>
+            </div>
+        </div>
+      )}
+
+      {/* NEW: Add/Edit Invitation Modal */}
+      {showAddInvitationModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl p-6 max-h-[90vh] overflow-y-auto">
+                <div className="flex justify-between items-center mb-6 border-b pb-4">
+                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                        <Mail className="text-teal-600" />
+                        {newInvitation.id ? 'แก้ไขหนังสือเชิญประชุม' : 'สร้างหนังสือเชิญประชุม (New Invitation)'}
+                    </h2>
+                    <button onClick={() => setShowAddInvitationModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                </div>
+                <form onSubmit={handleSaveInvitation} className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">อ้างอิงถึงการประชุม (Related Meeting)</label>
+                            <select 
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
+                                value={newInvitation.meetingId}
+                                onChange={e => setNewInvitation({...newInvitation, meetingId: e.target.value})}
+                            >
+                                <option value="">-- ไม่ระบุ / สร้างลอยๆ --</option>
+                                {meetingsList.filter(m => m.projectId === selectedProject.id).map(m => (
+                                    <option key={m.id} value={m.id}>{m.title} ({new Date(m.date).toLocaleDateString('th-TH')})</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">วันที่ออกหนังสือ (Issue Date)</label>
+                            <input 
+                                type="date" 
+                                required
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
+                                value={newInvitation.issueDate}
+                                onChange={e => setNewInvitation({...newInvitation, issueDate: e.target.value})}
+                            />
+                        </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg border border-gray-200">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">เรื่อง (Subject)</label>
+                            <input 
+                                type="text" 
+                                required 
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
+                                value={newInvitation.title}
+                                onChange={e => setNewInvitation({...newInvitation, title: e.target.value})}
+                                placeholder="เช่น ขอเชิญเข้าร่วมประชุมใหญ่สามัญประจำปี"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">เรียน (To)</label>
+                            <input 
+                                type="text" 
+                                required 
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
+                                value={newInvitation.recipient}
+                                onChange={e => setNewInvitation({...newInvitation, recipient: e.target.value})}
+                                placeholder="เช่น ท่านเจ้าของร่วม / สมาชิก"
+                            />
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">รายละเอียด / เนื้อหาในจดหมาย (Content)</label>
+                        <textarea 
+                            className="w-full border rounded-md p-3 h-40 resize-none outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
+                            value={newInvitation.content}
+                            onChange={e => setNewInvitation({...newInvitation, content: e.target.value})}
+                            placeholder="พิมพ์ข้อความเนื้อหาในจดหมายเชิญประชุม..."
+                        ></textarea>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">ลงชื่อผู้เชิญ (Signatory)</label>
+                        <input 
+                            type="text" 
+                            className="w-full md:w-1/2 border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
+                            value={newInvitation.signatory}
+                            onChange={e => setNewInvitation({...newInvitation, signatory: e.target.value})}
+                            placeholder="ระบุชื่อผู้ลงนาม เช่น นายสมชาย ใจดี (ผู้จัดการนิติบุคคล)"
+                        />
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-4 border-t mt-6">
+                        <Button variant="secondary" onClick={() => setShowAddInvitationModal(false)}>ยกเลิก</Button>
+                        <Button type="submit" icon={Save}>บันทึกหนังสือเชิญ</Button>
                     </div>
                 </form>
             </div>
