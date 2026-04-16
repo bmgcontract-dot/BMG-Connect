@@ -15925,9 +15925,20 @@ export default function App() {
       {showAuditRankingModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]">
-                <div className="p-4 border-b flex justify-between items-center bg-blue-50">
+                <div className="p-4 border-b flex justify-between items-center bg-blue-50 shrink-0">
                     <h2 className="text-xl font-bold text-blue-800 flex items-center gap-2"><BarChart3 size={24}/> จัดอันดับคะแนน Audit เฉลี่ย</h2>
-                    <button onClick={() => setShowAuditRankingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-blue-700">ประจำเดือน:</span>
+                            <input 
+                                type="month" 
+                                className="border border-blue-200 rounded-md p-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-300 text-blue-800 bg-white shadow-sm cursor-pointer"
+                                value={auditRankingMonth}
+                                onChange={(e) => setAuditRankingMonth(e.target.value)}
+                            />
+                        </div>
+                        <button onClick={() => setShowAuditRankingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                    </div>
                 </div>
                 <div className="p-0 overflow-y-auto">
                     <table className="w-full text-sm text-left">
@@ -15941,12 +15952,12 @@ export default function App() {
                         <tbody className="divide-y divide-gray-100">
                             {(() => {
                                 const rankData = projects.map(p => {
-                                    const pAudits = audits.filter(a => a.projectId === p.id);
-                                    const avg = pAudits.length > 0 ? (pAudits.reduce((sum, a) => sum + a.score, 0) / pAudits.length) : 0;
+                                    const pAudits = audits.filter(a => a.projectId === p.id && a.date?.startsWith(auditRankingMonth));
+                                    const avg = pAudits.length > 0 ? (pAudits.reduce((sum, a) => sum + (a.score || 0), 0) / pAudits.length) : 0;
                                     return { id: p.id, name: p.name, avgScore: parseFloat(avg.toFixed(1)) };
                                 }).filter(d => d.avgScore > 0).sort((a, b) => b.avgScore - a.avgScore);
 
-                                if (rankData.length === 0) return <tr><td colSpan="3" className="p-8 text-center text-gray-500">ไม่มีข้อมูล</td></tr>;
+                                if (rankData.length === 0) return <tr><td colSpan="3" className="p-12 text-center text-gray-400 bg-gray-50 border-b border-dashed"><div className="flex flex-col items-center"><ClipboardCheck size={40} className="mb-2 text-gray-300"/>ไม่พบข้อมูลการประเมินในเดือนที่เลือก</div></td></tr>;
 
                                 return rankData.map((d, i) => (
                                     <tr key={d.id} className={d.id === selectedProject?.id ? 'bg-blue-50/50' : 'hover:bg-gray-50'}>
@@ -15970,9 +15981,20 @@ export default function App() {
       {showReportRankingModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]">
-                <div className="p-4 border-b flex justify-between items-center bg-purple-50">
-                    <h2 className="text-xl font-bold text-purple-800 flex items-center gap-2"><BarChart3 size={24}/> จัดอันดับการส่งรายงานประจำวัน (เดือนนี้)</h2>
-                    <button onClick={() => setShowReportRankingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                <div className="p-4 border-b flex justify-between items-center bg-purple-50 shrink-0">
+                    <h2 className="text-xl font-bold text-purple-800 flex items-center gap-2"><BarChart3 size={24}/> จัดอันดับการส่งรายงานประจำวัน</h2>
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-purple-700">ประจำเดือน:</span>
+                            <input 
+                                type="month" 
+                                className="border border-purple-200 rounded-md p-1.5 text-sm outline-none focus:ring-2 focus:ring-purple-300 text-purple-800 bg-white shadow-sm cursor-pointer"
+                                value={reportRankingMonth}
+                                onChange={(e) => setReportRankingMonth(e.target.value)}
+                            />
+                        </div>
+                        <button onClick={() => setShowReportRankingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                    </div>
                 </div>
                 <div className="p-0 overflow-y-auto">
                     <table className="w-full text-sm text-left">
@@ -15985,14 +16007,13 @@ export default function App() {
                         </thead>
                         <tbody className="divide-y divide-gray-100">
                             {(() => {
-                                const currentMonthStr = new Date().toISOString().slice(0, 7);
                                 const rankData = projects.map(p => {
-                                    const pReports = dailyReports.filter(r => r.projectId === p.id && r.date.startsWith(currentMonthStr));
+                                    const pReports = dailyReports.filter(r => r.projectId === p.id && r.date?.startsWith(reportRankingMonth));
                                     const uniqueDays = new Set(pReports.map(r => r.date)).size;
                                     return { id: p.id, name: p.name, submittedDays: uniqueDays };
-                                }).sort((a, b) => b.submittedDays - a.submittedDays);
+                                }).filter(d => d.submittedDays > 0).sort((a, b) => b.submittedDays - a.submittedDays);
 
-                                if (rankData.length === 0) return <tr><td colSpan="3" className="p-8 text-center text-gray-500">ไม่มีข้อมูล</td></tr>;
+                                if (rankData.length === 0) return <tr><td colSpan="3" className="p-12 text-center text-gray-400 bg-gray-50 border-b border-dashed"><div className="flex flex-col items-center"><FileText size={40} className="mb-2 text-gray-300"/>ไม่พบข้อมูลการส่งรายงานในเดือนที่เลือก</div></td></tr>;
 
                                 return rankData.map((d, i) => (
                                     <tr key={d.id} className={d.id === selectedProject?.id ? 'bg-purple-50/50' : 'hover:bg-gray-50'}>
