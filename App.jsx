@@ -330,6 +330,10 @@ const STANDARD_FORMS = [
     // หมวดหมู่: งานบุคคลและภายใน (Internal HR / Finance) - คงไว้สำหรับพนักงานนิติฯ
     { id: 'f14', category: 'งานบุคคลและภายใน (Internal)', name: 'ใบลาพักผ่อน / ลากิจ / ลาป่วย (Leave Request)', format: 'PDF', size: '120 KB', lastUpdated: '2025-01-05', description: 'เอกสารขออนุมัติวันลาต่างๆ สำหรับพนักงานและเจ้าหน้าที่ประจำหน่วยงาน (Leave request form for annual, personal, or sick leave for employees and site staff.)' },
     { id: 'f15', category: 'งานบุคคลและภายใน (Internal)', name: 'ใบเบิกเงินสดย่อย (Petty Cash Voucher)', format: 'Excel', size: '45 KB', lastUpdated: '2025-01-05', description: 'เอกสารประกอบการขอเบิกเงินทดรองจ่าย หรือเงินสดย่อยประจำหน่วยงาน (Form for requesting petty cash reimbursement or advance payments for site operations.)' },
+    { id: 'f18', category: 'งานบุคคลและภายใน (Internal)', name: 'แบบฟอร์มการส่งมอบงาน ตำแหน่งผู้จัดการอาคาร (Building Manager Handover)', format: 'PDF', size: '120 KB', lastUpdated: '2026-04-16', description: 'เอกสารบันทึกการส่งมอบงาน ทรัพย์สิน เอกสารสำคัญ และหน้าที่ความรับผิดชอบของตำแหน่งผู้จัดการอาคาร' },
+    { id: 'f19', category: 'งานบุคคลและภายใน (Internal)', name: 'แบบฟอร์มการส่งมอบงาน ตำแหน่งผู้จัดการหมู่บ้าน (Village Manager Handover)', format: 'PDF', size: '120 KB', lastUpdated: '2026-04-16', description: 'เอกสารบันทึกการส่งมอบงาน ทรัพย์สิน เอกสารสำคัญ และหน้าที่ความรับผิดชอบของตำแหน่งผู้จัดการหมู่บ้าน' },
+    { id: 'f20', category: 'งานบุคคลและภายใน (Internal)', name: 'แบบฟอร์มการส่งมอบงาน ตำแหน่งหัวหน้าช่างประจำอาคาร (Chief Technician Handover)', format: 'PDF', size: '110 KB', lastUpdated: '2026-04-16', description: 'เอกสารบันทึกการส่งมอบงาน เครื่องมือช่าง ทะเบียนเครื่องจักร และแผน PM ของตำแหน่งหัวหน้าช่างประจำอาคาร' },
+    { id: 'f21', category: 'งานบุคคลและภายใน (Internal)', name: 'แบบฟอร์มการส่งมอบงาน ตำแหน่งช่างประจำอาคาร (Technician Handover)', format: 'PDF', size: '110 KB', lastUpdated: '2026-04-16', description: 'เอกสารบันทึกการส่งมอบงาน การเข้ากะ และเครื่องมือช่างพื้นฐาน สำหรับตำแหน่งช่างประจำอาคาร' },
 ];
 
 // Shift Codes
@@ -16059,49 +16063,71 @@ export default function App() {
                                 <span className="font-bold">เรื่อง</span> 
                                 <span className="ml-2 font-bold border-b border-gray-400 pb-1 flex-1">{selectedFormDetails.name.split(' (')[0]}</span>
                             </p>
-                            <p className="font-bold">เรียน ผู้จัดการ / คณะกรรมการนิติบุคคลฯ</p>
+                            <p className="font-bold">เรียน {selectedFormDetails.category === 'งานบุคคลและภายใน (Internal)' ? 'ผู้จัดการพื้นที่ / ฝ่ายทรัพยากรบุคคล (HR)' : 'ผู้จัดการ / คณะกรรมการนิติบุคคลฯ'}</p>
                             
                             <div className="ml-4 md:ml-8 space-y-5">
                                 <div className="flex items-center gap-2">
                                     <span className="font-bold whitespace-nowrap">ข้าพเจ้า</span> 
                                     <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2`} contentEditable={isEditingForm}></span>
                                 </div>
-                                <div className="flex items-center gap-4 flex-wrap">
-                                    <span className="font-bold whitespace-nowrap">เจ้าของร่วม / ผู้พักอาศัย ห้องเลขที่ / บ้านเลขที่</span> 
-                                    <span className={`w-40 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2 text-center`} contentEditable={isEditingForm}></span>
-                                </div>
-                                <div className="flex items-center gap-4 flex-wrap">
-                                    <span className="font-bold whitespace-nowrap">เบอร์โทรศัพท์ติดต่อ</span> 
-                                    <span className={`w-48 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2 text-center`} contentEditable={isEditingForm}></span>
-                                    <span className="font-bold whitespace-nowrap">อีเมล</span> 
-                                    <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2 text-center`} contentEditable={isEditingForm}></span>
-                                </div>
+
+                                {selectedFormDetails.category === 'งานบุคคลและภายใน (Internal)' ? (
+                                    <div className="flex items-center gap-4 flex-wrap">
+                                        <span className="font-bold whitespace-nowrap">ตำแหน่ง</span> 
+                                        <span className={`w-40 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2 text-center`} contentEditable={isEditingForm}></span>
+                                        <span className="font-bold whitespace-nowrap">สังกัดหน่วยงาน</span> 
+                                        <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2 text-center`} contentEditable={isEditingForm}></span>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="flex items-center gap-4 flex-wrap">
+                                            <span className="font-bold whitespace-nowrap">เจ้าของร่วม / ผู้พักอาศัย ห้องเลขที่ / บ้านเลขที่</span> 
+                                            <span className={`w-40 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2 text-center`} contentEditable={isEditingForm}></span>
+                                        </div>
+                                        <div className="flex items-center gap-4 flex-wrap">
+                                            <span className="font-bold whitespace-nowrap">เบอร์โทรศัพท์ติดต่อ</span> 
+                                            <span className={`w-48 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2 text-center`} contentEditable={isEditingForm}></span>
+                                            <span className="font-bold whitespace-nowrap">อีเมล</span> 
+                                            <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2 text-center`} contentEditable={isEditingForm}></span>
+                                        </div>
+                                    </>
+                                )}
                                 
-                                <p className="mt-8 font-bold">มีความประสงค์เพื่อ:</p>
+                                <p className="mt-8 font-bold">
+                                    {selectedFormDetails.category === 'งานบุคคลและภายใน (Internal)' ? 'รายละเอียดการดำเนินงาน / ส่งมอบงาน:' : 'มีความประสงค์เพื่อ:'}
+                                </p>
                                 <div className={`w-full min-h-[120px] border p-4 leading-relaxed ${isEditingForm ? "border-blue-300 bg-blue-50 outline-none rounded" : "border-gray-300"}`} contentEditable={isEditingForm}>
-                                    {isEditingForm ? "" : (selectedFormDetails.description || "ระบุรายละเอียดความประสงค์ที่นี่...")}
+                                    {isEditingForm ? "" : (selectedFormDetails.description || "ระบุรายละเอียดเพิ่มเติมที่นี่...")}
                                 </div>
                                 
-                                <p className="mt-6 font-bold">โดยมีรายละเอียดเพิ่มเติมดังนี้:</p>
-                                <div className="space-y-4">
-                                    <div className="flex items-end gap-2">1. <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2`} contentEditable={isEditingForm}></span></div>
-                                    <div className="flex items-end gap-2">2. <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2`} contentEditable={isEditingForm}></span></div>
-                                    <div className="flex items-end gap-2">3. <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2`} contentEditable={isEditingForm}></span></div>
-                                </div>
+                                {selectedFormDetails.category !== 'งานบุคคลและภายใน (Internal)' && (
+                                    <>
+                                        <p className="mt-6 font-bold">โดยมีรายละเอียดเพิ่มเติมดังนี้:</p>
+                                        <div className="space-y-4">
+                                            <div className="flex items-end gap-2">1. <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2`} contentEditable={isEditingForm}></span></div>
+                                            <div className="flex items-end gap-2">2. <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2`} contentEditable={isEditingForm}></span></div>
+                                            <div className="flex items-end gap-2">3. <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2`} contentEditable={isEditingForm}></span></div>
+                                        </div>
+                                    </>
+                                )}
                                 
-                                <p className="mt-10 pt-6 border-t border-gray-200 text-center font-bold">ข้าพเจ้าขอรับรองว่าข้อความเบื้องต้นเป็นความจริงทุกประการ และยินดีปฏิบัติตามระเบียบของนิติบุคคลฯ อย่างเคร่งครัด</p>
+                                <p className="mt-10 pt-6 border-t border-gray-200 text-center font-bold">
+                                    {selectedFormDetails.category === 'งานบุคคลและภายใน (Internal)' 
+                                        ? 'ข้าพเจ้าได้ส่งมอบงานและทรัพย์สินทั้งหมดที่อยู่ในความรับผิดชอบครบถ้วนเรียบร้อยแล้ว' 
+                                        : 'ข้าพเจ้าขอรับรองว่าข้อความเบื้องต้นเป็นความจริงทุกประการ และยินดีปฏิบัติตามระเบียบของนิติบุคคลฯ อย่างเคร่งครัด'}
+                                </p>
                             </div>
 
                             <div className="mt-16 flex justify-between px-4 md:px-8 text-center pb-8">
                                 <div className="w-56 md:w-64">
                                     <div className="border-b border-gray-500 w-full mb-2 h-6"></div>
                                     <p className="text-sm">( ........................................................ )</p>
-                                    <p className="mt-2 font-bold">ผู้ยื่นคำร้อง</p>
+                                    <p className="mt-2 font-bold">{selectedFormDetails.category === 'งานบุคคลและภายใน (Internal)' ? 'ผู้ยื่นเรื่อง / ผู้ส่งมอบงาน' : 'ผู้ยื่นคำร้อง'}</p>
                                 </div>
                                 <div className="w-56 md:w-64">
                                     <div className="border-b border-gray-500 w-full mb-2 h-6"></div>
                                     <p className="text-sm">( ........................................................ )</p>
-                                    <p className="mt-2 font-bold">ผู้รับเรื่อง / เจ้าหน้าที่นิติบุคคล</p>
+                                    <p className="mt-2 font-bold">{selectedFormDetails.category === 'งานบุคคลและภายใน (Internal)' ? 'ผู้อนุมัติ / ผู้รับมอบงาน' : 'ผู้รับเรื่อง / เจ้าหน้าที่นิติบุคคล'}</p>
                                 </div>
                             </div>
                         </div>
@@ -17116,7 +17142,7 @@ export default function App() {
                       </div>
                   )}
 
-                  <div className="p-6 md:p-8 flex flex-col flex-1 max-h-[65vh] overflow-y-auto custom-scrollbar">
+                  <div id="announcement-modal-content" className="p-6 md:p-8 flex flex-col flex-1 max-h-[65vh] overflow-y-auto custom-scrollbar">
                       <div className="flex items-center gap-2 mb-3">
                           {selectedAnnouncementView.priority === 'High' && (
                               <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
@@ -17138,6 +17164,72 @@ export default function App() {
                       <div className="text-sm md:text-base text-gray-700 whitespace-pre-wrap leading-relaxed">
                           {selectedAnnouncementView.content}
                       </div>
+
+                      {/* NEW: History of Other Announcements */}
+                      {(() => {
+                          const accessibleDeptsStr = currentUser?.accessibleDepts || '';
+                          const accessibleArray = typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : accessibleDeptsStr;
+                          const canAccessAll = accessibleArray.includes('All') || currentUser?.username === 'admin';
+
+                          const otherAnnouncements = announcements.filter(a => {
+                              // ไม่นำประกาศที่กำลังเปิดดูอยู่มาแสดงซ้ำ
+                              if (a.id === selectedAnnouncementView.id) return false;
+                              
+                              // ตรวจสอบวันที่ (แสดงเฉพาะประกาศที่ถึงกำหนดวันเริ่มแล้ว)
+                              const todayLocal = new Date();
+                              todayLocal.setHours(0,0,0,0);
+                              const startD = new Date(a.date);
+                              startD.setHours(0,0,0,0);
+                              if (todayLocal < startD) return false;
+
+                              // ตรวจสอบสิทธิ์การเข้าถึงว่าประกาศนี้ส่งถึงหน่วยงานของผู้ใช้งานหรือไม่
+                              if (a.projectId === 'All' || canAccessAll) return true;
+                              const project = projects.find(p => p.id === a.projectId);
+                              if (!project) return false;
+                              return project.name === currentUser.department || accessibleArray.includes(project.name);
+                          }).sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0, 5); // จำกัดให้แสดงแค่ 5 รายการล่าสุด
+
+                          if (otherAnnouncements.length === 0) return null;
+
+                          return (
+                              <div className="mt-10 pt-6 border-t border-gray-200">
+                                  <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                                      <History size={18} className="text-blue-500"/> ประกาศอื่นๆ ที่ผ่านมา
+                                  </h3>
+                                  <div className="space-y-3">
+                                      {otherAnnouncements.map(ann => (
+                                          <div 
+                                              key={ann.id} 
+                                              className="bg-white hover:bg-blue-50 border border-gray-200 hover:border-blue-300 p-3 rounded-xl cursor-pointer transition-all flex gap-4 group shadow-sm hover:shadow"
+                                              onClick={() => {
+                                                  // ดึงหน้าจอกลับไปด้านบนสุดเวลาเปลี่ยนเรื่อง
+                                                  const modal = document.getElementById('announcement-modal-content');
+                                                  if (modal) modal.scrollTop = 0;
+                                                  setSelectedAnnouncementView(ann);
+                                              }}
+                                          >
+                                              {ann.image ? (
+                                                  <div className="w-14 h-14 rounded-lg bg-gray-100 shrink-0 overflow-hidden border border-gray-200">
+                                                      <img src={ann.image} className="w-full h-full object-cover" alt="" />
+                                                  </div>
+                                              ) : (
+                                                  <div className="w-14 h-14 rounded-lg bg-gray-50 border border-gray-200 text-gray-400 flex items-center justify-center shrink-0 group-hover:text-blue-500 group-hover:bg-white transition-colors">
+                                                      <Radio size={20} />
+                                                  </div>
+                                              )}
+                                              <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                                  <h4 className="font-bold text-sm text-gray-800 truncate group-hover:text-blue-700 transition-colors">{ann.title}</h4>
+                                                  <div className="text-xs text-gray-500 mt-1.5 flex items-center gap-3">
+                                                      <span className="flex items-center gap-1"><Calendar size={12}/> {new Date(ann.date).toLocaleDateString('th-TH', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                                                      {ann.priority === 'High' && <span className="text-red-600 font-bold flex items-center gap-0.5"><AlertTriangle size={12}/> ด่วน</span>}
+                                                  </div>
+                                              </div>
+                                          </div>
+                                      ))}
+                                  </div>
+                              </div>
+                          );
+                      })()}
                   </div>
 
                   <div className="p-4 bg-gray-50 border-t border-gray-200 flex justify-between items-center shrink-0">
