@@ -2094,6 +2094,7 @@ export default function App() {
   // --- NEW: Meeting Invitations State ---
   const [meetingInvitations, setMeetingInvitations] = usePersistentCollection('bmg_meeting_invitations', [], fbUser);
   const [showAddInvitationModal, setShowAddInvitationModal] = useState(false);
+  const [selectedInvitationView, setSelectedInvitationView] = useState(null); // NEW: State สำหรับเก็บข้อมูลหนังสือเชิญที่ถูกเลือกดู
   const [newInvitation, setNewInvitation] = useState({
       id: null,
       meetingId: '',
@@ -2102,6 +2103,36 @@ export default function App() {
       recipient: 'เจ้าของร่วม / สมาชิก / คณะกรรมการ',
       content: '',
       signatory: ''
+  });
+
+  // --- NEW: Meeting Proxies State ---
+  const [meetingProxies, setMeetingProxies] = usePersistentCollection('bmg_meeting_proxies', [], fbUser);
+  const [showAddProxyModal, setShowAddProxyModal] = useState(false);
+  const [selectedProxyView, setSelectedProxyView] = useState(null);
+  const [newProxy, setNewProxy] = useState({
+      id: null,
+      meetingId: '',
+      date: new Date().toISOString().split('T')[0],
+      ownerName: '',
+      unitNo: '',
+      proxyName: '',
+      proxyRelation: 'บุคคลภายนอก', // บุคคลในครอบครัว, ผู้เช่า, บุคคลภายนอก
+      status: 'Pending' // Pending, Verified, Rejected
+  });
+
+  // --- NEW: Meeting Ballots State ---
+  const [meetingBallots, setMeetingBallots] = usePersistentCollection('bmg_meeting_ballots', [], fbUser);
+  const [showAddBallotModal, setShowAddBallotModal] = useState(false);
+  const [selectedBallotView, setSelectedBallotView] = useState(null);
+  const [newBallot, setNewBallot] = useState({
+      id: null,
+      meetingId: '',
+      date: new Date().toISOString().split('T')[0],
+      unitNo: '',
+      ownerName: '',
+      voterName: '',
+      voterType: 'เจ้าของร่วม', // เจ้าของร่วม, ผู้รับมอบฉันทะ
+      status: 'Valid' // Valid (บัตรดี), Void (บัตรเสีย)
   });
 
   // คงใช้ usePersistentState สำหรับข้อมูลที่เป็น Object เดี่ยวๆ
@@ -4504,6 +4535,49 @@ export default function App() {
       triggerAutoSync('Meeting_Invitations_หนังสือเชิญ', nextList, []);
       setShowAddInvitationModal(false);
       alert('บันทึกหนังสือเชิญประชุมเรียบร้อยแล้ว');
+  };
+
+  // --- NEW: Meeting Proxy Handlers ---
+  const handleSaveProxy = (e) => {
+      e.preventDefault();
+      let nextList;
+      const dataToSave = { ...newProxy };
+
+      if (dataToSave.id) {
+          nextList = meetingProxies.map(p => p.id === dataToSave.id ? dataToSave : p);
+      } else {
+          const id = generateId();
+          nextList = [{ ...dataToSave, id, projectId: selectedProject.id }, ...meetingProxies];
+      }
+      
+      setMeetingProxies(nextList);
+      triggerAutoSync('Meeting_Proxies_ใบมอบฉันทะ', nextList, []);
+      setShowAddProxyModal(false);
+      alert('บันทึกใบมอบฉันทะเรียบร้อยแล้ว');
+  };
+
+  // --- NEW: Meeting Ballot Handlers ---
+  const handleSaveBallot = (e) => {
+      e.preventDefault();
+      let nextList;
+      const dataToSave = { ...newBallot };
+
+      // ถ้าเป็นเจ้าของร่วม ให้ชื่อผู้ลงคะแนนตรงกับชื่อเจ้าของโดยอัตโนมัติ (ถ้าไม่ได้กรอก)
+      if (dataToSave.voterType === 'เจ้าของร่วม' && !dataToSave.voterName) {
+          dataToSave.voterName = dataToSave.ownerName;
+      }
+
+      if (dataToSave.id) {
+          nextList = meetingBallots.map(b => b.id === dataToSave.id ? dataToSave : b);
+      } else {
+          const id = generateId();
+          nextList = [{ ...dataToSave, id, projectId: selectedProject.id }, ...meetingBallots];
+      }
+      
+      setMeetingBallots(nextList);
+      triggerAutoSync('Meeting_Ballots_ใบลงคะแนน', nextList, []);
+      setShowAddBallotModal(false);
+      alert('บันทึกข้อมูลใบลงคะแนนเรียบร้อยแล้ว');
   };
 
   // Audit Handlers
@@ -7333,11 +7407,26 @@ export default function App() {
                       const rankStr = rankIndex >= 0 && projAudits.length > 0 ? rankIndex + 1 : '-';
                       const totalProjectsWithAudit = projectAvgScores.filter(p => p.avg > 0).length;
 
+                      // --- NEW: Project Specific Announcements ---
+                      const todayLocalForAnn = new Date();
+                      todayLocalForAnn.setHours(0,0,0,0);
+                      const projectAnnouncements = announcements.filter(a => {
+                          const startD = new Date(a.date);
+                          startD.setHours(0,0,0,0);
+                          if (todayLocalForAnn < startD) return false;
+                          if (a.endDate) {
+                              const endD = new Date(a.endDate);
+                              endD.setHours(0,0,0,0);
+                              if (todayLocalForAnn > endD) return false;
+                          }
+                          return a.projectId === 'All' || a.projectId === selectedProject.id;
+                      }).sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0, 3);
+
                       return (
                           <>
                               {/* Row 1: High Priority Alerts */}
                               {expiringContracts.length > 0 && (
-                                  <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg flex items-start gap-3 shadow-sm">
+                                  <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg flex items-start gap-3 shadow-sm mb-6">
                                       <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={20} />
                                       <div className="flex-1">
                                           <h4 
@@ -7356,6 +7445,48 @@ export default function App() {
                                           </div>
                                       </div>
                                   </div>
+                              )}
+
+                              {/* NEW: Project Announcements Banner */}
+                              {projectAnnouncements.length > 0 && (
+                                  <Card className="p-0 overflow-hidden relative group border-blue-200 mb-6">
+                                      <div className="bg-blue-50 border-b border-blue-100 p-4 flex justify-between items-center">
+                                          <h3 className="font-bold text-blue-800 flex items-center gap-2">
+                                              <Radio size={20} className="text-blue-600" /> ประกาศและข่าวสาร (Announcements)
+                                          </h3>
+                                      </div>
+                                      <div className="divide-y divide-gray-100">
+                                          {projectAnnouncements.map(ann => (
+                                              <div 
+                                                  key={ann.id} 
+                                                  className="p-4 flex items-center justify-between hover:bg-blue-50/50 cursor-pointer transition-colors group/item"
+                                                  onClick={() => setSelectedAnnouncementView(ann)}
+                                              >
+                                                  <div className="flex items-center gap-4 flex-1 min-w-0">
+                                                      {ann.image ? (
+                                                          <div className="w-12 h-12 rounded bg-gray-200 shrink-0 overflow-hidden border border-gray-200">
+                                                              <img src={ann.image} className="w-full h-full object-cover" alt="" />
+                                                          </div>
+                                                      ) : (
+                                                          <div className="w-12 h-12 rounded bg-blue-100 text-blue-500 flex items-center justify-center shrink-0 border border-blue-200">
+                                                              <Radio size={20} />
+                                                          </div>
+                                                      )}
+                                                      <div className="flex-1 min-w-0">
+                                                          <div className="flex items-center gap-2 mb-1">
+                                                              {ann.priority === 'High' && <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded-full">ด่วน</span>}
+                                                              <h4 className="font-bold text-gray-800 truncate group-hover/item:text-blue-600 transition-colors">{ann.title}</h4>
+                                                          </div>
+                                                          <p className="text-sm text-gray-500 truncate">{ann.content}</p>
+                                                      </div>
+                                                  </div>
+                                                  <div className="hidden md:flex flex-col items-end shrink-0 ml-4">
+                                                      <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded">{new Date(ann.date).toLocaleDateString('th-TH', { month: 'short', day: 'numeric' })}</span>
+                                                  </div>
+                                              </div>
+                                          ))}
+                                      </div>
+                                  </Card>
                               )}
 
                               {/* Row 2: Main Overview Cards */}
@@ -11407,15 +11538,21 @@ export default function App() {
                               <tbody className="divide-y divide-gray-100 bg-white">
                                   {meetingInvitations.filter(m => m.projectId === selectedProject.id).length > 0 ? (
                                       meetingInvitations.filter(m => m.projectId === selectedProject.id)
+                                      .sort((a,b) => new Date(b.issueDate) - new Date(a.issueDate))
                                       .map((inv, index) => {
                                           const relatedMeeting = meetingsList.find(m => m.id === inv.meetingId);
                                           return (
-                                          <tr key={inv.id} className="hover:bg-gray-50 transition-colors">
+                                          <tr key={inv.id} className="hover:bg-gray-50 transition-colors cursor-pointer group" onClick={() => setSelectedInvitationView(inv)}>
                                               <td className="p-3 text-center text-gray-500">{index + 1}</td>
                                               <td className="p-3 text-center text-gray-600 font-medium">
                                                   {new Date(inv.issueDate).toLocaleDateString('th-TH')}
                                               </td>
-                                              <td className="p-3 font-bold text-gray-800">{inv.title}</td>
+                                              <td className="p-3">
+                                                  <div className="font-bold text-gray-800 group-hover:text-teal-600 transition-colors flex items-center gap-1.5">
+                                                      {inv.title}
+                                                      <Search size={14} className={`text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity ${isExporting ? 'hidden' : ''}`} />
+                                                  </div>
+                                              </td>
                                               <td className="p-3 text-gray-600">{inv.recipient}</td>
                                               <td className="p-3 text-gray-500 text-xs">
                                                   {relatedMeeting ? (
@@ -11424,7 +11561,7 @@ export default function App() {
                                                       <span className="text-gray-400">- ไม่ได้ระบุ -</span>
                                                   )}
                                               </td>
-                                              <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`}>
+                                              <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`} onClick={(e) => e.stopPropagation()}>
                                                   <div className="flex items-center justify-center gap-1">
                                                       {hasPerm('proj_meeting', 'edit') && (
                                                           <button 
@@ -11461,7 +11598,217 @@ export default function App() {
                   </Card>
                   )}
 
-                  {!['plan', 'meeting_list', 'invitation'].includes(meetingSubTab) && (
+                  {/* --- TAB: ใบมอบฉันทะ --- */}
+                  {meetingSubTab === 'proxy' && (
+                  <Card id="print-proxy-area">
+                      <div className="p-4 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white">
+                          <h3 className="font-bold flex items-center gap-2 text-gray-800">
+                              <FileText size={20} className="text-teal-600" /> ใบมอบฉันทะ (Proxy Forms)
+                          </h3>
+                          <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
+                              <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(meetingProxies.filter(m => m.projectId === selectedProject.id), 'proxies_list')}>{t('exportCSV')}</Button>
+                              {hasPerm('proj_meeting', 'save') && <Button size="sm" icon={Plus} className="bg-teal-600 hover:bg-teal-700" onClick={() => {
+                                  setNewProxy({ 
+                                      id: null, meetingId: '', date: new Date().toISOString().split('T')[0], 
+                                      ownerName: '', unitNo: '', proxyName: '', proxyRelation: 'บุคคลภายนอก', status: 'Pending' 
+                                  });
+                                  setShowAddProxyModal(true);
+                              }}>สร้างใบมอบฉันทะ</Button>}
+                          </div>
+                      </div>
+
+                      <div className={isExporting ? "pb-4" : "overflow-x-auto"}>
+                          <table className="w-full text-sm text-left">
+                              <thead className="bg-gray-50 text-gray-600">
+                                  <tr>
+                                      <th className="p-3 border-b text-center w-12">{t('col_seq')}</th>
+                                      <th className="p-3 border-b text-center">วันที่รับเอกสาร</th>
+                                      <th className="p-3 border-b text-center">ห้อง / เลขที่</th>
+                                      <th className="p-3 border-b">ผู้มอบฉันทะ (เจ้าของร่วม)</th>
+                                      <th className="p-3 border-b">ผู้รับมอบฉันทะ</th>
+                                      <th className="p-3 border-b text-center">สถานะ</th>
+                                      <th className={`p-3 border-b text-center w-24 ${isExporting ? 'hidden' : ''}`}>จัดการ</th>
+                                  </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100 bg-white">
+                                  {meetingProxies.filter(m => m.projectId === selectedProject.id).length > 0 ? (
+                                      meetingProxies.filter(m => m.projectId === selectedProject.id)
+                                      .sort((a,b) => new Date(b.date) - new Date(a.date))
+                                      .map((proxy, index) => {
+                                          return (
+                                          <tr key={proxy.id} className="hover:bg-gray-50 transition-colors cursor-pointer group" onClick={() => setSelectedProxyView(proxy)}>
+                                              <td className="p-3 text-center text-gray-500">{index + 1}</td>
+                                              <td className="p-3 text-center text-gray-600 font-medium">
+                                                  {new Date(proxy.date).toLocaleDateString('th-TH')}
+                                              </td>
+                                              <td className="p-3 text-center font-bold text-gray-800">{proxy.unitNo}</td>
+                                              <td className="p-3">
+                                                  <div className="font-bold text-gray-800 group-hover:text-teal-600 transition-colors flex items-center gap-1.5">
+                                                      {proxy.ownerName}
+                                                      <Search size={14} className={`text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity ${isExporting ? 'hidden' : ''}`} />
+                                                  </div>
+                                              </td>
+                                              <td className="p-3 text-gray-600">
+                                                  <div className="font-medium">{proxy.proxyName}</div>
+                                                  <div className="text-[10px] text-gray-500">{proxy.proxyRelation}</div>
+                                              </td>
+                                              <td className="p-3 text-center">
+                                                  <span className={`px-2 py-1 rounded-md text-xs font-bold border inline-block w-24 text-center ${
+                                                      proxy.status === 'Verified' ? 'bg-green-50 border-green-200 text-green-700' : 
+                                                      proxy.status === 'Rejected' ? 'bg-red-50 border-red-200 text-red-700' : 
+                                                      'bg-orange-50 border-orange-200 text-orange-700'
+                                                  }`}>
+                                                      {proxy.status === 'Verified' ? 'ตรวจสอบแล้ว' : proxy.status === 'Rejected' ? 'เอกสารไม่สมบูรณ์' : 'รอตรวจสอบ'}
+                                                  </span>
+                                              </td>
+                                              <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`} onClick={(e) => e.stopPropagation()}>
+                                                  <div className="flex items-center justify-center gap-1">
+                                                      {hasPerm('proj_meeting', 'edit') && (
+                                                          <button 
+                                                              onClick={() => { setNewProxy(proxy); setShowAddProxyModal(true); }}
+                                                              className="text-gray-400 hover:text-blue-600 p-1.5 rounded-md hover:bg-blue-50 transition-colors"
+                                                              title="แก้ไขข้อมูล"
+                                                          >
+                                                              <Edit size={16} />
+                                                          </button>
+                                                      )}
+                                                      {hasPerm('proj_meeting', 'delete') && (
+                                                          <button 
+                                                              onClick={() => showConfirm('ยืนยันการลบ', `คุณต้องการลบใบมอบฉันทะของห้อง ${proxy.unitNo} ใช่หรือไม่?`, () => setMeetingProxies(prev => prev.filter(m => m.id !== proxy.id)))}
+                                                              className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
+                                                              title="ลบข้อมูล"
+                                                          >
+                                                              <Trash2 size={16} />
+                                                          </button>
+                                                      )}
+                                                  </div>
+                                              </td>
+                                          </tr>
+                                      )})
+                                  ) : (
+                                      <tr>
+                                          <td colSpan="7" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">
+                                              ยังไม่มีข้อมูลใบมอบฉันทะ คลิก "สร้างใบมอบฉันทะ" เพื่อเริ่มต้น
+                                          </td>
+                                      </tr>
+                                  )}
+                              </tbody>
+                          </table>
+                      </div>
+                  </Card>
+                  )}
+
+                  {/* --- TAB: ใบลงคะแนน (Ballots) --- */}
+                  {meetingSubTab === 'ballot' && (
+                  <Card id="print-ballot-area">
+                      <div className="p-4 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white">
+                          <h3 className="font-bold flex items-center gap-2 text-gray-800">
+                              <CheckSquare size={20} className="text-teal-600" /> ใบลงคะแนน (Voting Ballots)
+                          </h3>
+                          <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
+                              <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(meetingBallots.filter(m => m.projectId === selectedProject.id), 'ballots_list')}>{t('exportCSV')}</Button>
+                              {hasPerm('proj_meeting', 'save') && <Button size="sm" icon={Plus} className="bg-teal-600 hover:bg-teal-700" onClick={() => {
+                                  setNewBallot({ 
+                                      id: null, meetingId: '', date: new Date().toISOString().split('T')[0], 
+                                      unitNo: '', ownerName: '', voterName: '', voterType: 'เจ้าของร่วม', status: 'Valid' 
+                                  });
+                                  setShowAddBallotModal(true);
+                              }}>สร้างใบลงคะแนน</Button>}
+                          </div>
+                      </div>
+
+                      <div className={isExporting ? "pb-4" : "overflow-x-auto"}>
+                          <table className="w-full text-sm text-left">
+                              <thead className="bg-gray-50 text-gray-600">
+                                  <tr>
+                                      <th className="p-3 border-b text-center w-12">{t('col_seq')}</th>
+                                      <th className="p-3 border-b w-48">อ้างอิงการประชุม</th>
+                                      <th className="p-3 border-b text-center w-24">ห้อง/เลขที่</th>
+                                      <th className="p-3 border-b">ชื่อผู้ลงคะแนน</th>
+                                      <th className="p-3 border-b text-center">ประเภท</th>
+                                      <th className="p-3 border-b text-center">สถานะบัตร</th>
+                                      <th className={`p-3 border-b text-center w-24 ${isExporting ? 'hidden' : ''}`}>จัดการ</th>
+                                  </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100 bg-white">
+                                  {meetingBallots.filter(m => m.projectId === selectedProject.id).length > 0 ? (
+                                      meetingBallots.filter(m => m.projectId === selectedProject.id)
+                                      .sort((a,b) => new Date(b.date) - new Date(a.date))
+                                      .map((ballot, index) => {
+                                          const relatedMeeting = meetingsList.find(m => m.id === ballot.meetingId);
+                                          return (
+                                          <tr key={ballot.id} className="hover:bg-gray-50 transition-colors cursor-pointer group" onClick={() => setSelectedBallotView(ballot)}>
+                                              <td className="p-3 text-center text-gray-500">{index + 1}</td>
+                                              <td className="p-3 text-gray-600">
+                                                  {relatedMeeting ? (
+                                                      <div className="line-clamp-1 font-medium text-gray-800 group-hover:text-teal-600 transition-colors" title={relatedMeeting.title}>{relatedMeeting.title}</div>
+                                                  ) : (
+                                                      <span className="text-gray-400">- ไม่ได้ระบุ -</span>
+                                                  )}
+                                                  <div className="text-[10px] text-gray-400 mt-0.5">ออกบัตร: {new Date(ballot.date).toLocaleDateString('th-TH')}</div>
+                                              </td>
+                                              <td className="p-3 text-center font-bold text-gray-800">{ballot.unitNo}</td>
+                                              <td className="p-3">
+                                                  <div className="font-bold text-gray-800 flex items-center gap-1.5">
+                                                      {ballot.voterName || ballot.ownerName}
+                                                      <Search size={14} className={`text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity ${isExporting ? 'hidden' : ''}`} />
+                                                  </div>
+                                                  {ballot.voterType === 'ผู้รับมอบฉันทะ' && (
+                                                      <div className="text-[10px] text-gray-500 mt-0.5">แทน: {ballot.ownerName}</div>
+                                                  )}
+                                              </td>
+                                              <td className="p-3 text-center">
+                                                  <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${
+                                                      ballot.voterType === 'เจ้าของร่วม' ? 'bg-blue-100 text-blue-700 border border-blue-200' : 'bg-purple-100 text-purple-700 border border-purple-200'
+                                                  }`}>
+                                                      {ballot.voterType}
+                                                  </span>
+                                              </td>
+                                              <td className="p-3 text-center">
+                                                  <span className={`px-2 py-1 rounded-md text-xs font-bold border inline-block w-20 text-center ${
+                                                      ballot.status === 'Valid' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'
+                                                  }`}>
+                                                      {ballot.status === 'Valid' ? 'บัตรดี' : 'บัตรเสีย'}
+                                                  </span>
+                                              </td>
+                                              <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`} onClick={(e) => e.stopPropagation()}>
+                                                  <div className="flex items-center justify-center gap-1">
+                                                      {hasPerm('proj_meeting', 'edit') && (
+                                                          <button 
+                                                              onClick={() => { setNewBallot(ballot); setShowAddBallotModal(true); }}
+                                                              className="text-gray-400 hover:text-blue-600 p-1.5 rounded-md hover:bg-blue-50 transition-colors"
+                                                              title="แก้ไขข้อมูล"
+                                                          >
+                                                              <Edit size={16} />
+                                                          </button>
+                                                      )}
+                                                      {hasPerm('proj_meeting', 'delete') && (
+                                                          <button 
+                                                              onClick={() => showConfirm('ยืนยันการลบ', `คุณต้องการลบใบลงคะแนนของห้อง ${ballot.unitNo} ใช่หรือไม่?`, () => setMeetingBallots(prev => prev.filter(m => m.id !== ballot.id)))}
+                                                              className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
+                                                              title="ลบข้อมูล"
+                                                          >
+                                                              <Trash2 size={16} />
+                                                          </button>
+                                                      )}
+                                                  </div>
+                                              </td>
+                                          </tr>
+                                      )})
+                                  ) : (
+                                      <tr>
+                                          <td colSpan="7" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">
+                                              ยังไม่มีข้อมูลใบลงคะแนน คลิก "สร้างใบลงคะแนน" เพื่อเริ่มต้น
+                                          </td>
+                                      </tr>
+                                  )}
+                              </tbody>
+                          </table>
+                      </div>
+                  </Card>
+                  )}
+
+                  {!['plan', 'meeting_list', 'invitation', 'proxy', 'ballot'].includes(meetingSubTab) && (
                       <Card className="p-12 flex flex-col items-center justify-center text-center border-dashed border-2 min-h-[400px] bg-gray-50">
                           <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mb-4 shadow-sm border border-gray-200">
                               <Hammer className="text-gray-400" size={32} />
@@ -16073,203 +16420,578 @@ export default function App() {
         </div>
       )}
 
-      {/* NEW: Add/Edit Invitation Modal */}
-      {showAddInvitationModal && (
+      {/* NEW: Selected Invitation Details View Modal */}
+      {selectedInvitationView && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in overflow-y-auto">
+            <div className={`bg-white rounded-xl shadow-xl w-full max-w-4xl overflow-y-auto relative ${isExporting ? 'p-0 shadow-none m-0 h-max' : 'p-8 m-4 max-h-[95vh]'}`}>
+                <button 
+                    onClick={() => setSelectedInvitationView(null)} 
+                    className={`absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors z-10 ${isExporting ? 'hidden' : ''}`}
+                >
+                    <X size={24} />
+                </button>
+
+                <div id="print-invitation-detail" className={`bg-white text-gray-800 ${isExporting ? 'w-[210mm] min-h-[297mm] mx-auto box-border px-[25mm] py-[30mm]' : 'w-full px-4 md:px-12 py-8'}`}>
+                    
+                    <div className="flex justify-between items-start mb-8 text-sm">
+                        <div className="text-gray-500">
+                            ที่ ..............................
+                        </div>
+                        <div className="text-right text-gray-700">
+                            <p className="font-bold text-base mb-1">นิติบุคคลอาคารชุด / หมู่บ้าน {selectedProject?.name}</p>
+                            <p className="max-w-[250px] whitespace-pre-wrap">{selectedProject?.address}</p>
+                        </div>
+                    </div>
+
+                    <div className="flex justify-end mb-8 text-sm text-gray-800">
+                        <div>
+                            <p>วันที่ {new Date(selectedInvitationView.issueDate).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'})}</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4 text-base leading-relaxed mb-10 text-gray-800">
+                        <div className="flex items-start gap-4">
+                            <div className="font-bold w-12 shrink-0">เรื่อง</div>
+                            <div className="font-bold">{selectedInvitationView.title}</div>
+                        </div>
+                        <div className="flex items-start gap-4">
+                            <div className="font-bold w-12 shrink-0">เรียน</div>
+                            <div>{selectedInvitationView.recipient}</div>
+                        </div>
+                        {selectedInvitationView.meetingId && (
+                            <div className="flex items-start gap-4">
+                                <div className="font-bold w-12 shrink-0">อ้างถึง</div>
+                                <div>กำหนดการประชุม: {meetingsList.find(m => m.id === selectedInvitationView.meetingId)?.title || '-'}</div>
+                            </div>
+                        )}
+                        <div className="flex items-start gap-4">
+                            <div className="font-bold w-12 shrink-0 text-transparent">อ้างถึง</div>
+                            <div className="flex-1 border-b border-dotted border-gray-400 mt-5"></div>
+                        </div>
+                    </div>
+
+                    <div className="pl-0 md:pl-16 whitespace-pre-wrap text-base leading-loose min-h-[300px] mb-16 text-gray-800 font-medium">
+                        {selectedInvitationView.content}
+                    </div>
+
+                    <div className="flex justify-end mt-20 pr-4 md:pr-16 text-center text-gray-800">
+                        <div className="w-64">
+                            <p className="mb-4 text-left pl-6">ขอแสดงความนับถือ</p>
+                            <div className="h-20"></div>
+                            <p>( {selectedInvitationView.signatory || '.......................................................'} )</p>
+                            <p className="text-sm mt-1">ผู้จัดการนิติบุคคล / คณะกรรมการ</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div className={`mt-8 flex justify-end gap-2 pt-4 border-t border-gray-200 bg-white ${isExporting ? 'hidden' : ''}`}>
+                    {hasPerm('proj_meeting', 'edit') && (
+                        <Button variant="outline" icon={Edit} onClick={() => {
+                            setNewInvitation(selectedInvitationView);
+                            setSelectedInvitationView(null);
+                            setShowAddInvitationModal(true);
+                        }}>
+                            แก้ไขข้อมูล
+                        </Button>
+                    )}
+                    <Button variant="secondary" onClick={() => setSelectedInvitationView(null)}>ปิดหน้าต่าง</Button>
+                    <Button icon={Printer} onClick={() => {
+                        const container = document.getElementById('print-invitation-detail')?.closest('.overflow-y-auto');
+                        if (container) container.scrollTop = 0;
+                        setTimeout(() => handleExportPDF('print-invitation-detail', `Invitation_${selectedInvitationView.title}.pdf`, 'portrait', [0, 0, 0, 0]), 100);
+                    }} disabled={isExporting}>
+                        {isExporting ? 'กำลังโหลด...' : 'ดาวน์โหลด PDF'}
+                    </Button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* NEW: Add/Edit Proxy Modal */}
+      {showAddProxyModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl p-6 max-h-[90vh] overflow-y-auto">
                 <div className="flex justify-between items-center mb-6 border-b pb-4">
                     <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                        <Mail className="text-teal-600" />
-                        {newInvitation.id ? 'แก้ไขหนังสือเชิญประชุม' : 'สร้างหนังสือเชิญประชุม (New Invitation)'}
+                        <FileText className="text-teal-600" />
+                        {newProxy.id ? 'แก้ไขใบมอบฉันทะ' : 'สร้างใบมอบฉันทะ (New Proxy)'}
                     </h2>
-                    <button onClick={() => setShowAddInvitationModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                    <button onClick={() => setShowAddProxyModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
                 </div>
-                <form onSubmit={handleSaveInvitation} className="space-y-4">
+                <form onSubmit={handleSaveProxy} className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-bold text-gray-700 mb-1">อ้างอิงถึงการประชุม (Related Meeting)</label>
                             <select 
                                 className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
-                                value={newInvitation.meetingId}
-                                onChange={e => setNewInvitation({...newInvitation, meetingId: e.target.value})}
+                                value={newProxy.meetingId}
+                                onChange={e => setNewProxy({...newProxy, meetingId: e.target.value})}
+                                required
                             >
-                                <option value="">-- ไม่ระบุ / สร้างลอยๆ --</option>
+                                <option value="" disabled>-- เลือกการประชุม --</option>
                                 {meetingsList.filter(m => m.projectId === selectedProject.id).map(m => (
                                     <option key={m.id} value={m.id}>{m.title} ({new Date(m.date).toLocaleDateString('th-TH')})</option>
                                 ))}
                             </select>
                         </div>
                         <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-1">วันที่ออกหนังสือ (Issue Date)</label>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">วันที่ทำเอกสาร (Date)</label>
                             <input 
                                 type="date" 
                                 required
                                 className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
-                                value={newInvitation.issueDate}
-                                onChange={e => setNewInvitation({...newInvitation, issueDate: e.target.value})}
+                                value={newProxy.date}
+                                onChange={e => setNewProxy({...newProxy, date: e.target.value})}
                             />
                         </div>
                     </div>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg border border-gray-200">
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-1">เรื่อง (Subject)</label>
-                            <input 
-                                type="text" 
-                                required 
-                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
-                                value={newInvitation.title}
-                                onChange={e => setNewInvitation({...newInvitation, title: e.target.value})}
-                                placeholder="เช่น ขอเชิญเข้าร่วมประชุมใหญ่สามัญประจำปี"
-                            />
+                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 space-y-4">
+                        <h3 className="font-bold text-gray-700 border-b pb-2 mb-3">ข้อมูลผู้มอบฉันทะ (เจ้าของร่วม)</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="md:col-span-2">
+                                <label className="block text-sm font-bold text-gray-700 mb-1">ชื่อ - นามสกุล (Owner Name)</label>
+                                <input 
+                                    type="text" 
+                                    required 
+                                    className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
+                                    value={newProxy.ownerName}
+                                    onChange={e => setNewProxy({...newProxy, ownerName: e.target.value})}
+                                    placeholder="ระบุชื่อเจ้าของห้อง/บ้าน"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">ห้องเลขที่ (Unit No.)</label>
+                                <input 
+                                    type="text" 
+                                    required 
+                                    className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
+                                    value={newProxy.unitNo}
+                                    onChange={e => setNewProxy({...newProxy, unitNo: e.target.value})}
+                                    placeholder="ระบุเลขห้อง"
+                                />
+                            </div>
                         </div>
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-1">เรียน (To)</label>
-                            <input 
-                                type="text" 
-                                required 
-                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
-                                value={newInvitation.recipient}
-                                onChange={e => setNewInvitation({...newInvitation, recipient: e.target.value})}
-                                placeholder="เช่น ท่านเจ้าของร่วม / สมาชิก"
-                            />
+                    </div>
+
+                    <div className="bg-teal-50 p-4 rounded-lg border border-teal-100 space-y-4">
+                        <h3 className="font-bold text-teal-800 border-b border-teal-200 pb-2 mb-3">ข้อมูลผู้รับมอบฉันทะ (ตัวแทน)</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-bold text-teal-700 mb-1">ชื่อ - นามสกุล (Proxy Name)</label>
+                                <input 
+                                    type="text" 
+                                    required 
+                                    className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
+                                    value={newProxy.proxyName}
+                                    onChange={e => setNewProxy({...newProxy, proxyName: e.target.value})}
+                                    placeholder="ระบุชื่อผู้แทน"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-teal-700 mb-1">ความเกี่ยวข้อง (Relation)</label>
+                                <select 
+                                    className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
+                                    value={newProxy.proxyRelation}
+                                    onChange={e => setNewProxy({...newProxy, proxyRelation: e.target.value})}
+                                >
+                                    <option value="บุคคลในครอบครัว">บุคคลในครอบครัว (บิดา/มารดา/บุตร/คู่สมรส)</option>
+                                    <option value="ผู้เช่า">ผู้เช่า (Tenant)</option>
+                                    <option value="บุคคลภายนอก">บุคคลภายนอก (Other Person)</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
 
                     <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">รายละเอียด / เนื้อหาในจดหมาย (Content)</label>
-                        <textarea 
-                            className="w-full border rounded-md p-3 h-40 resize-none outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
-                            value={newInvitation.content}
-                            onChange={e => setNewInvitation({...newInvitation, content: e.target.value})}
-                            placeholder="พิมพ์ข้อความเนื้อหาในจดหมายเชิญประชุม..."
-                        ></textarea>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">ลงชื่อผู้เชิญ (Signatory)</label>
-                        <input 
-                            type="text" 
-                            className="w-full md:w-1/2 border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
-                            value={newInvitation.signatory}
-                            onChange={e => setNewInvitation({...newInvitation, signatory: e.target.value})}
-                            placeholder="ระบุชื่อผู้ลงนาม เช่น นายสมชาย ใจดี (ผู้จัดการนิติบุคคล)"
-                        />
+                        <label className="block text-sm font-bold text-gray-700 mb-1">สถานะเอกสาร (Status)</label>
+                        <select 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
+                            value={newProxy.status}
+                            onChange={e => setNewProxy({...newProxy, status: e.target.value})}
+                        >
+                            <option value="Pending">รอตรวจสอบ (Pending)</option>
+                            <option value="Verified">ตรวจสอบแล้ว เอกสารครบถ้วน (Verified)</option>
+                            <option value="Rejected">เอกสารไม่สมบูรณ์ / เป็นโมฆะ (Rejected)</option>
+                        </select>
                     </div>
 
                     <div className="flex justify-end gap-2 pt-4 border-t mt-6">
-                        <Button variant="secondary" onClick={() => setShowAddInvitationModal(false)}>ยกเลิก</Button>
-                        <Button type="submit" icon={Save}>บันทึกหนังสือเชิญ</Button>
+                        <Button variant="secondary" onClick={() => setShowAddProxyModal(false)}>ยกเลิก</Button>
+                        <Button type="submit" icon={Save}>บันทึกข้อมูล</Button>
                     </div>
                 </form>
             </div>
         </div>
       )}
 
-      {/* Selected Meeting Details View Modal */}
-      {selectedMeetingView && (
+      {/* NEW: Selected Proxy Details View Modal */}
+      {selectedProxyView && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in overflow-y-auto">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-8 max-h-[95vh] overflow-y-auto relative">
+            <div className={`bg-white rounded-xl shadow-xl w-full max-w-4xl overflow-y-auto relative ${isExporting ? 'p-0 shadow-none m-0 h-max' : 'p-8 m-4 max-h-[95vh]'}`}>
                 <button 
-                    onClick={() => setSelectedMeetingView(null)} 
-                    className="absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors"
+                    onClick={() => setSelectedProxyView(null)} 
+                    className={`absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors z-10 ${isExporting ? 'hidden' : ''}`}
                 >
                     <X size={24} />
                 </button>
 
-                <div className="mb-6 border-b pb-4 pr-8">
-                    <div className="flex items-center gap-2 mb-2">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                            selectedMeetingView.type === 'AGM' ? 'bg-purple-100 text-purple-700' :
-                            selectedMeetingView.type === 'EGM' ? 'bg-orange-100 text-orange-700' :
-                            'bg-blue-100 text-blue-700'
-                        }`}>
-                            {selectedMeetingView.type === 'AGM' ? 'สามัญประจำปี (AGM)' : selectedMeetingView.type === 'EGM' ? 'วิสามัญ (EGM)' : 'คณะกรรมการ (Committee)'}
-                        </span>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                            selectedMeetingView.status === 'Completed' ? 'bg-green-50 border-green-200 text-green-700' : 
-                            selectedMeetingView.status === 'Postponed' ? 'bg-orange-50 border-orange-200 text-orange-700' : 
-                            selectedMeetingView.status === 'Cancelled' ? 'bg-gray-100 border-gray-300 text-gray-600' :
-                            'bg-blue-50 border-blue-200 text-blue-700'
-                        }`}>
-                            {selectedMeetingView.status === 'Completed' ? 'เสร็จสิ้น' : selectedMeetingView.status === 'Postponed' ? 'เลื่อน' : selectedMeetingView.status === 'Cancelled' ? 'ยกเลิก' : 'รอดำเนินการ'}
-                        </span>
+                <div id="print-proxy-detail" className={`bg-white text-gray-800 ${isExporting ? 'w-[210mm] min-h-[297mm] mx-auto box-border px-[25mm] py-[30mm]' : 'w-full px-4 md:px-12 py-8'}`}>
+                    
+                    <div className="text-center mb-8">
+                        <h2 className="text-2xl font-bold mb-2">หนังสือมอบฉันทะ</h2>
+                        <h3 className="text-lg font-bold text-gray-700">นิติบุคคลอาคารชุด / หมู่บ้าน {selectedProject?.name}</h3>
                     </div>
-                    <h2 className="text-2xl font-bold text-gray-800 leading-tight">
-                        {selectedMeetingView.title}
-                    </h2>
+
+                    <div className="flex justify-end mb-8 text-sm text-gray-800">
+                        <div className="w-64">
+                            <p>ทำที่ นิติบุคคลฯ {selectedProject?.name}</p>
+                            <p className="mt-2">วันที่ {new Date(selectedProxyView.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'})}</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-6 text-base leading-loose mb-10 text-gray-800">
+                        <p>
+                            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ข้าพเจ้า <span className="font-bold border-b border-dotted border-gray-500 inline-block px-4 text-center min-w-[200px]">{selectedProxyView.ownerName}</span> 
+                            เป็นเจ้าของร่วม / สมาชิก อาคารชุด/หมู่บ้าน {selectedProject?.name} 
+                            ห้องเลขที่ / บ้านเลขที่ <span className="font-bold border-b border-dotted border-gray-500 inline-block px-4 text-center min-w-[100px]">{selectedProxyView.unitNo}</span>
+                        </p>
+                        <p>
+                            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ขอมอบฉันทะให้ <span className="font-bold border-b border-dotted border-gray-500 inline-block px-4 text-center min-w-[200px]">{selectedProxyView.proxyName}</span> 
+                            ความเกี่ยวข้องเป็น <span className="font-bold border-b border-dotted border-gray-500 inline-block px-4 text-center min-w-[100px]">{selectedProxyView.proxyRelation}</span> ของข้าพเจ้า
+                        </p>
+                        <p>
+                            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ให้เป็นผู้รับมอบฉันทะของข้าพเจ้า มีสิทธิเข้าร่วมประชุม ออกเสียงลงคะแนน และกระทำการใดๆ ในการประชุม
+                            <span className="font-bold border-b border-dotted border-gray-500 inline-block px-2 text-center min-w-[200px] mx-2">
+                                {meetingsList.find(m => m.id === selectedProxyView.meetingId)?.title || '.........................................................'}
+                            </span>
+                            แทนข้าพเจ้าได้ทุกประการ
+                        </p>
+                        <p>
+                            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;กิจการใดที่ผู้รับมอบฉันทะได้กระทำไปในการประชุมดังกล่าว ให้ถือเสมือนว่าข้าพเจ้าได้กระทำด้วยตนเองทุกประการ และข้าพเจ้าขอรับผิดชอบในการกระทำนั้นๆ ทั้งสิ้น
+                        </p>
+                    </div>
+
+                    <div className="flex justify-between mt-20 px-8 text-center text-gray-800">
+                        <div className="w-56">
+                            <div className="h-16"></div>
+                            <p>( ........................................................ )</p>
+                            <p className="mt-2 font-bold">ผู้มอบฉันทะ</p>
+                            <p className="text-sm mt-1">{selectedProxyView.ownerName}</p>
+                        </div>
+                        <div className="w-56">
+                            <div className="h-16"></div>
+                            <p>( ........................................................ )</p>
+                            <p className="mt-2 font-bold">ผู้รับมอบฉันทะ</p>
+                            <p className="text-sm mt-1">{selectedProxyView.proxyName}</p>
+                        </div>
+                    </div>
+                    
+                    <div className="flex justify-center mt-12 px-8 text-center text-gray-800">
+                        <div className="w-56">
+                            <div className="h-16"></div>
+                            <p>( ........................................................ )</p>
+                            <p className="mt-2 font-bold">พยาน / ผู้ตรวจสอบ</p>
+                            <p className="text-sm mt-1">เจ้าหน้าที่นิติบุคคล</p>
+                        </div>
+                    </div>
+                    
+                    {!isExporting && (
+                        <div className="mt-16 flex justify-end">
+                            <span className={`px-4 py-2 rounded-lg text-sm font-bold border shadow-sm ${
+                                selectedProxyView.status === 'Verified' ? 'bg-green-50 border-green-200 text-green-700' : 
+                                selectedProxyView.status === 'Rejected' ? 'bg-red-50 border-red-200 text-red-700' : 
+                                'bg-orange-50 border-orange-200 text-orange-700'
+                            }`}>
+                                สถานะเอกสาร: {selectedProxyView.status === 'Verified' ? 'ตรวจสอบแล้ว' : selectedProxyView.status === 'Rejected' ? 'เอกสารไม่สมบูรณ์ / เป็นโมฆะ' : 'รอตรวจสอบ (Pending)'}
+                            </span>
+                        </div>
+                    )}
                 </div>
 
-                <div className="space-y-6">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-gray-50 p-5 rounded-xl border border-gray-100 text-sm">
-                        <div className="flex items-start gap-3">
-                            <div className="p-2 bg-white rounded-lg shadow-sm border border-gray-200 text-blue-600 shrink-0"><Calendar size={18}/></div>
+                <div className={`mt-8 flex justify-end gap-2 pt-4 border-t border-gray-200 bg-white ${isExporting ? 'hidden' : ''}`}>
+                    {hasPerm('proj_meeting', 'edit') && (
+                        <Button variant="outline" icon={Edit} onClick={() => {
+                            setNewProxy(selectedProxyView);
+                            setSelectedProxyView(null);
+                            setShowAddProxyModal(true);
+                        }}>
+                            แก้ไขข้อมูล / อัปเดตสถานะ
+                        </Button>
+                    )}
+                    <Button variant="secondary" onClick={() => setSelectedProxyView(null)}>ปิดหน้าต่าง</Button>
+                    <Button icon={Printer} onClick={() => {
+                        const container = document.getElementById('print-proxy-detail')?.closest('.overflow-y-auto');
+                        if (container) container.scrollTop = 0;
+                        setTimeout(() => handleExportPDF('print-proxy-detail', `Proxy_${selectedProxyView.unitNo}.pdf`, 'portrait', [0, 0, 0, 0]), 100);
+                    }} disabled={isExporting}>
+                        {isExporting ? 'กำลังโหลด...' : 'ดาวน์โหลด PDF'}
+                    </Button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* NEW: Add/Edit Ballot Modal */}
+      {showAddBallotModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
+                <div className="flex justify-between items-center mb-6 border-b pb-4">
+                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                        <CheckSquare className="text-teal-600" />
+                        {newBallot.id ? 'แก้ไขข้อมูลใบลงคะแนน' : 'สร้างใบลงคะแนน (New Ballot)'}
+                    </h2>
+                    <button onClick={() => setShowAddBallotModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                </div>
+                <form onSubmit={handleSaveBallot} className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">อ้างอิงถึงการประชุม (Related Meeting)</label>
+                            <select 
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
+                                value={newBallot.meetingId}
+                                onChange={e => setNewBallot({...newBallot, meetingId: e.target.value})}
+                                required
+                            >
+                                <option value="" disabled>-- เลือกการประชุม --</option>
+                                {meetingsList.filter(m => m.projectId === selectedProject.id).map(m => (
+                                    <option key={m.id} value={m.id}>{m.title} ({new Date(m.date).toLocaleDateString('th-TH')})</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">วันที่ออกบัตร (Date)</label>
+                            <input 
+                                type="date" 
+                                required
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
+                                value={newBallot.date}
+                                onChange={e => setNewBallot({...newBallot, date: e.target.value})}
+                            />
+                        </div>
+                    </div>
+                    
+                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 space-y-4">
+                        <h3 className="font-bold text-gray-700 border-b pb-2 mb-3 flex items-center gap-2"><MapPin size={16}/> ข้อมูลกรรมสิทธิ์</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div>
-                                <span className="block text-xs font-bold text-gray-500 mb-0.5">วันที่ประชุม</span>
-                                <span className="font-bold text-gray-800">{new Date(selectedMeetingView.date).toLocaleDateString('th-TH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'})}</span>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">ห้อง/บ้านเลขที่ (Unit No.)</label>
+                                <input 
+                                    type="text" 
+                                    required 
+                                    className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 font-bold text-teal-700"
+                                    value={newBallot.unitNo}
+                                    onChange={e => setNewBallot({...newBallot, unitNo: e.target.value})}
+                                    placeholder="เช่น 101/5"
+                                />
+                            </div>
+                            <div className="md:col-span-2">
+                                <label className="block text-sm font-bold text-gray-700 mb-1">ชื่อเจ้าของร่วม (Owner Name)</label>
+                                <input 
+                                    type="text" 
+                                    required 
+                                    className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
+                                    value={newBallot.ownerName}
+                                    onChange={e => setNewBallot({...newBallot, ownerName: e.target.value})}
+                                    placeholder="ระบุชื่อเจ้าของกรรมสิทธิ์"
+                                />
                             </div>
                         </div>
-                        <div className="flex items-start gap-3">
-                            <div className="p-2 bg-white rounded-lg shadow-sm border border-gray-200 text-orange-600 shrink-0"><Clock size={18}/></div>
+                    </div>
+
+                    <div className="bg-teal-50 p-4 rounded-lg border border-teal-100 space-y-4">
+                        <h3 className="font-bold text-teal-800 border-b border-teal-200 pb-2 mb-3 flex items-center gap-2"><User size={16}/> ข้อมูลผู้ใช้สิทธิ์ลงคะแนน</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
-                                <span className="block text-xs font-bold text-gray-500 mb-0.5">เวลา</span>
-                                <span className="font-bold text-gray-800">{selectedMeetingView.time} น.</span>
+                                <label className="block text-sm font-bold text-teal-700 mb-1">ประเภทผู้ลงคะแนน (Voter Type)</label>
+                                <select 
+                                    className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
+                                    value={newBallot.voterType}
+                                    onChange={e => {
+                                        const type = e.target.value;
+                                        setNewBallot({
+                                            ...newBallot, 
+                                            voterType: type,
+                                            // ถ้าเปลี่ยนเป็นเจ้าของร่วม ให้เคลียร์ชื่อตัวแทนออก
+                                            voterName: type === 'เจ้าของร่วม' ? newBallot.ownerName : ''
+                                        });
+                                    }}
+                                >
+                                    <option value="เจ้าของร่วม">เจ้าของร่วม (มาด้วยตนเอง)</option>
+                                    <option value="ผู้รับมอบฉันทะ">ผู้รับมอบฉันทะ (ตัวแทน)</option>
+                                </select>
                             </div>
-                        </div>
-                        <div className="flex items-start gap-3 sm:col-span-2">
-                            <div className="p-2 bg-white rounded-lg shadow-sm border border-gray-200 text-red-500 shrink-0"><MapPin size={18}/></div>
                             <div>
-                                <span className="block text-xs font-bold text-gray-500 mb-0.5">สถานที่</span>
-                                <span className="font-bold text-gray-800">{selectedMeetingView.location || 'ไม่ได้ระบุสถานที่'}</span>
+                                <label className="block text-sm font-bold text-teal-700 mb-1">ชื่อผู้ลงคะแนน (Voter Name)</label>
+                                <input 
+                                    type="text" 
+                                    className={`w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 ${newBallot.voterType === 'เจ้าของร่วม' ? 'bg-gray-100 text-gray-500' : 'bg-white'}`}
+                                    value={newBallot.voterType === 'เจ้าของร่วม' ? newBallot.ownerName : newBallot.voterName}
+                                    onChange={e => newBallot.voterType !== 'เจ้าของร่วม' && setNewBallot({...newBallot, voterName: e.target.value})}
+                                    placeholder={newBallot.voterType === 'เจ้าของร่วม' ? 'ยึดตามชื่อเจ้าของร่วม' : 'ระบุชื่อตัวแทน'}
+                                    disabled={newBallot.voterType === 'เจ้าของร่วม'}
+                                    required={newBallot.voterType !== 'เจ้าของร่วม'}
+                                />
                             </div>
                         </div>
                     </div>
 
                     <div>
-                        <h3 className="font-bold text-gray-800 mb-2 border-b pb-2 flex items-center gap-2">
-                            <ClipboardList size={18} className="text-gray-400"/> วาระการประชุม (Agenda)
-                        </h3>
-                        <div className="bg-white border border-gray-200 rounded-lg p-4 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed min-h-[100px]">
-                            {selectedMeetingView.agenda || <span className="text-gray-400 italic">ไม่มีรายละเอียดวาระการประชุม</span>}
+                        <label className="block text-sm font-bold text-gray-700 mb-1">สถานะบัตรลงคะแนน (Ballot Status)</label>
+                        <select 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
+                            value={newBallot.status}
+                            onChange={e => setNewBallot({...newBallot, status: e.target.value})}
+                        >
+                            <option value="Valid">บัตรดี (Valid)</option>
+                            <option value="Void">บัตรเสีย / โมฆะ (Void)</option>
+                        </select>
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-4 border-t mt-6">
+                        <Button variant="secondary" onClick={() => setShowAddBallotModal(false)}>ยกเลิก</Button>
+                        <Button type="submit" icon={Save}>บันทึกข้อมูล</Button>
+                    </div>
+                </form>
+            </div>
+        </div>
+      )}
+
+      {/* NEW: Selected Ballot Details View Modal */}
+      {selectedBallotView && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in overflow-y-auto">
+            <div className={`bg-white rounded-xl shadow-xl w-full max-w-4xl overflow-y-auto relative ${isExporting ? 'p-0 shadow-none m-0 h-max' : 'p-8 m-4 max-h-[95vh]'}`}>
+                <button 
+                    onClick={() => setSelectedBallotView(null)} 
+                    className={`absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors z-10 ${isExporting ? 'hidden' : ''}`}
+                >
+                    <X size={24} />
+                </button>
+
+                <div id="print-ballot-detail" className={`bg-white text-gray-800 ${isExporting ? 'w-[210mm] min-h-[297mm] mx-auto box-border px-[20mm] py-[25mm]' : 'w-full px-4 md:px-8 py-4'}`}>
+                    
+                    {/* Ballot Header */}
+                    <div className="text-center mb-8 border-2 border-gray-800 p-4 rounded-lg relative">
+                        <div className="absolute top-2 right-4 text-sm font-mono text-gray-500">Ref: {selectedBallotView.id?.substring(0,6).toUpperCase()}</div>
+                        <h2 className="text-3xl font-black mb-2 tracking-wide text-gray-900">บัตรลงคะแนนเสียง (Voting Ballot)</h2>
+                        <h3 className="text-lg font-bold text-gray-700">{meetingsList.find(m => m.id === selectedBallotView.meetingId)?.title || 'การประชุมนิติบุคคล'}</h3>
+                        <p className="text-sm mt-1 text-gray-600">
+                            วันที่ {new Date(meetingsList.find(m => m.id === selectedBallotView.meetingId)?.date || selectedBallotView.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'})}
+                        </p>
+                    </div>
+
+                    {/* Voter Info */}
+                    <div className="flex justify-between items-start mb-8 text-base border-b-2 border-gray-800 pb-6 gap-4">
+                        <div className="flex-1 space-y-3">
+                            <div className="flex items-center gap-2">
+                                <span className="font-bold w-24 shrink-0">ห้องเลขที่:</span> 
+                                <span className="font-black text-xl border-b border-gray-400 px-4 inline-block min-w-[120px]">{selectedBallotView.unitNo}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="font-bold w-24 shrink-0">เจ้าของร่วม:</span> 
+                                <span className="border-b border-gray-400 px-4 inline-block flex-1">{selectedBallotView.ownerName}</span>
+                            </div>
+                        </div>
+                        <div className="w-1/3 shrink-0 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                            <div className="font-bold mb-2 flex items-center gap-2"><CheckSquare size={16}/> ผู้ใช้สิทธิ์ลงคะแนน</div>
+                            <div className="flex items-center gap-2 mb-1">
+                                <div className={`w-4 h-4 border border-gray-500 rounded-sm flex items-center justify-center ${selectedBallotView.voterType === 'เจ้าของร่วม' ? 'bg-gray-800 text-white' : 'bg-white'}`}>
+                                    {selectedBallotView.voterType === 'เจ้าของร่วม' && <CheckSquare size={12}/>}
+                                </div>
+                                <span>มาด้วยตนเอง</span>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-2">
+                                    <div className={`w-4 h-4 border border-gray-500 rounded-sm flex items-center justify-center ${selectedBallotView.voterType === 'ผู้รับมอบฉันทะ' ? 'bg-gray-800 text-white' : 'bg-white'}`}>
+                                        {selectedBallotView.voterType === 'ผู้รับมอบฉันทะ' && <CheckSquare size={12}/>}
+                                    </div>
+                                    <span>ผู้รับมอบฉันทะ</span>
+                                </div>
+                                {selectedBallotView.voterType === 'ผู้รับมอบฉันทะ' && (
+                                    <div className="ml-6 text-sm border-b border-dotted border-gray-500 pb-0.5 mt-1">
+                                        (ชื่อ: {selectedBallotView.voterName})
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
 
-                    <div className="border-t border-gray-200 pt-6">
-                        <h3 className="font-bold text-gray-800 mb-3 text-sm flex items-center gap-2">
-                            <FileCheck size={18} className="text-teal-600"/> รายงานการประชุม (Meeting Minutes)
-                        </h3>
-                        {(selectedMeetingView.minutesFileUrl || (selectedMeetingView.minutesFile && (selectedMeetingView.minutesFile.data || selectedMeetingView.minutesFile.isLocal))) ? (
-                            <div className="flex items-center justify-between bg-teal-50 border border-teal-100 p-4 rounded-xl shadow-sm hover:shadow transition-shadow">
-                                <div className="flex items-center gap-3 overflow-hidden pr-4">
-                                    <div className="p-2 bg-white rounded-lg shadow-sm text-red-500 shrink-0"><FileText size={24}/></div>
-                                    <div className="flex flex-col min-w-0">
-                                        <span className="truncate text-teal-900 font-bold text-sm leading-tight">{selectedMeetingView.minutesFile?.name || `รายงานการประชุม_${selectedMeetingView.date}.pdf`}</span>
-                                        <span className="text-[10px] text-teal-600 mt-0.5">PDF Document</span>
-                                    </div>
-                                </div>
-                                <Button 
-                                    className="shrink-0 flex items-center gap-2 bg-teal-600 hover:bg-teal-700 shadow-sm"
-                                    onClick={() => handleDownloadFile(selectedMeetingView.minutesFile || { fileUrl: selectedMeetingView.minutesFileUrl, name: `Meeting_Minutes_${selectedMeetingView.date}.pdf` })}
-                                >
-                                    <Download size={16} /> <span className="hidden sm:inline">ดาวน์โหลดไฟล์</span>
-                                </Button>
-                            </div>
-                        ) : (
-                            <div className="text-gray-400 bg-gray-50 p-6 rounded-xl text-center text-sm border border-dashed border-gray-300 flex flex-col items-center justify-center gap-2">
-                                <File size={32} className="text-gray-300"/>
-                                <p>ยังไม่มีไฟล์รายงานการประชุมแนบในระบบ</p>
-                            </div>
-                        )}
+                    {/* Voting Table */}
+                    <div className="mb-10">
+                        <h4 className="font-bold text-lg mb-4 bg-gray-200 p-2 text-center rounded-t-lg border border-b-0 border-gray-800">
+                            ส่วนลงมติ (Voting Section)
+                        </h4>
+                        <table className="w-full border-collapse border border-gray-800 text-base">
+                            <thead className="bg-gray-100">
+                                <tr>
+                                    <th className="border border-gray-800 p-3 text-center w-16">วาระที่</th>
+                                    <th className="border border-gray-800 p-3 text-left">รายละเอียดวาระการพิจารณาอนุมัติ</th>
+                                    <th className="border border-gray-800 p-3 text-center w-24">เห็นด้วย<br/><span className="text-xs font-normal">(Agree)</span></th>
+                                    <th className="border border-gray-800 p-3 text-center w-24">ไม่เห็นด้วย<br/><span className="text-xs font-normal">(Disagree)</span></th>
+                                    <th className="border border-gray-800 p-3 text-center w-24">งดออกเสียง<br/><span className="text-xs font-normal">(Abstain)</span></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {/* Generate 5 empty rows for voting */}
+                                {[1, 2, 3, 4, 5].map((num) => (
+                                    <tr key={num} className="h-16">
+                                        <td className="border border-gray-800 p-3 text-center font-bold text-lg">{num}</td>
+                                        <td className="border border-gray-800 p-3 text-gray-500 italic text-sm">
+                                            (...................................................................................)
+                                        </td>
+                                        <td className="border border-gray-800 p-3 text-center">
+                                            <div className="w-6 h-6 border-2 border-gray-400 mx-auto rounded-sm"></div>
+                                        </td>
+                                        <td className="border border-gray-800 p-3 text-center">
+                                            <div className="w-6 h-6 border-2 border-gray-400 mx-auto rounded-sm"></div>
+                                        </td>
+                                        <td className="border border-gray-800 p-3 text-center">
+                                            <div className="w-6 h-6 border-2 border-gray-400 mx-auto rounded-sm"></div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
+
+                    <div className="flex justify-between items-end mt-12 px-12 text-center text-gray-800">
+                        <div className="w-64">
+                            <div className="border-b border-gray-800 w-full mb-2 h-10"></div>
+                            <p className="text-sm">( ........................................................ )</p>
+                            <p className="mt-2 font-bold text-base">ผู้ลงคะแนนเสียง</p>
+                            <p className="text-sm mt-1">{selectedBallotView.voterType === 'เจ้าของร่วม' ? selectedBallotView.ownerName : selectedBallotView.voterName}</p>
+                        </div>
+                    </div>
+                    
+                    {!isExporting && (
+                        <div className="mt-12 flex justify-end">
+                            <span className={`px-4 py-2 rounded-lg text-sm font-bold border shadow-sm ${
+                                selectedBallotView.status === 'Valid' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'
+                            }`}>
+                                สถานะบัตร: {selectedBallotView.status === 'Valid' ? 'บัตรดี (Valid)' : 'บัตรเสีย / โมฆะ (Void)'}
+                            </span>
+                        </div>
+                    )}
                 </div>
 
-                <div className="mt-8 flex justify-end gap-2 pt-4 border-t border-gray-200">
+                <div className={`mt-8 flex justify-end gap-2 pt-4 border-t border-gray-200 bg-white ${isExporting ? 'hidden' : ''}`}>
                     {hasPerm('proj_meeting', 'edit') && (
-                        <Button variant="outline" icon={Edit} onClick={() => handleEditMeeting(selectedMeetingView)}>
-                            แก้ไขข้อมูล
+                        <Button variant="outline" icon={Edit} onClick={() => {
+                            setNewBallot(selectedBallotView);
+                            setSelectedBallotView(null);
+                            setShowAddBallotModal(true);
+                        }}>
+                            แก้ไขข้อมูล / สถานะบัตร
                         </Button>
                     )}
-                    <Button variant="secondary" onClick={() => setSelectedMeetingView(null)}>ปิดหน้าต่าง</Button>
+                    <Button variant="secondary" onClick={() => setSelectedBallotView(null)}>ปิดหน้าต่าง</Button>
+                    <Button icon={Printer} onClick={() => {
+                        const container = document.getElementById('print-ballot-detail')?.closest('.overflow-y-auto');
+                        if (container) container.scrollTop = 0;
+                        setTimeout(() => handleExportPDF('print-ballot-detail', `Ballot_${selectedBallotView.unitNo}.pdf`, 'portrait', [0, 0, 0, 0]), 100);
+                    }} disabled={isExporting}>
+                        {isExporting ? 'กำลังโหลด...' : 'ดาวน์โหลด / พิมพ์ PDF'}
+                    </Button>
                 </div>
             </div>
         </div>
