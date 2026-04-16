@@ -15925,65 +15925,10 @@ export default function App() {
       {showAuditRankingModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]">
-                <div className="p-4 border-b flex justify-between items-center bg-blue-50 shrink-0">
+                <div className="p-4 border-b flex justify-between items-center bg-blue-50">
                     <h2 className="text-xl font-bold text-blue-800 flex items-center gap-2"><BarChart3 size={24}/> จัดอันดับคะแนน Audit เฉลี่ย</h2>
-                    <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-2">
-                            <span className="text-sm font-bold text-blue-700">ประจำเดือน:</span>
-                            <input 
-                                type="month" 
-                                className="border border-blue-200 rounded-md p-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-300 text-blue-800 bg-white shadow-sm cursor-pointer"
-                                value={auditRankingMonth}
-                                onChange={(e) => setAuditRankingMonth(e.target.value)}
-                            />
-                        </div>
-                        <button onClick={() => setShowAuditRankingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
-                    </div>
+                    <button onClick={() => setShowAuditRankingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
                 </div>
-
-                {/* NEW: Historical Rank Trend for Selected Project */}
-                {selectedProject && (() => {
-                    const trendData = [];
-                    const d = new Date();
-                    for (let i = 5; i >= 0; i--) {
-                        const targetDate = new Date(d.getFullYear(), d.getMonth() - i, 1);
-                        const monthStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
-                        const monthNameTh = targetDate.toLocaleDateString('th-TH', { month: 'short', year: '2-digit' });
-
-                        const ranks = projects.map(p => {
-                            const pAudits = audits.filter(a => a.projectId === p.id && a.date.startsWith(monthStr));
-                            const avg = pAudits.length > 0 ? (pAudits.reduce((sum, a) => sum + a.score, 0) / pAudits.length) : 0;
-                            return { id: p.id, avgScore: avg };
-                        }).filter(data => data.avgScore > 0).sort((a, b) => b.avgScore - a.avgScore);
-
-                        const myRankIndex = ranks.findIndex(r => r.id === selectedProject.id);
-                        const myRank = myRankIndex >= 0 ? myRankIndex + 1 : null;
-
-                        trendData.push({ month: monthNameTh, rank: myRank });
-                    }
-                    
-                    if (trendData.every(data => data.rank === null)) return null;
-
-                    return (
-                        <div className="px-6 py-4 bg-white border-b border-gray-100 shrink-0">
-                            <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
-                                <History size={16} className="text-blue-500"/> แนวโน้มอันดับ (ย้อนหลัง 6 เดือน) - {selectedProject.name}
-                            </h3>
-                            <div className="h-32">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <LineChart data={trendData} margin={{ top: 5, right: 20, left: -25, bottom: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                        <XAxis dataKey="month" tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                        <YAxis reversed={true} tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} allowDecimals={false} domain={[1, 'dataMax']} />
-                                        <RechartsTooltip formatter={(val) => [`อันดับ ${val}`, 'Rank']} contentStyle={{ borderRadius: '8px', fontSize: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                        <Line type="monotone" dataKey="rank" name="อันดับ" stroke="#2563eb" strokeWidth={2} dot={{ r: 4, strokeWidth: 2, fill: '#fff' }} activeDot={{ r: 6 }} connectNulls={true} />
-                                    </LineChart>
-                                </ResponsiveContainer>
-                            </div>
-                        </div>
-                    );
-                })()}
-
                 <div className="p-0 overflow-y-auto">
                     <table className="w-full text-sm text-left">
                         <thead className="bg-gray-100 text-gray-600 sticky top-0 z-10">
@@ -16025,65 +15970,10 @@ export default function App() {
       {showReportRankingModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]">
-                <div className="p-4 border-b flex justify-between items-center bg-purple-50 shrink-0">
-                    <h2 className="text-xl font-bold text-purple-800 flex items-center gap-2"><BarChart3 size={24}/> จัดอันดับการส่งรายงานประจำวัน</h2>
-                    <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-2">
-                            <span className="text-sm font-bold text-purple-700">ประจำเดือน:</span>
-                            <input 
-                                type="month" 
-                                className="border border-purple-200 rounded-md p-1.5 text-sm outline-none focus:ring-2 focus:ring-purple-300 text-purple-800 bg-white shadow-sm cursor-pointer"
-                                value={reportRankingMonth}
-                                onChange={(e) => setReportRankingMonth(e.target.value)}
-                            />
-                        </div>
-                        <button onClick={() => setShowReportRankingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
-                    </div>
+                <div className="p-4 border-b flex justify-between items-center bg-purple-50">
+                    <h2 className="text-xl font-bold text-purple-800 flex items-center gap-2"><BarChart3 size={24}/> จัดอันดับการส่งรายงานประจำวัน (เดือนนี้)</h2>
+                    <button onClick={() => setShowReportRankingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
                 </div>
-
-                {/* NEW: Historical Rank Trend for Selected Project */}
-                {selectedProject && (() => {
-                    const trendData = [];
-                    const d = new Date();
-                    for (let i = 5; i >= 0; i--) {
-                        const targetDate = new Date(d.getFullYear(), d.getMonth() - i, 1);
-                        const monthStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
-                        const monthNameTh = targetDate.toLocaleDateString('th-TH', { month: 'short', year: '2-digit' });
-
-                        const ranks = projects.map(p => {
-                            const pReports = dailyReports.filter(r => r.projectId === p.id && r.date.startsWith(monthStr));
-                            const uniqueDays = new Set(pReports.map(r => r.date)).size;
-                            return { id: p.id, submittedDays: uniqueDays };
-                        }).filter(data => data.submittedDays > 0).sort((a, b) => b.submittedDays - a.submittedDays);
-
-                        const myRankIndex = ranks.findIndex(r => r.id === selectedProject.id);
-                        const myRank = myRankIndex >= 0 ? myRankIndex + 1 : null;
-
-                        trendData.push({ month: monthNameTh, rank: myRank });
-                    }
-                    
-                    if (trendData.every(data => data.rank === null)) return null;
-
-                    return (
-                        <div className="px-6 py-4 bg-white border-b border-gray-100 shrink-0">
-                            <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
-                                <History size={16} className="text-purple-500"/> แนวโน้มอันดับ (ย้อนหลัง 6 เดือน) - {selectedProject.name}
-                            </h3>
-                            <div className="h-32">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <LineChart data={trendData} margin={{ top: 5, right: 20, left: -25, bottom: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                        <XAxis dataKey="month" tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                        <YAxis reversed={true} tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} allowDecimals={false} domain={[1, 'dataMax']} />
-                                        <RechartsTooltip formatter={(val) => [`อันดับ ${val}`, 'Rank']} contentStyle={{ borderRadius: '8px', fontSize: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                        <Line type="monotone" dataKey="rank" name="อันดับ" stroke="#9333ea" strokeWidth={2} dot={{ r: 4, strokeWidth: 2, fill: '#fff' }} activeDot={{ r: 6 }} connectNulls={true} />
-                                    </LineChart>
-                                </ResponsiveContainer>
-                            </div>
-                        </div>
-                    );
-                })()}
-
                 <div className="p-0 overflow-y-auto">
                     <table className="w-full text-sm text-left">
                         <thead className="bg-gray-100 text-gray-600 sticky top-0 z-10">
