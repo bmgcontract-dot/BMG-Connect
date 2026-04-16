@@ -9,7 +9,7 @@ import {
   XCircle, Image as ImageIcon, File, Hourglass, Phone, Mail, LayoutGrid, List, ChevronDown, Save,
   ChevronLeft, ChevronRight, MousePointer2, FileCheck, DollarSign, Camera,
   MapPin, Box, PenTool, Printer as PrinterIcon, History, Folder, Lock,
-  Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2, Bell, Megaphone, Radio
+  Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2, Bell, Megaphone, Radio, Medal
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
@@ -1817,6 +1817,8 @@ export default function App() {
 
   // Add Daily Report Modal State
   const [showAddDailyReportModal, setShowAddDailyReportModal] = useState(false);
+  const [showDailyStats, setShowDailyStats] = useState(false); // NEW: State สำหรับแสดงสถิติรายงานย้อนหลัง
+  const [showAuditStats, setShowAuditStats] = useState(false); // NEW: State สำหรับแสดงสถิติ Audit ย้อนหลัง
   const [newDailyReport, setNewDailyReport] = useState({
       date: new Date().toISOString().split('T')[0],
       manpower: { juristic: 0, security: 0, cleaning: 0, gardening: 0, sweeper: 0, other: 0, otherLabel: '' },
@@ -10768,21 +10770,70 @@ export default function App() {
              <div className="space-y-4">
                 <div className="flex justify-between items-center">
                     <h3 className="font-bold text-lg">{t('dailyReports')}</h3>
-                    {hasPerm('proj_daily', 'save') && <Button icon={Plus} onClick={() => {
-                        setNewDailyReport({
-                            id: null,
-                            date: new Date().toISOString().split('T')[0],
-                            manpower: { juristic: 0, security: 0, cleaning: 0, gardening: 0, sweeper: 0, other: 0, otherLabel: '' },
-                            performance: { 
-                                juristic: { details: '', images: [] }, security: { details: '', images: [] }, cleaning: { details: '', images: [] },
-                                gardening: { details: '', images: [] }, sweeper: { details: '', images: [] }, other: { details: '', images: [] }
-                            },
-                            income: { commonFee: 0, lateFee: 0, water: 0, parking: 0, violation: 0, other: 0, otherLabel: '' },
-                            note: '', reporter: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : ''
-                        });
-                        setShowAddDailyReportModal(true);
-                    }}>{t('createDailyReport')}</Button>}
+                    <div className="flex gap-2">
+                        <Button variant="outline" icon={BarChart3} onClick={() => setShowDailyStats(!showDailyStats)}>
+                            {showDailyStats ? 'ซ่อนสถิติ' : 'สถิติย้อนหลัง'}
+                        </Button>
+                        {hasPerm('proj_daily', 'save') && <Button icon={Plus} onClick={() => {
+                            setNewDailyReport({
+                                id: null,
+                                date: new Date().toISOString().split('T')[0],
+                                manpower: { juristic: 0, security: 0, cleaning: 0, gardening: 0, sweeper: 0, other: 0, otherLabel: '' },
+                                performance: { 
+                                    juristic: { details: '', images: [] }, security: { details: '', images: [] }, cleaning: { details: '', images: [] },
+                                    gardening: { details: '', images: [] }, sweeper: { details: '', images: [] }, other: { details: '', images: [] }
+                                },
+                                income: { commonFee: 0, lateFee: 0, water: 0, parking: 0, violation: 0, other: 0, otherLabel: '' },
+                                note: '', reporter: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : ''
+                            });
+                            setShowAddDailyReportModal(true);
+                        }}>{t('createDailyReport')}</Button>}
+                    </div>
                 </div>
+
+                {showDailyStats && (() => {
+                    const dailyStatsData = [];
+                    const d = new Date();
+                    for (let i = 5; i >= 0; i--) {
+                        const targetDate = new Date(d.getFullYear(), d.getMonth() - i, 1);
+                        const monthStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
+                        const monthNameTh = targetDate.toLocaleDateString('th-TH', { month: 'short', year: '2-digit' });
+                        
+                        const reportsInMonth = dailyReports.filter(r => r.projectId === selectedProject.id && r.date.startsWith(monthStr));
+                        const uniqueDays = new Set(reportsInMonth.map(r => r.date)).size;
+                        const daysInMonth = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0).getDate();
+                        
+                        let passedDays = daysInMonth;
+                        if (i === 0) passedDays = d.getDate();
+                        const missedDays = Math.max(0, passedDays - uniqueDays);
+
+                        dailyStatsData.push({
+                            month: monthNameTh,
+                            submitted: uniqueDays,
+                            missed: missedDays
+                        });
+                    }
+                    
+                    return (
+                        <Card className="p-6 animate-fade-in border-t-4 border-purple-500 shadow-sm">
+                            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><BarChart3 className="text-purple-600"/> สถิติการส่งรายงานประจำวันย้อนหลัง 6 เดือน</h3>
+                            <div className="h-64">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={dailyStatsData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                        <XAxis dataKey="month" tick={{fontSize: 12, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                        <YAxis tick={{fontSize: 12, fill: '#6b7280'}} axisLine={false} tickLine={false} allowDecimals={false} />
+                                        <RechartsTooltip cursor={{fill: '#f3f4f6'}} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                        <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+                                        <Bar dataKey="submitted" name="ส่งรายงาน (วัน)" fill="url(#colorPurple)" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                                        <Bar dataKey="missed" name="ขาดส่ง / ยังไม่ถึงกำหนด (วัน)" fill="#e5e7eb" stroke="#d1d5db" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </Card>
+                    );
+                })()}
+
                 {/* List of reports */}
                 <div className="grid grid-cols-1 gap-4">
                    {dailyReports.filter(r => r.projectId === selectedProject.id).length === 0 ? (
@@ -10824,6 +10875,9 @@ export default function App() {
                           <ClipboardCheck size={20} className="text-blue-600" /> ประวัติการตรวจสอบ (Audit Records)
                       </h3>
                       <div className="flex gap-2">
+                          <Button variant="outline" size="sm" icon={BarChart3} onClick={() => setShowAuditStats(!showAuditStats)}>
+                              {showAuditStats ? 'ซ่อนสถิติ' : 'สถิติย้อนหลัง'}
+                          </Button>
                           <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(audits.filter(a => a.projectId === selectedProject.id), 'audit_records')}>{t('exportCSV')}</Button>
                           <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => {
                               const container = document.getElementById('print-project-audit');
@@ -10839,6 +10893,42 @@ export default function App() {
                       </div>
                   </div>
                   
+                  {showAuditStats && !isExporting && (() => {
+                      const auditStatsData = [];
+                      const d = new Date();
+                      for (let i = 5; i >= 0; i--) {
+                          const targetDate = new Date(d.getFullYear(), d.getMonth() - i, 1);
+                          const monthStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
+                          const monthNameTh = targetDate.toLocaleDateString('th-TH', { month: 'short', year: '2-digit' });
+                          
+                          const monthAudits = audits.filter(a => a.projectId === selectedProject.id && a.date.startsWith(monthStr));
+                          const avgScore = monthAudits.length > 0 ? (monthAudits.reduce((sum, a) => sum + a.score, 0) / monthAudits.length) : 0;
+
+                          auditStatsData.push({
+                              month: monthNameTh,
+                              score: parseFloat(avgScore.toFixed(1))
+                          });
+                      }
+                      
+                      return (
+                          <div className="p-6 bg-blue-50/30 border-b border-gray-200 animate-fade-in">
+                              <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><BarChart3 className="text-blue-600"/> สถิติคะแนน Audit เฉลี่ยย้อนหลัง 6 เดือน</h3>
+                              <div className="h-64 bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+                                  <ResponsiveContainer width="100%" height="100%">
+                                      <LineChart data={auditStatsData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                          <XAxis dataKey="month" tick={{fontSize: 12, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                          <YAxis domain={[0, 100]} tick={{fontSize: 12, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                          <RechartsTooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                          <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+                                          <Line type="monotone" dataKey="score" name="คะแนนเฉลี่ย (%)" stroke="#2563eb" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} />
+                                      </LineChart>
+                                  </ResponsiveContainer>
+                              </div>
+                          </div>
+                      );
+                  })()}
+
                   {isExporting && (
                       <div className="text-center mb-6 pt-4">
                           <h2 className="text-2xl font-bold">ประวัติการตรวจสอบ (Audit Records)</h2>
@@ -15797,7 +15887,14 @@ export default function App() {
 
                                 return rankData.map((d, i) => (
                                     <tr key={d.id} className={d.id === selectedProject?.id ? 'bg-blue-50/50' : 'hover:bg-gray-50'}>
-                                        <td className="p-3 text-center font-bold text-gray-500">{i + 1}</td>
+                                        <td className="p-3 text-center">
+                                            <div className="flex justify-center items-center">
+                                                {i === 0 ? <Medal size={22} className="text-yellow-500 drop-shadow-md" style={{ fill: '#FBBF24' }} title="อันดับ 1 (เหรียญทอง)" /> :
+                                                 i === 1 ? <Medal size={22} className="text-gray-400 drop-shadow-md" style={{ fill: '#E5E7EB' }} title="อันดับ 2 (เหรียญเงิน)" /> :
+                                                 i === 2 ? <Medal size={22} className="text-amber-600 drop-shadow-md" style={{ fill: '#D97706' }} title="อันดับ 3 (เหรียญทองแดง)" /> :
+                                                 <span className="font-bold text-gray-500">{i + 1}</span>}
+                                            </div>
+                                        </td>
                                         <td className={`p-3 font-medium ${d.id === selectedProject?.id ? 'text-blue-700' : 'text-gray-800'}`}>{d.name} {d.id === selectedProject?.id && '(หน่วยงานนี้)'}</td>
                                         <td className="p-3 text-center font-bold text-blue-600">{d.avgScore}%</td>
                                     </tr>
@@ -15839,7 +15936,14 @@ export default function App() {
 
                                 return rankData.map((d, i) => (
                                     <tr key={d.id} className={d.id === selectedProject?.id ? 'bg-purple-50/50' : 'hover:bg-gray-50'}>
-                                        <td className="p-3 text-center font-bold text-gray-500">{i + 1}</td>
+                                        <td className="p-3 text-center">
+                                            <div className="flex justify-center items-center">
+                                                {i === 0 ? <Medal size={22} className="text-yellow-500 drop-shadow-md" style={{ fill: '#FBBF24' }} title="อันดับ 1 (เหรียญทอง)" /> :
+                                                 i === 1 ? <Medal size={22} className="text-gray-400 drop-shadow-md" style={{ fill: '#E5E7EB' }} title="อันดับ 2 (เหรียญเงิน)" /> :
+                                                 i === 2 ? <Medal size={22} className="text-amber-600 drop-shadow-md" style={{ fill: '#D97706' }} title="อันดับ 3 (เหรียญทองแดง)" /> :
+                                                 <span className="font-bold text-gray-500">{i + 1}</span>}
+                                            </div>
+                                        </td>
                                         <td className={`p-3 font-medium ${d.id === selectedProject?.id ? 'text-purple-700' : 'text-gray-800'}`}>{d.name} {d.id === selectedProject?.id && '(หน่วยงานนี้)'}</td>
                                         <td className="p-3 text-center font-bold text-purple-600">{d.submittedDays} วัน</td>
                                     </tr>
