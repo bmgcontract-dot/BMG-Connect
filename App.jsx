@@ -1033,6 +1033,69 @@ const ThreeDBarHorizontal = (props) => {
     );
 };
 
+// --- NEW: 3D Medal Component ---
+const ThreeDMedal = ({ rank }) => {
+    if (rank > 3) return <span className="font-bold text-gray-500 text-base">{rank}</span>;
+
+    const styles = {
+        1: {
+            gradient: 'from-[#FFE066] via-[#F59E0B] to-[#B45309]',
+            border: 'border-[#FEF08A]',
+            innerShadow: 'shadow-[inset_0_3px_4px_rgba(255,255,255,0.8),_inset_0_-3px_4px_rgba(180,83,9,0.8)]',
+            dropShadow: 'drop-shadow-[0_4px_3px_rgba(245,158,11,0.4)]',
+            textColor: 'text-[#78350F]',
+            ribbonOuter: 'bg-[#991B1B]', // Dark Red
+            ribbonInner: 'bg-[#DC2626]', // Red
+        },
+        2: {
+            gradient: 'from-[#F3F4F6] via-[#9CA3AF] to-[#4B5563]',
+            border: 'border-[#FFFFFF]',
+            innerShadow: 'shadow-[inset_0_3px_4px_rgba(255,255,255,0.9),_inset_0_-3px_4px_rgba(75,85,99,0.8)]',
+            dropShadow: 'drop-shadow-[0_4px_3px_rgba(156,163,175,0.4)]',
+            textColor: 'text-[#1F2937]',
+            ribbonOuter: 'bg-[#1E3A8A]', // Dark Blue
+            ribbonInner: 'bg-[#2563EB]', // Blue
+        },
+        3: {
+            gradient: 'from-[#FDBA74] via-[#D97706] to-[#78350F]',
+            border: 'border-[#FED7AA]',
+            innerShadow: 'shadow-[inset_0_3px_4px_rgba(255,255,255,0.6),_inset_0_-3px_4px_rgba(120,53,15,0.8)]',
+            dropShadow: 'drop-shadow-[0_4px_3px_rgba(217,119,6,0.4)]',
+            textColor: 'text-[#451A03]',
+            ribbonOuter: 'bg-[#064E3B]', // Dark Green
+            ribbonInner: 'bg-[#059669]', // Green
+        }
+    };
+
+    const style = styles[rank];
+
+    return (
+        <div className={`relative flex flex-col items-center justify-center transform transition-transform hover:scale-110 ${style.dropShadow}`} title={`อันดับ ${rank}`}>
+            {/* 3D Ribbon Base */}
+            <div className="relative w-6 h-5 -mb-2 z-0 flex justify-center">
+                {/* Left tail */}
+                <div className={`absolute top-0 left-0 w-3 h-full ${style.ribbonOuter} transform -skew-y-[20deg] origin-top-left rounded-bl-sm`} style={{ clipPath: 'polygon(0 0, 100% 0, 100% 100%, 0 80%)' }}></div>
+                {/* Right tail */}
+                <div className={`absolute top-0 right-0 w-3 h-full ${style.ribbonOuter} transform skew-y-[20deg] origin-top-right rounded-br-sm`} style={{ clipPath: 'polygon(0 0, 100% 0, 100% 80%, 0 100%)' }}></div>
+                {/* Center Knot/Body */}
+                <div className={`absolute top-0 w-4 h-full ${style.ribbonInner} z-10 shadow-sm border-x border-black/10`}></div>
+            </div>
+            
+            {/* 3D Coin Body */}
+            <div className={`relative w-8 h-8 rounded-full bg-gradient-to-br ${style.gradient} border-[1.5px] ${style.border} flex items-center justify-center z-10 ${style.innerShadow}`}>
+                {/* Inner Ring */}
+                <div className="absolute inset-[2px] border border-white/30 rounded-full pointer-events-none"></div>
+                {/* Glossy Top Reflection */}
+                <div className="absolute top-0 w-full h-1/2 bg-gradient-to-b from-white/50 to-transparent rounded-t-full pointer-events-none"></div>
+                
+                <span className={`relative z-20 font-black text-[15px] ${style.textColor} tracking-tighter`} style={{ textShadow: '0px 1px 1px rgba(255,255,255,0.7)' }}>
+                    {rank}
+                </span>
+            </div>
+        </div>
+    );
+};
+
 const ChartGradients = () => (
   <svg width="0" height="0" style={{ position: 'absolute', pointerEvents: 'none' }}>
     <defs>
@@ -15864,13 +15927,24 @@ export default function App() {
             <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]">
                 <div className="p-4 border-b flex justify-between items-center bg-blue-50">
                     <h2 className="text-xl font-bold text-blue-800 flex items-center gap-2"><BarChart3 size={24}/> จัดอันดับคะแนน Audit เฉลี่ย</h2>
-                    <button onClick={() => setShowAuditRankingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-blue-700">ประจำเดือน:</span>
+                            <input 
+                                type="month" 
+                                className="border border-blue-200 rounded-md p-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-300 text-blue-800 bg-white shadow-sm cursor-pointer"
+                                value={auditRankingMonth}
+                                onChange={(e) => setAuditRankingMonth(e.target.value)}
+                            />
+                        </div>
+                        <button onClick={() => setShowAuditRankingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                    </div>
                 </div>
                 <div className="p-0 overflow-y-auto">
                     <table className="w-full text-sm text-left">
-                        <thead className="bg-gray-100 text-gray-600 sticky top-0">
+                        <thead className="bg-gray-100 text-gray-600 sticky top-0 z-10">
                             <tr>
-                                <th className="p-3 text-center w-16">อันดับ</th>
+                                <th className="p-3 text-center w-20">อันดับ</th>
                                 <th className="p-3">โครงการ / หน่วยงาน</th>
                                 <th className="p-3 text-center w-32">คะแนนเฉลี่ย (%)</th>
                             </tr>
@@ -15878,21 +15952,18 @@ export default function App() {
                         <tbody className="divide-y divide-gray-100">
                             {(() => {
                                 const rankData = projects.map(p => {
-                                    const pAudits = audits.filter(a => a.projectId === p.id);
+                                    const pAudits = audits.filter(a => a.projectId === p.id && a.date.startsWith(auditRankingMonth));
                                     const avg = pAudits.length > 0 ? (pAudits.reduce((sum, a) => sum + a.score, 0) / pAudits.length) : 0;
                                     return { id: p.id, name: p.name, avgScore: parseFloat(avg.toFixed(1)) };
                                 }).filter(d => d.avgScore > 0).sort((a, b) => b.avgScore - a.avgScore);
 
-                                if (rankData.length === 0) return <tr><td colSpan="3" className="p-8 text-center text-gray-500">ไม่มีข้อมูล</td></tr>;
+                                if (rankData.length === 0) return <tr><td colSpan="3" className="p-12 text-center text-gray-400 bg-gray-50 border-b border-dashed"><div className="flex flex-col items-center"><ClipboardCheck size={40} className="mb-2 text-gray-300"/>ไม่พบข้อมูลการประเมินในเดือนที่เลือก</div></td></tr>;
 
                                 return rankData.map((d, i) => (
                                     <tr key={d.id} className={d.id === selectedProject?.id ? 'bg-blue-50/50' : 'hover:bg-gray-50'}>
                                         <td className="p-3 text-center">
-                                            <div className="flex justify-center items-center">
-                                                {i === 0 ? <Medal size={22} className="text-yellow-500 drop-shadow-md" style={{ fill: '#FBBF24' }} title="อันดับ 1 (เหรียญทอง)" /> :
-                                                 i === 1 ? <Medal size={22} className="text-gray-400 drop-shadow-md" style={{ fill: '#E5E7EB' }} title="อันดับ 2 (เหรียญเงิน)" /> :
-                                                 i === 2 ? <Medal size={22} className="text-amber-600 drop-shadow-md" style={{ fill: '#D97706' }} title="อันดับ 3 (เหรียญทองแดง)" /> :
-                                                 <span className="font-bold text-gray-500">{i + 1}</span>}
+                                            <div className="flex justify-center items-center py-1">
+                                                <ThreeDMedal rank={i + 1} />
                                             </div>
                                         </td>
                                         <td className={`p-3 font-medium ${d.id === selectedProject?.id ? 'text-blue-700' : 'text-gray-800'}`}>{d.name} {d.id === selectedProject?.id && '(หน่วยงานนี้)'}</td>
@@ -15911,37 +15982,44 @@ export default function App() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]">
                 <div className="p-4 border-b flex justify-between items-center bg-purple-50">
-                    <h2 className="text-xl font-bold text-purple-800 flex items-center gap-2"><BarChart3 size={24}/> จัดอันดับการส่งรายงานประจำวัน (เดือนนี้)</h2>
-                    <button onClick={() => setShowReportRankingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                    <h2 className="text-xl font-bold text-purple-800 flex items-center gap-2"><BarChart3 size={24}/> จัดอันดับการส่งรายงานประจำวัน</h2>
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-purple-700">ประจำเดือน:</span>
+                            <input 
+                                type="month" 
+                                className="border border-purple-200 rounded-md p-1.5 text-sm outline-none focus:ring-2 focus:ring-purple-300 text-purple-800 bg-white shadow-sm cursor-pointer"
+                                value={reportRankingMonth}
+                                onChange={(e) => setReportRankingMonth(e.target.value)}
+                            />
+                        </div>
+                        <button onClick={() => setShowReportRankingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                    </div>
                 </div>
                 <div className="p-0 overflow-y-auto">
                     <table className="w-full text-sm text-left">
-                        <thead className="bg-gray-100 text-gray-600 sticky top-0">
+                        <thead className="bg-gray-100 text-gray-600 sticky top-0 z-10">
                             <tr>
-                                <th className="p-3 text-center w-16">อันดับ</th>
+                                <th className="p-3 text-center w-20">อันดับ</th>
                                 <th className="p-3">โครงการ / หน่วยงาน</th>
                                 <th className="p-3 text-center w-32">จำนวนวันส่งแล้ว</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
                             {(() => {
-                                const currentMonthStr = new Date().toISOString().slice(0, 7);
                                 const rankData = projects.map(p => {
-                                    const pReports = dailyReports.filter(r => r.projectId === p.id && r.date.startsWith(currentMonthStr));
+                                    const pReports = dailyReports.filter(r => r.projectId === p.id && r.date.startsWith(reportRankingMonth));
                                     const uniqueDays = new Set(pReports.map(r => r.date)).size;
                                     return { id: p.id, name: p.name, submittedDays: uniqueDays };
-                                }).sort((a, b) => b.submittedDays - a.submittedDays);
+                                }).filter(d => d.submittedDays > 0).sort((a, b) => b.submittedDays - a.submittedDays);
 
-                                if (rankData.length === 0) return <tr><td colSpan="3" className="p-8 text-center text-gray-500">ไม่มีข้อมูล</td></tr>;
+                                if (rankData.length === 0) return <tr><td colSpan="3" className="p-12 text-center text-gray-400 bg-gray-50 border-b border-dashed"><div className="flex flex-col items-center"><FileText size={40} className="mb-2 text-gray-300"/>ไม่พบข้อมูลการส่งรายงานในเดือนที่เลือก</div></td></tr>;
 
                                 return rankData.map((d, i) => (
                                     <tr key={d.id} className={d.id === selectedProject?.id ? 'bg-purple-50/50' : 'hover:bg-gray-50'}>
                                         <td className="p-3 text-center">
-                                            <div className="flex justify-center items-center">
-                                                {i === 0 ? <Medal size={22} className="text-yellow-500 drop-shadow-md" style={{ fill: '#FBBF24' }} title="อันดับ 1 (เหรียญทอง)" /> :
-                                                 i === 1 ? <Medal size={22} className="text-gray-400 drop-shadow-md" style={{ fill: '#E5E7EB' }} title="อันดับ 2 (เหรียญเงิน)" /> :
-                                                 i === 2 ? <Medal size={22} className="text-amber-600 drop-shadow-md" style={{ fill: '#D97706' }} title="อันดับ 3 (เหรียญทองแดง)" /> :
-                                                 <span className="font-bold text-gray-500">{i + 1}</span>}
+                                            <div className="flex justify-center items-center py-1">
+                                                <ThreeDMedal rank={i + 1} />
                                             </div>
                                         </td>
                                         <td className={`p-3 font-medium ${d.id === selectedProject?.id ? 'text-purple-700' : 'text-gray-800'}`}>{d.name} {d.id === selectedProject?.id && '(หน่วยงานนี้)'}</td>
