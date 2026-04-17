@@ -2121,6 +2121,7 @@ export default function App() {
   const [selectedAuditReport, setSelectedAuditReport] = useState(null); // NEW: State สำหรับเก็บข้อมูล Audit ที่ถูกคลิกดูรายละเอียด
   const [showAuditRankingModal, setShowAuditRankingModal] = useState(false); // NEW: State สำหรับเปิด/ปิด Modal จัดอันดับคะแนน Audit
   const [showReportRankingModal, setShowReportRankingModal] = useState(false); // NEW: State สำหรับเปิด/ปิด Modal จัดอันดับรายงานประจำวัน
+  const [reportRankingMonth, setReportRankingMonth] = useState(() => new Date().toISOString().slice(0, 7)); // NEW: State สำหรับเก็บเดือนที่ดูใน Modal จัดอันดับรายงาน
   const [newAudit, setNewAudit] = useState({
       projectId: '',
       date: new Date().toISOString().split('T')[0],
@@ -7635,6 +7636,7 @@ export default function App() {
                                           <button 
                                               onClick={(e) => {
                                                   e.stopPropagation();
+                                                  setReportRankingMonth(new Date().toISOString().slice(0, 7));
                                                   setShowReportRankingModal(true);
                                               }}
                                               className="mt-4 w-full flex justify-center items-center gap-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 hover:text-purple-800 px-3 py-2 rounded-lg text-xs font-bold border border-purple-200 shadow-sm cursor-pointer transition-all hover:shadow"
@@ -15970,13 +15972,40 @@ export default function App() {
       {showReportRankingModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]">
-                <div className="p-4 border-b flex justify-between items-center bg-purple-50">
-                    <h2 className="text-xl font-bold text-purple-800 flex items-center gap-2"><BarChart3 size={24}/> จัดอันดับการส่งรายงานประจำวัน (เดือนนี้)</h2>
-                    <button onClick={() => setShowReportRankingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                <div className="p-4 border-b flex flex-col sm:flex-row justify-between items-start sm:items-center bg-purple-50 gap-4 shrink-0">
+                    <h2 className="text-xl font-bold text-purple-800 flex items-center gap-2"><BarChart3 size={24}/> จัดอันดับการส่งรายงาน</h2>
+                    <div className="flex items-center gap-4 w-full sm:w-auto justify-between">
+                        <div className="flex items-center bg-white rounded-lg p-1 border border-purple-200 shadow-sm">
+                            <button 
+                                onClick={() => {
+                                    const [y, m] = reportRankingMonth.split('-').map(Number);
+                                    const d = new Date(y, m - 2, 1);
+                                    setReportRankingMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+                                }} 
+                                className="p-1 hover:bg-purple-100 rounded text-purple-600 transition"
+                            >
+                                <ChevronLeft size={18}/>
+                            </button>
+                            <span className="px-4 text-sm font-bold text-purple-800 w-36 text-center">
+                                ประจำเดือน: {new Date(reportRankingMonth + '-01').toLocaleDateString('th-TH', { month: 'short', year: 'numeric' })}
+                            </span>
+                            <button 
+                                onClick={() => {
+                                    const [y, m] = reportRankingMonth.split('-').map(Number);
+                                    const d = new Date(y, m, 1);
+                                    setReportRankingMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+                                }} 
+                                className="p-1 hover:bg-purple-100 rounded text-purple-600 transition"
+                            >
+                                <ChevronRight size={18}/>
+                            </button>
+                        </div>
+                        <button onClick={() => setShowReportRankingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                    </div>
                 </div>
                 <div className="p-0 overflow-y-auto">
                     <table className="w-full text-sm text-left">
-                        <thead className="bg-gray-100 text-gray-600 sticky top-0 z-10">
+                        <thead className="bg-gray-100 text-gray-600 sticky top-0 z-10 shadow-sm">
                             <tr>
                                 <th className="p-3 text-center w-20">อันดับ</th>
                                 <th className="p-3">โครงการ / หน่วยงาน</th>
@@ -15985,24 +16014,31 @@ export default function App() {
                         </thead>
                         <tbody className="divide-y divide-gray-100">
                             {(() => {
-                                const currentMonthStr = new Date().toISOString().slice(0, 7);
+                                const targetMonthStr = reportRankingMonth || new Date().toISOString().slice(0, 7);
                                 const rankData = projects.map(p => {
-                                    const pReports = dailyReports.filter(r => r.projectId === p.id && r.date.startsWith(currentMonthStr));
+                                    const pReports = dailyReports.filter(r => r.projectId === p.id && r.date && r.date.startsWith(targetMonthStr));
                                     const uniqueDays = new Set(pReports.map(r => r.date)).size;
                                     return { id: p.id, name: p.name, submittedDays: uniqueDays };
                                 }).sort((a, b) => b.submittedDays - a.submittedDays);
 
-                                if (rankData.length === 0) return <tr><td colSpan="3" className="p-8 text-center text-gray-500">ไม่มีข้อมูล</td></tr>;
+                                if (rankData.length === 0) return <tr><td colSpan="3" className="p-8 text-center text-gray-500">ไม่มีข้อมูลหน่วยงาน</td></tr>;
+                                
+                                const hasData = rankData.some(d => d.submittedDays > 0);
+                                if (!hasData) return <tr><td colSpan="3" className="p-8 text-center text-gray-500 bg-gray-50">ยังไม่มีการส่งรายงานในเดือนนี้</td></tr>;
 
                                 return rankData.map((d, i) => (
                                     <tr key={d.id} className={d.id === selectedProject?.id ? 'bg-purple-50/50' : 'hover:bg-gray-50'}>
                                         <td className="p-3 text-center">
                                             <div className="flex justify-center items-center py-1">
-                                                <ThreeDMedal rank={i + 1} />
+                                                {d.submittedDays > 0 ? <ThreeDMedal rank={i + 1} /> : <span className="text-gray-300">-</span>}
                                             </div>
                                         </td>
-                                        <td className={`p-3 font-medium ${d.id === selectedProject?.id ? 'text-purple-700' : 'text-gray-800'}`}>{d.name} {d.id === selectedProject?.id && '(หน่วยงานนี้)'}</td>
-                                        <td className="p-3 text-center font-bold text-purple-600">{d.submittedDays} วัน</td>
+                                        <td className={`p-3 font-medium ${d.id === selectedProject?.id ? 'text-purple-700' : 'text-gray-800'}`}>
+                                            {d.name} {d.id === selectedProject?.id && <span className="text-xs text-purple-500 ml-1 font-normal">(หน่วยงานนี้)</span>}
+                                        </td>
+                                        <td className="p-3 text-center font-bold text-purple-600">
+                                            {d.submittedDays > 0 ? `${d.submittedDays} วัน` : <span className="text-gray-400 font-normal">0 วัน</span>}
+                                        </td>
                                     </tr>
                                 ));
                             })()}
