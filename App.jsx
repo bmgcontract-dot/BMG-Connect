@@ -2120,6 +2120,7 @@ export default function App() {
   const [showAddAuditModal, setShowAddAuditModal] = useState(false);
   const [selectedAuditReport, setSelectedAuditReport] = useState(null); // NEW: State สำหรับเก็บข้อมูล Audit ที่ถูกคลิกดูรายละเอียด
   const [showAuditRankingModal, setShowAuditRankingModal] = useState(false); // NEW: State สำหรับเปิด/ปิด Modal จัดอันดับคะแนน Audit
+  const [auditRankingMonth, setAuditRankingMonth] = useState(() => new Date().toISOString().slice(0, 7)); // NEW: State สำหรับเก็บเดือนที่ดูใน Modal จัดอันดับ Audit
   const [showReportRankingModal, setShowReportRankingModal] = useState(false); // NEW: State สำหรับเปิด/ปิด Modal จัดอันดับรายงานประจำวัน
   const [reportRankingMonth, setReportRankingMonth] = useState(() => new Date().toISOString().slice(0, 7)); // NEW: State สำหรับเก็บเดือนที่ดูใน Modal จัดอันดับรายงาน
   const [newAudit, setNewAudit] = useState({
@@ -7591,6 +7592,7 @@ export default function App() {
                                           <button 
                                               onClick={(e) => {
                                                   e.stopPropagation(); // ป้องกันไม่ให้ทะลุไปโดนส่วนอื่น
+                                                  setAuditRankingMonth(new Date().toISOString().slice(0, 7));
                                                   setShowAuditRankingModal(true);
                                               }}
                                               className="mt-3 w-full flex justify-center items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 hover:text-blue-800 px-3 py-2 rounded-lg text-xs font-bold border border-blue-200 shadow-sm cursor-pointer transition-all hover:shadow"
@@ -15927,13 +15929,40 @@ export default function App() {
       {showAuditRankingModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]">
-                <div className="p-4 border-b flex justify-between items-center bg-blue-50">
+                <div className="p-4 border-b flex flex-col sm:flex-row justify-between items-start sm:items-center bg-blue-50 gap-4 shrink-0">
                     <h2 className="text-xl font-bold text-blue-800 flex items-center gap-2"><BarChart3 size={24}/> จัดอันดับคะแนน Audit เฉลี่ย</h2>
-                    <button onClick={() => setShowAuditRankingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                    <div className="flex items-center gap-4 w-full sm:w-auto justify-between">
+                        <div className="flex items-center bg-white rounded-lg p-1 border border-blue-200 shadow-sm">
+                            <button 
+                                onClick={() => {
+                                    const [y, m] = auditRankingMonth.split('-').map(Number);
+                                    const d = new Date(y, m - 2, 1);
+                                    setAuditRankingMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+                                }} 
+                                className="p-1 hover:bg-blue-100 rounded text-blue-600 transition"
+                            >
+                                <ChevronLeft size={18}/>
+                            </button>
+                            <span className="px-4 text-sm font-bold text-blue-800 w-36 text-center">
+                                ประจำเดือน: {new Date(auditRankingMonth + '-01').toLocaleDateString('th-TH', { month: 'short', year: 'numeric' })}
+                            </span>
+                            <button 
+                                onClick={() => {
+                                    const [y, m] = auditRankingMonth.split('-').map(Number);
+                                    const d = new Date(y, m, 1);
+                                    setAuditRankingMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+                                }} 
+                                className="p-1 hover:bg-blue-100 rounded text-blue-600 transition"
+                            >
+                                <ChevronRight size={18}/>
+                            </button>
+                        </div>
+                        <button onClick={() => setShowAuditRankingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                    </div>
                 </div>
                 <div className="p-0 overflow-y-auto">
                     <table className="w-full text-sm text-left">
-                        <thead className="bg-gray-100 text-gray-600 sticky top-0 z-10">
+                        <thead className="bg-gray-100 text-gray-600 sticky top-0 z-10 shadow-sm">
                             <tr>
                                 <th className="p-3 text-center w-20">อันดับ</th>
                                 <th className="p-3">โครงการ / หน่วยงาน</th>
@@ -15942,22 +15971,28 @@ export default function App() {
                         </thead>
                         <tbody className="divide-y divide-gray-100">
                             {(() => {
+                                const targetMonthStr = auditRankingMonth || new Date().toISOString().slice(0, 7);
                                 const rankData = projects.map(p => {
-                                    const pAudits = audits.filter(a => a.projectId === p.id);
+                                    const pAudits = audits.filter(a => a.projectId === p.id && a.date && a.date.startsWith(targetMonthStr));
                                     const avg = pAudits.length > 0 ? (pAudits.reduce((sum, a) => sum + a.score, 0) / pAudits.length) : 0;
                                     return { id: p.id, name: p.name, avgScore: parseFloat(avg.toFixed(1)) };
-                                }).filter(d => d.avgScore > 0).sort((a, b) => b.avgScore - a.avgScore);
+                                }).sort((a, b) => b.avgScore - a.avgScore);
 
-                                if (rankData.length === 0) return <tr><td colSpan="3" className="p-8 text-center text-gray-500">ไม่มีข้อมูล</td></tr>;
+                                if (rankData.length === 0) return <tr><td colSpan="3" className="p-8 text-center text-gray-500">ไม่มีข้อมูลหน่วยงาน</td></tr>;
+                                
+                                const hasData = rankData.some(d => d.avgScore > 0);
+                                if (!hasData) return <tr><td colSpan="3" className="p-8 text-center text-gray-500 bg-gray-50">ยังไม่มีการประเมิน Audit ในเดือนนี้</td></tr>;
 
-                                return rankData.map((d, i) => (
+                                return rankData.filter(d => d.avgScore > 0).map((d, i) => (
                                     <tr key={d.id} className={d.id === selectedProject?.id ? 'bg-blue-50/50' : 'hover:bg-gray-50'}>
                                         <td className="p-3 text-center">
                                             <div className="flex justify-center items-center py-1">
                                                 <ThreeDMedal rank={i + 1} />
                                             </div>
                                         </td>
-                                        <td className={`p-3 font-medium ${d.id === selectedProject?.id ? 'text-blue-700' : 'text-gray-800'}`}>{d.name} {d.id === selectedProject?.id && '(หน่วยงานนี้)'}</td>
+                                        <td className={`p-3 font-medium ${d.id === selectedProject?.id ? 'text-blue-700' : 'text-gray-800'}`}>
+                                            {d.name} {d.id === selectedProject?.id && <span className="text-xs text-blue-500 ml-1 font-normal">(หน่วยงานนี้)</span>}
+                                        </td>
                                         <td className="p-3 text-center font-bold text-blue-600">{d.avgScore}%</td>
                                     </tr>
                                 ));
