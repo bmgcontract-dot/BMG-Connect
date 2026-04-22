@@ -2061,12 +2061,15 @@ export default function App() {
       title: '',
       content: '',
       date: new Date().toISOString().split('T')[0],
+      hasEndDate: false,
       endDate: '',
       priority: 'Normal', // Normal, High
       projectId: 'All', // 'All' or specific Project ID
       author: '',
       image: null,
-      link: ''
+      link: '',
+      additionalImages: [],
+      status: 'Published' // Draft, Published
   });
 
   // Meetings State
@@ -2639,6 +2642,13 @@ export default function App() {
           return true;
       }
       
+      // FIX: บังคับให้เห็นเมนู "โครงการ" ทันที หากมีการระบุ "หน่วยงานที่เข้าถึงได้" ไว้ (ป้องกัน Admin ลืมติ๊กสิทธิ์)
+      if (menuId === 'projects' && action === 'view') {
+          const depts = currentUser.accessibleDepts;
+          const deptsArray = Array.isArray(depts) ? depts : (typeof depts === 'string' ? depts.split(', ').filter(Boolean) : []);
+          if (deptsArray.length > 0) return true;
+      }
+      
       return !!perms[menuId]?.[action];
   };
 
@@ -2647,9 +2657,9 @@ export default function App() {
       if (!currentUser) return false;
       if (currentUser.username === 'admin') return true;
       
-      // แปลงข้อมูลเป็น Array เพื่อการตรวจสอบที่แม่นยำ
-      const accessibleDeptsStr = currentUser.accessibleDepts || '';
-      const accessibleArray = typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : accessibleDeptsStr;
+      // แปลงข้อมูลเป็น Array เพื่อการตรวจสอบที่แม่นยำ ป้องกันบัคข้อมูลผิดประเภท
+      const accessibleDeptsStr = currentUser.accessibleDepts;
+      const accessibleArray = Array.isArray(accessibleDeptsStr) ? accessibleDeptsStr : (typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : []);
       
       if (accessibleArray.includes('All') || accessibleArray.length > 0) return true;
       return false; // ถ้าเป็นพนักงานประจำหน่วยงานปกติ จะถูกล็อค
@@ -2735,37 +2745,6 @@ export default function App() {
     }
   }, [showAddRepairModal, selectedProject, repairs, newRepair.id, newRepair.code]);
 
-  // Auto-calculate Audit Score for Daily Reports (Item 11.1)
-  const currentScore10_0 = newAudit.scores['10_0'];
-  useEffect(() => {
-      if (showAddAuditModal && newAudit.projectId && newAudit.date) {
-          const targetMonthStr = newAudit.date.substring(0, 7);
-          const pReports = dailyReports.filter(r => r.projectId === newAudit.projectId && r.date && r.date.startsWith(targetMonthStr));
-          const uniqueDays = new Set(pReports.map(r => r.date)).size;
-          
-          const [year, month] = targetMonthStr.split('-').map(Number);
-          const d = new Date();
-          const isCurrentMonth = d.getFullYear() === year && d.getMonth() + 1 === month;
-          const daysInMonth = isCurrentMonth ? Math.max(1, d.getDate()) : new Date(year, month, 0).getDate();
-          
-          const percentage = Math.round((uniqueDays / daysInMonth) * 100) || 0;
-          
-          let autoScore = '';
-          if (percentage >= 100) autoScore = '5';
-          else if (percentage > 80) autoScore = '4';
-          else if (percentage > 60) autoScore = '3';
-          else if (percentage > 40) autoScore = '2';
-          else autoScore = '1';
-
-          if (currentScore10_0 !== autoScore) {
-              setNewAudit(prev => ({
-                  ...prev,
-                  scores: { ...prev.scores, '10_0': autoScore }
-              }));
-          }
-      }
-  }, [showAddAuditModal, newAudit.projectId, newAudit.date, dailyReports, currentScore10_0]);
-
   // Sync Schedule Note when month or project changes
   useEffect(() => {
       if (selectedProject && currentMonth) {
@@ -2773,6 +2752,40 @@ export default function App() {
           setScheduleNote(scheduleNotes[noteKey] || '');
       }
   }, [selectedProject, currentMonth, scheduleNotes]);
+
+  // --- NEW: Auto-calculate Audit Score for Item 11 (Daily Reports) ---
+  useEffect(() => {
+      if (showAddAuditModal && newAudit.projectId && newAudit.date) {
+          const targetMonthStr = newAudit.date.substring(0, 7);
+          const pReports = dailyReports.filter(r => r.projectId === newAudit.projectId && r.date && r.date.startsWith(targetMonthStr));
+          const uniqueDays = new Set(pReports.map(r => r.date)).size;
+
+          const [year, month] = targetMonthStr.split('-').map(Number);
+          const d = new Date();
+          const isCurrentMonth = d.getFullYear() === year && d.getMonth() + 1 === month;
+          const daysInMonth = isCurrentMonth ? d.getDate() : new Date(year, month, 0).getDate();
+
+          const percentage = Math.round((uniqueDays / daysInMonth) * 100) || 0;
+
+          let score = '0';
+          if (percentage >= 100) score = '5';
+          else if (percentage > 80) score = '4';
+          else if (percentage > 60) score = '3';
+          else if (percentage > 40) score = '2';
+          else if (percentage > 0) score = '1';
+
+          setNewAudit(prev => {
+              if (prev.scores['10_0'] !== score) {
+                  return {
+                      ...prev,
+                      scores: { ...prev.scores, '10_0': score },
+                      remarks: { ...prev.remarks, '10_0': `คำนวณอัตโนมัติ: จัดทำ ${uniqueDays}/${daysInMonth} วัน (${percentage}%)` }
+                  };
+              }
+              return prev;
+          });
+      }
+  }, [showAddAuditModal, newAudit.projectId, newAudit.date, dailyReports]);
 
   const t = (key) => TRANSLATIONS[lang][key] || key;
   const changeMonth = (increment) => { const [year, month] = currentMonth.split('-').map(Number); const date = new Date(year, month - 1 + increment, 1); const newYear = date.getFullYear(); const newMonth = String(date.getMonth() + 1).padStart(2, '0'); setCurrentMonth(`${newYear}-${newMonth}`); }; const getDaysInMonth = (year, month) => { const date = new Date(year, month - 1, 1); const days = []; while (date.getMonth() === month - 1) { days.push(new Date(date)); date.setDate(date.getDate() + 1); } return days; }; 
@@ -4813,11 +4826,12 @@ export default function App() {
 
   // --- NEW: Handlers สำหรับประกาศ/ข่าวสาร (Announcements) ---
   const handleSaveAnnouncement = (e) => {
-      e.preventDefault();
+      if (e && e.preventDefault) e.preventDefault();
       let nextList;
       const dataToSave = { 
           ...newAnnouncement, 
-          author: newAnnouncement.author || `${currentUser?.firstName} ${currentUser?.lastName}` 
+          author: newAnnouncement.author || `${currentUser?.firstName} ${currentUser?.lastName}`,
+          endDate: newAnnouncement.hasEndDate ? newAnnouncement.endDate : ''
       };
 
       if (isEditingAnnouncement) {
@@ -4833,11 +4847,18 @@ export default function App() {
       if (dataToSave.image && dataToSave.image.startsWith('data:image')) {
           filesToUpload.push({ name: `Announcement_${dataToSave.id}.jpg`, data: dataToSave.image });
       }
+      if (dataToSave.additionalImages && dataToSave.additionalImages.length > 0) {
+          dataToSave.additionalImages.forEach((img, idx) => {
+              if (img.startsWith('data:image')) {
+                  filesToUpload.push({ name: `Announcement_${dataToSave.id}_add_${idx}.jpg`, data: img });
+              }
+          });
+      }
       triggerAutoSync('Announcements_ประกาศ', nextList, filesToUpload); // Sync to Google Sheets if configured
 
       setShowAddAnnouncementModal(false);
       setIsEditingAnnouncement(false);
-      setNewAnnouncement({ id: null, title: '', content: '', date: new Date().toISOString().split('T')[0], endDate: '', priority: 'Normal', projectId: 'All', author: '', image: null, link: '' });
+      setNewAnnouncement({ id: null, title: '', content: '', date: new Date().toISOString().split('T')[0], hasEndDate: false, endDate: '', priority: 'Normal', projectId: 'All', author: '', image: null, link: '', additionalImages: [], status: 'Published' });
       alert(t('saveSuccess'));
   };
 
@@ -5124,10 +5145,9 @@ export default function App() {
 
   // --- NEW: Google Drive Backup Handler ---
   const handleBackupToDrive = async () => {
-      // ❗ คำเตือน: นำ Web App URL ที่ได้จาก Google Apps Script สำหรับ Google Drive มาวางแทนข้อความด้านล่างนี้
       const GOOGLE_SCRIPT_DRIVE_URL = 'https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec';
       
-      if(!GOOGLE_SCRIPT_DRIVE_URL || GOOGLE_SCRIPT_DRIVE_URL === 'YOUR_GOOGLE_SCRIPT_DRIVE_URL_HERE') {
+      if(!GOOGLE_SCRIPT_DRIVE_URL || GOOGLE_SCRIPT_DRIVE_URL.includes('YOUR_')) {
           alert("กรุณานำ Web App URL ของ Google Apps Script สำหรับบันทึกลง Drive มาใส่ในโค้ดก่อนใช้งานฟังก์ชันนี้");
           return;
       }
@@ -5138,24 +5158,56 @@ export default function App() {
 
           // 1. ดึงไฟล์เอกสารจาก IndexedDB (สัญญา, เอกสารโครงการที่เคยอัปโหลดไว้)
           const localFiles = await getAllFilesLocally();
-          for (const [fileId, fileData] of Object.entries(localFiles)) {
-              if (typeof fileData === 'string' && fileData.includes('base64,')) {
-                  filesToUpload.push({ name: `Document_${fileId}.pdf`, data: fileData });
+          if (localFiles) {
+              for (const [fileId, fileData] of Object.entries(localFiles)) {
+                  if (fileData && typeof fileData === 'string' && fileData.includes('base64,')) {
+                      filesToUpload.push({ name: `Document_${fileId}.pdf`, data: fileData });
+                  }
               }
           }
 
-          // 2. ดึงรูปภาพจากระบบ
-          if(companyInfo.logo) filesToUpload.push({ name: 'Company_Logo.jpg', data: companyInfo.logo });
-          users.forEach(u => { if(u.photo) filesToUpload.push({ name: `User_${u.employeeId || u.id}.jpg`, data: u.photo }) });
-          assets.forEach(a => { if(a.photo) filesToUpload.push({ name: `Asset_${a.code}.jpg`, data: a.photo }) });
-          tools.forEach(t => { if(t.photo) filesToUpload.push({ name: `Tool_${t.code}.jpg`, data: t.photo }) });
-          machines.forEach(m => { if(m.photo) filesToUpload.push({ name: `Machine_${m.code}.jpg`, data: m.photo }) });
+          // 2. ดึงรูปภาพจากระบบ (เพิ่มการตรวจสอบตัวแปรเพื่อป้องกัน TypeError)
+          if(companyInfo && companyInfo.logo && typeof companyInfo.logo === 'string') {
+              filesToUpload.push({ name: 'Company_Logo.jpg', data: companyInfo.logo });
+          }
+
+          (Array.isArray(users) ? users : []).forEach(u => { 
+              if(u && u.photo && typeof u.photo === 'string') filesToUpload.push({ name: `User_${u.employeeId || u.id}.jpg`, data: u.photo });
+          });
+          
+          (Array.isArray(assets) ? assets : []).forEach(a => { 
+              if(a && a.photo && typeof a.photo === 'string') filesToUpload.push({ name: `Asset_${a.code}.jpg`, data: a.photo });
+          });
+          
+          (Array.isArray(tools) ? tools : []).forEach(t => { 
+              if(t && t.photo && typeof t.photo === 'string') filesToUpload.push({ name: `Tool_${t.code}.jpg`, data: t.photo });
+          });
+          
+          (Array.isArray(machines) ? machines : []).forEach(m => { 
+              if(m && m.photo && typeof m.photo === 'string') filesToUpload.push({ name: `Machine_${m.code}.jpg`, data: m.photo });
+          });
           
           // ดึงรูปจากประวัติ PM (หากมี)
-          pmHistoryList.forEach(pm => {
-              if (pm.images && pm.images.length > 0) {
+          (Array.isArray(pmHistoryList) ? pmHistoryList : []).forEach(pm => {
+              if (pm && Array.isArray(pm.images)) {
                   pm.images.forEach((img, idx) => {
-                      filesToUpload.push({ name: `PM_${pm.machineCode}_img${idx+1}.jpg`, data: img });
+                      if (img && typeof img === 'string') {
+                          filesToUpload.push({ name: `PM_${pm.machineCode}_img${idx+1}.jpg`, data: img });
+                      }
+                  });
+              }
+          });
+
+          // ดึงรูปจากประกาศข่าวสาร
+          (Array.isArray(announcements) ? announcements : []).forEach(ann => {
+              if (ann && ann.image && typeof ann.image === 'string') {
+                  filesToUpload.push({ name: `Announcement_${ann.id}_Cover.jpg`, data: ann.image });
+              }
+              if (ann && Array.isArray(ann.additionalImages)) {
+                  ann.additionalImages.forEach((img, idx) => {
+                      if (img && typeof img === 'string') {
+                          filesToUpload.push({ name: `Announcement_${ann.id}_Add${idx+1}.jpg`, data: img });
+                      }
                   });
               }
           });
@@ -5175,9 +5227,13 @@ export default function App() {
           let successCount = 0;
           let failCount = 0;
 
-          // ส่งข้อมูลไปบันทึกทีละไฟล์เพื่อป้องกันขนาด Payload ใหญ่เกินขีดจำกัดของ Apps Script
+          // ส่งข้อมูลไปบันทึกทีละไฟล์
           for (let i = 0; i < filesToUpload.length; i++) {
               const file = filesToUpload[i];
+              
+              // ป้องกัน Error หากรูปเสีย
+              if (!file || !file.data || typeof file.data !== 'string') continue;
+
               // แยกประเภท (mimeType) และข้อมูล (base64) ออกจากกัน
               const match = file.data.match(/^data:(.+);base64,(.+)$/);
               if (!match) continue;
@@ -5189,31 +5245,33 @@ export default function App() {
                   filename: file.name,
                   mimeType: mimeType,
                   data: base64Data,
-                  folderName: autoFolderName // <--- เพิ่มการส่งชื่อโฟลเดอร์ไปยัง Apps Script
+                  folderName: autoFolderName 
               };
 
               try {
-                  // แก้ปัญหา CORS Error: ใช้ mode 'no-cors' 
+                  // ใช้ mode 'no-cors' 
                   await fetch(GOOGLE_SCRIPT_DRIVE_URL, {
                       method: 'POST',
                       mode: 'no-cors',
                       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                       body: JSON.stringify(payload)
                   });
-                  
-                  // ถ้าระบบส่งคำขอไปได้โดยไม่เกิด Error จะถือว่าสำเร็จ (เพราะ no-cors ไม่อนุญาตให้อ่าน response.status จากเซิร์ฟเวอร์ Google)
                   successCount++;
               } catch (err) {
                   console.error("Upload error for file:", file.name, err);
                   failCount++;
               }
+
+              // FIX: พักให้เบราว์เซอร์ประมวลผล 50ms ป้องกันหน้าจอค้าง (Out of memory / Call stack size exceeded)
+              await new Promise(resolve => setTimeout(resolve, 50));
           }
 
           alert(`✅ สำรองไฟล์ไปยัง Google Drive เสร็จสิ้น!\nสำเร็จ: ${successCount} ไฟล์\nล้มเหลว: ${failCount} ไฟล์\n\nโฟลเดอร์ปลายทาง: ${autoFolderName}`);
 
       } catch (error) {
           console.error("Drive Backup error:", error);
-          alert("❌ เกิดข้อผิดพลาดในการสำรองข้อมูลไปยัง Google Drive");
+          // แสดงข้อความ Error ที่แท้จริงออกมาเพื่อให้ทราบสาเหตุ
+          alert(`❌ เกิดข้อผิดพลาดในการสำรองข้อมูลไปยัง Google Drive\n\nรายละเอียด: ${error.message || 'กรุณาตรวจสอบว่ามีไฟล์หรือข้อมูลที่เสียหายอยู่ในระบบหรือไม่'}`);
       } finally {
           setIsBackingUpToDrive(false);
       }
@@ -5811,8 +5869,8 @@ export default function App() {
       // ดึงข้อมูลโครงการเฉพาะที่ผู้ใช้มีสิทธิ์เข้าถึง สำหรับแสดงผลแดชบอร์ดให้สอดคล้องกับสิทธิ์
       const visibleProjectsDashboard = projects.filter(p => {
           if (currentUser?.username === 'admin') return true;
-          const accessibleDeptsStr = currentUser?.accessibleDepts || '';
-          const accessibleArray = typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : accessibleDeptsStr;
+          const accessibleDeptsStr = currentUser?.accessibleDepts;
+          const accessibleArray = Array.isArray(accessibleDeptsStr) ? accessibleDeptsStr : (typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : []);
           if (accessibleArray.includes('All')) return true;
           return p.name === currentUser?.department || accessibleArray.includes(p.name);
       });
@@ -5878,8 +5936,10 @@ export default function App() {
           }
           if (currentUser?.username === 'admin') return true;
           if (a.projectId === 'All') return true;
-          const accessibleDeptsStr = currentUser?.accessibleDepts || '';
-          const accessibleArray = typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : accessibleDeptsStr;
+          
+          const accessibleDeptsStr = currentUser?.accessibleDepts;
+          const accessibleArray = Array.isArray(accessibleDeptsStr) ? accessibleDeptsStr : (typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : []);
+          
           if (accessibleArray.includes('All')) return true;
           const project = projects.find(p => p.id === a.projectId);
           if (!project) return false;
@@ -6696,8 +6756,8 @@ export default function App() {
           if (a.projectId === 'All') return true; // ประกาศรวม เห็นทุกคน
           
           // ตรวจสอบว่าพนักงานอยู่สังกัดโครงการนี้ หรือมีสิทธิ์เข้าถึงโครงการนี้หรือไม่
-          const accessibleDeptsStr = currentUser?.accessibleDepts || '';
-          const accessibleArray = typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : accessibleDeptsStr;
+          const accessibleDeptsStr = currentUser?.accessibleDepts;
+          const accessibleArray = Array.isArray(accessibleDeptsStr) ? accessibleDeptsStr : (typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : []);
           
           if (accessibleArray.includes('All')) return true;
           
@@ -6721,7 +6781,7 @@ export default function App() {
                   <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
                       {hasPerm('announcements', 'save') && (
                           <Button icon={Plus} onClick={() => {
-                              setNewAnnouncement({ id: null, title: '', content: '', date: new Date().toISOString().split('T')[0], endDate: '', priority: 'Normal', projectId: 'All', author: '', image: null, link: '' });
+                              setNewAnnouncement({ id: null, title: '', content: '', date: new Date().toISOString().split('T')[0], hasEndDate: false, endDate: '', priority: 'Normal', projectId: 'All', author: '', image: null, link: '', additionalImages: [], status: 'Published' });
                               setIsEditingAnnouncement(false);
                               setShowAddAnnouncementModal(true);
                           }}>
@@ -6784,6 +6844,10 @@ export default function App() {
                                   {ann.content}
                               </div>
                               
+                              {ann.status === 'Draft' && (
+                                  <span className="bg-gray-100 text-gray-600 border border-gray-300 px-2 py-0.5 rounded text-[10px] font-bold w-fit mb-2">ฉบับร่าง (Draft)</span>
+                              )}
+                              
                               <div className="mt-auto pt-3 border-t border-gray-100 flex justify-between items-center text-xs text-gray-400">
                                   <div className="flex items-center gap-1"><Calendar size={12}/> {new Date(ann.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })}</div>
                                   <div className="flex items-center gap-1"><User size={12}/> {ann.author}</div>
@@ -6807,8 +6871,8 @@ export default function App() {
       const visibleProjects = projects.filter(p => {
           if (currentUser?.username === 'admin') return true;
           
-          const accessibleDeptsStr = currentUser?.accessibleDepts || '';
-          const accessibleArray = typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : accessibleDeptsStr;
+          const accessibleDeptsStr = currentUser?.accessibleDepts;
+          const accessibleArray = Array.isArray(accessibleDeptsStr) ? accessibleDeptsStr : (typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : []);
           
           if (accessibleArray.includes('All')) return true;
           
@@ -15859,7 +15923,7 @@ export default function App() {
                                 <FileText size={20} className="text-blue-500 shrink-0"/>
                                 <div className="text-sm">
                                     <div className="font-bold text-blue-800">สถิติการส่งรายงานประจำวัน (อ้างอิงเดือน {targetMonthStr}): <span className="text-xl ml-2">{uniqueDays}</span> / {daysInMonth} วัน</div>
-                                    <div className="text-blue-600 mt-0.5">คิดเป็น <span className="font-bold">{percentage}%</span> ของจำนวนวันปฏิบัติการ (ระบบให้คะแนนลงข้อ 11.1 ให้อัตโนมัติ)</div>
+                                    <div className="text-blue-600 mt-0.5">คิดเป็น <span className="font-bold">{percentage}%</span> ของจำนวนวันปฏิบัติการ (ใช้เป็นข้อมูลอ้างอิงการให้คะแนนข้อ 11)</div>
                                 </div>
                             </div>
                         );
@@ -16625,933 +16689,295 @@ export default function App() {
 
       {/* Add Announcement Modal */}
       {showAddAnnouncementModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-                <div className="flex justify-between items-center mb-6 border-b pb-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in overflow-y-auto">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl overflow-hidden flex flex-col max-h-[95vh]">
+                <div className="flex justify-between items-center p-6 border-b bg-gray-50 shrink-0">
                     <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                        <Radio className="text-red-500" />
-                        {isEditingAnnouncement ? 'แก้ไขประกาศ' : 'สร้างประกาศใหม่'}
+                        <Radio className="text-blue-600" />
+                        {isEditingAnnouncement ? 'แก้ไขประกาศ (Edit Announcement)' : 'สร้างประกาศใหม่ (New Announcement)'}
                     </h2>
-                    <button onClick={() => setShowAddAnnouncementModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                    <button type="button" onClick={() => setShowAddAnnouncementModal(false)} className="text-gray-400 hover:text-red-500 bg-white rounded-full p-1.5 border shadow-sm transition-colors"><X size={20} /></button>
                 </div>
-                <form onSubmit={handleSaveAnnouncement} className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">หัวข้อประกาศ (Title)</label>
-                        <input 
-                            type="text" 
-                            required 
-                            className="w-full border rounded-md p-2 outline-none focus:border-red-500"
-                            value={newAnnouncement.title}
-                            onChange={e => setNewAnnouncement({...newAnnouncement, title: e.target.value})}
-                            placeholder="ระบุหัวข้อข่าวสารหรือเรื่องที่ต้องการแจ้ง..."
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">รายละเอียด (Content)</label>
-                        <textarea 
-                            required
-                            className="w-full border rounded-md p-2 h-32 resize-none outline-none focus:border-red-500"
-                            value={newAnnouncement.content}
-                            onChange={e => setNewAnnouncement({...newAnnouncement, content: e.target.value})}
-                            placeholder="พิมพ์รายละเอียดที่นี่..."
-                        ></textarea>
-                    </div>
-
-                    {/* แนบลิงก์ */}
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">แนบลิงก์ (Link)</label>
-                        <div className="relative">
-                            <LinkIcon size={16} className="absolute left-3 top-2.5 text-gray-400"/>
-                            <input 
-                                type="url" 
-                                className="w-full border rounded-md pl-9 p-2 outline-none focus:border-red-500"
-                                value={newAnnouncement.link || ''}
-                                onChange={e => setNewAnnouncement({...newAnnouncement, link: e.target.value})}
-                                placeholder="https://..."
-                            />
-                        </div>
-                    </div>
-
-                    {/* แนบรูปภาพ */}
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-2">ภาพปก (Cover Image)</label>
-                        <div className="flex items-center gap-4">
-                            <div className="w-24 h-24 bg-gray-100 rounded-lg border border-dashed border-gray-300 flex items-center justify-center overflow-hidden">
-                                {newAnnouncement.image ? (
-                                    <img src={newAnnouncement.image} alt="Preview" className="w-full h-full object-cover" />
-                                ) : (
-                                    <ImageIcon className="text-gray-300" size={32} />
-                                )}
+                
+                <div className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar">
+                    <form id="announcement-form" onSubmit={handleSaveAnnouncement} className="grid grid-cols-1 xl:grid-cols-5 gap-8">
+                        
+                        {/* --- LEFT COLUMN: Form --- */}
+                        <div className="xl:col-span-3 space-y-6">
+                            {/* News Type */}
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-3">ประเภทข่าว</label>
+                                <div className="flex items-center gap-8">
+                                    <label className="flex items-center gap-2 cursor-pointer group">
+                                        <input type="radio" name="newsType" checked={newAnnouncement.priority === 'Normal'} onChange={() => setNewAnnouncement({...newAnnouncement, priority: 'Normal'})} className="accent-blue-600 w-5 h-5 cursor-pointer" />
+                                        <span className="text-sm font-medium text-gray-700 group-hover:text-blue-600 transition-colors">ข่าวประชาสัมพันธ์</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer group">
+                                        <input type="radio" name="newsType" checked={newAnnouncement.priority === 'High'} onChange={() => setNewAnnouncement({...newAnnouncement, priority: 'High'})} className="accent-blue-600 w-5 h-5 cursor-pointer" />
+                                        <span className="text-sm font-medium text-gray-700 group-hover:text-blue-600 transition-colors">ข่าวด่วน</span>
+                                    </label>
+                                </div>
                             </div>
-                            <div className="flex flex-col gap-2">
-                                <label className="cursor-pointer bg-white border border-gray-300 px-4 py-2 rounded-md text-sm hover:bg-gray-50 transition-colors flex items-center gap-2 justify-center">
-                                    <Upload size={16}/> อัปโหลดรูป
-                                    <input type="file" accept="image/*" className="hidden" onChange={handleAnnouncementImageUpload} />
+
+                            {/* Title */}
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">หัวข้อ <span className="text-red-500">*</span></label>
+                                <input 
+                                    type="text" 
+                                    required 
+                                    className="w-full border border-gray-300 rounded-md p-3 outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all text-sm"
+                                    value={newAnnouncement.title}
+                                    onChange={e => setNewAnnouncement({...newAnnouncement, title: e.target.value})}
+                                    placeholder="ระบุหัวข้อข่าวสารหรือเรื่องที่ต้องการแจ้ง..."
+                                />
+                            </div>
+
+                            {/* Cover Image */}
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center flex-wrap gap-2">
+                                    ภาพหัวข้อเรื่อง <span className="text-red-500">*</span> 
+                                    <span className="text-red-400 text-xs font-normal">ไฟล์ภาพ jpg, png เท่านั้น ขนาดไม่เกิน 2000 x 2000 พิกเซล</span>
                                 </label>
+                                <div className="w-full h-56 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative hover:bg-gray-100 hover:border-blue-300 transition-all cursor-pointer group shadow-inner">
+                                    {newAnnouncement.image ? (
+                                        <>
+                                            <img src={newAnnouncement.image} alt="Cover" className="w-full h-full object-contain bg-white" />
+                                            <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm">
+                                                <span className="text-white font-bold flex items-center gap-2 border-2 border-white px-4 py-2 rounded-full"><Edit size={16}/> เปลี่ยนรูปภาพ</span>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <div className="text-center text-gray-500 group-hover:text-blue-500 transition-colors">
+                                            <ImageIcon size={40} className="mx-auto mb-3 opacity-60 group-hover:opacity-100" />
+                                            <span className="font-bold text-sm">คลิกเพื่อเลือกรูปภาพ</span>
+                                        </div>
+                                    )}
+                                    <input type="file" accept="image/jpeg, image/png" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleAnnouncementImageUpload} />
+                                </div>
                                 {newAnnouncement.image && (
-                                    <button type="button" onClick={() => setNewAnnouncement({...newAnnouncement, image: null})} className="text-red-500 text-xs hover:underline">
-                                        ลบรูปภาพ
+                                    <button type="button" onClick={() => setNewAnnouncement({...newAnnouncement, image: null})} className="text-red-500 text-xs mt-2 hover:underline font-medium">ลบรูปภาพปก</button>
+                                )}
+                            </div>
+
+                            {/* Content (Simulated Rich Text) */}
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">เนื้อหา <span className="text-red-500">*</span></label>
+                                <div className="border border-gray-300 rounded-md overflow-hidden focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+                                    {/* Fake Toolbar */}
+                                    <div className="bg-gray-50 border-b border-gray-200 px-3 py-2.5 flex flex-wrap items-center gap-4 text-gray-600">
+                                        <select className="text-sm bg-transparent outline-none cursor-pointer font-medium"><option>Normal</option></select>
+                                        <div className="h-4 border-l border-gray-300"></div>
+                                        <div className="flex gap-3">
+                                            <button type="button" className="hover:text-blue-600 font-bold" title="Bold">B</button>
+                                            <button type="button" className="hover:text-blue-600 italic font-serif" title="Italic">I</button>
+                                            <button type="button" className="hover:text-blue-600 underline" title="Underline">U</button>
+                                        </div>
+                                        <div className="h-4 border-l border-gray-300"></div>
+                                        <button type="button" className="hover:text-blue-600" title="Link"><LinkIcon size={14}/></button>
+                                        <button type="button" className="hover:text-blue-600" title="List"><List size={14}/></button>
+                                    </div>
+                                    <textarea 
+                                        required
+                                        className="w-full p-4 h-48 resize-none outline-none text-sm text-gray-700 leading-relaxed"
+                                        value={newAnnouncement.content}
+                                        onChange={e => setNewAnnouncement({...newAnnouncement, content: e.target.value})}
+                                        placeholder="พิมพ์เนื้อหาที่นี่..."
+                                    ></textarea>
+                                </div>
+                            </div>
+
+                            {/* Additional Images (Multiple) */}
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center flex-wrap gap-2">
+                                    แนบรูปภาพเพิ่มเติม <span className="text-red-400 text-xs font-normal">ไฟล์ภาพ jpg, png เท่านั้น ขนาดไม่เกิน 2000 x 2000 พิกเซล</span>
+                                </label>
+                                <div className="flex flex-wrap gap-3">
+                                    {newAnnouncement.additionalImages?.map((img, idx) => (
+                                        <div key={idx} className="relative w-24 h-24 rounded-lg border border-gray-200 overflow-hidden group shadow-sm bg-white p-1">
+                                            <img src={img} className="w-full h-full object-cover rounded" />
+                                            <button type="button" onClick={() => setNewAnnouncement(prev => ({...prev, additionalImages: prev.additionalImages.filter((_, i) => i !== idx)}))} className="absolute inset-1 bg-red-500/70 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-[1px] rounded"><Trash2 size={16}/></button>
+                                        </div>
+                                    ))}
+                                    <label className="w-24 h-24 bg-white border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center text-gray-400 cursor-pointer hover:bg-gray-50 hover:border-blue-400 hover:text-blue-500 transition-all shadow-sm">
+                                        <Plus size={28} />
+                                        <input type="file" accept="image/jpeg, image/png" multiple className="hidden" onChange={async (e) => {
+                                            const files = Array.from(e.target.files);
+                                            const newImages = await Promise.all(files.map(f => compressImage(f)));
+                                            setNewAnnouncement(prev => ({...prev, additionalImages: [...(prev.additionalImages||[]), ...newImages]}));
+                                        }} />
+                                    </label>
+                                </div>
+                            </div>
+
+                            {/* Link & Files */}
+                            <div className="pt-4 border-t border-gray-100">
+                                <label className="block text-sm font-bold text-gray-700 mb-2">ไฟล์เพิ่มเติม / แนบลิงก์</label>
+                                <div className="flex flex-col gap-3">
+                                    <div className="flex items-center gap-2">
+                                        <Button variant="outline" size="sm" className="bg-white border-blue-200 text-blue-600 hover:bg-blue-50" icon={File} type="button">แนบไฟล์</Button>
+                                        <span className="text-xs text-gray-400">Support File Just .PDF Only and File Not Over 10 MB</span>
+                                    </div>
+                                    <div className="relative">
+                                        <LinkIcon size={16} className="absolute left-3 top-2.5 text-gray-400"/>
+                                        <input 
+                                            type="url" 
+                                            className="w-full border border-gray-300 rounded-md pl-9 p-2 text-sm outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all"
+                                            value={newAnnouncement.link || ''}
+                                            onChange={e => setNewAnnouncement({...newAnnouncement, link: e.target.value})}
+                                            placeholder="https:// แนบลิงก์เว็บไซต์เพิ่มเติม (ถ้ามี)"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* --- RIGHT COLUMN: Settings & Preview --- */}
+                        <div className="xl:col-span-2 space-y-6 border-t xl:border-t-0 xl:border-l border-gray-200 pt-6 xl:pt-0 xl:pl-8 flex flex-col">
+                            
+                            {/* Targeting Setting */}
+                            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                                <h4 className="font-bold text-gray-800 mb-3 text-sm flex items-center gap-2 border-b pb-2"><Building2 size={16} className="text-blue-500"/> เป้าหมายโครงการ</h4>
+                                <select 
+                                    className="w-full border border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-gray-50 focus:bg-white transition-colors"
+                                    value={newAnnouncement.projectId}
+                                    onChange={e => setNewAnnouncement({...newAnnouncement, projectId: e.target.value})}
+                                >
+                                    <option value="All">แจ้งทุกหน่วยงาน (All Projects)</option>
+                                    <optgroup label="เลือกเฉพาะโครงการ">
+                                        {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                    </optgroup>
+                                </select>
+                            </div>
+
+                            {/* Posting Options */}
+                            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                                <h4 className="font-bold text-gray-800 mb-3 text-sm border-b pb-2">ตัวเลือกการโพสต์</h4>
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer mb-2">
+                                            <input type="checkbox" checked={true} readOnly className="accent-blue-600 w-4 h-4 rounded cursor-default" />
+                                            ตั้งวันที่ส่งประกาศ <span className="text-yellow-500"><Info size={14}/></span>
+                                        </label>
+                                        <input 
+                                            type="date" 
+                                            required 
+                                            className="w-full border border-gray-300 rounded-md p-2 outline-none focus:border-blue-500 text-sm ml-6 w-[calc(100%-24px)] bg-gray-50 focus:bg-white transition-colors"
+                                            value={newAnnouncement.date}
+                                            onChange={e => setNewAnnouncement({...newAnnouncement, date: e.target.value})}
+                                        />
+                                    </div>
+                                    <div className="pt-2">
+                                        <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer mb-2">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={newAnnouncement.hasEndDate} 
+                                                onChange={(e) => setNewAnnouncement({...newAnnouncement, hasEndDate: e.target.checked})} 
+                                                className="accent-blue-600 w-4 h-4 rounded cursor-pointer" 
+                                            />
+                                            ตั้งวันที่หมดอายุประกาศ <span className="text-yellow-500"><Info size={14}/></span>
+                                        </label>
+                                        {newAnnouncement.hasEndDate && (
+                                            <input 
+                                                type="date" 
+                                                required={newAnnouncement.hasEndDate} 
+                                                className="w-full border border-gray-300 rounded-md p-2 outline-none focus:border-blue-500 text-sm ml-6 w-[calc(100%-24px)] animate-fade-in bg-gray-50 focus:bg-white transition-colors"
+                                                value={newAnnouncement.endDate || ''}
+                                                onChange={e => setNewAnnouncement({...newAnnouncement, endDate: e.target.value})}
+                                            />
+                                        )}
+                                    </div>
+                                </div>
+                                
+                                {/* Action Buttons */}
+                                <div className="grid grid-cols-2 gap-3 pt-6 mt-2">
+                                    <button 
+                                        type="submit" 
+                                        onClick={() => setNewAnnouncement({...newAnnouncement, status: 'Draft'})} 
+                                        className="py-2 px-4 text-blue-600 text-sm font-bold rounded-lg border border-blue-600 hover:bg-blue-50 transition-colors w-full bg-white shadow-sm"
+                                    >
+                                        บันทึกแบบร่าง
                                     </button>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-1">วันที่แจ้ง (Start Date)</label>
-                            <input 
-                                type="date" 
-                                required 
-                                className="w-full border rounded-md p-2 outline-none focus:border-red-500"
-                                value={newAnnouncement.date}
-                                onChange={e => setNewAnnouncement({...newAnnouncement, date: e.target.value})}
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-1">วันสิ้นสุดประกาศ</label>
-                            <input 
-                                type="date" 
-                                className="w-full border rounded-md p-2 outline-none focus:border-red-500 bg-white"
-                                value={newAnnouncement.endDate || ''}
-                                onChange={e => setNewAnnouncement({...newAnnouncement, endDate: e.target.value})}
-                            />
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-1">ระดับความสำคัญ</label>
-                            <select 
-                                className="w-full border rounded-md p-2 outline-none focus:border-red-500 bg-white"
-                                value={newAnnouncement.priority}
-                                onChange={e => setNewAnnouncement({...newAnnouncement, priority: e.target.value})}
-                            >
-                                <option value="Normal">ทั่วไป (Normal)</option>
-                                <option value="High">ด่วน (High Priority)</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-1">เป้าหมายโครงการ</label>
-                            <select 
-                                className="w-full border rounded-md p-2 outline-none focus:border-red-500 bg-white"
-                                value={newAnnouncement.projectId}
-                                onChange={e => setNewAnnouncement({...newAnnouncement, projectId: e.target.value})}
-                            >
-                                <option value="All">แจ้งทุกหน่วยงาน (All Projects)</option>
-                                <optgroup label="เลือกเฉพาะโครงการ">
-                                    {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                                </optgroup>
-                            </select>
-                        </div>
-                    </div>
-                    
-                    <p className="text-xs text-gray-500 mt-1">* หากเลือกเฉพาะโครงการ พนักงานที่อยู่โครงการอื่นจะไม่เห็นประกาศนี้</p>
-                    
-                    <div className="flex justify-end gap-2 pt-4 border-t mt-6">
-                        <Button variant="secondary" onClick={() => setShowAddAnnouncementModal(false)}>ยกเลิก</Button>
-                        <Button type="submit" icon={Save}>บันทึกประกาศ</Button>
-                    </div>
-                </form>
-            </div>
-        </div>
-      )}
-
-      {/* Add Meeting Modal */}
-      {showAddMeetingModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
-                <div className="flex justify-between items-center mb-6 border-b pb-4">
-                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                        <Megaphone className="text-teal-600" />
-                        {isEditingMeeting ? 'แก้ไขข้อมูลการประชุม' : 'เพิ่มกำหนดการประชุม'}
-                    </h2>
-                    <button onClick={() => setShowAddMeetingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
-                </div>
-                <form onSubmit={handleSaveMeeting} className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">หัวข้อการประชุม (Title)</label>
-                        <input 
-                            type="text" 
-                            required 
-                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
-                            value={newMeeting.title}
-                            onChange={e => setNewMeeting({...newMeeting, title: e.target.value})}
-                            placeholder="เช่น ประชุมใหญ่สามัญเจ้าของร่วม ประจำปี 2567"
-                        />
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-1">ประเภทการประชุม (Type)</label>
-                            <select 
-                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
-                                value={newMeeting.type}
-                                onChange={e => setNewMeeting({...newMeeting, type: e.target.value})}
-                            >
-                                <option value="AGM">ประชุมใหญ่สามัญ (AGM)</option>
-                                <option value="EGM">ประชุมใหญ่วิสามัญ (EGM)</option>
-                                <option value="Committee">ประชุมคณะกรรมการ (Committee)</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-1">สถานที่ (Location)</label>
-                            <input 
-                                type="text" 
-                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
-                                value={newMeeting.location}
-                                onChange={e => setNewMeeting({...newMeeting, location: e.target.value})}
-                                placeholder="เช่น ห้องประชุมชั้น 1, ผ่านระบบ Zoom"
-                            />
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                        <div className="col-span-1 md:col-span-1">
-                            <label className="block text-sm font-bold text-gray-700 mb-1">วันที่ (Date)</label>
-                            <input 
-                                type="date" 
-                                required
-                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
-                                value={newMeeting.date}
-                                onChange={e => setNewMeeting({...newMeeting, date: e.target.value})}
-                            />
-                        </div>
-                        <div className="col-span-1 md:col-span-1">
-                            <label className="block text-sm font-bold text-gray-700 mb-1">เวลา (Time)</label>
-                            <input 
-                                type="time" 
-                                required
-                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
-                                value={newMeeting.time}
-                                onChange={e => setNewMeeting({...newMeeting, time: e.target.value})}
-                            />
-                        </div>
-                        <div className="col-span-2 md:col-span-1">
-                            <label className="block text-sm font-bold text-gray-700 mb-1">สถานะ (Status)</label>
-                            <select 
-                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
-                                value={newMeeting.status}
-                                onChange={e => setNewMeeting({...newMeeting, status: e.target.value})}
-                            >
-                                <option value="Scheduled">รอดำเนินการ (Scheduled)</option>
-                                <option value="Completed">เสร็จสิ้น (Completed)</option>
-                                <option value="Postponed">เลื่อน (Postponed)</option>
-                                <option value="Cancelled">ยกเลิก (Cancelled)</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">วาระการประชุม (Agenda)</label>
-                        <textarea 
-                            className="w-full border rounded-md p-2 h-24 resize-none outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
-                            value={newMeeting.agenda}
-                            onChange={e => setNewMeeting({...newMeeting, agenda: e.target.value})}
-                            placeholder="วาระที่ 1: ...&#10;วาระที่ 2: ..."
-                        ></textarea>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">แนบรายงานการประชุม (Minutes - PDF)</label>
-                        <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:bg-teal-50 cursor-pointer relative transition-colors group">
-                            <input type="file" accept=".pdf" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleMeetingFileUpload} title="คลิกเพื่ออัปโหลดหรือเปลี่ยนไฟล์" />
-                            {newMeeting.minutesFile ? (
-                                <div className="text-teal-600 flex flex-col items-center justify-center gap-1">
-                                    <div className="flex items-center gap-2 font-bold"><FileCheck size={20}/> {newMeeting.minutesFile.name}</div>
-                                    <span className="text-xs text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity">คลิกเพื่อเปลี่ยนไฟล์ใหม่</span>
+                                    <button 
+                                        type="submit" 
+                                        onClick={() => setNewAnnouncement({...newAnnouncement, status: 'Published'})} 
+                                        className="py-2 px-4 text-white text-sm font-bold rounded-lg bg-blue-600 hover:bg-blue-700 transition-colors w-full shadow-md"
+                                    >
+                                        ตกลง (Publish)
+                                    </button>
                                 </div>
-                            ) : (
-                                <div className="text-gray-500 flex flex-col items-center gap-1"><Upload size={24}/><span className="text-xs font-medium">คลิกเพื่ออัปโหลดไฟล์ PDF</span></div>
-                            )}
-                        </div>
-                    </div>
-                    <div className="flex justify-end gap-2 pt-4 border-t mt-6">
-                        <Button variant="secondary" onClick={() => setShowAddMeetingModal(false)}>ยกเลิก</Button>
-                        <Button type="submit" icon={Save}>บันทึกข้อมูล</Button>
-                    </div>
-                </form>
-            </div>
-        </div>
-      )}
-
-      {/* NEW: Selected Invitation Details View Modal */}
-      {selectedInvitationView && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in overflow-y-auto">
-            <div className={`bg-white rounded-xl shadow-xl w-full max-w-4xl overflow-y-auto relative ${isExporting ? 'p-0 shadow-none m-0 h-max' : 'p-8 m-4 max-h-[95vh]'}`}>
-                <button 
-                    onClick={() => setSelectedInvitationView(null)} 
-                    className={`absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors z-10 ${isExporting ? 'hidden' : ''}`}
-                >
-                    <X size={24} />
-                </button>
-
-                <div id="print-invitation-detail" className={`bg-white text-gray-800 ${isExporting ? 'w-[210mm] min-h-[297mm] mx-auto box-border px-[25mm] py-[30mm]' : 'w-full px-4 md:px-12 py-8'}`}>
-                    
-                    <div className="flex justify-between items-start mb-8 text-sm">
-                        <div className="text-gray-500">
-                            ที่ ..............................
-                        </div>
-                        <div className="text-right text-gray-700">
-                            <p className="font-bold text-base mb-1">นิติบุคคลอาคารชุด / หมู่บ้าน {selectedProject?.name}</p>
-                            <p className="max-w-[250px] whitespace-pre-wrap">{selectedProject?.address}</p>
-                        </div>
-                    </div>
-
-                    <div className="flex justify-end mb-8 text-sm text-gray-800">
-                        <div>
-                            <p>วันที่ {new Date(selectedInvitationView.issueDate).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'})}</p>
-                        </div>
-                    </div>
-
-                    <div className="space-y-4 text-base leading-relaxed mb-10 text-gray-800">
-                        <div className="flex items-start gap-4">
-                            <div className="font-bold w-12 shrink-0">เรื่อง</div>
-                            <div className="font-bold">{selectedInvitationView.title}</div>
-                        </div>
-                        <div className="flex items-start gap-4">
-                            <div className="font-bold w-12 shrink-0">เรียน</div>
-                            <div>{selectedInvitationView.recipient}</div>
-                        </div>
-                        {selectedInvitationView.meetingId && (
-                            <div className="flex items-start gap-4">
-                                <div className="font-bold w-12 shrink-0">อ้างถึง</div>
-                                <div>กำหนดการประชุม: {meetingsList.find(m => m.id === selectedInvitationView.meetingId)?.title || '-'}</div>
                             </div>
-                        )}
-                        <div className="flex items-start gap-4">
-                            <div className="font-bold w-12 shrink-0 text-transparent">อ้างถึง</div>
-                            <div className="flex-1 border-b border-dotted border-gray-400 mt-5"></div>
-                        </div>
-                    </div>
 
-                    <div className="pl-0 md:pl-16 whitespace-pre-wrap text-base leading-loose min-h-[300px] mb-16 text-gray-800 font-medium">
-                        {selectedInvitationView.content}
-                    </div>
-
-                    <div className="flex justify-end mt-20 pr-4 md:pr-16 text-center text-gray-800">
-                        <div className="w-64">
-                            <p className="mb-4 text-left pl-6">ขอแสดงความนับถือ</p>
-                            <div className="h-20"></div>
-                            <p>( {selectedInvitationView.signatory || '.......................................................'} )</p>
-                            <p className="text-sm mt-1">ผู้จัดการนิติบุคคล / คณะกรรมการ</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div className={`mt-8 flex justify-end gap-2 pt-4 border-t border-gray-200 bg-white ${isExporting ? 'hidden' : ''}`}>
-                    {hasPerm('proj_meeting', 'edit') && (
-                        <Button variant="outline" icon={Edit} onClick={() => {
-                            setNewInvitation(selectedInvitationView);
-                            setSelectedInvitationView(null);
-                            setShowAddInvitationModal(true);
-                        }}>
-                            แก้ไขข้อมูล
-                        </Button>
-                    )}
-                    <Button variant="secondary" onClick={() => setSelectedInvitationView(null)}>ปิดหน้าต่าง</Button>
-                    <Button icon={Printer} onClick={() => {
-                        const container = document.getElementById('print-invitation-detail')?.closest('.overflow-y-auto');
-                        if (container) container.scrollTop = 0;
-                        setTimeout(() => handleExportPDF('print-invitation-detail', `Invitation_${selectedInvitationView.title}.pdf`, 'portrait', [0, 0, 0, 0]), 100);
-                    }} disabled={isExporting}>
-                        {isExporting ? 'กำลังโหลด...' : 'ดาวน์โหลด PDF'}
-                    </Button>
-                </div>
-            </div>
-        </div>
-      )}
-
-      {/* NEW: Add/Edit Proxy Modal */}
-      {showAddProxyModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl p-6 max-h-[90vh] overflow-y-auto">
-                <div className="flex justify-between items-center mb-6 border-b pb-4">
-                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                        <FileText className="text-teal-600" />
-                        {newProxy.id ? 'แก้ไขใบมอบฉันทะ' : 'สร้างใบมอบฉันทะ (New Proxy)'}
-                    </h2>
-                    <button onClick={() => setShowAddProxyModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
-                </div>
-                <form onSubmit={handleSaveProxy} className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-1">อ้างอิงถึงการประชุม (Related Meeting)</label>
-                            <select 
-                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
-                                value={newProxy.meetingId}
-                                onChange={e => setNewProxy({...newProxy, meetingId: e.target.value})}
-                                required
-                            >
-                                <option value="" disabled>-- เลือกการประชุม --</option>
-                                {meetingsList.filter(m => m.projectId === selectedProject.id).map(m => (
-                                    <option key={m.id} value={m.id}>{m.title} ({new Date(m.date).toLocaleDateString('th-TH')})</option>
-                                ))}
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-1">วันที่ทำเอกสาร (Date)</label>
-                            <input 
-                                type="date" 
-                                required
-                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
-                                value={newProxy.date}
-                                onChange={e => setNewProxy({...newProxy, date: e.target.value})}
-                            />
-                        </div>
-                    </div>
-                    
-                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 space-y-4">
-                        <h3 className="font-bold text-gray-700 border-b pb-2 mb-3">ข้อมูลผู้มอบฉันทะ (เจ้าของร่วม)</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div className="md:col-span-2">
-                                <label className="block text-sm font-bold text-gray-700 mb-1">ชื่อ - นามสกุล (Owner Name)</label>
-                                <input 
-                                    type="text" 
-                                    required 
-                                    className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
-                                    value={newProxy.ownerName}
-                                    onChange={e => setNewProxy({...newProxy, ownerName: e.target.value})}
-                                    placeholder="ระบุชื่อเจ้าของห้อง/บ้าน"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">ห้องเลขที่ (Unit No.)</label>
-                                <input 
-                                    type="text" 
-                                    required 
-                                    className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
-                                    value={newProxy.unitNo}
-                                    onChange={e => setNewProxy({...newProxy, unitNo: e.target.value})}
-                                    placeholder="ระบุเลขห้อง"
-                                />
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="bg-teal-50 p-4 rounded-lg border border-teal-100 space-y-4">
-                        <h3 className="font-bold text-teal-800 border-b border-teal-200 pb-2 mb-3">ข้อมูลผู้รับมอบฉันทะ (ตัวแทน)</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-bold text-teal-700 mb-1">ชื่อ - นามสกุล (Proxy Name)</label>
-                                <input 
-                                    type="text" 
-                                    required 
-                                    className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
-                                    value={newProxy.proxyName}
-                                    onChange={e => setNewProxy({...newProxy, proxyName: e.target.value})}
-                                    placeholder="ระบุชื่อผู้แทน"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-teal-700 mb-1">ความเกี่ยวข้อง (Relation)</label>
-                                <select 
-                                    className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
-                                    value={newProxy.proxyRelation}
-                                    onChange={e => setNewProxy({...newProxy, proxyRelation: e.target.value})}
-                                >
-                                    <option value="บุคคลในครอบครัว">บุคคลในครอบครัว (บิดา/มารดา/บุตร/คู่สมรส)</option>
-                                    <option value="ผู้เช่า">ผู้เช่า (Tenant)</option>
-                                    <option value="บุคคลภายนอก">บุคคลภายนอก (Other Person)</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">สถานะเอกสาร (Status)</label>
-                        <select 
-                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
-                            value={newProxy.status}
-                            onChange={e => setNewProxy({...newProxy, status: e.target.value})}
-                        >
-                            <option value="Pending">รอตรวจสอบ (Pending)</option>
-                            <option value="Verified">ตรวจสอบแล้ว เอกสารครบถ้วน (Verified)</option>
-                            <option value="Rejected">เอกสารไม่สมบูรณ์ / เป็นโมฆะ (Rejected)</option>
-                        </select>
-                    </div>
-
-                    <div className="flex justify-end gap-2 pt-4 border-t mt-6">
-                        <Button variant="secondary" onClick={() => setShowAddProxyModal(false)}>ยกเลิก</Button>
-                        <Button type="submit" icon={Save}>บันทึกข้อมูล</Button>
-                    </div>
-                </form>
-            </div>
-        </div>
-      )}
-
-      {/* NEW: Selected Proxy Details View Modal */}
-      {selectedProxyView && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in overflow-y-auto">
-            <div className={`bg-white rounded-xl shadow-xl w-full max-w-4xl overflow-y-auto relative ${isExporting ? 'p-0 shadow-none m-0 h-max' : 'p-8 m-4 max-h-[95vh]'}`}>
-                <button 
-                    onClick={() => setSelectedProxyView(null)} 
-                    className={`absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors z-10 ${isExporting ? 'hidden' : ''}`}
-                >
-                    <X size={24} />
-                </button>
-
-                <div id="print-proxy-detail" className={`bg-white text-gray-800 ${isExporting ? 'w-[210mm] min-h-[297mm] mx-auto box-border px-[25mm] py-[30mm]' : 'w-full px-4 md:px-12 py-8'}`}>
-                    
-                    <div className="text-center mb-8">
-                        <h2 className="text-2xl font-bold mb-2">หนังสือมอบฉันทะ</h2>
-                        <h3 className="text-lg font-bold text-gray-700">นิติบุคคลอาคารชุด / หมู่บ้าน {selectedProject?.name}</h3>
-                    </div>
-
-                    <div className="flex justify-end mb-8 text-sm text-gray-800">
-                        <div className="w-64">
-                            <p>ทำที่ นิติบุคคลฯ {selectedProject?.name}</p>
-                            <p className="mt-2">วันที่ {new Date(selectedProxyView.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'})}</p>
-                        </div>
-                    </div>
-
-                    <div className="space-y-6 text-base leading-loose mb-10 text-gray-800">
-                        <p>
-                            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ข้าพเจ้า <span className="font-bold border-b border-dotted border-gray-500 inline-block px-4 text-center min-w-[200px]">{selectedProxyView.ownerName}</span> 
-                            เป็นเจ้าของร่วม / สมาชิก อาคารชุด/หมู่บ้าน {selectedProject?.name} 
-                            ห้องเลขที่ / บ้านเลขที่ <span className="font-bold border-b border-dotted border-gray-500 inline-block px-4 text-center min-w-[100px]">{selectedProxyView.unitNo}</span>
-                        </p>
-                        <p>
-                            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ขอมอบฉันทะให้ <span className="font-bold border-b border-dotted border-gray-500 inline-block px-4 text-center min-w-[200px]">{selectedProxyView.proxyName}</span> 
-                            ความเกี่ยวข้องเป็น <span className="font-bold border-b border-dotted border-gray-500 inline-block px-4 text-center min-w-[100px]">{selectedProxyView.proxyRelation}</span> ของข้าพเจ้า
-                        </p>
-                        <p>
-                            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ให้เป็นผู้รับมอบฉันทะของข้าพเจ้า มีสิทธิเข้าร่วมประชุม ออกเสียงลงคะแนน และกระทำการใดๆ ในการประชุม
-                            <span className="font-bold border-b border-dotted border-gray-500 inline-block px-2 text-center min-w-[200px] mx-2">
-                                {meetingsList.find(m => m.id === selectedProxyView.meetingId)?.title || '.........................................................'}
-                            </span>
-                            แทนข้าพเจ้าได้ทุกประการ
-                        </p>
-                        <p>
-                            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;กิจการใดที่ผู้รับมอบฉันทะได้กระทำไปในการประชุมดังกล่าว ให้ถือเสมือนว่าข้าพเจ้าได้กระทำด้วยตนเองทุกประการ และข้าพเจ้าขอรับผิดชอบในการกระทำนั้นๆ ทั้งสิ้น
-                        </p>
-                    </div>
-
-                    <div className="flex justify-between mt-20 px-8 text-center text-gray-800">
-                        <div className="w-56">
-                            <div className="h-16"></div>
-                            <p>( ........................................................ )</p>
-                            <p className="mt-2 font-bold">ผู้มอบฉันทะ</p>
-                            <p className="text-sm mt-1">{selectedProxyView.ownerName}</p>
-                        </div>
-                        <div className="w-56">
-                            <div className="h-16"></div>
-                            <p>( ........................................................ )</p>
-                            <p className="mt-2 font-bold">ผู้รับมอบฉันทะ</p>
-                            <p className="text-sm mt-1">{selectedProxyView.proxyName}</p>
-                        </div>
-                    </div>
-                    
-                    <div className="flex justify-center mt-12 px-8 text-center text-gray-800">
-                        <div className="w-56">
-                            <div className="h-16"></div>
-                            <p>( ........................................................ )</p>
-                            <p className="mt-2 font-bold">พยาน / ผู้ตรวจสอบ</p>
-                            <p className="text-sm mt-1">เจ้าหน้าที่นิติบุคคล</p>
-                        </div>
-                    </div>
-                    
-                    {!isExporting && (
-                        <div className="mt-16 flex justify-end">
-                            <span className={`px-4 py-2 rounded-lg text-sm font-bold border shadow-sm ${
-                                selectedProxyView.status === 'Verified' ? 'bg-green-50 border-green-200 text-green-700' : 
-                                selectedProxyView.status === 'Rejected' ? 'bg-red-50 border-red-200 text-red-700' : 
-                                'bg-orange-50 border-orange-200 text-orange-700'
-                            }`}>
-                                สถานะเอกสาร: {selectedProxyView.status === 'Verified' ? 'ตรวจสอบแล้ว' : selectedProxyView.status === 'Rejected' ? 'เอกสารไม่สมบูรณ์ / เป็นโมฆะ' : 'รอตรวจสอบ (Pending)'}
-                            </span>
-                        </div>
-                    )}
-                </div>
-
-                <div className={`mt-8 flex justify-end gap-2 pt-4 border-t border-gray-200 bg-white ${isExporting ? 'hidden' : ''}`}>
-                    {hasPerm('proj_meeting', 'edit') && (
-                        <Button variant="outline" icon={Edit} onClick={() => {
-                            setNewProxy(selectedProxyView);
-                            setSelectedProxyView(null);
-                            setShowAddProxyModal(true);
-                        }}>
-                            แก้ไขข้อมูล / อัปเดตสถานะ
-                        </Button>
-                    )}
-                    <Button variant="secondary" onClick={() => setSelectedProxyView(null)}>ปิดหน้าต่าง</Button>
-                    <Button icon={Printer} onClick={() => {
-                        const container = document.getElementById('print-proxy-detail')?.closest('.overflow-y-auto');
-                        if (container) container.scrollTop = 0;
-                        setTimeout(() => handleExportPDF('print-proxy-detail', `Proxy_${selectedProxyView.unitNo}.pdf`, 'portrait', [0, 0, 0, 0]), 100);
-                    }} disabled={isExporting}>
-                        {isExporting ? 'กำลังโหลด...' : 'ดาวน์โหลด PDF'}
-                    </Button>
-                </div>
-            </div>
-        </div>
-      )}
-
-      {/* NEW: Add/Edit Ballot Modal */}
-      {showAddBallotModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
-                <div className="flex justify-between items-center mb-6 border-b pb-4">
-                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                        <CheckSquare className="text-teal-600" />
-                        {newBallot.id ? 'แก้ไขข้อมูลใบลงคะแนน' : 'สร้างใบลงคะแนน (New Ballot)'}
-                    </h2>
-                    <button onClick={() => setShowAddBallotModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
-                </div>
-                <form onSubmit={handleSaveBallot} className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-1">อ้างอิงถึงการประชุม (Related Meeting)</label>
-                            <select 
-                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
-                                value={newBallot.meetingId}
-                                onChange={e => setNewBallot({...newBallot, meetingId: e.target.value})}
-                                required
-                            >
-                                <option value="" disabled>-- เลือกการประชุม --</option>
-                                {meetingsList.filter(m => m.projectId === selectedProject.id).map(m => (
-                                    <option key={m.id} value={m.id}>{m.title} ({new Date(m.date).toLocaleDateString('th-TH')})</option>
-                                ))}
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-1">วันที่ออกบัตร (Date)</label>
-                            <input 
-                                type="date" 
-                                required
-                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
-                                value={newBallot.date}
-                                onChange={e => setNewBallot({...newBallot, date: e.target.value})}
-                            />
-                        </div>
-                    </div>
-                    
-                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 space-y-4">
-                        <h3 className="font-bold text-gray-700 border-b pb-2 mb-3 flex items-center gap-2"><MapPin size={16}/> ข้อมูลกรรมสิทธิ์</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">ห้อง/บ้านเลขที่ (Unit No.)</label>
-                                <input 
-                                    type="text" 
-                                    required 
-                                    className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 font-bold text-teal-700"
-                                    value={newBallot.unitNo}
-                                    onChange={e => setNewBallot({...newBallot, unitNo: e.target.value})}
-                                    placeholder="เช่น 101/5"
-                                />
-                            </div>
-                            <div className="md:col-span-2">
-                                <label className="block text-sm font-bold text-gray-700 mb-1">ชื่อเจ้าของร่วม (Owner Name)</label>
-                                <input 
-                                    type="text" 
-                                    required 
-                                    className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500"
-                                    value={newBallot.ownerName}
-                                    onChange={e => setNewBallot({...newBallot, ownerName: e.target.value})}
-                                    placeholder="ระบุชื่อเจ้าของกรรมสิทธิ์"
-                                />
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="bg-teal-50 p-4 rounded-lg border border-teal-100 space-y-4">
-                        <h3 className="font-bold text-teal-800 border-b border-teal-200 pb-2 mb-3 flex items-center gap-2"><User size={16}/> ข้อมูลผู้ใช้สิทธิ์ลงคะแนน</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-bold text-teal-700 mb-1">ประเภทผู้ลงคะแนน (Voter Type)</label>
-                                <select 
-                                    className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
-                                    value={newBallot.voterType}
-                                    onChange={e => {
-                                        const type = e.target.value;
-                                        setNewBallot({
-                                            ...newBallot, 
-                                            voterType: type,
-                                            // ถ้าเปลี่ยนเป็นเจ้าของร่วม ให้เคลียร์ชื่อตัวแทนออก
-                                            voterName: type === 'เจ้าของร่วม' ? newBallot.ownerName : ''
-                                        });
-                                    }}
-                                >
-                                    <option value="เจ้าของร่วม">เจ้าของร่วม (มาด้วยตนเอง)</option>
-                                    <option value="ผู้รับมอบฉันทะ">ผู้รับมอบฉันทะ (ตัวแทน)</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-teal-700 mb-1">ชื่อผู้ลงคะแนน (Voter Name)</label>
-                                <input 
-                                    type="text" 
-                                    className={`w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 ${newBallot.voterType === 'เจ้าของร่วม' ? 'bg-gray-100 text-gray-500' : 'bg-white'}`}
-                                    value={newBallot.voterType === 'เจ้าของร่วม' ? newBallot.ownerName : newBallot.voterName}
-                                    onChange={e => newBallot.voterType !== 'เจ้าของร่วม' && setNewBallot({...newBallot, voterName: e.target.value})}
-                                    placeholder={newBallot.voterType === 'เจ้าของร่วม' ? 'ยึดตามชื่อเจ้าของร่วม' : 'ระบุชื่อตัวแทน'}
-                                    disabled={newBallot.voterType === 'เจ้าของร่วม'}
-                                    required={newBallot.voterType !== 'เจ้าของร่วม'}
-                                />
-                            </div>
-                        </div>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">สถานะบัตรลงคะแนน (Ballot Status)</label>
-                        <select 
-                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-500 bg-white"
-                            value={newBallot.status}
-                            onChange={e => setNewBallot({...newBallot, status: e.target.value})}
-                        >
-                            <option value="Valid">บัตรดี (Valid)</option>
-                            <option value="Void">บัตรเสีย / โมฆะ (Void)</option>
-                        </select>
-                    </div>
-
-                    <div className="flex justify-end gap-2 pt-4 border-t mt-6">
-                        <Button variant="secondary" onClick={() => setShowAddBallotModal(false)}>ยกเลิก</Button>
-                        <Button type="submit" icon={Save}>บันทึกข้อมูล</Button>
-                    </div>
-                </form>
-            </div>
-        </div>
-      )}
-
-      {/* NEW: Selected Ballot Details View Modal */}
-      {selectedBallotView && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in overflow-y-auto">
-            <div className={`bg-white rounded-xl shadow-xl w-full max-w-4xl overflow-y-auto relative ${isExporting ? 'p-0 shadow-none m-0 h-max' : 'p-8 m-4 max-h-[95vh]'}`}>
-                <button 
-                    onClick={() => setSelectedBallotView(null)} 
-                    className={`absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors z-10 ${isExporting ? 'hidden' : ''}`}
-                >
-                    <X size={24} />
-                </button>
-
-                <div id="print-ballot-detail" className={`bg-white text-gray-800 ${isExporting ? 'w-[210mm] min-h-[297mm] mx-auto box-border px-[20mm] py-[25mm]' : 'w-full px-4 md:px-8 py-4'}`}>
-                    
-                    {/* Ballot Header */}
-                    <div className="text-center mb-8 border-2 border-gray-800 p-4 rounded-lg relative">
-                        <div className="absolute top-2 right-4 text-sm font-mono text-gray-500">Ref: {selectedBallotView.id?.substring(0,6).toUpperCase()}</div>
-                        <h2 className="text-3xl font-black mb-2 tracking-wide text-gray-900">บัตรลงคะแนนเสียง (Voting Ballot)</h2>
-                        <h3 className="text-lg font-bold text-gray-700">{meetingsList.find(m => m.id === selectedBallotView.meetingId)?.title || 'การประชุมนิติบุคคล'}</h3>
-                        <p className="text-sm mt-1 text-gray-600">
-                            วันที่ {new Date(meetingsList.find(m => m.id === selectedBallotView.meetingId)?.date || selectedBallotView.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'})}
-                        </p>
-                    </div>
-
-                    {/* Voter Info */}
-                    <div className="flex justify-between items-start mb-8 text-base border-b-2 border-gray-800 pb-6 gap-4">
-                        <div className="flex-1 space-y-3">
-                            <div className="flex items-center gap-2">
-                                <span className="font-bold w-24 shrink-0">ห้องเลขที่:</span> 
-                                <span className="font-black text-xl border-b border-gray-400 px-4 inline-block min-w-[120px]">{selectedBallotView.unitNo}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <span className="font-bold w-24 shrink-0">เจ้าของร่วม:</span> 
-                                <span className="border-b border-gray-400 px-4 inline-block flex-1">{selectedBallotView.ownerName}</span>
-                            </div>
-                        </div>
-                        <div className="w-1/3 shrink-0 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                            <div className="font-bold mb-2 flex items-center gap-2"><CheckSquare size={16}/> ผู้ใช้สิทธิ์ลงคะแนน</div>
-                            <div className="flex items-center gap-2 mb-1">
-                                <div className={`w-4 h-4 border border-gray-500 rounded-sm flex items-center justify-center ${selectedBallotView.voterType === 'เจ้าของร่วม' ? 'bg-gray-800 text-white' : 'bg-white'}`}>
-                                    {selectedBallotView.voterType === 'เจ้าของร่วม' && <CheckSquare size={12}/>}
-                                </div>
-                                <span>มาด้วยตนเอง</span>
-                            </div>
-                            <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-2">
-                                    <div className={`w-4 h-4 border border-gray-500 rounded-sm flex items-center justify-center ${selectedBallotView.voterType === 'ผู้รับมอบฉันทะ' ? 'bg-gray-800 text-white' : 'bg-white'}`}>
-                                        {selectedBallotView.voterType === 'ผู้รับมอบฉันทะ' && <CheckSquare size={12}/>}
+                            {/* Mobile Preview Area */}
+                            <div className="flex flex-col items-center flex-1 bg-gray-50 p-6 rounded-xl border border-gray-200">
+                                <h4 className="font-bold text-gray-800 mb-4 text-sm w-full text-center">ตัวอย่างการแสดงผล (Preview)</h4>
+                                
+                                {/* Phone Mockup */}
+                                <div className="w-[280px] h-[580px] bg-white rounded-[2.5rem] border-[12px] border-gray-900 shadow-xl relative flex flex-col overflow-hidden shrink-0">
+                                    {/* Notch */}
+                                    <div className="absolute top-0 inset-x-0 h-5 bg-gray-900 w-32 mx-auto rounded-b-xl z-20"></div>
+                                    
+                                    {/* App Header */}
+                                    <div className="bg-blue-600 text-white p-3 pt-7 flex justify-between items-center shadow-sm z-10 shrink-0">
+                                        <ChevronLeft size={18} />
+                                        <span className="font-bold text-xs">รายละเอียดประกาศ</span>
+                                        <span className="w-5"></span>
                                     </div>
-                                    <span>ผู้รับมอบฉันทะ</span>
-                                </div>
-                                {selectedBallotView.voterType === 'ผู้รับมอบฉันทะ' && (
-                                    <div className="ml-6 text-sm border-b border-dotted border-gray-500 pb-0.5 mt-1">
-                                        (ชื่อ: {selectedBallotView.voterName})
+
+                                    {/* Scrollable Content inside Phone */}
+                                    <div className="flex-1 overflow-y-auto bg-gray-50 pb-6 custom-scrollbar relative">
+                                        {/* Cover Image */}
+                                        {newAnnouncement.image ? (
+                                            <div className="w-full aspect-video bg-gray-200">
+                                                <img src={newAnnouncement.image} className="w-full h-full object-cover" />
+                                            </div>
+                                        ) : (
+                                            <div className="w-full aspect-video bg-gray-200 flex items-center justify-center text-gray-400 border-b border-gray-300">
+                                                <ImageIcon size={24} />
+                                            </div>
+                                        )}
+                                        
+                                        {/* Text Content */}
+                                        <div className="p-4 bg-white min-h-full">
+                                            <div className="flex items-center gap-2 mb-2">
+                                                {newAnnouncement.priority === 'High' && <span className="bg-red-100 text-red-600 text-[8px] font-bold px-1.5 py-0.5 rounded">ข่าวด่วน</span>}
+                                                <span className="text-[9px] text-gray-400">{new Date(newAnnouncement.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })}</span>
+                                            </div>
+                                            <h3 className="font-bold text-gray-800 text-sm leading-snug mb-3 break-words">
+                                                {newAnnouncement.title || 'หัวข้อประกาศ...'}
+                                            </h3>
+                                            <div className="text-[11px] text-gray-600 whitespace-pre-wrap leading-relaxed break-words">
+                                                {newAnnouncement.content || 'รายละเอียดเนื้อหาประกาศ...'}
+                                            </div>
+
+                                            {/* Link Preview */}
+                                            {newAnnouncement.link && (
+                                                <div className="mt-4 p-2 bg-blue-50 border border-blue-100 rounded flex items-center gap-2 text-blue-600 text-[10px]">
+                                                    <LinkIcon size={12} className="shrink-0" />
+                                                    <span className="truncate">{newAnnouncement.link}</span>
+                                                </div>
+                                            )}
+
+                                            {/* Additional Images Preview */}
+                                            {newAnnouncement.additionalImages?.length > 0 && (
+                                                <div className="mt-4 border-t border-gray-100 pt-3">
+                                                    <div className="grid grid-cols-3 gap-1.5">
+                                                        {newAnnouncement.additionalImages.map((img, i) => (
+                                                            <div key={i} className="aspect-square bg-gray-100 rounded border border-gray-200 overflow-hidden">
+                                                                <img src={img} className="w-full h-full object-cover" />
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
-                                )}
+                                </div>
                             </div>
                         </div>
-                    </div>
-
-                    {/* Voting Table */}
-                    <div className="mb-10">
-                        <h4 className="font-bold text-lg mb-4 bg-gray-200 p-2 text-center rounded-t-lg border border-b-0 border-gray-800">
-                            ส่วนลงมติ (Voting Section)
-                        </h4>
-                        <table className="w-full border-collapse border border-gray-800 text-base">
-                            <thead className="bg-gray-100">
-                                <tr>
-                                    <th className="border border-gray-800 p-3 text-center w-16">วาระที่</th>
-                                    <th className="border border-gray-800 p-3 text-left">รายละเอียดวาระการพิจารณาอนุมัติ</th>
-                                    <th className="border border-gray-800 p-3 text-center w-24">เห็นด้วย<br/><span className="text-xs font-normal">(Agree)</span></th>
-                                    <th className="border border-gray-800 p-3 text-center w-24">ไม่เห็นด้วย<br/><span className="text-xs font-normal">(Disagree)</span></th>
-                                    <th className="border border-gray-800 p-3 text-center w-24">งดออกเสียง<br/><span className="text-xs font-normal">(Abstain)</span></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {/* Generate 5 empty rows for voting */}
-                                {[1, 2, 3, 4, 5].map((num) => (
-                                    <tr key={num} className="h-16">
-                                        <td className="border border-gray-800 p-3 text-center font-bold text-lg">{num}</td>
-                                        <td className="border border-gray-800 p-3 text-gray-500 italic text-sm">
-                                            (...................................................................................)
-                                        </td>
-                                        <td className="border border-gray-800 p-3 text-center">
-                                            <div className="w-6 h-6 border-2 border-gray-400 mx-auto rounded-sm"></div>
-                                        </td>
-                                        <td className="border border-gray-800 p-3 text-center">
-                                            <div className="w-6 h-6 border-2 border-gray-400 mx-auto rounded-sm"></div>
-                                        </td>
-                                        <td className="border border-gray-800 p-3 text-center">
-                                            <div className="w-6 h-6 border-2 border-gray-400 mx-auto rounded-sm"></div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div className="flex justify-between items-end mt-12 px-12 text-center text-gray-800">
-                        <div className="w-64">
-                            <div className="border-b border-gray-800 w-full mb-2 h-10"></div>
-                            <p className="text-sm">( ........................................................ )</p>
-                            <p className="mt-2 font-bold text-base">ผู้ลงคะแนนเสียง</p>
-                            <p className="text-sm mt-1">{selectedBallotView.voterType === 'เจ้าของร่วม' ? selectedBallotView.ownerName : selectedBallotView.voterName}</p>
-                        </div>
-                    </div>
-                    
-                    {!isExporting && (
-                        <div className="mt-12 flex justify-end">
-                            <span className={`px-4 py-2 rounded-lg text-sm font-bold border shadow-sm ${
-                                selectedBallotView.status === 'Valid' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'
-                            }`}>
-                                สถานะบัตร: {selectedBallotView.status === 'Valid' ? 'บัตรดี (Valid)' : 'บัตรเสีย / โมฆะ (Void)'}
-                            </span>
-                        </div>
-                    )}
-                </div>
-
-                <div className={`mt-8 flex justify-end gap-2 pt-4 border-t border-gray-200 bg-white ${isExporting ? 'hidden' : ''}`}>
-                    {hasPerm('proj_meeting', 'edit') && (
-                        <Button variant="outline" icon={Edit} onClick={() => {
-                            setNewBallot(selectedBallotView);
-                            setSelectedBallotView(null);
-                            setShowAddBallotModal(true);
-                        }}>
-                            แก้ไขข้อมูล / สถานะบัตร
-                        </Button>
-                    )}
-                    <Button variant="secondary" onClick={() => setSelectedBallotView(null)}>ปิดหน้าต่าง</Button>
-                    <Button icon={Printer} onClick={() => {
-                        const container = document.getElementById('print-ballot-detail')?.closest('.overflow-y-auto');
-                        if (container) container.scrollTop = 0;
-                        setTimeout(() => handleExportPDF('print-ballot-detail', `Ballot_${selectedBallotView.unitNo}.pdf`, 'portrait', [0, 0, 0, 0]), 100);
-                    }} disabled={isExporting}>
-                        {isExporting ? 'กำลังโหลด...' : 'ดาวน์โหลด / พิมพ์ PDF'}
-                    </Button>
+                    </form>
                 </div>
             </div>
         </div>
-      )}
-
-      {/* Global Confirm Modal (ใช้สำหรับทุกปุ่มที่มีการให้กดยืนยัน เช่น ลบ, อนุมัติ) */}
-      {confirmModal.isOpen && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 animate-fade-in">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-gray-200 transform transition-all scale-100">
-                  <div className={`p-4 flex items-center gap-3 border-b ${confirmModal.type === 'danger' ? 'bg-red-50 border-red-100' : confirmModal.type === 'warning' ? 'bg-orange-50 border-orange-100' : confirmModal.type === 'info' ? 'bg-blue-50 border-blue-100' : 'bg-gray-50 border-gray-100'}`}>
-                      <div className={`p-2 rounded-full ${confirmModal.type === 'danger' ? 'bg-red-100 text-red-600' : confirmModal.type === 'warning' ? 'bg-orange-100 text-orange-600' : confirmModal.type === 'info' ? 'bg-blue-100 text-blue-600' : 'bg-gray-200 text-gray-600'}`}>
-                          {confirmModal.type === 'info' ? <CheckCircle size={20} /> : <AlertTriangle size={20} />}
-                      </div>
-                      <h3 className={`font-bold text-lg ${confirmModal.type === 'danger' ? 'text-red-800' : confirmModal.type === 'warning' ? 'text-orange-800' : confirmModal.type === 'info' ? 'text-blue-800' : 'text-gray-800'}`}>
-                          {confirmModal.title}
-                      </h3>
-                  </div>
-                  <div className="p-6 text-gray-600 text-sm whitespace-pre-wrap leading-relaxed">
-                      {confirmModal.message}
-                  </div>
-                  <div className="p-4 bg-gray-50 border-t flex justify-end gap-2">
-                      {confirmModal.onConfirm ? (
-                          <>
-                              <Button variant="secondary" onClick={closeConfirm}>
-                                  ยกเลิก
-                              </Button>
-                              <Button 
-                                  variant={confirmModal.type === 'danger' ? 'danger' : confirmModal.type === 'warning' ? 'primary' : confirmModal.type === 'info' ? 'success' : 'primary'} 
-                                  onClick={() => {
-                                      confirmModal.onConfirm();
-                                      closeConfirm();
-                                  }}
-                              >
-                                  {confirmModal.confirmText}
-                              </Button>
-                          </>
-                      ) : (
-                          <Button variant="primary" onClick={closeConfirm}>
-                              {confirmModal.confirmText}
-                          </Button>
-                      )}
-                  </div>
-              </div>
-          </div>
-      )}
-
-      {/* Global Announcement Popup Modal */}
-      {activePopupAnnouncement && !isExporting && (
-          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 animate-fade-in">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col relative transform transition-all scale-100 border border-gray-200">
-                  
-                  {/* Priority Top Bar */}
-                  <div className={`h-2 w-full ${activePopupAnnouncement.priority === 'High' ? 'bg-red-500' : 'bg-blue-500'}`}></div>
-                  
-                  <button 
-                      onClick={handleDismissAnnouncement} 
-                      className="absolute top-4 right-4 text-gray-500 hover:text-red-500 bg-white/80 rounded-full p-1.5 transition-colors z-10 backdrop-blur-md shadow-sm"
-                  >
-                      <X size={20} />
-                  </button>
-
-                  {activePopupAnnouncement.image && (
-                      <div className="w-full h-48 sm:h-64 bg-gray-100 relative overflow-hidden shrink-0">
-                          <img src={activePopupAnnouncement.image} className="w-full h-full object-cover" alt="Announcement" />
-                      </div>
-                  )}
-
-                  <div className="p-6 md:p-8 flex flex-col flex-1 max-h-[60vh] overflow-y-auto custom-scrollbar">
-                      <div className="flex items-center gap-2 mb-3">
-                          {activePopupAnnouncement.priority === 'High' && (
-                              <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
-                                  <AlertTriangle size={10} /> ด่วน
-                              </span>
-                          )}
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-orange-50 text-orange-700 border-orange-200 shrink-0 flex items-center gap-1">
-                              <Radio size={10} /> ประกาศใหม่
-                          </span>
-                          <span className="text-xs text-gray-500 ml-auto flex items-center gap-1 shrink-0">
-                              <Calendar size={12}/> {new Date(activePopupAnnouncement.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}
-                          </span>
-                      </div>
-
-                      <h2 className="text-xl md:text-2xl font-bold text-gray-800 mb-4 leading-tight">
-                          {activePopupAnnouncement.title}
-                      </h2>
-                      
-                      <div className="text-sm md:text-base text-gray-600 whitespace-pre-wrap leading-relaxed">
-                          {activePopupAnnouncement.content}
-                      </div>
-
-                      {activePopupAnnouncement.link && (
-                          <div className="mt-4">
-                              <a href={activePopupAnnouncement.link.startsWith('http') ? activePopupAnnouncement.link : `https://${activePopupAnnouncement.link}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 bg-blue-50 text-blue-600 hover:text-blue-800 hover:bg-blue-100 px-4 py-2 rounded-lg font-medium transition-colors border border-blue-200 shadow-sm">
-                                  <LinkIcon size={16} />
-                                  เปิดลิงก์แนบ (Open Link)
-                              </a>
-                          </div>
-                      )}
-                  </div>
-
-                  <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center shrink-0">
-                      <div className="text-xs text-gray-400 flex items-center gap-1">
-                          <User size={12}/> {activePopupAnnouncement.author}
-                      </div>
-                      <Button onClick={handleDismissAnnouncement}>
-                          รับทราบ (Acknowledge)
-                      </Button>
-                  </div>
-              </div>
-          </div>
       )}
 
       {/* Selected Announcement View Modal (Manual Click) */}
@@ -17607,10 +17033,26 @@ export default function App() {
                           </div>
                       )}
 
+                      {/* Display Additional Images */}
+                      {selectedAnnouncementView.additionalImages?.length > 0 && (
+                          <div className="mt-6 pt-4 border-t border-gray-100">
+                              <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2 text-sm">
+                                  <ImageIcon size={16} className="text-blue-500"/> รูปภาพเพิ่มเติม
+                              </h3>
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                  {selectedAnnouncementView.additionalImages.map((img, i) => (
+                                      <a key={i} href={img} target="_blank" rel="noopener noreferrer" className="aspect-square bg-gray-100 rounded-lg border border-gray-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+                                          <img src={img} className="w-full h-full object-cover" alt="" />
+                                      </a>
+                                  ))}
+                              </div>
+                          </div>
+                      )}
+
                       {/* NEW: History of Other Announcements */}
                       {(() => {
-                          const accessibleDeptsStr = currentUser?.accessibleDepts || '';
-                          const accessibleArray = typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : accessibleDeptsStr;
+                          const accessibleDeptsStr = currentUser?.accessibleDepts;
+                          const accessibleArray = Array.isArray(accessibleDeptsStr) ? accessibleDeptsStr : (typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : []);
                           const canAccessAll = accessibleArray.includes('All') || currentUser?.username === 'admin';
 
                           const otherAnnouncements = announcements.filter(a => {
