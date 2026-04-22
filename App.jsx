@@ -2735,6 +2735,37 @@ export default function App() {
     }
   }, [showAddRepairModal, selectedProject, repairs, newRepair.id, newRepair.code]);
 
+  // Auto-calculate Audit Score for Daily Reports (Item 11.1)
+  const currentScore10_0 = newAudit.scores['10_0'];
+  useEffect(() => {
+      if (showAddAuditModal && newAudit.projectId && newAudit.date) {
+          const targetMonthStr = newAudit.date.substring(0, 7);
+          const pReports = dailyReports.filter(r => r.projectId === newAudit.projectId && r.date && r.date.startsWith(targetMonthStr));
+          const uniqueDays = new Set(pReports.map(r => r.date)).size;
+          
+          const [year, month] = targetMonthStr.split('-').map(Number);
+          const d = new Date();
+          const isCurrentMonth = d.getFullYear() === year && d.getMonth() + 1 === month;
+          const daysInMonth = isCurrentMonth ? Math.max(1, d.getDate()) : new Date(year, month, 0).getDate();
+          
+          const percentage = Math.round((uniqueDays / daysInMonth) * 100) || 0;
+          
+          let autoScore = '';
+          if (percentage >= 100) autoScore = '5';
+          else if (percentage > 80) autoScore = '4';
+          else if (percentage > 60) autoScore = '3';
+          else if (percentage > 40) autoScore = '2';
+          else autoScore = '1';
+
+          if (currentScore10_0 !== autoScore) {
+              setNewAudit(prev => ({
+                  ...prev,
+                  scores: { ...prev.scores, '10_0': autoScore }
+              }));
+          }
+      }
+  }, [showAddAuditModal, newAudit.projectId, newAudit.date, dailyReports, currentScore10_0]);
+
   // Sync Schedule Note when month or project changes
   useEffect(() => {
       if (selectedProject && currentMonth) {
@@ -15828,7 +15859,7 @@ export default function App() {
                                 <FileText size={20} className="text-blue-500 shrink-0"/>
                                 <div className="text-sm">
                                     <div className="font-bold text-blue-800">สถิติการส่งรายงานประจำวัน (อ้างอิงเดือน {targetMonthStr}): <span className="text-xl ml-2">{uniqueDays}</span> / {daysInMonth} วัน</div>
-                                    <div className="text-blue-600 mt-0.5">คิดเป็น <span className="font-bold">{percentage}%</span> ของจำนวนวันปฏิบัติการ (ใช้เป็นข้อมูลอ้างอิงการให้คะแนนข้อ 11)</div>
+                                    <div className="text-blue-600 mt-0.5">คิดเป็น <span className="font-bold">{percentage}%</span> ของจำนวนวันปฏิบัติการ (ระบบให้คะแนนลงข้อ 11.1 ให้อัตโนมัติ)</div>
                                 </div>
                             </div>
                         );
