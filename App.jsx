@@ -301,7 +301,8 @@ const AUDIT_FORM_TEMPLATE = [
     { title: '7. บอร์ดประชาสัมพันธ์', items: ['ปิดงบการเงินเดือนปัจจุบัน', 'รายงานผลการดำเนินงาน', 'ประกาศภายใน update สม่ำเสมอ', 'ความชัดเจน/อ่านง่าย'] },
     { title: '8. การติดตามหนี้ค่าส่วนกลาง (Debt Collection)', items: ['ความคืบหน้าการลดหนี้ (Target: 3%=1, 5%=2, 7%=3, 10%=4, >10%=5)', 'รายงานสถานะลูกหนี้รายเดือน (Aging Report)', 'บันทึกการติดตามหนี้ (Call Log/Letter)', 'การดำเนินการตามขั้นตอนกฎหมาย/ระเบียบ', 'การจัดเก็บหลักฐานการชำระเงิน'] },
     { title: '9. ความคืบหน้าการใช้งาน Application (App Adoption)', items: ['อัตราการดาวน์โหลดและลงทะเบียน (Target: >80%=5, >60%=4, >40%=3)', 'สถิติการเข้าใช้งาน (Active Users) ของเจ้าของร่วม/สมาชิก', 'การใช้ฟังก์ชันหลัก (แจ้งซ่อม, ชำระเงิน, รับพัสดุ)', 'ความสมบูรณ์ของข้อมูลสมาชิกในระบบ (Profile Completeness)', 'การประชาสัมพันธ์และการสนับสนุนการใช้งาน (Support)'] },
-    { title: '10. ความพร้อมในการรับการตรวจสอบ (Readiness)', items: ['ผู้รับผิดชอบหน่วยงานอยู่ปฏิบัติหน้าที่/พร้อมให้ข้อมูล', 'เอกสารและหลักฐานประกอบการตรวจสอบมีการจัดเตรียมพร้อม', 'สถานที่/พื้นที่หน้างานมีความพร้อมสำหรับการเข้าตรวจสอบ', 'การจัดเตรียมอุปกรณ์/เครื่องมือที่จำเป็นสำหรับการตรวจสอบ'] }
+    { title: '10. ความพร้อมในการรับการตรวจสอบ (Readiness)', items: ['ผู้รับผิดชอบหน่วยงานอยู่ปฏิบัติหน้าที่/พร้อมให้ข้อมูล', 'เอกสารและหลักฐานประกอบการตรวจสอบมีการจัดเตรียมพร้อม', 'สถานที่/พื้นที่หน้างานมีความพร้อมสำหรับการเข้าตรวจสอบ', 'การจัดเตรียมอุปกรณ์/เครื่องมือที่จำเป็นสำหรับการตรวจสอบ'] },
+    { title: '11. การจัดทำและนำส่งรายงานประจำวัน (Daily Report)', items: ['จำนวนวันที่มีการนำส่งรายงานประจำวัน (Target: 100%=5, >80%=4, >60%=3, >40%=2, <40%=1)', 'ความครบถ้วนของข้อมูลในรายงาน (กำลังพล, รายรับ)', 'ความชัดเจนของรายละเอียดผลการปฏิบัติงาน', 'ความสม่ำเสมอและความครบถ้วนของรูปภาพประกอบ'] }
 ];
 
 // Standard Forms Data
@@ -2064,7 +2065,8 @@ export default function App() {
       priority: 'Normal', // Normal, High
       projectId: 'All', // 'All' or specific Project ID
       author: '',
-      image: null
+      image: null,
+      link: ''
   });
 
   // Meetings State
@@ -2130,6 +2132,7 @@ export default function App() {
       type: 'Internal Audit',
       scores: {},
       remarks: {},
+      activeItems: {}, // NEW: State สำหรับเก็บสถานะการเปิด/ปิดหัวข้อ
       additionalComments: ''
   });
 
@@ -4666,8 +4669,33 @@ export default function App() {
       }));
   };
 
+  const calculateMaxAuditScore = () => {
+      let max = 0;
+      AUDIT_FORM_TEMPLATE.forEach((cat, catIdx) => {
+          if (newAudit.activeItems[`cat_${catIdx}`] !== false) {
+              cat.items.forEach((_, itemIdx) => {
+                  if (newAudit.activeItems[`${catIdx}_${itemIdx}`] !== false) {
+                      max += 5;
+                  }
+              });
+          }
+      });
+      return max;
+  };
+
   const calculateTotalAuditScore = () => {
-      return Object.values(newAudit.scores).reduce((sum, val) => sum + (parseInt(val) || 0), 0);
+      let total = 0;
+      AUDIT_FORM_TEMPLATE.forEach((cat, catIdx) => {
+          if (newAudit.activeItems[`cat_${catIdx}`] !== false) {
+              cat.items.forEach((_, itemIdx) => {
+                  const key = `${catIdx}_${itemIdx}`;
+                  if (newAudit.activeItems[key] !== false) {
+                      total += (parseInt(newAudit.scores[key]) || 0);
+                  }
+              });
+          }
+      });
+      return total;
   };
 
   const handleSaveAudit = (e) => {
@@ -4677,23 +4705,27 @@ export default function App() {
           return;
       }
       
-      // ตรวจสอบว่าให้คะแนนครบทุกข้อหรือไม่ (ป้องกันปัญหากดปุ่มแล้วนิ่งจาก HTML5 Validation)
+      // ตรวจสอบว่าให้คะแนนครบทุกข้อที่ "เปิดใช้งาน" หรือไม่
       let missingCount = 0;
       AUDIT_FORM_TEMPLATE.forEach((category, catIdx) => {
-          category.items.forEach((item, itemIdx) => {
-              if (!newAudit.scores[`${catIdx}_${itemIdx}`]) {
-                  missingCount++;
-              }
-          });
+          if (newAudit.activeItems[`cat_${catIdx}`] !== false) {
+              category.items.forEach((item, itemIdx) => {
+                  const key = `${catIdx}_${itemIdx}`;
+                  if (newAudit.activeItems[key] !== false && !newAudit.scores[key]) {
+                      missingCount++;
+                  }
+              });
+          }
       });
 
       if (missingCount > 0) {
-          alert(`กรุณาให้คะแนนประเมินให้ครบทุกหัวข้อ (พบหัวข้อที่ยังไม่ได้ให้คะแนนจำนวน ${missingCount} ข้อ)`);
+          alert(`กรุณาให้คะแนนประเมินให้ครบทุกหัวข้อ (พบหัวข้อที่เปิดใช้งานแต่ยังไม่ได้ให้คะแนนจำนวน ${missingCount} ข้อ)`);
           return;
       }
       
       const totalScore = calculateTotalAuditScore();
-      const percentScore = Math.round((totalScore / 235) * 100);
+      const maxScore = calculateMaxAuditScore();
+      const percentScore = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
       
       const id = generateId();
       const auditToSave = {
@@ -4703,11 +4735,13 @@ export default function App() {
           category: newAudit.type,
           score: percentScore, // Save as percentage for compatibility with existing UI
           rawScore: totalScore,
+          maxScore: maxScore,
           inspector: newAudit.inspector,
           remarks: newAudit.additionalComments || 'ตรวจสอบเรียบร้อย',
           fileUrl: null,
-          itemScores: newAudit.scores, // บันทึกคะแนนรายข้อ
-          itemRemarks: newAudit.remarks // บันทึกหมายเหตุรายข้อ
+          itemScores: newAudit.scores,
+          itemRemarks: newAudit.remarks,
+          activeItems: newAudit.activeItems // บันทึกสถานะเปิดปิดไปด้วย
       };
       
       const nextList = [auditToSave, ...(Array.isArray(audits) ? audits : [])];
@@ -4722,6 +4756,7 @@ export default function App() {
           type: 'Internal Audit',
           scores: {},
           remarks: {},
+          activeItems: {},
           additionalComments: ''
       });
       alert('บันทึกผลการประเมินสำเร็จ');
@@ -4771,7 +4806,7 @@ export default function App() {
 
       setShowAddAnnouncementModal(false);
       setIsEditingAnnouncement(false);
-      setNewAnnouncement({ id: null, title: '', content: '', date: new Date().toISOString().split('T')[0], endDate: '', priority: 'Normal', projectId: 'All', author: '', image: null });
+      setNewAnnouncement({ id: null, title: '', content: '', date: new Date().toISOString().split('T')[0], endDate: '', priority: 'Normal', projectId: 'All', author: '', image: null, link: '' });
       alert(t('saveSuccess'));
   };
 
@@ -6655,7 +6690,7 @@ export default function App() {
                   <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
                       {hasPerm('announcements', 'save') && (
                           <Button icon={Plus} onClick={() => {
-                              setNewAnnouncement({ id: null, title: '', content: '', date: new Date().toISOString().split('T')[0], endDate: '', priority: 'Normal', projectId: 'All', author: '', image: null });
+                              setNewAnnouncement({ id: null, title: '', content: '', date: new Date().toISOString().split('T')[0], endDate: '', priority: 'Normal', projectId: 'All', author: '', image: null, link: '' });
                               setIsEditingAnnouncement(false);
                               setShowAddAnnouncementModal(true);
                           }}>
@@ -6948,7 +6983,7 @@ export default function App() {
                   </div>
                   <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
                       {hasPerm('audits', 'save') && (
-                          <Button icon={Plus} onClick={() => { setNewAudit(prev => ({...prev, projectId: '', inspector: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : ''})); setShowAddAuditModal(true); }}>
+                          <Button icon={Plus} onClick={() => { setNewAudit(prev => ({...prev, projectId: '', inspector: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : '', scores: {}, remarks: {}, activeItems: {}, additionalComments: ''})); setShowAddAuditModal(true); }}>
                               {t('newAudit')}
                           </Button>
                       )}
@@ -7025,6 +7060,7 @@ export default function App() {
                               {audits.length > 0 ? (
                                   audits.map(audit => { 
                                       const project = projects.find(p => p.id === audit.projectId); 
+                                      const max = audit.maxScore || 235;
                                       return (
                                           <tr key={audit.id} className="hover:bg-gray-50 transition-colors">
                                               <td className="p-4 text-gray-600">{audit.date}</td>
@@ -7032,7 +7068,7 @@ export default function App() {
                                               <td className="p-4 text-gray-600 break-words whitespace-normal">{audit.category}</td>
                                               <td className="p-4 text-center">
                                                   <span className={`font-bold px-2 py-1 rounded text-xs ${audit.score >= 90 ? 'bg-green-100 text-green-700' : audit.score >= 70 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
-                                                      {audit.rawScore ? `${audit.rawScore}/235` : `${audit.score}%`}
+                                                      {audit.rawScore ? `${audit.rawScore}/${max}` : `${audit.score}%`}
                                                   </span>
                                               </td>
                                               <td className="p-4 text-gray-700 break-words whitespace-normal">{audit.inspector}</td>
@@ -10954,7 +10990,7 @@ export default function App() {
                               {isExporting ? t('downloading') : t('downloadPDF')}
                           </Button>
                           {hasPerm('proj_audit', 'save') && <Button size="sm" icon={Plus} onClick={() => {
-                              setNewAudit(prev => ({...prev, projectId: selectedProject.id, inspector: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : ''}));
+                              setNewAudit(prev => ({...prev, projectId: selectedProject.id, inspector: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : '', scores: {}, remarks: {}, activeItems: {}, additionalComments: ''}));
                               setShowAddAuditModal(true);
                           }}>เพิ่มผลประเมิน</Button>}
                       </div>
@@ -11018,7 +11054,9 @@ export default function App() {
                           </thead>
                           <tbody className="divide-y divide-gray-100 bg-white">
                               {audits.filter(a => a.projectId === selectedProject.id).length > 0 ? (
-                                  audits.filter(a => a.projectId === selectedProject.id).map((audit, index) => (
+                                  audits.filter(a => a.projectId === selectedProject.id).map((audit, index) => {
+                                      const max = audit.maxScore || 235;
+                                      return (
                                       <tr key={audit.id} className="hover:bg-gray-50 transition-colors">
                                           <td className="p-3 text-center text-gray-500">{index + 1}</td>
                                           <td className="p-3 font-medium text-blue-600 cursor-pointer hover:underline hover:text-blue-800 flex items-center gap-1 group" onClick={() => setSelectedAuditReport(audit)}>
@@ -11027,7 +11065,7 @@ export default function App() {
                                           <td className="p-3 text-gray-600 break-words whitespace-normal">{audit.category}</td>
                                           <td className="p-3 text-center">
                                               <span className={`font-bold px-2 py-1 rounded-md text-xs ${audit.score >= 90 ? 'bg-green-50 text-green-700 border border-green-200' : audit.score >= 70 ? 'bg-yellow-50 text-yellow-700 border border-yellow-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-                                                  {audit.rawScore ? `${audit.rawScore}/235` : `${audit.score}%`}
+                                                  {audit.rawScore ? `${audit.rawScore}/${max}` : `${audit.score}%`}
                                               </span>
                                           </td>
                                           <td className="p-3 text-gray-700 flex items-center gap-1 mt-1 break-words whitespace-normal"><User size={14} className={`text-gray-400 shrink-0 ${isExporting ? 'hidden' : ''}`}/> {audit.inspector}</td>
@@ -11044,7 +11082,8 @@ export default function App() {
                                               )}
                                           </td>
                                       </tr>
-                                  ))
+                                      );
+                                  })
                               ) : (
                                   <tr><td colSpan="7" className="p-8 text-center text-gray-400 border-2 border-dashed border-gray-200 m-4 rounded-lg bg-gray-50">{t('noData')}</td></tr>
                               )}
@@ -15769,39 +15808,131 @@ export default function App() {
                             <option value="External Audit">External Audit (หน่วยงานภายนอก)</option>
                         </select>
                     </div>
+                    
+                    {/* ข้อมูลสถิติรายงานประจำวันดึงมาแสดงอัตโนมัติ */}
+                    {(() => {
+                        if (!newAudit.projectId || !newAudit.date) return null;
+                        const targetMonthStr = newAudit.date.substring(0, 7);
+                        const pReports = dailyReports.filter(r => r.projectId === newAudit.projectId && r.date && r.date.startsWith(targetMonthStr));
+                        const uniqueDays = new Set(pReports.map(r => r.date)).size;
+                        
+                        const [year, month] = targetMonthStr.split('-').map(Number);
+                        const d = new Date();
+                        const isCurrentMonth = d.getFullYear() === year && d.getMonth() + 1 === month;
+                        const daysInMonth = isCurrentMonth ? d.getDate() : new Date(year, month, 0).getDate();
+                        
+                        const percentage = Math.round((uniqueDays / daysInMonth) * 100) || 0;
+                        
+                        return (
+                            <div className="col-span-1 md:col-span-2 lg:col-span-4 mt-2 bg-blue-50 border border-blue-200 p-3 rounded-lg flex items-center gap-3">
+                                <FileText size={20} className="text-blue-500 shrink-0"/>
+                                <div className="text-sm">
+                                    <div className="font-bold text-blue-800">สถิติการส่งรายงานประจำวัน (อ้างอิงเดือน {targetMonthStr}): <span className="text-xl ml-2">{uniqueDays}</span> / {daysInMonth} วัน</div>
+                                    <div className="text-blue-600 mt-0.5">คิดเป็น <span className="font-bold">{percentage}%</span> ของจำนวนวันปฏิบัติการ (ใช้เป็นข้อมูลอ้างอิงการให้คะแนนข้อ 11)</div>
+                                </div>
+                            </div>
+                        );
+                    })()}
                 </div>
 
                 <div className="space-y-6">
                     <div className="bg-purple-50 text-purple-800 p-3 rounded-lg text-sm font-bold flex justify-between items-center shadow-sm">
-                        <span>คะแนนรวม: {calculateTotalAuditScore()} / 235</span>
-                        <span>{Math.round((calculateTotalAuditScore() / 235) * 100)}%</span>
+                        <span>คะแนนรวม: {calculateTotalAuditScore()} / {calculateMaxAuditScore()}</span>
+                        <span>{calculateMaxAuditScore() > 0 ? Math.round((calculateTotalAuditScore() / calculateMaxAuditScore()) * 100) : 0}%</span>
                     </div>
 
-                    {AUDIT_FORM_TEMPLATE.map((category, catIdx) => (
-                        <div key={catIdx} className="border border-gray-200 rounded-lg overflow-hidden">
-                            <div className="bg-gray-100 p-3 font-bold text-gray-800 border-b border-gray-200">
-                                {category.title}
+                    {AUDIT_FORM_TEMPLATE.map((category, catIdx) => {
+                        const isCategoryActive = newAudit.activeItems[`cat_${catIdx}`] !== false;
+                        
+                        return (
+                        <div key={catIdx} className={`border ${isCategoryActive ? 'border-gray-200' : 'border-gray-300 opacity-60'} rounded-lg overflow-hidden transition-opacity`}>
+                            <div className={`p-3 font-bold text-gray-800 border-b flex justify-between items-center ${isCategoryActive ? 'bg-gray-100 border-gray-200' : 'bg-gray-200 border-gray-300'}`}>
+                                <span>{category.title}</span>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs text-gray-500 font-normal">ตรวจหมวดนี้</span>
+                                    <label className="relative inline-flex items-center cursor-pointer" title={isCategoryActive ? 'ปิดการตรวจสอบหมวดหมู่นี้' : 'เปิดการตรวจสอบหมวดหมู่นี้'}>
+                                        <input 
+                                            type="checkbox" 
+                                            className="sr-only peer" 
+                                            checked={isCategoryActive} 
+                                            onChange={() => {
+                                                setNewAudit(prev => {
+                                                    const newScores = { ...prev.scores };
+                                                    const newRemarks = { ...prev.remarks };
+                                                    // หากปิดหมวดหมู่ ให้ลบผลประเมินในหมวดนั้นทิ้งเพื่อป้องกันข้อมูลค้าง
+                                                    if (isCategoryActive) {
+                                                        category.items.forEach((_, i) => {
+                                                            delete newScores[`${catIdx}_${i}`];
+                                                            delete newRemarks[`${catIdx}_${i}`];
+                                                        });
+                                                    }
+                                                    return {
+                                                        ...prev,
+                                                        activeItems: { ...prev.activeItems, [`cat_${catIdx}`]: !isCategoryActive },
+                                                        scores: newScores,
+                                                        remarks: newRemarks
+                                                    };
+                                                });
+                                            }} 
+                                        />
+                                        <div className="w-8 h-4 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-purple-500"></div>
+                                    </label>
+                                </div>
                             </div>
                             <div className="p-0 overflow-x-auto">
                                 <table className="w-full text-sm">
                                     <thead className="bg-gray-50 text-gray-600">
                                         <tr>
                                             <th className="p-2 text-center w-10">#</th>
+                                            <th className="p-2 text-center w-14" title="เปิด/ปิด การตรวจสอบหัวข้อนี้">ตรวจ</th>
                                             <th className="p-2 text-left">รายการตรวจประเมิน</th>
                                             <th className="p-2 text-center w-40">ระดับคะแนน (1-5)</th>
                                             <th className="p-2 text-left w-64">หมายเหตุ</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
-                                        {category.items.map((item, itemIdx) => (
-                                            <tr key={itemIdx} className="hover:bg-gray-50">
+                                        {category.items.map((item, itemIdx) => {
+                                            const key = `${catIdx}_${itemIdx}`;
+                                            const isItemActive = newAudit.activeItems[key] !== false;
+                                            const isActive = isCategoryActive && isItemActive; // สรุปสถานะการเปิดใช้งานจริง
+                                            
+                                            return (
+                                            <tr key={itemIdx} className={`hover:bg-gray-50 ${!isActive ? 'bg-gray-100 opacity-60' : ''}`}>
                                                 <td className="p-2 text-center text-gray-500">{itemIdx + 1}</td>
+                                                <td className="p-2 text-center">
+                                                    <label className="relative inline-flex items-center cursor-pointer" title={!isCategoryActive ? 'หมวดหมู่นี้ถูกปิด' : isItemActive ? 'ปิดการตรวจสอบหัวข้อนี้' : 'เปิดการตรวจสอบหัวข้อนี้'}>
+                                                        <input 
+                                                            type="checkbox" 
+                                                            className="sr-only peer" 
+                                                            checked={isActive} 
+                                                            disabled={!isCategoryActive}
+                                                            onChange={() => {
+                                                                setNewAudit(prev => {
+                                                                    const newScores = { ...prev.scores };
+                                                                    const newRemarks = { ...prev.remarks };
+                                                                    if (isActive) {
+                                                                        delete newScores[key];
+                                                                        delete newRemarks[key];
+                                                                    }
+                                                                    return {
+                                                                        ...prev,
+                                                                        activeItems: { ...prev.activeItems, [key]: !isActive },
+                                                                        scores: newScores,
+                                                                        remarks: newRemarks
+                                                                    };
+                                                                });
+                                                            }} 
+                                                        />
+                                                        <div className={`w-8 h-4 ${!isCategoryActive ? 'bg-gray-200' : 'bg-gray-300'} peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all ${isCategoryActive ? 'peer-checked:bg-purple-500' : 'peer-checked:bg-gray-400'}`}></div>
+                                                    </label>
+                                                </td>
                                                 <td className="p-2 text-gray-700">{item}</td>
                                                 <td className="p-2 text-center">
                                                     <select 
-                                                        className={`w-full border rounded p-1.5 outline-none focus:border-purple-500 text-center transition-colors ${!newAudit.scores[`${catIdx}_${itemIdx}`] ? 'border-red-300 bg-red-50 text-red-600' : 'border-gray-300'}`}
-                                                        value={newAudit.scores[`${catIdx}_${itemIdx}`] || ''}
+                                                        className={`w-full border rounded p-1.5 outline-none focus:border-purple-500 text-center transition-colors ${!isActive ? 'bg-gray-200 cursor-not-allowed text-gray-400' : !newAudit.scores[key] ? 'border-red-300 bg-red-50 text-red-600' : 'border-gray-300'}`}
+                                                        value={newAudit.scores[key] || ''}
                                                         onChange={(e) => handleAuditScoreChange(catIdx, itemIdx, e.target.value)}
+                                                        disabled={!isActive}
                                                     >
                                                         <option value="" disabled>-</option>
                                                         <option value="5">5 - ดีเยี่ยม</option>
@@ -15815,19 +15946,22 @@ export default function App() {
                                                 <td className="p-2">
                                                     <input 
                                                         type="text" 
-                                                        className="w-full border border-gray-300 rounded p-1.5 outline-none focus:border-purple-500 text-xs"
-                                                        placeholder="ระบุข้อเสนอแนะ..."
-                                                        value={newAudit.remarks[`${catIdx}_${itemIdx}`] || ''}
+                                                        className={`w-full border rounded p-1.5 outline-none focus:border-purple-500 text-xs ${!isActive ? 'bg-gray-200 cursor-not-allowed border-gray-300 placeholder-gray-400' : 'border-gray-300'}`}
+                                                        placeholder={isActive ? "ระบุข้อเสนอแนะ..." : "-"}
+                                                        value={newAudit.remarks[key] || ''}
                                                         onChange={(e) => handleAuditRemarkChange(catIdx, itemIdx, e.target.value)}
+                                                        disabled={!isActive}
                                                     />
                                                 </td>
                                             </tr>
-                                        ))}
+                                            );
+                                        })}
                                     </tbody>
                                 </table>
                             </div>
                         </div>
-                    ))}
+                        );
+                    })}
                 </div>
 
                 <div>
@@ -15868,16 +16002,20 @@ export default function App() {
                     <div className="text-right">
                         <span className="font-bold">ผลการประเมินรวม:</span> 
                         <span className={`ml-2 px-3 py-1 rounded-full font-bold ${selectedAuditReport.score >= 90 ? 'bg-green-100 text-green-800' : selectedAuditReport.score >= 70 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
-                            {selectedAuditReport.rawScore ? `${selectedAuditReport.rawScore}/235` : `${selectedAuditReport.score}%`}
+                            {selectedAuditReport.rawScore ? `${selectedAuditReport.rawScore}/${selectedAuditReport.maxScore || 235}` : `${selectedAuditReport.score}%`}
                         </span>
                     </div>
                 </div>
 
                 <div className="space-y-6">
-                    {AUDIT_FORM_TEMPLATE.map((category, catIdx) => (
-                        <div key={catIdx} className="border border-gray-300 rounded-lg overflow-hidden">
-                            <div className="bg-gray-100 p-2 px-3 font-bold text-gray-800 border-b border-gray-300 text-sm">
-                                {category.title}
+                    {AUDIT_FORM_TEMPLATE.map((category, catIdx) => {
+                        const isCategoryActive = selectedAuditReport.activeItems?.[`cat_${catIdx}`] !== false;
+                        
+                        return (
+                        <div key={catIdx} className={`border border-gray-300 rounded-lg overflow-hidden ${!isCategoryActive ? 'opacity-60' : ''}`}>
+                            <div className="bg-gray-100 p-2 px-3 font-bold text-gray-800 border-b border-gray-300 text-sm flex justify-between items-center">
+                                <span>{category.title}</span>
+                                {!isCategoryActive && <span className="text-[10px] text-red-600 border border-red-200 bg-red-50 px-2 py-0.5 rounded shadow-sm">ปิดการตรวจสอบหมวดนี้</span>}
                             </div>
                             <table className="w-full text-xs">
                                 <thead className="bg-gray-50 text-gray-600 border-b border-gray-200">
@@ -15890,21 +16028,29 @@ export default function App() {
                                 </thead>
                                 <tbody className="divide-y divide-gray-200">
                                     {category.items.map((item, itemIdx) => {
-                                        const score = selectedAuditReport.itemScores?.[`${catIdx}_${itemIdx}`] || '-';
-                                        const remark = selectedAuditReport.itemRemarks?.[`${catIdx}_${itemIdx}`] || '-';
+                                        const key = `${catIdx}_${itemIdx}`;
+                                        const isItemActive = selectedAuditReport.activeItems?.[key] !== false;
+                                        const isActive = isCategoryActive && isItemActive;
+                                        const score = isActive ? (selectedAuditReport.itemScores?.[key] || '-') : 'N/A';
+                                        const remark = isActive ? (selectedAuditReport.itemRemarks?.[key] || '-') : 'ไม่มีการประเมิน';
+                                        
                                         return (
-                                            <tr key={itemIdx}>
+                                            <tr key={itemIdx} className={!isActive ? 'bg-gray-50' : ''}>
                                                 <td className="p-2 text-center text-gray-500">{itemIdx + 1}</td>
-                                                <td className="p-2 text-gray-700">{item}</td>
-                                                <td className="p-2 text-center font-bold text-gray-800">{score}</td>
-                                                <td className="p-2 text-gray-600">{remark}</td>
+                                                <td className={`p-2 ${!isActive ? 'text-gray-400' : 'text-gray-700'}`}>
+                                                    {item}
+                                                    {!isActive && isCategoryActive && <span className="text-[10px] text-gray-400 ml-2">(ปิดการตรวจสอบ)</span>}
+                                                </td>
+                                                <td className={`p-2 text-center font-bold ${!isActive ? 'text-gray-400' : 'text-gray-800'}`}>{score}</td>
+                                                <td className={`p-2 ${!isActive ? 'text-gray-400 italic' : 'text-gray-600'}`}>{remark}</td>
                                             </tr>
                                         );
                                     })}
                                 </tbody>
                             </table>
                         </div>
-                    ))}
+                        );
+                    })}
                 </div>
 
                 <div className="mt-8 border border-gray-300 rounded-lg p-4 bg-gray-50">
@@ -16480,9 +16626,24 @@ export default function App() {
                         ></textarea>
                     </div>
 
+                    {/* แนบลิงก์ */}
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">แนบลิงก์ (Link)</label>
+                        <div className="relative">
+                            <LinkIcon size={16} className="absolute left-3 top-2.5 text-gray-400"/>
+                            <input 
+                                type="url" 
+                                className="w-full border rounded-md pl-9 p-2 outline-none focus:border-red-500"
+                                value={newAnnouncement.link || ''}
+                                onChange={e => setNewAnnouncement({...newAnnouncement, link: e.target.value})}
+                                placeholder="https://..."
+                            />
+                        </div>
+                    </div>
+
                     {/* แนบรูปภาพ */}
                     <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-2">แนบรูปภาพ (Image)</label>
+                        <label className="block text-sm font-bold text-gray-700 mb-2">ภาพปก (Cover Image)</label>
                         <div className="flex items-center gap-4">
                             <div className="w-24 h-24 bg-gray-100 rounded-lg border border-dashed border-gray-300 flex items-center justify-center overflow-hidden">
                                 {newAnnouncement.image ? (
@@ -17339,6 +17500,15 @@ export default function App() {
                       <div className="text-sm md:text-base text-gray-600 whitespace-pre-wrap leading-relaxed">
                           {activePopupAnnouncement.content}
                       </div>
+
+                      {activePopupAnnouncement.link && (
+                          <div className="mt-4">
+                              <a href={activePopupAnnouncement.link.startsWith('http') ? activePopupAnnouncement.link : `https://${activePopupAnnouncement.link}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 bg-blue-50 text-blue-600 hover:text-blue-800 hover:bg-blue-100 px-4 py-2 rounded-lg font-medium transition-colors border border-blue-200 shadow-sm">
+                                  <LinkIcon size={16} />
+                                  เปิดลิงก์แนบ (Open Link)
+                              </a>
+                          </div>
+                      )}
                   </div>
 
                   <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center shrink-0">
@@ -17396,6 +17566,15 @@ export default function App() {
                       <div className="text-sm md:text-base text-gray-700 whitespace-pre-wrap leading-relaxed">
                           {selectedAnnouncementView.content}
                       </div>
+
+                      {selectedAnnouncementView.link && (
+                          <div className="mt-6 pt-4 border-t border-gray-100">
+                              <a href={selectedAnnouncementView.link.startsWith('http') ? selectedAnnouncementView.link : `https://${selectedAnnouncementView.link}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 bg-blue-50 text-blue-600 hover:text-blue-800 hover:bg-blue-100 px-4 py-2.5 rounded-lg font-bold transition-colors border border-blue-200 shadow-sm">
+                                  <LinkIcon size={18} />
+                                  ไปยังลิงก์แนบ (Open Link)
+                              </a>
+                          </div>
+                      )}
 
                       {/* NEW: History of Other Announcements */}
                       {(() => {
