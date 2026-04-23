@@ -13097,6 +13097,42 @@ export default function App() {
           </div>
       )}
 
+      {/* Global Confirm Modal (For all showConfirm/showAlert calls) */}
+      {confirmModal.isOpen && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 animate-fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col transform transition-all scale-100 border border-gray-200">
+                  <div className={`p-5 flex items-center gap-3 ${confirmModal.type === 'danger' ? 'bg-red-50 text-red-600 border-b border-red-100' : confirmModal.type === 'warning' ? 'bg-orange-50 text-orange-600 border-b border-orange-100' : confirmModal.type === 'info' ? 'bg-blue-50 text-blue-600 border-b border-blue-100' : 'bg-green-50 text-green-600 border-b border-green-100'}`}>
+                      {confirmModal.type === 'danger' ? <Trash2 size={24} /> : confirmModal.type === 'warning' ? <AlertTriangle size={24} /> : confirmModal.type === 'info' ? <Info size={24} /> : <CheckCircle size={24} />}
+                      <h2 className="text-xl font-bold">{confirmModal.title}</h2>
+                  </div>
+                  <div className="p-6 text-gray-700 text-sm leading-relaxed">
+                      {confirmModal.message.split('\n').map((line, i) => (
+                          <p key={i} className={i > 0 ? "mt-2" : ""}>{line}</p>
+                      ))}
+                  </div>
+                  <div className="p-4 border-t bg-gray-50 flex justify-end gap-2 shrink-0">
+                      {confirmModal.onConfirm ? (
+                          <>
+                              <Button variant="secondary" onClick={closeConfirm}>{t('cancel')}</Button>
+                              <Button 
+                                  variant={confirmModal.type === 'danger' ? 'danger' : 'primary'}
+                                  className={confirmModal.type === 'info' ? 'bg-blue-600 hover:bg-blue-700 text-white border-transparent' : confirmModal.type === 'warning' ? 'bg-orange-600 hover:bg-orange-700 text-white border-transparent' : ''}
+                                  onClick={() => {
+                                      confirmModal.onConfirm();
+                                      closeConfirm();
+                                  }}
+                              >
+                                  {confirmModal.confirmText}
+                              </Button>
+                          </>
+                      ) : (
+                          <Button onClick={closeConfirm}>{confirmModal.confirmText}</Button>
+                      )}
+                  </div>
+              </div>
+          </div>
+      )}
+
       {/* Global Floating Notification Bell */}
       {!isExporting && currentUser && getPendingApprovals().length > 0 && (
           <div className="fixed bottom-8 right-8 z-[90] animate-fade-in">
