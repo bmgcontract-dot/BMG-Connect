@@ -1389,7 +1389,11 @@ function usePersistentState(key, initialValue, fbUser) {
   
   const stateRef = useRef(state);
   const [isSynced, setIsSynced] = useState(false);
-  const [isLoaded, setIsLoaded] = useState(false);
+  // OPTIMIZE: ถ้ามีข้อมูลใน Cache ให้ถือว่าโหลดเสร็จแล้วทันที ไม่ต้องรอหน้าจอหมุน
+  const [isLoaded, setIsLoaded] = useState(() => {
+      if (typeof window !== 'undefined' && localStorage.getItem(key)) return true;
+      return false;
+  });
 
   useEffect(() => {
       stateRef.current = state;
@@ -1401,10 +1405,10 @@ function usePersistentState(key, initialValue, fbUser) {
         return; 
     }
     
-    // ตั้งเวลา 3 วินาที หากโหลดข้อมูลจาก Firebase ไม่ได้ให้ปลดล็อคหน้าจอทันที
+    // OPTIMIZE: ลดเวลาบังคับข้าม (Timeout) หากเน็ตช้าลงจาก 3 วิ เหลือ 1.5 วิ
     const fallbackTimer = setTimeout(() => {
         setIsLoaded(true);
-    }, 3000);
+    }, 1500);
 
     if (!fbUser || !appId) {
         return () => clearTimeout(fallbackTimer);
@@ -1528,7 +1532,18 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
 
   const stateRef = useRef(state);
   const isLoadedRef = useRef(false);
-  const [isLoaded, setIsLoaded] = useState(false);
+  
+  // OPTIMIZE: ข้ามหน้าต่างโหลดดิงทันทีถ้ามีข้อมูลใน Cache อยู่แล้ว
+  const [isLoaded, setIsLoaded] = useState(() => {
+      if (typeof window !== 'undefined') {
+          const local = localStorage.getItem(collectionName);
+          if (local && local !== '[]') {
+              isLoadedRef.current = true;
+              return true;
+          }
+      }
+      return false;
+  });
 
   useEffect(() => {
       stateRef.current = state;
@@ -1541,14 +1556,14 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
         return;
     }
 
-    // ตั้งเวลา 3 วินาที หากโหลด Collection ข้อมูลไม่ขึ้น ให้ข้ามไปใช้งาน Local Storage เลย
+    // OPTIMIZE: ลดเวลาบังคับข้าม (Timeout) ลงเหลือ 1.5 วินาที เพื่อให้หน้า Login เด้งขึ้นมาไวที่สุด
     const fallbackTimer = setTimeout(() => {
         if (!isLoadedRef.current) {
             console.warn("Firebase sync timeout for collection:", collectionName);
             setIsLoaded(true);
             isLoadedRef.current = true;
         }
-    }, 3000);
+    }, 1500);
 
     if (!fbUser || !appId) {
         return () => clearTimeout(fallbackTimer);
@@ -1714,7 +1729,12 @@ function useUserPersistentState(key, initialValue, fbUser) {
 
   const stateRef = useRef(state);
   const [isSynced, setIsSynced] = useState(false);
-  const [isLoaded, setIsLoaded] = useState(false);
+  
+  // OPTIMIZE: ข้ามโหลดทันทีถ้ามี Cache
+  const [isLoaded, setIsLoaded] = useState(() => {
+      if (typeof window !== 'undefined' && localStorage.getItem(`user_pref_${key}`)) return true;
+      return false;
+  });
 
   useEffect(() => {
       stateRef.current = state;
@@ -1726,9 +1746,10 @@ function useUserPersistentState(key, initialValue, fbUser) {
         return;
     }
 
+    // OPTIMIZE: ลด Timeout ลงเหลือ 1.5 วิ
     const fallbackTimer = setTimeout(() => {
         setIsLoaded(true);
-    }, 3000);
+    }, 1500);
 
     if (!fbUser || !appId) {
         return () => clearTimeout(fallbackTimer);
@@ -17312,7 +17333,7 @@ export default function App() {
                               <Button 
                                   variant={confirmModal.type === 'danger' ? 'danger' : 'primary'} 
                                   onClick={() => {
-                                      confirmModal.onConfirm();
+                                      confirmModal.onConfirm();ฟ
                                       closeConfirm();
                                   }}
                               >
