@@ -1853,6 +1853,8 @@ export default function App() {
   const [scheduleNote, setScheduleNote] = useState(''); // NEW: State สำหรับเก็บ Note ในตารางงาน
   const [scheduleNotes, setScheduleNotes] = usePersistentState('bmg_scheduleNotes', {}, fbUser); // NEW: Persistent state for schedule notes
   const [scheduleApprovals, setScheduleApprovals] = usePersistentState('bmg_scheduleApprovals', {}, fbUser); // NEW: State สำหรับเก็บสถานะการอนุมัติตารางงาน
+  const [hoScheduleModal, setHoScheduleModal] = useState(null); // NEW: Modal สำหรับเลือกหน่วยงานหลายแห่ง
+  const [hoSelectedProjects, setHoSelectedProjects] = useState([]); // NEW: รายการหน่วยงานที่ถูกเลือก
   const [selectedKpiDetail, setSelectedKpiDetail] = useState(null); // NEW: State สำหรับเปิด Modal รายละเอียด KPI
   const [isSyncingSheets, setIsSyncingSheets] = useState(false); // NEW: State สำหรับสถานะกำลังส่งข้อมูลไป Google Sheets
   const [isBackingUpToDrive, setIsBackingUpToDrive] = useState(false); // NEW: State สำหรับสถานะกำลังส่งไฟล์ไป Google Drive
@@ -2051,7 +2053,7 @@ export default function App() {
 
   // --- NEW: State สำหรับจัดการรายการแบบฟอร์ม ---
   const [showAddFormModal, setShowAddFormModal] = useState(false);
-  const [newFormItem, setNewFormItem] = useState({ id: null, category: 'งานบริหารและนิติบุคคล (Juristic & Mgmt.)', name: '', format: 'PDF', size: '100 KB', description: '' });
+  const [newFormItem, setNewFormItem] = useState({ id: null, category: 'งานบริหารและนิติบุคคล (Juristic & Mgmt.)', name: '', format: 'PDF', size: '100 KB', description: '', link: '' });
 
   // Announcements State
   const [showAddAnnouncementModal, setShowAddAnnouncementModal] = useState(false);
@@ -3201,24 +3203,44 @@ export default function App() {
   const handleLogin = (e) => { 
       e.preventDefault(); 
       
-      const inputUsername = (loginForm.username || '').trim(); // ป้องกันค่าว่าง
+      // ปรับปรุง: ตัดช่องว่างซ้ายขวา และแปลงเป็นตัวพิมพ์เล็กทั้งหมด ป้องกันปัญหาพิมพ์เล็ก-ใหญ่บนมือถือ
+      const inputUsername = (loginForm.username || '').trim().toLowerCase(); 
       const inputPassword = loginForm.password || '';
+
+      if (!inputUsername || !inputPassword) {
+          setLoginError('กรุณากรอกชื่อผู้ใช้งานและรหัสผ่าน');
+          return;
+      }
 
       // 1. ค้นหาใน Users State ปกติ (รับประกันว่า users เป็น Array เสมอ)
       const userList = Array.isArray(users) ? users : [];
-      let user = userList.find(u => u.username === inputUsername && u.password === inputPassword); 
+      
+      // ปรับปรุง: เทียบ username โดยไม่สนใจพิมพ์เล็กพิมพ์ใหญ่ และตัดช่องว่างเผื่อพิมพ์ผิด
+      let user = userList.find(u => 
+          (u.username || '').trim().toLowerCase() === inputUsername && 
+          u.password === inputPassword
+      ); 
       
       // 2. Fallback ฉุกเฉินสำหรับ Admin ป้องกันบัญชีหายหรือเข้าไม่ได้จากปัญหา Database
       if (!user && inputUsername === 'admin' && inputPassword === 'bosskim') {
-          user = JSON.parse(JSON.stringify(INITIAL_USERS[0])); // ดึงบัญชี Admin หลักมาใช้ป้องกัน Reference ผิดพลาด
-          
-          // ถ้าไม่มีในฐานข้อมูล ให้เพิ่มกลับเข้าไปกู้คืนให้โดยอัตโนมัติ
-          if (!userList.some(u => u.username === 'admin')) {
+          // หากมีบัญชี admin ในระบบอยู่แล้ว (แต่ลืมรหัสผ่าน) ให้กู้สิทธิ์คืน
+          const existingAdmin = userList.find(u => (u.username || '').trim().toLowerCase() === 'admin');
+          if (existingAdmin) {
+              user = { ...existingAdmin, permissions: getFullPermissions() };
+          } else {
+              // ถ้าไม่มีบัญชี admin เลย ให้สร้างใหม่ฉุกเฉิน
+              user = JSON.parse(JSON.stringify(INITIAL_USERS[0])); 
               setUsers([...userList, user]);
           }
       }
 
       if (user) { 
+          // ปรับปรุง: ตรวจสอบสถานะการระงับใช้งาน
+          if (user.status !== 'Active') {
+              setLoginError('บัญชีผู้ใช้งานนี้ถูกระงับ (Inactive) กรุณาติดต่อผู้ดูแลระบบ');
+              return;
+          }
+
           // อัปเดตเวลาเข้าใช้งานล่าสุด
           const updatedUser = { ...user, lastLogin: new Date().toISOString() };
           
@@ -5620,6 +5642,8 @@ export default function App() {
                       <User className="absolute left-4 top-3.5 text-gray-500" size={18} />
                       <input 
                           type="text" 
+                          autoCapitalize="none"
+                          autoCorrect="off"
                           className="pl-11 block w-full rounded-xl border-gray-700 shadow-sm p-3 border focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all bg-gray-800/50 text-white placeholder-gray-500 focus:bg-gray-800" 
                           value={loginForm.username} 
                           onChange={e => setLoginForm({...loginForm, username: e.target.value})} 
@@ -8261,6 +8285,9 @@ export default function App() {
             // ACT จะแก้ไขได้ก็ต่อเมื่อ ยังไม่ถูกล็อค
             const canEditAct = !isLocked;
 
+            // ตรวจสอบว่าเป็นหน่วยงาน Head Office หรือไม่
+            const isHeadOffice = selectedProject?.name === 'Head Office';
+
             return (
             <div id="print-schedule-area" className={isExporting ? 'w-[277mm] min-w-[277mm] max-w-[277mm] mx-auto bg-white p-4 box-border relative z-10' : 'w-full'}>
             <Card className={`${isExporting ? 'border-none shadow-none' : 'min-w-full overflow-hidden'}`}>
@@ -8407,20 +8434,41 @@ export default function App() {
                                                 PLAN
                                             </td>
                                             {daysInMonth.map(date => {
-                                                const dateString = date.toISOString().split('T')[0];
+                                                const yyyy = date.getFullYear();
+                                                const mm = String(date.getMonth() + 1).padStart(2, '0');
+                                                const dd = String(date.getDate()).padStart(2, '0');
+                                                const dateString = `${yyyy}-${mm}-${dd}`;
+                                                
                                                 const key = `${user.id}_${dateString}`;
                                                 const val = schedules[key] || '';
-                                                const shiftData = SHIFTS.find(s => s.id === val);
-                                                const colorClass = shiftData ? shiftData.color : '';
+                                                const shiftData = !isHeadOffice ? SHIFTS.find(s => s.id === val) : null;
+                                                
+                                                let colorClass = shiftData ? shiftData.color : '';
+                                                if (isHeadOffice && val) {
+                                                    colorClass = 'bg-blue-50 text-blue-700 border-blue-200';
+                                                }
 
                                                 return (
                                                     <td key={dateString} className={`p-0 border-r border-gray-200 text-center align-middle bg-blue-50/20 ${isExporting ? 'h-auto' : 'h-full'}`}>
                                                         {isExporting ? (
-                                                            <div className={`w-full h-full min-h-[18px] flex items-center justify-center p-0 text-[7.5px] font-bold uppercase ${colorClass}`}>{val}</div>
+                                                            <div className={`w-full h-full min-h-[18px] flex items-center justify-center p-0.5 leading-tight overflow-hidden ${isHeadOffice ? 'text-[5px] break-all font-medium' : 'text-[7.5px] font-bold uppercase'} ${colorClass}`}>{val}</div>
+                                                        ) : isHeadOffice ? (
+                                                            <div
+                                                                className={`w-full h-full min-h-[26px] md:min-h-[28px] flex items-center justify-center text-center text-[8px] xl:text-[9px] p-0.5 m-0 transition-colors ${colorClass} ${!canEditPlan ? 'cursor-not-allowed opacity-70' : 'cursor-pointer hover:bg-blue-100 hover:shadow-inner'}`}
+                                                                onClick={() => {
+                                                                    if (canEditPlan) {
+                                                                        setHoSelectedProjects(val ? val.split(', ').filter(Boolean) : []);
+                                                                        setHoScheduleModal({ userId: user.id, userName: `${user.firstName} ${user.lastName}`, dateString, type: 'plan', currentValue: val });
+                                                                    }
+                                                                }}
+                                                                title={!canEditPlan ? "ตาราง Plan ถูกอนุมัติหรือล็อคแล้ว" : "คลิกเพื่อเลือกหน่วยงาน (เลือกได้หลายที่)"}
+                                                            >
+                                                                <span className="line-clamp-3 leading-tight break-words">{val}</span>
+                                                            </div>
                                                         ) : (
                                                             <input 
                                                                 type="text" 
-                                                                className={`w-full h-full min-h-[26px] md:min-h-[28px] text-center text-[9px] xl:text-[10px] 2xl:text-xs p-0 m-0 focus:outline-none focus:ring-inset focus:ring-1 focus:ring-orange-500 uppercase transition-colors block ${colorClass} ${!canEditPlan ? 'cursor-not-allowed opacity-70' : selectedShift ? 'cursor-pointer' : 'cursor-text'}`}
+                                                                className={`w-full h-full min-h-[26px] md:min-h-[28px] text-center text-[9px] xl:text-[10px] 2xl:text-xs p-0 m-0 focus:outline-none focus:ring-inset focus:ring-1 focus:ring-orange-500 transition-colors block ${colorClass} ${!isHeadOffice ? 'uppercase' : ''} ${!canEditPlan ? 'cursor-not-allowed opacity-70' : selectedShift ? 'cursor-pointer' : 'cursor-text'}`}
                                                                 value={val}
                                                                 onClick={() => {
                                                                     if (canEditPlan && selectedShift) {
@@ -8442,23 +8490,44 @@ export default function App() {
                                                 ACT
                                             </td>
                                             {daysInMonth.map(date => {
-                                                const dateString = date.toISOString().split('T')[0];
+                                                const yyyy = date.getFullYear();
+                                                const mm = String(date.getMonth() + 1).padStart(2, '0');
+                                                const dd = String(date.getDate()).padStart(2, '0');
+                                                const dateString = `${yyyy}-${mm}-${dd}`;
+                                                
                                                 const planKey = `${user.id}_${dateString}`;
                                                 const actKey = `${user.id}_${dateString}_act`;
                                                 const planVal = schedules[planKey] || '';
                                                 // หากยังไม่ได้กรอก ACT จะดึงข้อมูล PLAN มาเป็นตัวตั้งต้น
                                                 const actVal = schedules[actKey] !== undefined ? schedules[actKey] : planVal;
-                                                const shiftData = SHIFTS.find(s => s.id === actVal);
-                                                const colorClass = shiftData ? shiftData.color : '';
+                                                const shiftData = !isHeadOffice ? SHIFTS.find(s => s.id === actVal) : null;
+                                                
+                                                let colorClass = shiftData ? shiftData.color : '';
+                                                if (isHeadOffice && actVal) {
+                                                    colorClass = 'bg-green-50 text-green-700 border-green-200';
+                                                }
 
                                                 return (
                                                     <td key={`${dateString}_act`} className={`p-0 border-r border-gray-200 text-center align-middle bg-green-50/20 ${isExporting ? 'h-auto' : 'h-full'}`}>
                                                         {isExporting ? (
-                                                            <div className={`w-full h-full min-h-[18px] flex items-center justify-center p-0 text-[7.5px] font-bold uppercase ${colorClass}`}>{actVal}</div>
+                                                            <div className={`w-full h-full min-h-[18px] flex items-center justify-center p-0.5 leading-tight overflow-hidden ${isHeadOffice ? 'text-[5px] break-all font-medium' : 'text-[7.5px] font-bold uppercase'} ${colorClass}`}>{actVal}</div>
+                                                        ) : isHeadOffice ? (
+                                                            <div
+                                                                className={`w-full h-full min-h-[26px] md:min-h-[28px] flex items-center justify-center text-center text-[8px] xl:text-[9px] p-0.5 m-0 transition-colors ${colorClass} ${!canEditAct ? 'cursor-not-allowed opacity-70' : 'cursor-pointer hover:bg-green-100 hover:shadow-inner'}`}
+                                                                onClick={() => {
+                                                                    if (canEditAct) {
+                                                                        setHoSelectedProjects(actVal ? actVal.split(', ').filter(Boolean) : []);
+                                                                        setHoScheduleModal({ userId: user.id, userName: `${user.firstName} ${user.lastName}`, dateString, type: 'act', currentValue: actVal });
+                                                                    }
+                                                                }}
+                                                                title={!canEditAct ? "ตารางถูกล็อคแล้วโดยฝ่ายบุคคล" : "คลิกเพื่อเลือกหน่วยงานตามจริง (เลือกได้หลายที่)"}
+                                                            >
+                                                                <span className="line-clamp-3 leading-tight break-words">{actVal}</span>
+                                                            </div>
                                                         ) : (
                                                             <input 
                                                                 type="text" 
-                                                                className={`w-full h-full min-h-[26px] md:min-h-[28px] text-center text-[9px] xl:text-[10px] 2xl:text-xs p-0 m-0 focus:outline-none focus:ring-inset focus:ring-1 focus:ring-green-500 uppercase transition-colors block ${colorClass} ${!canEditAct ? 'cursor-not-allowed opacity-70' : selectedShift ? 'cursor-pointer' : 'cursor-text'}`}
+                                                                className={`w-full h-full min-h-[26px] md:min-h-[28px] text-center text-[9px] xl:text-[10px] 2xl:text-xs p-0 m-0 focus:outline-none focus:ring-inset focus:ring-1 focus:ring-green-500 transition-colors block ${colorClass} ${!isHeadOffice ? 'uppercase' : ''} ${!canEditAct ? 'cursor-not-allowed opacity-70' : selectedShift ? 'cursor-pointer' : 'cursor-text'}`}
                                                                 value={actVal}
                                                                 onClick={() => {
                                                                     if (canEditAct && selectedShift) {
@@ -8469,6 +8538,48 @@ export default function App() {
                                                                 readOnly={!canEditAct || !!selectedShift}
                                                                 disabled={!canEditAct}
                                                                 title={!canEditAct ? "ตารางถูกล็อคแล้วโดยฝ่ายบุคคล" : "แก้ไขตารางตามการเข้างานจริง (Actual)"}
+                                                            />
+                                                        )}
+                                                    </td>
+                                                );
+                                            })}
+                                        </tr>
+                                        <tr className="hover:bg-gray-50">
+                                            <td className={`border-r border-gray-200 text-center font-bold bg-green-50 text-green-700 p-0 ${isExporting ? 'text-[6px]' : 'text-[9px]'}`}>
+                                                ACT
+                                            </td>
+                                            {daysInMonth.map(date => {
+                                                const dateString = date.toISOString().split('T')[0];
+                                                const planKey = `${user.id}_${dateString}`;
+                                                const actKey = `${user.id}_${dateString}_act`;
+                                                const planVal = schedules[planKey] || '';
+                                                // หากยังไม่ได้กรอก ACT จะดึงข้อมูล PLAN มาเป็นตัวตั้งต้น
+                                                const actVal = schedules[actKey] !== undefined ? schedules[actKey] : planVal;
+                                                const shiftData = !isHeadOffice ? SHIFTS.find(s => s.id === actVal) : null;
+                                                
+                                                let colorClass = shiftData ? shiftData.color : '';
+                                                if (isHeadOffice && actVal) {
+                                                    colorClass = 'bg-green-50 text-green-700 border-green-200';
+                                                }
+
+                                                return (
+                                                    <td key={`${dateString}_act`} className={`p-0 border-r border-gray-200 text-center align-middle bg-green-50/20 ${isExporting ? 'h-auto' : 'h-full'}`}>
+                                                        {isExporting ? (
+                                                            <div className={`w-full h-full min-h-[18px] flex items-center justify-center p-0.5 leading-tight overflow-hidden ${isHeadOffice ? 'text-[5px] break-all font-medium' : 'text-[7.5px] font-bold uppercase'} ${colorClass}`}>{actVal}</div>
+                                                        ) : (
+                                                            <input 
+                                                                type="text" 
+                                                                className={`w-full h-full min-h-[26px] md:min-h-[28px] text-center text-[9px] xl:text-[10px] 2xl:text-xs p-0 m-0 focus:outline-none focus:ring-inset focus:ring-1 focus:ring-green-500 transition-colors block ${colorClass} ${!isHeadOffice ? 'uppercase' : ''} ${!canEditAct ? 'cursor-not-allowed opacity-70' : (selectedShift && !isHeadOffice) ? 'cursor-pointer' : 'cursor-text'}`}
+                                                                value={actVal}
+                                                                onClick={() => {
+                                                                    if (canEditAct && selectedShift && !isHeadOffice) {
+                                                                        updateSchedule(user.id, dateString, selectedShift, 'act');
+                                                                    }
+                                                                }}
+                                                                onChange={(e) => canEditAct && updateSchedule(user.id, dateString, isHeadOffice ? e.target.value : e.target.value.toUpperCase(), 'act')}
+                                                                readOnly={!canEditAct || (!!selectedShift && !isHeadOffice)}
+                                                                disabled={!canEditAct}
+                                                                title={!canEditAct ? "ตารางถูกล็อคแล้วโดยฝ่ายบุคคล" : (isHeadOffice ? "พิมพ์ชื่อหน่วยงาน" : "แก้ไขตารางตามการเข้างานจริง (Actual)")}
                                                             />
                                                         )}
                                                     </td>
@@ -8486,30 +8597,36 @@ export default function App() {
                 <div className={`border-t border-gray-200 ${isExporting ? 'bg-white pt-2 pb-1 px-0 mt-2' : 'p-4 bg-gray-50'}`}>
                     <div className="flex justify-between items-center mb-1.5">
                         <h4 className={`font-bold text-gray-700 flex items-center gap-2 ${isExporting ? 'text-[10px]' : 'text-sm'}`}>
-                            คำอธิบายสัญลักษณ์ (Shift Legend) 
+                            {isHeadOffice ? 'คำแนะนำการลงตารางงานส่วนกลาง' : 'คำอธิบายสัญลักษณ์ (Shift Legend)'}
                         </h4>
-                        {!isExporting && (
+                        {!isExporting && !isHeadOffice && (
                             <div className="text-[10px] text-gray-400 flex items-center gap-1">
                                 <MousePointer2 size={12} /> Click shift below to auto-fill
                             </div>
                         )}
                     </div>
-                    <div className={`grid ${isExporting ? 'grid-cols-7 gap-y-1 gap-x-1.5' : 'grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-y-2 gap-x-2'}`}>
-                        {SHIFTS.map(shift => (
-                            <div 
-                                key={shift.id} 
-                                onClick={() => !isExporting && setSelectedShift(selectedShift === shift.id ? null : shift.id)}
-                                className={`flex items-center gap-1.5 transition-all select-none ${isExporting ? 'text-[9px]' : 'text-xs cursor-pointer hover:bg-gray-200 p-1 rounded'} ${selectedShift === shift.id && !isExporting ? 'ring-2 ring-orange-500 bg-white shadow-md scale-105' : ''}`}
-                            >
-                                <span className={`inline-block text-center rounded font-bold border ${shift.color} ${isExporting ? 'w-5 py-0 text-[7px]' : 'w-8 py-0.5'}`}>
-                                    {shift.id}
-                                </span>
-                                <span className={`text-gray-600 truncate ${isExporting ? 'text-[7px]' : ''}`} title={lang === 'th' ? shift.label_th : shift.label_en}>
-                                    {lang === 'th' ? (shift.label_th.split(' - ')[1] || shift.label_th) : (shift.label_en.split(' - ')[1] || shift.label_en)}
-                                </span>
-                            </div>
-                        ))}
-                    </div>
+                    {isHeadOffice ? (
+                        <div className={`text-gray-600 ${isExporting ? 'text-[8px]' : 'text-xs'} bg-white p-3 rounded border border-gray-200`}>
+                            <p className="flex items-center gap-2"><Building2 size={14} className="text-blue-500"/> สำหรับหน่วยงาน Head Office ให้ <strong>คลิกที่ช่องตาราง</strong> เพื่อเลือกชื่อโครงการ/หน่วยงาน ที่พนักงานเดินทางไปปฏิบัติงาน (สามารถเลือกได้มากกว่า 1 แห่งต่อวัน)</p>
+                        </div>
+                    ) : (
+                        <div className={`grid ${isExporting ? 'grid-cols-7 gap-y-1 gap-x-1.5' : 'grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-y-2 gap-x-2'}`}>
+                            {SHIFTS.map(shift => (
+                                <div 
+                                    key={shift.id} 
+                                    onClick={() => !isExporting && setSelectedShift(selectedShift === shift.id ? null : shift.id)}
+                                    className={`flex items-center gap-1.5 transition-all select-none ${isExporting ? 'text-[9px]' : 'text-xs cursor-pointer hover:bg-gray-200 p-1 rounded'} ${selectedShift === shift.id && !isExporting ? 'ring-2 ring-orange-500 bg-white shadow-md scale-105' : ''}`}
+                                >
+                                    <span className={`inline-block text-center rounded font-bold border ${shift.color} ${isExporting ? 'w-5 py-0 text-[7px]' : 'w-8 py-0.5'}`}>
+                                        {shift.id}
+                                    </span>
+                                    <span className={`text-gray-600 truncate ${isExporting ? 'text-[7px]' : ''}`} title={lang === 'th' ? shift.label_th : shift.label_en}>
+                                        {lang === 'th' ? (shift.label_th.split(' - ')[1] || shift.label_th) : (shift.label_en.split(' - ')[1] || shift.label_en)}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
 
                 {/* Note Area */}
@@ -8576,6 +8693,53 @@ export default function App() {
                     })()}
                 </div>
             </Card>
+
+            {/* Head Office Multi-Select Modal */}
+            {hoScheduleModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 animate-fade-in">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-md flex flex-col max-h-[85vh]">
+                        <div className="p-4 border-b flex justify-between items-center bg-gray-50 shrink-0 rounded-t-xl">
+                            <div>
+                                <h3 className="font-bold text-gray-800">เลือกสถานที่ปฏิบัติงาน</h3>
+                                <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+                                    <User size={12} className="text-gray-400"/> {hoScheduleModal.userName} | <Calendar size={12} className="text-gray-400"/> {new Date(hoScheduleModal.dateString).toLocaleDateString('th-TH')} ({hoScheduleModal.type === 'plan' ? 'PLAN' : 'ACT'})
+                                </p>
+                            </div>
+                            <button onClick={() => setHoScheduleModal(null)} className="text-gray-400 hover:text-red-500 bg-white p-1 rounded-md border shadow-sm"><X size={20}/></button>
+                        </div>
+                        <div className="p-4 overflow-y-auto flex-1 custom-scrollbar">
+                            <div className="space-y-2">
+                                {['Head Office', ...projects.map(p => p.name)].map((projName, idx) => (
+                                    <label key={idx} className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all hover:shadow-sm ${hoSelectedProjects.includes(projName) ? 'bg-orange-50 border-orange-300' : 'bg-white border-gray-200 hover:bg-gray-50'}`}>
+                                        <input 
+                                            type="checkbox" 
+                                            className="w-5 h-5 accent-orange-600 cursor-pointer"
+                                            checked={hoSelectedProjects.includes(projName)}
+                                            onChange={() => {
+                                                setHoSelectedProjects(prev => 
+                                                    prev.includes(projName) ? prev.filter(p => p !== projName) : [...prev, projName]
+                                                );
+                                            }}
+                                        />
+                                        <span className={`font-medium ${hoSelectedProjects.includes(projName) ? 'text-orange-800' : 'text-gray-700'}`}>{projName}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="p-4 border-t bg-white rounded-b-xl flex justify-between items-center shrink-0">
+                            <span className="text-xs font-bold text-gray-500 bg-gray-100 px-3 py-1.5 rounded-full">เลือกแล้ว {hoSelectedProjects.length} แห่ง</span>
+                            <div className="flex gap-2">
+                                <Button variant="secondary" onClick={() => setHoScheduleModal(null)}>ยกเลิก</Button>
+                                <Button onClick={() => {
+                                    updateSchedule(hoScheduleModal.userId, hoScheduleModal.dateString, hoSelectedProjects.join(', '), hoScheduleModal.type);
+                                    setHoScheduleModal(null);
+                                }} icon={Save}>บันทึกข้อมูล</Button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             </div>
             );
           })()}
@@ -11204,7 +11368,7 @@ export default function App() {
                           <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
                               {hasPerm('proj_forms', 'save') && (
                                   <Button size="sm" icon={Plus} onClick={() => {
-                                      setNewFormItem({ id: null, category: 'งานบริหารและนิติบุคคล (Juristic & Mgmt.)', name: '', format: 'PDF', size: '100 KB', description: '' });
+                                      setNewFormItem({ id: null, category: 'งานบริหารและนิติบุคคล (Juristic & Mgmt.)', name: '', format: 'PDF', size: '100 KB', description: '', link: '' });
                                       setShowAddFormModal(true);
                                   }}>เพิ่มแบบฟอร์ม</Button>
                               )}
@@ -11251,15 +11415,19 @@ export default function App() {
                                                   </div>
                                               </div>
                                               <Button 
-                                                  variant="outline" 
+                                                  variant={form.link ? "primary" : "outline"}
                                                   size="sm" 
-                                                  className="w-full mt-auto flex items-center justify-center gap-2 bg-gray-50 hover:bg-orange-50 hover:text-orange-700 hover:border-orange-300" 
+                                                  className={`w-full mt-auto flex items-center justify-center gap-2 ${form.link ? 'bg-blue-600 hover:bg-blue-700 text-white border-blue-600' : 'bg-gray-50 hover:bg-orange-50 hover:text-orange-700 hover:border-orange-300'}`}
                                                   onClick={(e) => {
                                                       e.stopPropagation();
-                                                      setSelectedFormDetails(form);
+                                                      if (form.link) {
+                                                          window.open(form.link.startsWith('http') ? form.link : `https://${form.link}`, '_blank');
+                                                      } else {
+                                                          setSelectedFormDetails(form);
+                                                      }
                                                   }}
                                               >
-                                                  <File size={16} /> ดูแบบฟอร์ม / พิมพ์
+                                                  {form.link ? <><LinkIcon size={16} /> เปิดลิงก์ภายนอก</> : <><File size={16} /> ดูแบบฟอร์ม / พิมพ์</>}
                                               </Button>
                                           </div>
                                       ))}
@@ -13094,42 +13262,6 @@ export default function App() {
           <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-gray-900/90 text-white px-5 py-2.5 rounded-full shadow-2xl flex items-center gap-3 z-[9999] animate-fade-in backdrop-blur-sm border border-gray-700">
               <Cloud size={16} className="text-blue-400 animate-pulse" />
               <span className="text-sm font-medium tracking-wide">{autoSyncMessage}</span>
-          </div>
-      )}
-
-      {/* Global Confirm Modal (For all showConfirm/showAlert calls) */}
-      {confirmModal.isOpen && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 animate-fade-in">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col transform transition-all scale-100 border border-gray-200">
-                  <div className={`p-5 flex items-center gap-3 ${confirmModal.type === 'danger' ? 'bg-red-50 text-red-600 border-b border-red-100' : confirmModal.type === 'warning' ? 'bg-orange-50 text-orange-600 border-b border-orange-100' : confirmModal.type === 'info' ? 'bg-blue-50 text-blue-600 border-b border-blue-100' : 'bg-green-50 text-green-600 border-b border-green-100'}`}>
-                      {confirmModal.type === 'danger' ? <Trash2 size={24} /> : confirmModal.type === 'warning' ? <AlertTriangle size={24} /> : confirmModal.type === 'info' ? <Info size={24} /> : <CheckCircle size={24} />}
-                      <h2 className="text-xl font-bold">{confirmModal.title}</h2>
-                  </div>
-                  <div className="p-6 text-gray-700 text-sm leading-relaxed">
-                      {confirmModal.message.split('\n').map((line, i) => (
-                          <p key={i} className={i > 0 ? "mt-2" : ""}>{line}</p>
-                      ))}
-                  </div>
-                  <div className="p-4 border-t bg-gray-50 flex justify-end gap-2 shrink-0">
-                      {confirmModal.onConfirm ? (
-                          <>
-                              <Button variant="secondary" onClick={closeConfirm}>{t('cancel')}</Button>
-                              <Button 
-                                  variant={confirmModal.type === 'danger' ? 'danger' : 'primary'}
-                                  className={confirmModal.type === 'info' ? 'bg-blue-600 hover:bg-blue-700 text-white border-transparent' : confirmModal.type === 'warning' ? 'bg-orange-600 hover:bg-orange-700 text-white border-transparent' : ''}
-                                  onClick={() => {
-                                      confirmModal.onConfirm();
-                                      closeConfirm();
-                                  }}
-                              >
-                                  {confirmModal.confirmText}
-                              </Button>
-                          </>
-                      ) : (
-                          <Button onClick={closeConfirm}>{confirmModal.confirmText}</Button>
-                      )}
-                  </div>
-              </div>
           </div>
       )}
 
@@ -16524,6 +16656,20 @@ export default function App() {
                             onChange={e => setNewFormItem({...newFormItem, description: e.target.value})}
                         ></textarea>
                     </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">แนบลิงก์ (URL/Link) - สำหรับแบบฟอร์มภายนอก</label>
+                        <div className="relative">
+                            <LinkIcon size={16} className="absolute left-3 top-2.5 text-gray-400"/>
+                            <input 
+                                type="url" 
+                                className="w-full border rounded-md pl-9 p-2 outline-none focus:border-blue-500"
+                                value={newFormItem.link || ''}
+                                onChange={e => setNewFormItem({...newFormItem, link: e.target.value})}
+                                placeholder="https://..."
+                            />
+                        </div>
+                        <p className="text-[10px] text-gray-500 mt-1">* หากระบุลิงก์ เมื่อคลิกที่การ์ดระบบจะเปิดลิงก์นี้แทนการเปิดแบบฟอร์มพิมพ์ PDF ภายในระบบ</p>
+                    </div>
                     <div className="flex justify-end gap-2 pt-4 border-t">
                         <Button variant="secondary" onClick={() => setShowAddFormModal(false)}>ยกเลิก</Button>
                         <Button type="submit" icon={Save}>บันทึกข้อมูล</Button>
@@ -17159,6 +17305,65 @@ export default function App() {
                       <Button variant="secondary" onClick={() => setSelectedAnnouncementView(null)}>
                           ปิดหน้าต่าง
                       </Button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* Global Confirm / Alert Modal */}
+      {confirmModal.isOpen && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[10000] p-4 animate-fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col transform transition-all scale-100 border border-gray-200">
+                  <div className={`p-5 border-b flex items-center gap-3 ${
+                      confirmModal.type === 'danger' ? 'bg-red-50 border-red-100' :
+                      confirmModal.type === 'warning' || confirmModal.type === 'alert' ? 'bg-orange-50 border-orange-100' :
+                      confirmModal.type === 'success' ? 'bg-green-50 border-green-100' :
+                      'bg-blue-50 border-blue-100'
+                  }`}>
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm ${
+                          confirmModal.type === 'danger' ? 'bg-red-100 text-red-600' :
+                          confirmModal.type === 'warning' || confirmModal.type === 'alert' ? 'bg-orange-100 text-orange-600' :
+                          confirmModal.type === 'success' ? 'bg-green-100 text-green-600' :
+                          'bg-blue-100 text-blue-600'
+                      }`}>
+                          {confirmModal.type === 'danger' ? <Trash2 size={20} /> :
+                           confirmModal.type === 'warning' || confirmModal.type === 'alert' ? <AlertTriangle size={20} /> :
+                           confirmModal.type === 'success' ? <CheckCircle size={20} /> :
+                           <Info size={20} />}
+                      </div>
+                      <h2 className={`text-xl font-bold ${
+                          confirmModal.type === 'danger' ? 'text-red-800' :
+                          confirmModal.type === 'warning' || confirmModal.type === 'alert' ? 'text-orange-800' :
+                          confirmModal.type === 'success' ? 'text-green-800' :
+                          'text-blue-800'
+                      }`}>
+                          {confirmModal.title}
+                      </h2>
+                  </div>
+                  
+                  <div className="p-6 bg-white min-h-[100px] flex items-center">
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed w-full">
+                          {confirmModal.message}
+                      </p>
+                  </div>
+                  
+                  <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3 shrink-0">
+                      {confirmModal.onConfirm ? (
+                          <>
+                              <Button variant="secondary" onClick={closeConfirm}>{t('cancel') || 'ยกเลิก'}</Button>
+                              <Button 
+                                  variant={confirmModal.type === 'danger' ? 'danger' : 'primary'} 
+                                  onClick={() => {
+                                      confirmModal.onConfirm();
+                                      closeConfirm();
+                                  }}
+                              >
+                                  {confirmModal.confirmText}
+                              </Button>
+                          </>
+                      ) : (
+                          <Button variant="primary" onClick={closeConfirm}>{confirmModal.confirmText || 'ตกลง'}</Button>
+                      )}
                   </div>
               </div>
           </div>
