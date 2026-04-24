@@ -8544,48 +8544,6 @@ export default function App() {
                                                 );
                                             })}
                                         </tr>
-                                        <tr className="hover:bg-gray-50">
-                                            <td className={`border-r border-gray-200 text-center font-bold bg-green-50 text-green-700 p-0 ${isExporting ? 'text-[6px]' : 'text-[9px]'}`}>
-                                                ACT
-                                            </td>
-                                            {daysInMonth.map(date => {
-                                                const dateString = date.toISOString().split('T')[0];
-                                                const planKey = `${user.id}_${dateString}`;
-                                                const actKey = `${user.id}_${dateString}_act`;
-                                                const planVal = schedules[planKey] || '';
-                                                // หากยังไม่ได้กรอก ACT จะดึงข้อมูล PLAN มาเป็นตัวตั้งต้น
-                                                const actVal = schedules[actKey] !== undefined ? schedules[actKey] : planVal;
-                                                const shiftData = !isHeadOffice ? SHIFTS.find(s => s.id === actVal) : null;
-                                                
-                                                let colorClass = shiftData ? shiftData.color : '';
-                                                if (isHeadOffice && actVal) {
-                                                    colorClass = 'bg-green-50 text-green-700 border-green-200';
-                                                }
-
-                                                return (
-                                                    <td key={`${dateString}_act`} className={`p-0 border-r border-gray-200 text-center align-middle bg-green-50/20 ${isExporting ? 'h-auto' : 'h-full'}`}>
-                                                        {isExporting ? (
-                                                            <div className={`w-full h-full min-h-[18px] flex items-center justify-center p-0.5 leading-tight overflow-hidden ${isHeadOffice ? 'text-[5px] break-all font-medium' : 'text-[7.5px] font-bold uppercase'} ${colorClass}`}>{actVal}</div>
-                                                        ) : (
-                                                            <input 
-                                                                type="text" 
-                                                                className={`w-full h-full min-h-[26px] md:min-h-[28px] text-center text-[9px] xl:text-[10px] 2xl:text-xs p-0 m-0 focus:outline-none focus:ring-inset focus:ring-1 focus:ring-green-500 transition-colors block ${colorClass} ${!isHeadOffice ? 'uppercase' : ''} ${!canEditAct ? 'cursor-not-allowed opacity-70' : (selectedShift && !isHeadOffice) ? 'cursor-pointer' : 'cursor-text'}`}
-                                                                value={actVal}
-                                                                onClick={() => {
-                                                                    if (canEditAct && selectedShift && !isHeadOffice) {
-                                                                        updateSchedule(user.id, dateString, selectedShift, 'act');
-                                                                    }
-                                                                }}
-                                                                onChange={(e) => canEditAct && updateSchedule(user.id, dateString, isHeadOffice ? e.target.value : e.target.value.toUpperCase(), 'act')}
-                                                                readOnly={!canEditAct || (!!selectedShift && !isHeadOffice)}
-                                                                disabled={!canEditAct}
-                                                                title={!canEditAct ? "ตารางถูกล็อคแล้วโดยฝ่ายบุคคล" : (isHeadOffice ? "พิมพ์ชื่อหน่วยงาน" : "แก้ไขตารางตามการเข้างานจริง (Actual)")}
-                                                            />
-                                                        )}
-                                                    </td>
-                                                );
-                                            })}
-                                        </tr>
                                     </tbody>
                                 ))}
                             </table>
