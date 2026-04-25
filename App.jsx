@@ -14686,7 +14686,7 @@ export default function App() {
       {/* Selected Daily Report View Modal */}
       {selectedDailyReport && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-            <div className={`bg-white rounded-lg shadow-xl w-full max-w-[210mm] m-4 relative animate-fade-in ${isExporting ? 'p-0 shadow-none overflow-visible' : 'p-8 max-h-[95vh] overflow-y-auto'}`}>
+            <div className={`bg-white rounded-lg shadow-xl w-full max-w-[210mm] m-4 relative animate-fade-in ${isExporting ? 'p-0 shadow-none overflow-visible w-max min-w-min max-w-none mx-auto' : 'p-8 max-h-[95vh] overflow-y-auto'}`}>
                 <button 
                     onClick={() => setSelectedDailyReport(null)} 
                     className={`absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors z-10 ${isExporting ? 'hidden' : ''}`}
@@ -14694,7 +14694,7 @@ export default function App() {
                     <X size={24} />
                 </button>
 
-                <div id="print-daily-report" className={`space-y-6 bg-white ${isExporting ? 'p-8' : ''}`}>
+                <div id="print-daily-report" className={`space-y-6 bg-white ${isExporting ? 'w-[190mm] min-w-[190mm] max-w-[190mm] mx-auto box-border py-8 px-0' : ''}`}>
                     {/* Header */}
                     <div className="text-center border-b pb-4 mb-6">
                         <h2 className="text-2xl font-bold text-gray-800">
@@ -16231,7 +16231,7 @@ export default function App() {
           <div className={`bg-white rounded-lg shadow-xl w-full max-w-4xl m-4 relative animate-fade-in ${isExporting ? 'p-0 shadow-none overflow-visible max-h-none w-max min-w-min' : 'max-h-[95vh] overflow-y-auto'}`}>
             <button onClick={() => setSelectedAuditReport(null)} className={`absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors z-10 ${isExporting ? 'hidden' : ''}`}><X size={24} /></button>
 
-            <div id="print-audit-detail" className={`bg-white text-gray-800 ${isExporting ? 'w-[190mm] min-w-[190mm] max-w-[190mm] mx-auto box-border p-8' : 'w-full p-8'}`}>
+            <div id="print-audit-detail" className={`bg-white text-gray-800 ${isExporting ? 'w-[190mm] min-w-[190mm] max-w-[190mm] mx-auto box-border py-8 px-0' : 'w-full p-8'}`}>
                 <div className="text-center border-b-2 border-gray-800 pb-4 mb-6">
                     <h2 className="text-2xl font-bold uppercase">รายงานการตรวจสอบคุณภาพ (Audit Report)</h2>
                     <h3 className="text-lg text-gray-600 mt-1">{selectedAuditReport.category}</h3>
@@ -16301,7 +16301,7 @@ export default function App() {
                 </div>
 
                 {/* Signatures Area */}
-                <div className={`flex justify-between px-4 md:px-12 pt-16 pb-4 mt-8 border-t border-gray-300 gap-4 flex-wrap ${isExporting ? 'px-8 pt-12 mt-12' : ''}`} style={{ pageBreakInside: 'avoid' }}>
+                <div className={`flex justify-between px-4 md:px-12 pt-16 pb-4 mt-8 border-t border-gray-300 gap-4 flex-wrap ${isExporting ? 'px-0 pt-12 mt-12' : ''}`} style={{ pageBreakInside: 'avoid' }}>
                     <div className="text-center w-48 mx-auto">
                         <div className="border-b border-gray-500 w-full mb-2 h-8 text-blue-800 font-serif italic flex items-end justify-center pb-1 truncate">
                             {selectedAuditReport.inspector}
@@ -16681,7 +16681,7 @@ export default function App() {
       {/* Form Document View/Edit Modal */}
       {selectedFormDetails && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 animate-fade-in backdrop-blur-sm">
-            <div className={`bg-white rounded-xl shadow-2xl w-full flex flex-col relative transition-all ${isExporting ? 'max-w-[210mm] max-h-none overflow-visible p-8 shadow-none m-0' : 'max-w-5xl max-h-[95vh] overflow-hidden'}`}>
+            <div className={`bg-white rounded-xl shadow-2xl w-full flex flex-col relative transition-all ${isExporting ? 'w-max min-w-min max-w-none max-h-none overflow-visible p-0 shadow-none m-0' : 'max-w-5xl max-h-[95vh] overflow-hidden'}`}>
                 {!isExporting && (
                     <div className="p-4 border-b flex justify-between items-center bg-gray-50 shrink-0">
                         <div>
@@ -16697,7 +16697,7 @@ export default function App() {
                 
                 {/* Simulated Document Area */}
                 <div className={`bg-gray-200 flex-1 overflow-y-auto flex justify-center py-8 ${isExporting ? 'py-0 bg-white' : ''}`}>
-                    <div id="print-document-form" className={`bg-white shadow-lg relative text-gray-800 ${isExporting ? 'w-full shadow-none' : 'w-[210mm] min-h-[297mm] px-[15mm] pt-[15mm] pb-[20mm] border border-gray-300'}`}>
+                    <div id="print-document-form" className={`bg-white shadow-lg relative text-gray-800 ${isExporting ? 'w-[190mm] min-w-[190mm] max-w-[190mm] mx-auto box-border py-8 px-0 shadow-none border-none' : 'mx-auto w-[210mm] min-h-[297mm] px-[15mm] pt-[15mm] pb-[20mm] border border-gray-300'}`}>
                         {/* Header */}
                         <div className="text-center mb-8 mt-4">
                             <h1 className="text-2xl font-bold mb-2">นิติบุคคลอาคารชุด / หมู่บ้าน {selectedProject?.name || '................................'}</h1>
