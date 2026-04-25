@@ -17333,7 +17333,7 @@ export default function App() {
                               <Button 
                                   variant={confirmModal.type === 'danger' ? 'danger' : 'primary'} 
                                   onClick={() => {
-                                      confirmModal.onConfirm();ฟ
+                                      confirmModal.onConfirm();
                                       closeConfirm();
                                   }}
                               >
