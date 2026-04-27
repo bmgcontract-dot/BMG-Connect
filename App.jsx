@@ -2358,6 +2358,7 @@ export default function App() {
       const canAccessAll = accessibleArray.includes('All') || currentUser.username === 'admin';
 
       const validAnnouncements = announcements.filter(a => {
+          if (a.status !== 'Published') return false;
           if (dismissedAnnouncements.includes(a.id)) return false;
 
           const startD = new Date(a.date);
@@ -17304,6 +17305,65 @@ export default function App() {
                       </div>
                       <Button variant="secondary" onClick={() => setSelectedAnnouncementView(null)}>
                           ปิดหน้าต่าง
+                      </Button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* Global Announcement Popup */}
+      {activePopupAnnouncement && !isExporting && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col border border-gray-200 transform transition-all scale-100">
+                  <div className={`h-2 w-full ${activePopupAnnouncement.priority === 'High' ? 'bg-red-500' : 'bg-blue-500'}`}></div>
+                  
+                  <div className="p-6 md:p-8 flex flex-col max-h-[80vh] overflow-y-auto custom-scrollbar">
+                      <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-2">
+                              {activePopupAnnouncement.priority === 'High' && (
+                                  <span className="bg-red-100 text-red-700 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
+                                      <AlertTriangle size={14} /> ประกาศด่วน
+                                  </span>
+                              )}
+                              <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
+                                  <Radio size={14} /> ข่าวสารประกาศ
+                              </span>
+                          </div>
+                          <button onClick={handleDismissAnnouncement} className="text-gray-400 hover:text-gray-600 transition-colors bg-gray-100 hover:bg-gray-200 rounded-full p-1">
+                              <X size={20} />
+                          </button>
+                      </div>
+
+                      {activePopupAnnouncement.image && (
+                          <div className="w-full h-48 sm:h-64 bg-gray-100 rounded-xl mb-6 overflow-hidden border border-gray-200">
+                              <img src={activePopupAnnouncement.image} className="w-full h-full object-contain bg-gray-900" alt="Announcement Cover" />
+                          </div>
+                      )}
+
+                      <h2 className="text-xl md:text-2xl font-bold text-gray-800 mb-3 leading-tight">
+                          {activePopupAnnouncement.title}
+                      </h2>
+                      
+                      <div className="text-sm md:text-base text-gray-700 whitespace-pre-wrap leading-relaxed">
+                          {activePopupAnnouncement.content}
+                      </div>
+
+                      {activePopupAnnouncement.link && (
+                          <div className="mt-6">
+                              <a href={activePopupAnnouncement.link.startsWith('http') ? activePopupAnnouncement.link : `https://${activePopupAnnouncement.link}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 bg-blue-50 text-blue-600 hover:text-blue-800 hover:bg-blue-100 px-4 py-2.5 rounded-lg font-bold transition-colors border border-blue-200 shadow-sm w-full justify-center">
+                                  <LinkIcon size={18} />
+                                  ดูรายละเอียดเพิ่มเติม (Open Link)
+                              </a>
+                          </div>
+                      )}
+                  </div>
+
+                  <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center shrink-0">
+                      <span className="text-xs text-gray-500">
+                          ประกาศเมื่อ: {new Date(activePopupAnnouncement.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric'})}
+                      </span>
+                      <Button onClick={handleDismissAnnouncement} variant="primary" className="bg-blue-600 hover:bg-blue-700">
+                          รับทราบ (Acknowledge)
                       </Button>
                   </div>
               </div>
