@@ -2811,7 +2811,7 @@ export default function App() {
   }, [showAddAuditModal, newAudit.projectId, newAudit.date, dailyReports]);
 
   const t = (key) => TRANSLATIONS[lang][key] || key;
-  const changeMonth = (increment) => { const [year, month] = currentMonth.split('-').map(Number); const date = new Date(year, month - 1 + increment, 1); const newYear = date.getFullYear(); const newMonth = String(date.getMonth() + 1).padStart(2, '0'); setCurrentMonth(`${newYear}-${newMonth}`); }; const getDaysInMonth = (year, month) => { const date = new Date(year, month - 1, 1); const days = []; while (date.getMonth() === month - 1) { days.push(new Date(date)); date.setDate(date.getDate() + 1); } return days; }; 
+  const changeMonth = (increment) => { const [year, month] = currentMonth.split('-').map(Number); const date = new Date(year, month - 1 + increment, 1); const newYear = date.getFullYear(); const newMonth = String(date.getMonth() + 1).padStart(2, '0'); setCurrentMonth(`${newYear}-${newMonth}`); }; const getDaysInMonth = (year, month) => { const numDays = new Date(year, month, 0).getDate(); return Array.from({ length: numDays }, (_, i) => i + 1); }; 
   
   const handleSaveSchedule = () => { 
       if (selectedProject) {
@@ -8397,18 +8397,21 @@ export default function App() {
                                         <th className={`border-r border-gray-300 text-left ${isExporting ? 'p-0.5 px-1 w-[12%]' : 'px-1.5 p-1 w-[12%]'} truncate`} rowSpan="2">{t('col_name')}</th>
                                         <th className={`border-r border-gray-300 text-left ${isExporting ? 'p-0.5 px-1 w-[8%]' : 'px-1.5 p-1 w-[8%]'} truncate`} rowSpan="2">{t('col_role')}</th>
                                         <th className={`border-r border-gray-300 text-center ${isExporting ? 'p-0.5 w-[3%] text-[7px]' : 'p-1 w-[3%] text-[8px]'}`} rowSpan="2">ประเภท</th>
-                                        {daysInMonth.map(date => (
-                                            <th key={date.getDate()} className={`border-r border-gray-300 text-center font-normal text-gray-600 ${isExporting ? 'p-0 text-[8px]' : 'p-0.5'}`}>
-                                                {date.getDate()}
+                                        {daysInMonth.map(d => (
+                                            <th key={d} className={`border-r border-gray-300 text-center font-normal text-gray-600 ${isExporting ? 'p-0 text-[8px]' : 'p-0.5'}`}>
+                                                {d}
                                             </th>
                                         ))}
                                     </tr>
                                     <tr className="bg-gray-50 border-b border-gray-300">
-                                        {daysInMonth.map(date => (
-                                            <th key={date.getDate()} className={`border-r border-gray-300 text-center font-bold p-0 ${isExporting ? 'text-[7px] h-3' : 'text-[7px] md:text-[8px] xl:text-[9px]'} ${date.getDay() === 0 || date.getDay() === 6 ? 'text-red-500 bg-red-50' : 'text-gray-700'}`}>
-                                                {lang === 'th' ? dayNamesTh[date.getDay()] : dayNamesEn[date.getDay()]}
-                                            </th>
-                                        ))}
+                                        {daysInMonth.map(d => {
+                                            const dateObj = new Date(year, month - 1, d);
+                                            return (
+                                                <th key={d} className={`border-r border-gray-300 text-center font-bold p-0 ${isExporting ? 'text-[7px] h-3' : 'text-[7px] md:text-[8px] xl:text-[9px]'} ${dateObj.getDay() === 0 || dateObj.getDay() === 6 ? 'text-red-500 bg-red-50' : 'text-gray-700'}`}>
+                                                    {lang === 'th' ? dayNamesTh[dateObj.getDay()] : dayNamesEn[dateObj.getDay()]}
+                                                </th>
+                                            );
+                                        })}
                                     </tr>
                                 </thead>
                                 {sortedStaff.map((user, index) => (
@@ -8454,11 +8457,10 @@ export default function App() {
                                             <td className={`border-r border-gray-200 text-center font-bold bg-blue-50 text-blue-700 p-0 ${isExporting ? 'text-[6px]' : 'text-[9px]'}`}>
                                                 PLAN
                                             </td>
-                                            {daysInMonth.map(date => {
-                                                const yyyy = date.getFullYear();
-                                                const mm = String(date.getMonth() + 1).padStart(2, '0');
-                                                const dd = String(date.getDate()).padStart(2, '0');
-                                                const dateString = `${yyyy}-${mm}-${dd}`;
+                                            {daysInMonth.map(d => {
+                                                const mm = String(month).padStart(2, '0');
+                                                const dd = String(d).padStart(2, '0');
+                                                const dateString = `${year}-${mm}-${dd}`;
                                                 
                                                 const key = `${user.id}_${dateString}`;
                                                 const val = schedules[key] || '';
@@ -8510,11 +8512,10 @@ export default function App() {
                                             <td className={`border-r border-gray-200 text-center font-bold bg-green-50 text-green-700 p-0 ${isExporting ? 'text-[6px]' : 'text-[9px]'}`}>
                                                 ACT
                                             </td>
-                                            {daysInMonth.map(date => {
-                                                const yyyy = date.getFullYear();
-                                                const mm = String(date.getMonth() + 1).padStart(2, '0');
-                                                const dd = String(date.getDate()).padStart(2, '0');
-                                                const dateString = `${yyyy}-${mm}-${dd}`;
+                                            {daysInMonth.map(d => {
+                                                const mm = String(month).padStart(2, '0');
+                                                const dd = String(d).padStart(2, '0');
+                                                const dateString = `${year}-${mm}-${dd}`;
                                                 
                                                 const planKey = `${user.id}_${dateString}`;
                                                 const actKey = `${user.id}_${dateString}_act`;
