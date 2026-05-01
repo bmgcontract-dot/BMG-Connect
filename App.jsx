@@ -4595,14 +4595,18 @@ export default function App() {
   const handleSaveOther = (e) => {
       e.preventDefault();
       let nextList;
+      
       if (newOther.id) {
           nextList = othersData.map(o => o.id === newOther.id ? { ...newOther } : o);
       } else {
           const id = generateId();
-          nextList = [...othersData, { ...newOther, id, projectId: selectedProject.id }];
+          // ดันข้อมูลที่เพิ่งเพิ่มใหม่ ให้ไปอยู่ด้านบนสุดของตาราง
+          nextList = [{ ...newOther, id, projectId: selectedProject.id }, ...othersData];
       }
+      
       setOthersData(nextList);
-      triggerAutoSync('OthersData_อื่นๆ', nextList, []);
+      triggerAutoSync('OthersData_ข้อมูลอื่นๆ', nextList, []); // เพิ่มการส่งข้อมูลซิงค์ไป Google Sheets
+      
       setShowAddOtherModal(false);
       setNewOther({ id: null, title: '', details: '', link: '' });
       alert(t('saveSuccess'));
