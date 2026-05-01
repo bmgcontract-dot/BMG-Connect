@@ -4594,22 +4594,38 @@ export default function App() {
   // Others Handlers
   const handleSaveOther = (e) => {
       e.preventDefault();
-      let nextList;
       
-      if (newOther.id) {
-          nextList = othersData.map(o => o.id === newOther.id ? { ...newOther } : o);
-      } else {
-          const id = generateId();
-          // ดันข้อมูลที่เพิ่งเพิ่มใหม่ ให้ไปอยู่ด้านบนสุดของตาราง
-          nextList = [{ ...newOther, id, projectId: selectedProject.id }, ...othersData];
-      }
-      
-      setOthersData(nextList);
-      triggerAutoSync('OthersData_ข้อมูลอื่นๆ', nextList, []); // เพิ่มการส่งข้อมูลซิงค์ไป Google Sheets
+      setOthersData(prev => {
+          const currentList = Array.isArray(prev) ? prev : [];
+          let nextList;
+          
+          // ทำความสะอาดข้อมูล ป้องกันค่า undefined
+          const cleanData = {
+              ...newOther,
+              title: newOther.title || '',
+              details: newOther.details || '',
+              link: newOther.link || ''
+          };
+          
+          if (cleanData.id) {
+              nextList = currentList.map(o => o.id === cleanData.id ? cleanData : o);
+          } else {
+              const id = generateId();
+              // ดันข้อมูลที่เพิ่งเพิ่มใหม่ ให้ไปอยู่ด้านบนสุดของตาราง
+              nextList = [{ ...cleanData, id, projectId: selectedProject.id }, ...currentList];
+          }
+          
+          // โยนการซิงค์ไว้ใน Event Loop ถัดไป เพื่อไม่ให้บล็อคการ Render หน้าจอ
+          setTimeout(() => triggerAutoSync('OthersData_ข้อมูลอื่นๆ', nextList, []), 100);
+          
+          return nextList;
+      });
       
       setShowAddOtherModal(false);
       setNewOther({ id: null, title: '', details: '', link: '' });
-      alert(t('saveSuccess'));
+      
+      // แจ้งเตือนแบบ Custom UI ป้องกันปัญหา Thread Blocking จาก alert() ปกติ
+      showAlert('บันทึกสำเร็จ', 'บันทึกข้อมูลเข้าสู่ระบบเรียบร้อยแล้ว');
   };
 
   // Meetings Handlers
