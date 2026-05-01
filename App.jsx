@@ -4592,40 +4592,40 @@ export default function App() {
   };
   
   // Others Handlers
-  const handleSaveOther = (e) => {
+  const handleSaveOther = async (e) => {
       e.preventDefault();
       
-      setOthersData(prev => {
-          const currentList = Array.isArray(prev) ? prev : [];
+      try {
           let nextList;
-          
-          // ทำความสะอาดข้อมูล ป้องกันค่า undefined
-          const cleanData = {
-              ...newOther,
-              title: newOther.title || '',
-              details: newOther.details || '',
-              link: newOther.link || ''
-          };
-          
-          if (cleanData.id) {
-              nextList = currentList.map(o => o.id === cleanData.id ? cleanData : o);
+          let savedOther = { ...newOther };
+
+          if (!savedOther.id) {
+              savedOther.id = generateId();
+              savedOther.projectId = selectedProject.id;
+              // ดันข้อมูลใหม่ไว้บนสุดของตาราง
+              nextList = [savedOther, ...othersData];
           } else {
-              const id = generateId();
-              // ดันข้อมูลที่เพิ่งเพิ่มใหม่ ให้ไปอยู่ด้านบนสุดของตาราง
-              nextList = [{ ...cleanData, id, projectId: selectedProject.id }, ...currentList];
+              // กรณีโหมดแก้ไข
+              nextList = othersData.map(o => o.id === savedOther.id ? savedOther : o);
           }
           
-          // โยนการซิงค์ไว้ใน Event Loop ถัดไป เพื่อไม่ให้บล็อคการ Render หน้าจอ
-          setTimeout(() => triggerAutoSync('OthersData_ข้อมูลอื่นๆ', nextList, []), 100);
+          // 1. อัปเดต State ทันทีเพื่อให้ตารางวาดใหม่ (Re-render) เดี๋ยวนั้น
+          setOthersData(nextList);
           
-          return nextList;
-      });
-      
-      setShowAddOtherModal(false);
-      setNewOther({ id: null, title: '', details: '', link: '' });
-      
-      // แจ้งเตือนแบบ Custom UI ป้องกันปัญหา Thread Blocking จาก alert() ปกติ
-      showAlert('บันทึกสำเร็จ', 'บันทึกข้อมูลเข้าสู่ระบบเรียบร้อยแล้ว');
+          // 2. ปิดหน้าต่าง Modal และล้างค่าฟอร์ม
+          setShowAddOtherModal(false);
+          setNewOther({ id: null, title: '', details: '', link: '' });
+          
+          // 3. ยิงข้อมูล Sync ขึ้น Google Sheets แบบเบื้องหลัง
+          triggerAutoSync('OthersData_ข้อมูลอื่นๆ', nextList, []);
+          
+          // 4. แจ้งเตือนแบบ Custom UI ไม่บล็อกการแสดงผลของหน้าจอ
+          showAlert('บันทึกสำเร็จ', 'บันทึกข้อมูลเข้าสู่ระบบและแสดงผลเรียบร้อยแล้ว');
+          
+      } catch (error) {
+          console.error("Error saving other data:", error);
+          showAlert('เกิดข้อผิดพลาด', 'ไม่สามารถบันทึกข้อมูลได้ กรุณาลองใหม่อีกครั้ง');
+      }
   };
 
   // Meetings Handlers
