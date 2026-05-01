@@ -12308,7 +12308,7 @@ export default function App() {
                                       <th className="p-4 text-center w-16">ลำดับ</th>
                                       <th className="p-4 w-1/4">หัวข้อ</th>
                                       <th className="p-4 w-1/3">รายละเอียด</th>
-                                      <th className="p-4 w-1/4">แนบ LINK</th>
+                                      <th className="p-4 w-1/4">แนบ Link</th>
                                       <th className={`p-4 text-center w-24 ${isExporting ? 'hidden' : ''}`}>จัดการ</th>
                                   </tr>
                               </thead>
@@ -12321,8 +12321,8 @@ export default function App() {
                                               <td className="p-4 text-gray-600 whitespace-pre-wrap">{item.details || '-'}</td>
                                               <td className="p-4">
                                                   {item.link ? (
-                                                      <a href={item.link.startsWith('http') ? item.link : `https://${item.link}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1 text-xs font-medium bg-blue-50 px-2 py-1 rounded-md w-fit max-w-[200px]" title={item.link}>
-                                                          <LinkIcon size={14} className="shrink-0" /> <span className="truncate block">{item.link}</span>
+                                                      <a href={item.link.startsWith('http') ? item.link : `https://${item.link}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1 text-xs font-medium bg-blue-50 px-2 py-1 rounded-md w-fit truncate max-w-[200px]" title={item.link}>
+                                                          <LinkIcon size={14} className="shrink-0" /> <span className="truncate">{item.link}</span>
                                                       </a>
                                                   ) : (
                                                       <span className="text-gray-400">-</span>
@@ -12341,11 +12341,7 @@ export default function App() {
                                                       )}
                                                       {hasPerm('proj_others', 'delete') && (
                                                           <button 
-                                                              onClick={() => showConfirm('ยืนยันการลบ', `คุณต้องการลบข้อมูลหัวข้อ "${item.title}" ใช่หรือไม่?`, () => {
-                                                                  const nextList = othersData.filter(o => o.id !== item.id);
-                                                                  setOthersData(nextList);
-                                                                  triggerAutoSync('Others_ข้อมูลอื่นๆ', nextList, []);
-                                                              })}
+                                                              onClick={() => showConfirm('ยืนยันการลบ', `คุณต้องการลบข้อมูลหัวข้อ "${item.title}" ใช่หรือไม่?`, () => setOthersData(prev => prev.filter(o => o.id !== item.id)))}
                                                               className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
                                                               title="ลบข้อมูล"
                                                           >
