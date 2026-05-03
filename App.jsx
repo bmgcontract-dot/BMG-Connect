@@ -2352,6 +2352,7 @@ export default function App() {
   });
   const [activePopupAnnouncement, setActivePopupAnnouncement] = useState(null);
   const [selectedAnnouncementView, setSelectedAnnouncementView] = useState(null); // NEW: State สำหรับแสดงรายละเอียดประกาศเมื่อคลิก
+  const [expandedImage, setExpandedImage] = useState(null); // NEW: State สำหรับดูรูปภาพขนาดใหญ่
 
   // Effect to check and show popup announcements
   useEffect(() => {
@@ -17186,8 +17187,14 @@ export default function App() {
                   </button>
 
                   {selectedAnnouncementView.image && (
-                      <div className="w-full h-48 sm:h-72 bg-gray-100 relative overflow-hidden shrink-0 border-b border-gray-200">
+                      <div 
+                          className="w-full h-48 sm:h-72 bg-gray-100 relative overflow-hidden shrink-0 border-b border-gray-200 cursor-pointer group"
+                          onClick={() => setExpandedImage(selectedAnnouncementView.image)}
+                      >
                           <img src={selectedAnnouncementView.image} className="w-full h-full object-contain bg-gray-900" alt="Announcement" />
+                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-[1px]">
+                              <Search className="text-white" size={32} />
+                          </div>
                       </div>
                   )}
 
@@ -17231,9 +17238,16 @@ export default function App() {
                               </h3>
                               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                                   {selectedAnnouncementView.additionalImages.map((img, i) => (
-                                      <a key={i} href={img} target="_blank" rel="noopener noreferrer" className="aspect-square bg-gray-100 rounded-lg border border-gray-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+                                      <div 
+                                          key={i} 
+                                          onClick={() => setExpandedImage(img)} 
+                                          className="aspect-square bg-gray-100 rounded-lg border border-gray-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-pointer relative group"
+                                      >
                                           <img src={img} className="w-full h-full object-cover" alt="" />
-                                      </a>
+                                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-[1px]">
+                                              <Search className="text-white" size={24} />
+                                          </div>
+                                      </div>
                                   ))}
                               </div>
                           </div>
@@ -17342,8 +17356,14 @@ export default function App() {
                       </div>
 
                       {activePopupAnnouncement.image && (
-                          <div className="w-full h-48 sm:h-64 bg-gray-100 rounded-xl mb-6 overflow-hidden border border-gray-200">
+                          <div 
+                              className="w-full h-48 sm:h-64 bg-gray-100 rounded-xl mb-6 overflow-hidden border border-gray-200 cursor-pointer group relative"
+                              onClick={() => setExpandedImage(activePopupAnnouncement.image)}
+                          >
                               <img src={activePopupAnnouncement.image} className="w-full h-full object-contain bg-gray-900" alt="Announcement Cover" />
+                              <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-[1px]">
+                                  <Search className="text-white" size={32} />
+                              </div>
                           </div>
                       )}
 
@@ -17371,6 +17391,43 @@ export default function App() {
                       </span>
                       <Button onClick={handleDismissAnnouncement} variant="primary" className="bg-blue-600 hover:bg-blue-700">
                           รับทราบ (Acknowledge)
+                      </Button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* Expanded Image Lightbox Modal */}
+      {expandedImage && (
+          <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-[10000] p-4 animate-fade-in" onClick={() => setExpandedImage(null)}>
+              <div className="relative w-full max-w-5xl flex flex-col items-center justify-center" onClick={e => e.stopPropagation()}>
+                  <button 
+                      onClick={() => setExpandedImage(null)} 
+                      className="absolute -top-12 right-0 md:-right-12 text-white/70 hover:text-white bg-black/50 hover:bg-black/80 rounded-full p-2 transition-all"
+                      title="ปิด"
+                  >
+                      <X size={24} />
+                  </button>
+                  <img 
+                      src={expandedImage} 
+                      alt="Expanded Preview" 
+                      className="max-w-full max-h-[75vh] object-contain rounded-lg shadow-2xl border border-white/10" 
+                  />
+                  <div className="mt-6 flex gap-4">
+                      <Button 
+                          variant="primary" 
+                          icon={Download} 
+                          onClick={() => {
+                              const a = document.createElement('a');
+                              a.href = expandedImage;
+                              a.download = `Image_${Date.now()}.jpg`;
+                              document.body.appendChild(a);
+                              a.click();
+                              document.body.removeChild(a);
+                          }}
+                          className="bg-white/10 hover:bg-white/20 text-white border border-white/20 shadow-lg backdrop-blur-md"
+                      >
+                          ดาวน์โหลดรูปภาพ
                       </Button>
                   </div>
               </div>
