@@ -1428,16 +1428,25 @@ function usePersistentState(key, initialValue, fbUser) {
         try {
           if (data.totalChunks !== undefined) {
               let fullJson = '';
+              let hasChunkError = false;
               for (let i = 0; i < data.totalChunks; i++) {
                   const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
                   const chunkSnap = await getDoc(chunkRef);
                   if (chunkSnap.exists()) {
                       fullJson += chunkSnap.data().chunk;
+                  } else {
+                      hasChunkError = true;
                   }
               }
-              if (thisFetchId !== currentFetchId) return;
+              if (thisFetchId !== currentFetchId || hasChunkError) return;
               if (fullJson) {
                   const parsedData = JSON.parse(fullJson);
+                  // --- FIX: Data Loss Prevention ---
+                  if (parsedData && typeof parsedData === 'object' && Object.keys(parsedData).length === 0 && stateRef.current && Object.keys(stateRef.current).length > 0) {
+                      console.warn(`[BMG Sync] ป้องกันการทับข้อมูล ${key} ด้วยค่าว่าง`);
+                      return;
+                  }
+                  // ---------------------------------
                   if (JSON.stringify(stateRef.current) !== JSON.stringify(parsedData)) {
                       setState(parsedData);
                       stateRef.current = parsedData;
@@ -1447,6 +1456,12 @@ function usePersistentState(key, initialValue, fbUser) {
           } else if (data.value) {
               if (thisFetchId !== currentFetchId) return;
               const parsedData = JSON.parse(data.value);
+              // --- FIX: Data Loss Prevention ---
+              if (parsedData && typeof parsedData === 'object' && Object.keys(parsedData).length === 0 && stateRef.current && Object.keys(stateRef.current).length > 0) {
+                  console.warn(`[BMG Sync] ป้องกันการทับข้อมูล ${key} ด้วยค่าว่าง`);
+                  return;
+              }
+              // ---------------------------------
               if (JSON.stringify(stateRef.current) !== JSON.stringify(parsedData)) {
                   setState(parsedData);
                   stateRef.current = parsedData;
@@ -1582,6 +1597,25 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
       snapshot.forEach(doc => {
           items.push({ ...doc.data(), id: doc.id });
       });
+
+      // --- FIX: ระบบป้องกันข้อมูลสูญหาย (Data Loss Prevention) ---
+      // ตรวจสอบกรณี Firebase โหลดไม่ทันแล้วส่งค่าว่าง [] กลับมาทับ Local Storage
+      if (items.length === 0 && Array.isArray(stateRef.current) && stateRef.current.length > 0) {
+          // หากใน snapshot ไม่มี docChanges (ไม่ได้เกิดจากการกดลบจริงๆ) ให้ตีความว่าเกิดข้อผิดพลาดในการโหลด
+          if (snapshot.docChanges().length === 0) {
+              console.warn(`[BMG Sync] ป้องกันข้อมูลหายใน ${collectionName} - ดึงข้อมูลจาก Cache กลับไปที่ Server`);
+              stateRef.current.forEach(item => {
+                  if (item && item.id) {
+                      const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, String(item.id));
+                      setDoc(docRef, item).catch(console.error);
+                  }
+              });
+              isLoadedRef.current = true;
+              setIsLoaded(true);
+              return; // ข้ามการเขียนทับ State ไปเลยเพื่อรักษาสถานะเดิม
+          }
+      }
+      // -------------------------------------------------------
 
       if (items.length === 0 && Array.isArray(initialValue) && initialValue.length > 0) {
           setState(initialValue);
