@@ -7261,8 +7261,8 @@ export default function App() {
                                               <td className="p-4 font-medium text-gray-800 break-words whitespace-normal">{project ? project.name : 'Unknown Project'}</td>
                                               <td className="p-4 text-gray-600 break-words whitespace-normal">{audit.category}</td>
                                               <td className="p-4 text-center">
-                                                  <span className={`font-bold px-2 py-1 rounded text-xs ${audit.score >= 90 ? 'bg-green-100 text-green-700' : audit.score >= 70 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
-                                                      {audit.rawScore ? `${audit.rawScore}/${max}` : `${audit.score}%`}
+                                                  <span className={`font-bold px-2 py-1 rounded text-xs whitespace-nowrap ${audit.score >= 90 ? 'bg-green-100 text-green-700' : audit.score >= 70 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                                                      {audit.rawScore ? `${audit.rawScore}/${max} (${audit.score}%)` : `${audit.score}%`}
                                                   </span>
                                               </td>
                                               <td className="p-4 text-gray-700 break-words whitespace-normal">{audit.inspector}</td>
@@ -11357,8 +11357,8 @@ export default function App() {
                                           </td>
                                           <td className="p-3 text-gray-600 break-words whitespace-normal">{audit.category}</td>
                                           <td className="p-3 text-center">
-                                              <span className={`font-bold px-2 py-1 rounded-md text-xs ${audit.score >= 90 ? 'bg-green-50 text-green-700 border border-green-200' : audit.score >= 70 ? 'bg-yellow-50 text-yellow-700 border border-yellow-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-                                                  {audit.rawScore ? `${audit.rawScore}/${max}` : `${audit.score}%`}
+                                              <span className={`font-bold px-2 py-1 rounded-md text-xs whitespace-nowrap ${audit.score >= 90 ? 'bg-green-50 text-green-700 border border-green-200' : audit.score >= 70 ? 'bg-yellow-50 text-yellow-700 border border-yellow-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                                                  {audit.rawScore ? `${audit.rawScore}/${max} (${audit.score}%)` : `${audit.score}%`}
                                               </span>
                                           </td>
                                           <td className="p-3 text-gray-700 flex items-center gap-1 mt-1 break-words whitespace-normal"><User size={14} className={`text-gray-400 shrink-0 ${isExporting ? 'hidden' : ''}`}/> {audit.inspector}</td>
@@ -16298,8 +16298,8 @@ export default function App() {
                     <div><span className="font-bold">ผู้ตรวจประเมิน (Inspector):</span> {selectedAuditReport.inspector}</div>
                     <div className="text-right">
                         <span className="font-bold">ผลการประเมินรวม:</span> 
-                        <span className={`ml-2 px-3 py-1 rounded-full font-bold ${selectedAuditReport.score >= 90 ? 'bg-green-100 text-green-800' : selectedAuditReport.score >= 70 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
-                            {selectedAuditReport.rawScore ? `${selectedAuditReport.rawScore}/${selectedAuditReport.maxScore || 235}` : `${selectedAuditReport.score}%`}
+                        <span className={`ml-2 px-3 py-1 rounded-full font-bold whitespace-nowrap ${selectedAuditReport.score >= 90 ? 'bg-green-100 text-green-800' : selectedAuditReport.score >= 70 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
+                            {selectedAuditReport.rawScore ? `${selectedAuditReport.rawScore}/${selectedAuditReport.maxScore || 235} (${selectedAuditReport.score}%)` : `${selectedAuditReport.score}%`}
                         </span>
                     </div>
                 </div>
