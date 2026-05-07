@@ -1406,10 +1406,10 @@ function usePersistentState(key, initialValue, fbUser) {
         return; 
     }
     
-    // OPTIMIZE: ลดเวลาบังคับข้าม (Timeout) หากเน็ตช้าลงจาก 3 วิ เหลือ 1.5 วิ
+    // OPTIMIZE: ขยายเวลาบังคับข้าม (Timeout) เป็น 4 วินาที เพื่อรองรับอินเทอร์เน็ตมือถือ
     const fallbackTimer = setTimeout(() => {
         setIsLoaded(true);
-    }, 1500);
+    }, 4000);
 
     if (!fbUser || !appId) {
         return () => clearTimeout(fallbackTimer);
@@ -1578,14 +1578,14 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
         return;
     }
 
-    // OPTIMIZE: ลดเวลาบังคับข้าม (Timeout) ลงเหลือ 1.5 วินาที เพื่อให้หน้า Login เด้งขึ้นมาไวที่สุด
+    // OPTIMIZE: ขยายเวลาบังคับข้าม (Timeout) เป็น 5 วินาที เพื่อให้ชัวร์ว่าโหลดข้อมูลพนักงานเสร็จก่อนแสดงหน้า Login
     const fallbackTimer = setTimeout(() => {
         if (!isLoadedRef.current) {
             console.warn("Firebase sync timeout for collection:", collectionName);
             setIsLoaded(true);
             isLoadedRef.current = true;
         }
-    }, 1500);
+    }, 5000);
 
     if (!fbUser || !appId) {
         return () => clearTimeout(fallbackTimer);
@@ -1787,10 +1787,10 @@ function useUserPersistentState(key, initialValue, fbUser) {
         return;
     }
 
-    // OPTIMIZE: ลด Timeout ลงเหลือ 1.5 วิ
+    // OPTIMIZE: ขยายเวลาบังคับข้าม (Timeout) เป็น 4 วินาที
     const fallbackTimer = setTimeout(() => {
         setIsLoaded(true);
-    }, 1500);
+    }, 4000);
 
     if (!fbUser || !appId) {
         return () => clearTimeout(fallbackTimer);
@@ -1873,11 +1873,15 @@ export default function App() {
           await signInAnonymously(auth);
         }
       } catch (e) {
-        console.error("Auth error", e);
+        console.error("Auth error, falling back to local storage", e);
+        db = null; // Disable Firestore on auth failure to avoid network/permission loops
+        setFbUser({ uid: 'local-fallback-user' });
       }
     };
     initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setFbUser);
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+        if (user) setFbUser(user);
+    });
     return () => unsubscribe();
   }, []);
 
@@ -3346,7 +3350,12 @@ export default function App() {
               setActiveMenu('dashboard');
           }
       } else { 
-          setLoginError('ชื่อผู้ใช้งาน หรือ รหัสผ่านไม่ถูกต้อง (หากคุณลืมรหัสผ่าน กรุณาติดต่อผู้ดูแลระบบ)'); 
+          // เพิ่มการตรวจสอบ: ถ้ารายชื่อพนักงานในเครื่องยังมีแค่แอดมินคนเดียว แสดงว่าเน็ตอาจจะช้าและโหลดข้อมูลยังไม่เสร็จ
+          if (userList.length <= 1) {
+              setLoginError('ระบบกำลังดึงข้อมูลจากคลาวด์ กรุณารอสักครู่ (ประมาณ 3 วินาที) แล้วกดเข้าสู่ระบบอีกครั้ง');
+          } else {
+              setLoginError('ชื่อผู้ใช้งาน หรือ รหัสผ่านไม่ถูกต้อง (หากคุณลืมรหัสผ่าน กรุณาติดต่อผู้ดูแลระบบ)'); 
+          }
       } 
   };
   
@@ -5695,8 +5704,10 @@ export default function App() {
         {!isUsersLoaded ? (
             <div className="flex flex-col items-center justify-center py-8 space-y-4">
                 <Loader2 size={40} className="text-orange-500 animate-spin" />
-                <div className="text-orange-400 font-bold text-lg animate-pulse">กำลังเชื่อมต่อฐานข้อมูล...</div>
-                <div className="text-gray-500 text-sm">กรุณารอสักครู่ (Please wait)</div>
+                <div className="text-orange-400 font-bold text-lg animate-pulse">กำลังเตรียมความพร้อมระบบ...</div>
+                <div className="text-gray-500 text-sm text-center">
+                    กำลังดึงข้อมูลพนักงานจากฐานข้อมูล<br/>อาจใช้เวลา 2-5 วินาที ขึ้นอยู่กับอินเทอร์เน็ต
+                </div>
             </div>
         ) : (
             <form onSubmit={handleLogin} className="space-y-5">
@@ -10271,9 +10282,9 @@ export default function App() {
                                                                           return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
                                                                       })()}
                                                                   </td>
-                                                                  <td className="p-3 text-right text-gray-500">{r.prevValue.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                                                                  <td className="p-3 text-right font-bold text-gray-800">{r.value.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                                                                  <td className="p-3 text-right font-bold text-red-600">+{r.usage.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                                                                  <td className="p-3 text-right text-gray-500">{Number(r.prevValue || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                                                                  <td className="p-3 text-right font-bold text-gray-800">{Number(r.value || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                                                                  <td className="p-3 text-right font-bold text-red-600">+{Number(r.usage || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
                                                                   <td className="p-3 text-center text-gray-500 text-xs">
                                                                       <span className="bg-gray-100 px-2 py-1 rounded border border-gray-200">{r.recorder}</span>
                                                                   </td>
@@ -10362,7 +10373,7 @@ export default function App() {
                                                       </td>
                                                       <td className="p-3 text-right">
                                                           <div className="font-bold text-gray-800 text-base">
-                                                              {m.lastReading.toLocaleString(undefined, {minimumFractionDigits: 2})}
+                                                              {Number(m.lastReading || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
                                                           </div>
                                                           {m.lastDate && (
                                                               <div className="text-xs text-gray-500 mt-0.5 flex items-center justify-end gap-1">
@@ -14704,7 +14715,7 @@ export default function App() {
                                                  {meter?.type === 'Water' ? <Droplet size={14} className="text-blue-500 shrink-0"/> : <Zap size={14} className="text-orange-500 shrink-0"/>}
                                                  <span className="font-medium text-gray-700 truncate" title={meter?.name}>{meter?.name} <span className="text-gray-400 font-normal">({meter?.code})</span></span>
                                              </div>
-                                             <span className="font-bold text-red-600 shrink-0">+{r.usage.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                                             <span className="font-bold text-red-600 shrink-0">+{Number(r.usage || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
                                          </div>
                                      )
                                  })}
