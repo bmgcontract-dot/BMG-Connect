@@ -9,7 +9,7 @@ import {
   XCircle, Image as ImageIcon, File, Hourglass, Phone, Mail, LayoutGrid, List, ChevronDown, Save,
   ChevronLeft, ChevronRight, MousePointer2, FileCheck, DollarSign, Camera,
   MapPin, Box, PenTool, Printer as PrinterIcon, History, Folder, Lock,
-  Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2, Bell, Megaphone, Radio, Medal
+  Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2, Bell, Megaphone, Radio, Medal, Landmark
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
@@ -1000,6 +1000,11 @@ const INITIAL_REPAIRS = [];
 const INITIAL_OTHERS = [];
 const INITIAL_MEETINGS = [];
 const INITIAL_ANNOUNCEMENTS = [];
+const INITIAL_DEPOSITS = [];
+
+// NEW: Deposit Constants
+const DEPOSIT_TYPES = ['ฝากประจำ', 'สลากออมสิน', 'สลาก ธ.ก.ส.', 'อื่นๆ (ให้ระบุ)'];
+const DEPOSIT_DURATIONS = ['1 เดือน', '2 เดือน', '3 เดือน', '4 เดือน', '5 เดือน', '6 เดือน', '7 เดือน', '8 เดือน', '9 เดือน', '10 เดือน', '11 เดือน', '12 เดือน', '2 ปี', '3 ปี', '4 ปี'];
 
 // NEW: Custom 3D Bar Shapes
 const ThreeDBar = (props) => {
@@ -2156,6 +2161,13 @@ export default function App() {
       minutesFile: null
   });
 
+  // --- NEW: Deposits State ---
+  const [showAddDepositModal, setShowAddDepositModal] = useState(false);
+  const [isEditingDeposit, setIsEditingDeposit] = useState(false);
+  const [newDeposit, setNewDeposit] = useState({
+      id: null, type: 'ฝากประจำ', customType: '', amount: '', duration: '12 เดือน', startDate: '', endDate: ''
+  });
+
   // --- NEW: Meeting Gantt Plans State ---
   const INITIAL_GANTT_PLANS = [];
   const [meetingGanttPlans, setMeetingGanttPlans] = usePersistentCollection('bmg_meeting_gantt_plans', INITIAL_GANTT_PLANS, fbUser);
@@ -2235,6 +2247,7 @@ export default function App() {
   const [formsList, setFormsList] = usePersistentCollection('bmg_forms_list', STANDARD_FORMS, fbUser);
   const [meetingsList, setMeetingsList] = usePersistentCollection('bmg_meetings', INITIAL_MEETINGS, fbUser);
   const [announcements, setAnnouncements] = usePersistentCollection('bmg_announcements', INITIAL_ANNOUNCEMENTS, fbUser);
+  const [deposits, setDeposits] = usePersistentCollection('bmg_deposits', INITIAL_DEPOSITS, fbUser);
 
   // --- NEW: Meeting Invitations State ---
   const [meetingInvitations, setMeetingInvitations] = usePersistentCollection('bmg_meeting_invitations', [], fbUser);
@@ -4581,6 +4594,38 @@ export default function App() {
       setShowAddActionPlanModal(false);
       setNewActionPlan({ id: null, issue: '', details: '', responsible: '', otherResponsible: '', startDate: new Date().toISOString().split('T')[0], deadline: '', status: 'Pending' });
       alert(t('saveSuccess'));
+  };
+
+  // --- NEW: Deposit Handlers ---
+  const handleSaveDeposit = (e) => {
+      e.preventDefault();
+      let nextList;
+      const finalType = newDeposit.type === 'อื่นๆ (ให้ระบุ)' ? newDeposit.customType : newDeposit.type;
+      const dataToSave = { ...newDeposit, type: finalType };
+
+      if (isEditingDeposit) {
+          nextList = deposits.map(d => d.id === newDeposit.id ? dataToSave : d);
+      } else {
+          dataToSave.id = generateId();
+          dataToSave.projectId = selectedProject.id;
+          nextList = [...deposits, dataToSave];
+      }
+      setDeposits(nextList);
+      triggerAutoSync('Deposits_เงินฝาก', nextList, []);
+      setShowAddDepositModal(false);
+      alert('บันทึกข้อมูลเงินฝากสำเร็จ');
+  };
+
+  const handleEditDeposit = (dep) => {
+      let t = dep.type;
+      let ct = '';
+      if (!DEPOSIT_TYPES.includes(t)) {
+          ct = t;
+          t = 'อื่นๆ (ให้ระบุ)';
+      }
+      setNewDeposit({ ...dep, type: t, customType: ct });
+      setIsEditingDeposit(true);
+      setShowAddDepositModal(true);
   };
 
   const handleSaveCompanyInfo = (e) => {
@@ -7637,6 +7682,13 @@ export default function App() {
                           calculateDaysRemaining(c.endDate) <= 45
                       ).sort((a,b) => calculateDaysRemaining(a.endDate) - calculateDaysRemaining(b.endDate));
 
+                      // --- 1.1 Deposits expiring <= 30 days ---
+                      const expiringDeposits = deposits.filter(d => 
+                          d.projectId === selectedProject.id && 
+                          calculateDaysRemaining(d.endDate) >= 0 && 
+                          calculateDaysRemaining(d.endDate) <= 30
+                      ).sort((a,b) => calculateDaysRemaining(a.endDate) - calculateDaysRemaining(b.endDate));
+
                       // --- 2. Leave Usage (H, V, BL, S) for current month ---
                       const projectStaffIds = users.filter(u => u.department === selectedProject.name).map(u => u.id);
                       const leaveCounts = { H: 0, V: 0, BL: 0, S: 0 };
@@ -7726,24 +7778,46 @@ export default function App() {
                       return (
                           <>
                               {/* Row 1: High Priority Alerts */}
-                              {expiringContracts.length > 0 && (
-                                  <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg flex items-start gap-3 shadow-sm mb-6">
+                              {(expiringContracts.length > 0 || expiringDeposits.length > 0) && (
+                                  <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg flex items-start gap-3 shadow-sm mb-6 flex-col md:flex-row">
                                       <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={20} />
-                                      <div className="flex-1">
-                                          <h4 
-                                            className="text-red-800 font-bold mb-1 cursor-pointer hover:underline flex items-center gap-1"
-                                            onClick={() => setProjectTab('contracts')}
-                                          >
-                                            การแจ้งเตือน: สัญญาใกล้หมดอายุ (น้อยกว่า 45 วัน) <ArrowRight size={14} />
-                                          </h4>
-                                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
-                                              {expiringContracts.map(c => (
-                                                  <div key={c.id} className="bg-white px-3 py-2 rounded border border-red-100 flex justify-between items-center text-sm">
-                                                      <span className="font-medium text-gray-700 truncate pr-2" title={c.vendorName}>{c.vendorName}</span>
-                                                      <span className="text-red-600 font-bold whitespace-nowrap bg-red-50 px-2 py-0.5 rounded">เหลือ {calculateDaysRemaining(c.endDate)} วัน</span>
+                                      <div className="flex-1 w-full">
+                                          {expiringContracts.length > 0 && (
+                                              <div className="mb-4 last:mb-0">
+                                                  <h4 
+                                                    className="text-red-800 font-bold mb-2 cursor-pointer hover:underline flex items-center gap-1"
+                                                    onClick={() => setProjectTab('contracts')}
+                                                  >
+                                                    <Briefcase size={14}/> การแจ้งเตือน: สัญญาใกล้หมดอายุ (น้อยกว่า 45 วัน) <ArrowRight size={14} />
+                                                  </h4>
+                                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+                                                      {expiringContracts.map(c => (
+                                                          <div key={c.id} className="bg-white px-3 py-2 rounded border border-red-100 flex justify-between items-center text-sm">
+                                                              <span className="font-medium text-gray-700 truncate pr-2" title={c.vendorName}>{c.vendorName}</span>
+                                                              <span className="text-red-600 font-bold whitespace-nowrap bg-red-50 px-2 py-0.5 rounded">เหลือ {calculateDaysRemaining(c.endDate)} วัน</span>
+                                                          </div>
+                                                      ))}
                                                   </div>
-                                              ))}
-                                          </div>
+                                              </div>
+                                          )}
+                                          
+                                          {expiringDeposits.length > 0 && (
+                                              <div className="mb-2 last:mb-0">
+                                                  <h4 
+                                                    className="text-orange-800 font-bold mb-2 cursor-pointer hover:underline flex items-center gap-1"
+                                                  >
+                                                    <Landmark size={14}/> การแจ้งเตือน: เงินฝาก / สลากออมทรัพย์ ใกล้ครบกำหนด (ภายใน 30 วัน)
+                                                  </h4>
+                                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+                                                      {expiringDeposits.map(d => (
+                                                          <div key={d.id} className="bg-white px-3 py-2 rounded border border-orange-200 flex justify-between items-center text-sm shadow-sm">
+                                                              <span className="font-medium text-gray-700 truncate pr-2" title={d.type}>{d.type} - {Number(d.amount).toLocaleString()} บาท</span>
+                                                              <span className="text-orange-600 font-bold whitespace-nowrap bg-orange-50 px-2 py-0.5 rounded">เหลือ {calculateDaysRemaining(d.endDate)} วัน</span>
+                                                          </div>
+                                                      ))}
+                                                  </div>
+                                              </div>
+                                          )}
                                       </div>
                                   </div>
                               )}
@@ -8033,7 +8107,85 @@ export default function App() {
                                   </Card>
                               </div>
 
-                              {/* Row 4: Project Documents */}
+                              {/* Row 4: Deposits & Savings */}
+                              <Card className="p-6 hover:shadow-sm transition-all mt-6 border-t-4 border-emerald-500">
+                                  <div className="flex justify-between items-center mb-4">
+                                      <h3 className="font-bold flex items-center gap-2 text-gray-800">
+                                          <Landmark className="text-emerald-500" size={20}/> 
+                                          ข้อมูลเงินฝาก และ สลากออมทรัพย์
+                                      </h3>
+                                      {hasPerm('projects', 'edit') && (
+                                          <Button size="sm" icon={Plus} className="bg-emerald-600 hover:bg-emerald-700" onClick={() => {
+                                              setNewDeposit({ id: null, type: 'ฝากประจำ', customType: '', amount: '', duration: '12 เดือน', startDate: '', endDate: '' });
+                                              setIsEditingDeposit(false);
+                                              setShowAddDepositModal(true);
+                                          }}>เพิ่มรายการ</Button>
+                                      )}
+                                  </div>
+                                  
+                                  <div className="overflow-x-auto">
+                                      <table className="w-full text-sm text-left">
+                                          <thead className="bg-gray-50 text-gray-600 uppercase">
+                                              <tr>
+                                                  <th className="p-3 border-b text-center w-12">ลำดับ</th>
+                                                  <th className="p-3 border-b w-48">ประเภทเงินฝาก</th>
+                                                  <th className="p-3 border-b text-center">ระยะเวลา</th>
+                                                  <th className="p-3 border-b text-right">มูลค่า (บาท)</th>
+                                                  <th className="p-3 border-b text-center">เริ่ม - ครบกำหนด</th>
+                                                  <th className="p-3 border-b text-center w-32">สถานะ</th>
+                                                  {hasPerm('projects', 'edit') && <th className="p-3 border-b text-center w-20">จัดการ</th>}
+                                              </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-gray-100 bg-white">
+                                              {deposits.filter(d => d.projectId === selectedProject.id).length > 0 ? (
+                                                  deposits.filter(d => d.projectId === selectedProject.id).sort((a,b) => calculateDaysRemaining(a.endDate) - calculateDaysRemaining(b.endDate)).map((dep, idx) => {
+                                                      const remDays = calculateDaysRemaining(dep.endDate);
+                                                      const isExpiring = remDays >= 0 && remDays <= 30;
+                                                      const isExpired = remDays < 0;
+                                                      
+                                                      return (
+                                                          <tr key={dep.id} className="hover:bg-gray-50 transition-colors">
+                                                              <td className="p-3 text-center text-gray-500">{idx + 1}</td>
+                                                              <td className="p-3 font-bold text-gray-800">{dep.type}</td>
+                                                              <td className="p-3 text-center text-gray-600">{dep.duration}</td>
+                                                              <td className="p-3 text-right font-medium text-emerald-700">{Number(dep.amount).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                                              <td className="p-3 text-center text-gray-600 text-xs">
+                                                                  <div className="flex items-center justify-center gap-1"><Calendar size={12} className="text-gray-400"/> {new Date(dep.startDate).toLocaleDateString('th-TH', { month: 'short', year: '2-digit', day: 'numeric'})}</div>
+                                                                  <div className="mt-1 flex items-center justify-center gap-1"><Hourglass size={12} className="text-gray-400"/> {new Date(dep.endDate).toLocaleDateString('th-TH', { month: 'short', year: '2-digit', day: 'numeric'})}</div>
+                                                              </td>
+                                                              <td className="p-3 text-center">
+                                                                  <span className={`px-2 py-1 rounded-md text-xs font-bold border inline-block w-full text-center ${
+                                                                      isExpired ? 'bg-red-50 border-red-200 text-red-700' :
+                                                                      isExpiring ? 'bg-orange-50 border-orange-200 text-orange-700' :
+                                                                      'bg-green-50 border-green-200 text-green-700'
+                                                                  }`}>
+                                                                      {isExpired ? 'ครบกำหนดแล้ว' : `เหลือ ${remDays} วัน`}
+                                                                  </span>
+                                                              </td>
+                                                              {hasPerm('projects', 'edit') && (
+                                                                  <td className="p-3 text-center">
+                                                                      <div className="flex items-center justify-center gap-1">
+                                                                          <button onClick={() => handleEditDeposit(dep)} className="text-gray-400 hover:text-blue-600 p-1 rounded hover:bg-blue-50 transition-colors" title="แก้ไข">
+                                                                              <Edit size={16} />
+                                                                          </button>
+                                                                          <button onClick={() => showConfirm('ยืนยันการลบ', `คุณต้องการลบข้อมูลเงินฝาก ${dep.type} ใช่หรือไม่?`, () => setDeposits(prev => prev.filter(d => d.id !== dep.id)))} className="text-gray-400 hover:text-red-600 p-1 rounded hover:bg-red-50 transition-colors" title="ลบ">
+                                                                              <Trash2 size={16} />
+                                                                          </button>
+                                                                      </div>
+                                                                  </td>
+                                                              )}
+                                                          </tr>
+                                                      )
+                                                  })
+                                              ) : (
+                                                  <tr><td colSpan={hasPerm('projects', 'edit') ? "7" : "6"} className="p-8 text-center text-gray-400 bg-gray-50 border-b border-dashed">ไม่มีข้อมูลเงินฝากหรือสลากออมทรัพย์</td></tr>
+                                              )}
+                                          </tbody>
+                                      </table>
+                                  </div>
+                              </Card>
+
+                              {/* Row 5: Project Documents */}
                               <Card className="p-6 hover:shadow-sm transition-all mt-6 border-t-4 border-blue-500">
                                   <h3 className="font-bold mb-4 flex items-center gap-2 text-gray-800">
                                       <FileText className="text-blue-500" size={20}/> 
@@ -13644,6 +13796,112 @@ export default function App() {
                       {isSavingProject ? <><Loader2 size={16} className="animate-spin" /> กำลังบันทึก...</> : t('save')}
                   </Button>
               </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Deposit Modal */}
+      {showAddDepositModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 m-4 relative animate-fade-in">
+            <div className="flex justify-between items-center mb-6 border-b pb-4">
+              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <Landmark className="text-emerald-500" />
+                {isEditingDeposit ? 'แก้ไขข้อมูลเงินฝาก' : 'เพิ่มรายการเงินฝาก / สลากออมทรัพย์'}
+              </h2>
+              <button onClick={() => setShowAddDepositModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
+            </div>
+            
+            <form onSubmit={handleSaveDeposit} className="space-y-4">
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">ประเภทเงินฝาก (Type)</label>
+                    <select 
+                        className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200"
+                        value={newDeposit.type}
+                        onChange={e => setNewDeposit({...newDeposit, type: e.target.value})}
+                        required
+                    >
+                        {DEPOSIT_TYPES.map(type => (
+                            <option key={type} value={type}>{type}</option>
+                        ))}
+                    </select>
+                    {newDeposit.type === 'อื่นๆ (ให้ระบุ)' && (
+                        <input 
+                            type="text" 
+                            className="mt-2 w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200 bg-gray-50"
+                            placeholder="ระบุประเภทเงินฝาก..."
+                            value={newDeposit.customType}
+                            onChange={e => setNewDeposit({...newDeposit, customType: e.target.value})}
+                            required
+                        />
+                    )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">มูลค่า (บาท)</label>
+                        <div className="relative">
+                            <span className="absolute left-3 top-2.5 text-gray-500 text-sm">฿</span>
+                            <input 
+                                type="number" 
+                                required 
+                                className="w-full border rounded-md pl-7 p-2 outline-none focus:ring-2 focus:ring-emerald-200"
+                                value={newDeposit.amount}
+                                onChange={e => setNewDeposit({...newDeposit, amount: e.target.value})}
+                                placeholder="0.00"
+                            />
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">ระยะเวลา (Duration)</label>
+                        <select 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200"
+                            value={newDeposit.duration}
+                            onChange={e => setNewDeposit({...newDeposit, duration: e.target.value})}
+                            required
+                        >
+                            {DEPOSIT_DURATIONS.map(dur => (
+                                <option key={dur} value={dur}>{dur}</option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">วันที่เริ่ม (Start Date)</label>
+                        <input 
+                            type="date" 
+                            required 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200"
+                            value={newDeposit.startDate}
+                            onChange={e => setNewDeposit({...newDeposit, startDate: e.target.value})}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">วันครบกำหนด (End Date)</label>
+                        <input 
+                            type="date" 
+                            required 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200"
+                            value={newDeposit.endDate}
+                            onChange={e => setNewDeposit({...newDeposit, endDate: e.target.value})}
+                        />
+                    </div>
+                </div>
+
+                {/* Remaining Days calculation in form */}
+                {newDeposit.endDate && (
+                    <div className="text-right text-xs font-medium text-emerald-600 mt-1">
+                        ระบบจะแจ้งเตือนล่วงหน้า 30 วันก่อนครบกำหนด
+                    </div>
+                )}
+
+                <div className="flex justify-end gap-2 pt-4 border-t border-gray-200 mt-6">
+                    <Button variant="secondary" onClick={() => setShowAddDepositModal(false)}>{t('cancel')}</Button>
+                    <Button type="submit" icon={Save} className="bg-emerald-600 hover:bg-emerald-700">บันทึกข้อมูล</Button>
+                </div>
             </form>
           </div>
         </div>
