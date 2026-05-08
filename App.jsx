@@ -2173,7 +2173,7 @@ export default function App() {
   const [showAddDepositModal, setShowAddDepositModal] = useState(false);
   const [isEditingDeposit, setIsEditingDeposit] = useState(false);
   const [newDeposit, setNewDeposit] = useState({
-      id: null, type: 'ฝากประจำ', customType: '', bank: '', amount: '', duration: '12 เดือน', startDate: '', endDate: ''
+      id: null, type: 'ฝากประจำ', customType: '', bank: '', amount: '', interestRate: '', duration: '12 เดือน', startDate: '', endDate: ''
   });
 
   // --- NEW: Meeting Gantt Plans State ---
@@ -4631,7 +4631,7 @@ export default function App() {
           ct = t;
           t = 'อื่นๆ (ให้ระบุ)';
       }
-      setNewDeposit({ ...dep, type: t, customType: ct, bank: dep.bank || '' });
+      setNewDeposit({ ...dep, type: t, customType: ct, bank: dep.bank || '', interestRate: dep.interestRate || '' });
       setIsEditingDeposit(true);
       setShowAddDepositModal(true);
   };
@@ -8124,7 +8124,7 @@ export default function App() {
                                       </h3>
                                       {hasPerm('projects', 'edit') && (
                                           <Button size="sm" icon={Plus} className="bg-emerald-600 hover:bg-emerald-700" onClick={() => {
-                                              setNewDeposit({ id: null, type: 'ฝากประจำ', customType: '', bank: '', amount: '', duration: '12 เดือน', startDate: '', endDate: '' });
+                                              setNewDeposit({ id: null, type: 'ฝากประจำ', customType: '', bank: '', amount: '', interestRate: '', duration: '12 เดือน', startDate: '', endDate: '' });
                                               setIsEditingDeposit(false);
                                               setShowAddDepositModal(true);
                                           }}>เพิ่มรายการ</Button>
@@ -8138,6 +8138,7 @@ export default function App() {
                                                   <th className="p-3 border-b text-center w-12">ลำดับ</th>
                                                   <th className="p-3 border-b w-40">ประเภทเงินฝาก</th>
                                                   <th className="p-3 border-b w-40">ธนาคาร</th>
+                                                  <th className="p-3 border-b text-center">อัตราดอกเบี้ย</th>
                                                   <th className="p-3 border-b text-center">ระยะเวลา</th>
                                                   <th className="p-3 border-b text-right">มูลค่า (บาท)</th>
                                                   <th className="p-3 border-b text-center">เริ่ม - ครบกำหนด</th>
@@ -8157,6 +8158,7 @@ export default function App() {
                                                               <td className="p-3 text-center text-gray-500">{idx + 1}</td>
                                                               <td className="p-3 font-bold text-gray-800">{dep.type}</td>
                                                               <td className="p-3 text-gray-700">{dep.bank || '-'}</td>
+                                                              <td className="p-3 text-center font-bold text-emerald-600">{dep.interestRate ? `${dep.interestRate}%` : '-'}</td>
                                                               <td className="p-3 text-center text-gray-600">{dep.duration}</td>
                                                               <td className="p-3 text-right font-medium text-emerald-700">{Number(dep.amount).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                                                               <td className="p-3 text-center text-gray-600 text-xs">
@@ -13864,7 +13866,7 @@ export default function App() {
                     </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                         <label className="block text-sm font-bold text-gray-700 mb-1">มูลค่า (บาท)</label>
                         <div className="relative">
@@ -13877,6 +13879,20 @@ export default function App() {
                                 onChange={e => setNewDeposit({...newDeposit, amount: e.target.value})}
                                 placeholder="0.00"
                             />
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">อัตราดอกเบี้ย (%)</label>
+                        <div className="relative">
+                            <input 
+                                type="number" 
+                                step="0.01"
+                                className="w-full border rounded-md p-2 pr-8 outline-none focus:ring-2 focus:ring-emerald-200"
+                                value={newDeposit.interestRate}
+                                onChange={e => setNewDeposit({...newDeposit, interestRate: e.target.value})}
+                                placeholder="0.00"
+                            />
+                            <span className="absolute right-3 top-2.5 text-gray-500 text-sm">%</span>
                         </div>
                     </div>
                     <div>
