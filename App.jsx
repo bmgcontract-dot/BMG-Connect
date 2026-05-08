@@ -17132,17 +17132,17 @@ export default function App() {
                 )}
                 
                 {/* Simulated Document Area */}
-                <div className={`bg-gray-200 flex-1 overflow-y-auto flex justify-center py-8 ${isExporting ? 'py-0 bg-white' : ''}`}>
-                    <div id="print-document-form" className={`bg-white shadow-lg relative text-gray-800 ${isExporting ? 'w-[190mm] min-w-[190mm] max-w-[190mm] mx-auto box-border py-8 px-0 shadow-none border-none' : 'mx-auto w-[210mm] min-h-[297mm] px-[15mm] pt-[15mm] pb-[20mm] border border-gray-300'}`}>
+                <div className={`bg-gray-200 flex-1 overflow-y-auto flex justify-center py-8 ${isExporting ? 'py-0 bg-white overflow-hidden' : ''}`}>
+                    <div id="print-document-form" className={`bg-white shadow-lg relative text-gray-800 flex flex-col ${isExporting ? 'w-[190mm] h-[255mm] min-w-[190mm] max-w-[190mm] min-h-[255mm] max-h-[255mm] mx-auto box-border pt-4 px-0 shadow-none border-none overflow-hidden' : 'mx-auto w-[210mm] h-[297mm] min-w-[210mm] max-w-[210mm] min-h-[297mm] max-h-[297mm] px-[15mm] pt-[15mm] pb-[20mm] border border-gray-300 overflow-hidden'}`}>
                         {/* Header */}
-                        <div className="text-center mb-8 mt-4">
-                            <h1 className="text-2xl font-bold mb-2">นิติบุคคลอาคารชุด / หมู่บ้าน {selectedProject?.name || '................................'}</h1>
-                            <h2 className="text-xl font-bold text-gray-700">{selectedFormDetails.name.split(' (')[0]}</h2>
+                        <div className="text-center mb-6 mt-2 shrink-0">
+                            <h1 className="text-xl md:text-2xl font-bold mb-2">นิติบุคคลอาคารชุด / หมู่บ้าน {selectedProject?.name || '................................'}</h1>
+                            <h2 className="text-lg md:text-xl font-bold text-gray-700">{selectedFormDetails.name.split(' (')[0]}</h2>
                         </div>
                         
                         {/* Document Content Simulation */}
-                        <div className="space-y-6 text-base leading-relaxed px-4">
-                            <div className="flex justify-end mb-6">
+                        <div className="space-y-4 text-sm md:text-base leading-relaxed px-4 flex-1">
+                            <div className="flex justify-end mb-4">
                                 <div className="flex items-end gap-2">
                                      <span className="font-bold">วันที่</span> 
                                      <span className={isEditingForm ? "border-b border-blue-500 outline-none bg-blue-50 w-40 inline-block text-center min-h-[24px]" : "border-b border-dotted border-gray-500 w-40 inline-block text-center min-h-[24px]"} contentEditable={isEditingForm}></span>
@@ -17155,7 +17155,7 @@ export default function App() {
                             </p>
                             <p className="font-bold">เรียน {selectedFormDetails.category === 'งานบุคคลและภายใน (Internal)' ? 'ผู้จัดการพื้นที่ / ฝ่ายทรัพยากรบุคคล (HR)' : 'ผู้จัดการ / คณะกรรมการนิติบุคคลฯ'}</p>
                             
-                            <div className="ml-4 md:ml-8 space-y-5">
+                            <div className="ml-4 md:ml-8 space-y-4">
                                 <div className="flex items-center gap-2">
                                     <span className="font-bold whitespace-nowrap">ข้าพเจ้า</span> 
                                     <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2`} contentEditable={isEditingForm}></span>
@@ -17183,17 +17183,17 @@ export default function App() {
                                     </>
                                 )}
                                 
-                                <p className="mt-8 font-bold">
+                                <p className="mt-4 font-bold">
                                     {selectedFormDetails.category === 'งานบุคคลและภายใน (Internal)' ? 'รายละเอียดการดำเนินงาน / ส่งมอบงาน:' : 'มีความประสงค์เพื่อ:'}
                                 </p>
-                                <div className={`w-full min-h-[120px] border p-4 leading-relaxed ${isEditingForm ? "border-blue-300 bg-blue-50 outline-none rounded" : "border-gray-300"}`} contentEditable={isEditingForm}>
+                                <div className={`w-full min-h-[100px] border p-3 leading-relaxed text-sm ${isEditingForm ? "border-blue-300 bg-blue-50 outline-none rounded" : "border-gray-300"}`} contentEditable={isEditingForm}>
                                     {isEditingForm ? "" : (selectedFormDetails.description || "ระบุรายละเอียดเพิ่มเติมที่นี่...")}
                                 </div>
                                 
                                 {selectedFormDetails.category !== 'งานบุคคลและภายใน (Internal)' && (
                                     <>
-                                        <p className="mt-6 font-bold">โดยมีรายละเอียดเพิ่มเติมดังนี้:</p>
-                                        <div className="space-y-4">
+                                        <p className="mt-4 font-bold">โดยมีรายละเอียดเพิ่มเติมดังนี้:</p>
+                                        <div className="space-y-3">
                                             <div className="flex items-end gap-2">1. <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2`} contentEditable={isEditingForm}></span></div>
                                             <div className="flex items-end gap-2">2. <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2`} contentEditable={isEditingForm}></span></div>
                                             <div className="flex items-end gap-2">3. <span className={`flex-1 border-b ${isEditingForm ? "border-blue-500 outline-none bg-blue-50" : "border-dotted border-gray-500"} min-h-[24px] px-2`} contentEditable={isEditingForm}></span></div>
@@ -17201,24 +17201,25 @@ export default function App() {
                                     </>
                                 )}
                                 
-                                <p className="mt-10 pt-6 border-t border-gray-200 text-center font-bold">
+                                <p className="mt-6 pt-4 border-t border-gray-200 text-center font-bold text-sm">
                                     {selectedFormDetails.category === 'งานบุคคลและภายใน (Internal)' 
                                         ? 'ข้าพเจ้าได้ส่งมอบงานและทรัพย์สินทั้งหมดที่อยู่ในความรับผิดชอบครบถ้วนเรียบร้อยแล้ว' 
                                         : 'ข้าพเจ้าขอรับรองว่าข้อความเบื้องต้นเป็นความจริงทุกประการ และยินดีปฏิบัติตามระเบียบของนิติบุคคลฯ อย่างเคร่งครัด'}
                                 </p>
                             </div>
+                        </div>
 
-                            <div className="mt-16 flex justify-between px-4 md:px-8 text-center pb-8">
-                                <div className="w-56 md:w-64">
-                                    <div className="border-b border-gray-500 w-full mb-2 h-6"></div>
-                                    <p className="text-sm">( ........................................................ )</p>
-                                    <p className="mt-2 font-bold">{selectedFormDetails.category === 'งานบุคคลและภายใน (Internal)' ? 'ผู้ยื่นเรื่อง / ผู้ส่งมอบงาน' : 'ผู้ยื่นคำร้อง'}</p>
-                                </div>
-                                <div className="w-56 md:w-64">
-                                    <div className="border-b border-gray-500 w-full mb-2 h-6"></div>
-                                    <p className="text-sm">( ........................................................ )</p>
-                                    <p className="mt-2 font-bold">{selectedFormDetails.category === 'งานบุคคลและภายใน (Internal)' ? 'ผู้อนุมัติ / ผู้รับมอบงาน' : 'ผู้รับเรื่อง / เจ้าหน้าที่นิติบุคคล'}</p>
-                                </div>
+                        {/* Signatures Area Anchored to Bottom */}
+                        <div className="mt-auto pt-6 flex justify-between px-4 md:px-8 text-center shrink-0">
+                            <div className="w-40 md:w-48">
+                                <div className="border-b border-gray-500 w-full mb-2 h-6"></div>
+                                <p className="text-xs md:text-sm">( ........................................................ )</p>
+                                <p className="mt-1 font-bold text-xs md:text-sm">{selectedFormDetails.category === 'งานบุคคลและภายใน (Internal)' ? 'ผู้ยื่นเรื่อง / ผู้ส่งมอบงาน' : 'ผู้ยื่นคำร้อง'}</p>
+                            </div>
+                            <div className="w-40 md:w-48">
+                                <div className="border-b border-gray-500 w-full mb-2 h-6"></div>
+                                <p className="text-xs md:text-sm">( ........................................................ )</p>
+                                <p className="mt-1 font-bold text-xs md:text-sm">{selectedFormDetails.category === 'งานบุคคลและภายใน (Internal)' ? 'ผู้อนุมัติ / ผู้รับมอบงาน' : 'ผู้รับเรื่อง / เจ้าหน้าที่นิติบุคคล'}</p>
                             </div>
                         </div>
                     </div>
@@ -17241,6 +17242,7 @@ export default function App() {
                             )}
                             <Button icon={Printer} onClick={() => {
                                 setIsEditingForm(false);
+                                // รอให้ state อัปเดตและซ่อน UI ก่อนแคปหน้าจอเพื่อจัด PDF (ด้วย margin ที่หักลบขอบแบบพอดีแล้ว)
                                 setTimeout(() => handleExportPDF('print-document-form', `${selectedFormDetails.name}.pdf`, 'portrait', [22, 10, 20, 10]), 100);
                             }} disabled={isEditingForm}>พิมพ์ / ดาวน์โหลด PDF</Button>
                         </div>
