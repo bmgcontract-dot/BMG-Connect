@@ -1401,7 +1401,9 @@ function usePersistentState(key, initialValue, fbUser) {
   });
   
   const stateRef = useRef(state);
-  const syncTimeoutRef = useRef(null); // NEW: เพิ่ม Ref สำหรับควบคุมการหน่วงเวลา (Debounce)
+  const syncTimeoutRef = useRef(null); 
+  const isUploadingRef = useRef(false); // NEW: Track upload status
+  const lastLocalUpdateRef = useRef(0); // NEW: Track last local edit time
   const [isSynced, setIsSynced] = useState(false);
   // OPTIMIZE: ถ้ามีข้อมูลใน Cache ให้ถือว่าโหลดเสร็จแล้วทันที ไม่ต้องรอหน้าจอหมุน
   const [isLoaded, setIsLoaded] = useState(() => {
@@ -1433,6 +1435,13 @@ function usePersistentState(key, initialValue, fbUser) {
     let currentFetchId = 0;
 
     const unsubscribe = onSnapshot(docRef, async (docSnap) => {
+      // 🛡️ 100% Data Loss Prevention: ข้ามรับข้อมูล Server ถ้าเพิ่งมีการพิมพ์หรือส่งข้อมูลอยู่
+      if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
+          console.warn(`[BMG Sync] 🛡️ ป้องกันข้อมูล ${key} หาย: ข้ามการดึงข้อมูลจาก Server เนื่องจากมีการแก้ไขภายใน 5 วินาทีล่าสุด`);
+          setIsLoaded(true);
+          return;
+      }
+
       if (docSnap.exists()) {
         currentFetchId++;
         const thisFetchId = currentFetchId;
@@ -1451,7 +1460,12 @@ function usePersistentState(key, initialValue, fbUser) {
                       hasChunkError = true;
                   }
               }
+              
               if (thisFetchId !== currentFetchId || hasChunkError) return;
+              
+              // 🛡️ Re-check Data Loss Prevention (เผื่อจังหวะที่ดึง Chunk ใช้เวลานาน แล้วผู้ใช้พิมพ์แทรก)
+              if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) return;
+
               if (fullJson) {
                   const parsedData = JSON.parse(fullJson);
                   // --- FIX: Data Loss Prevention ---
@@ -1500,6 +1514,8 @@ function usePersistentState(key, initialValue, fbUser) {
   }, [fbUser, key]);
 
   const setPersistentValue = async (newValue, isRestore = false) => {
+    lastLocalUpdateRef.current = Date.now(); // บันทึกเวลาที่แก้ล่าสุด เพื่อกัน Firebase มาทับ
+
     const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
     if (!isRestore && valueToStore === stateRef.current) return;
 
@@ -1520,6 +1536,7 @@ function usePersistentState(key, initialValue, fbUser) {
        return new Promise((resolve) => {
            // NEW: หน่วงเวลา 1 วินาที หลังจากหยุดพิมพ์/คลิก ค่อยเซฟขึ้น Database
            syncTimeoutRef.current = setTimeout(async () => {
+               isUploadingRef.current = true;
                try {
                    const jsonStr = JSON.stringify(stateRef.current); // ใช้ state ล่าสุดเสมอ
                    const CHUNK_SIZE = 900000; 
@@ -1535,9 +1552,11 @@ function usePersistentState(key, initialValue, fbUser) {
                    
                    const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
                    await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
-                   resolve();
                } catch(err) {
                    console.error("Firebase Storage Error:", err);
+               } finally {
+                   syncTimeoutRef.current = null;
+                   isUploadingRef.current = false;
                    resolve();
                }
            }, 1000); 
@@ -1567,6 +1586,9 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
 
   const stateRef = useRef(state);
   const isLoadedRef = useRef(false);
+  const syncTimeoutRef = useRef(null); 
+  const isUploadingRef = useRef(false); // NEW
+  const lastLocalUpdateRef = useRef(0); // NEW
   
   // OPTIMIZE: ข้ามหน้าต่างโหลดดิงทันทีถ้ามีข้อมูลใน Cache อยู่แล้ว
   const [isLoaded, setIsLoaded] = useState(() => {
@@ -1606,6 +1628,14 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
 
     const collRef = collection(db, 'artifacts', appId, 'public', 'data', collectionName);
     const unsubscribe = onSnapshot(collRef, (snapshot) => {
+      // 🛡️ 100% Data Loss Prevention: ข้ามรับข้อมูล Server ถ้ากำลังพิมพ์หรือส่งข้อมูลอยู่
+      if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
+          console.warn(`[BMG Sync] 🛡️ ป้องกันข้อมูล ${collectionName} หาย: ข้ามการดึงข้อมูลจาก Server`);
+          setIsLoaded(true);
+          isLoadedRef.current = true;
+          return;
+      }
+
       const items = [];
       snapshot.forEach(doc => {
           items.push({ ...doc.data(), id: doc.id });
@@ -1674,6 +1704,8 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
   }, [fbUser, collectionName]);
 
   const setPersistentValue = async (newValue, isRestore = false) => {
+    lastLocalUpdateRef.current = Date.now(); // บันทึกเวลา
+
     const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
     if (!isRestore && valueToStore === stateRef.current) return;
 
@@ -1692,76 +1724,82 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
     }
 
     if (db && fbUser && appId && isLoadedRef.current) {
+       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+
        return new Promise(async (resolve) => {
-           try {
-               let batch = writeBatch(db);
-               let opCount = 0;
-               
-               const oldStateMap = new Map();
-               for (const o of oldState) {
-                   if (o && o.id) oldStateMap.set(String(o.id), o);
-               }
-
-               const newStateMap = new Map();
-               for (const n of safeValueToStore) {
-                   if (n && n.id) newStateMap.set(String(n.id), n);
-               }
-
-               // 1. เพิ่มหรืออัปเดตข้อมูล
-               for (const item of safeValueToStore) {
-                   if (!item || !item.id) continue; // ข้ามรายการที่ไม่มี ID (ข้อมูลเสีย)
-                   const strId = String(item.id);
+           syncTimeoutRef.current = setTimeout(async () => {
+               isUploadingRef.current = true;
+               try {
+                   let batch = writeBatch(db);
+                   let opCount = 0;
                    
-                   let needsUpdate = true;
-                   // หากเป็นการ Restore จะบังคับเขียนทับเลย ข้ามการเปรียบเทียบข้อมูลเพื่อลดภาระ CPU
-                   if (!isRestore) {
-                       const oldItem = oldStateMap.get(strId);
-                       if (oldItem && JSON.stringify(oldItem) === JSON.stringify(item)) {
-                           needsUpdate = false;
+                   const oldStateMap = new Map();
+                   for (const o of oldState) {
+                       if (o && o.id) oldStateMap.set(String(o.id), o);
+                   }
+
+                   const newStateMap = new Map();
+                   for (const n of safeValueToStore) {
+                       if (n && n.id) newStateMap.set(String(n.id), n);
+                   }
+
+                   // 1. เพิ่มหรืออัปเดตข้อมูล
+                   for (const item of safeValueToStore) {
+                       if (!item || !item.id) continue; // ข้ามรายการที่ไม่มี ID (ข้อมูลเสีย)
+                       const strId = String(item.id);
+                       
+                       let needsUpdate = true;
+                       // หากเป็นการ Restore จะบังคับเขียนทับเลย ข้ามการเปรียบเทียบข้อมูลเพื่อลดภาระ CPU
+                       if (!isRestore) {
+                           const oldItem = oldStateMap.get(strId);
+                           if (oldItem && JSON.stringify(oldItem) === JSON.stringify(item)) {
+                               needsUpdate = false;
+                           }
+                       }
+
+                       if (needsUpdate) {
+                           const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, strId);
+                           batch.set(docRef, item);
+                           opCount++;
+                       }
+                       
+                       // ตัดรอบส่งเมื่อครบ 400 รายการ และรอให้สำเร็จก่อนทำชุดถัดไป
+                       if (opCount >= 400) {
+                           await batch.commit(); 
+                           batch = writeBatch(db);
+                           opCount = 0;
+                           await new Promise(r => setTimeout(r, 20)); // พัก UI 20ms ป้องกันหน้าจอค้าง
                        }
                    }
 
-                   if (needsUpdate) {
-                       const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, strId);
-                       batch.set(docRef, item);
-                       opCount++;
+                   // 2. ลบข้อมูลที่ไม่มีในก้อนใหม่
+                   for (const oldId of oldStateMap.keys()) {
+                       if (!newStateMap.has(oldId)) {
+                           const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, oldId);
+                           batch.delete(docRef);
+                           opCount++;
+                       }
+                       
+                       if (opCount >= 400) {
+                           await batch.commit();
+                           batch = writeBatch(db);
+                           opCount = 0;
+                           await new Promise(r => setTimeout(r, 20));
+                       }
                    }
-                   
-                   // ตัดรอบส่งเมื่อครบ 400 รายการ และรอให้สำเร็จก่อนทำชุดถัดไป
-                   if (opCount >= 400) {
-                       await batch.commit(); 
-                       batch = writeBatch(db);
-                       opCount = 0;
-                       await new Promise(r => setTimeout(r, 20)); // พัก UI 20ms ป้องกันหน้าจอค้าง
-                   }
-               }
 
-               // 2. ลบข้อมูลที่ไม่มีในก้อนใหม่
-               for (const oldId of oldStateMap.keys()) {
-                   if (!newStateMap.has(oldId)) {
-                       const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, oldId);
-                       batch.delete(docRef);
-                       opCount++;
-                   }
-                   
-                   if (opCount >= 400) {
+                   // ส่งข้อมูลเศษที่เหลือ
+                   if (opCount > 0) {
                        await batch.commit();
-                       batch = writeBatch(db);
-                       opCount = 0;
-                       await new Promise(r => setTimeout(r, 20));
                    }
+               } catch (err) {
+                   console.error(`Firestore Batch Write Error [${collectionName}]:`, err);
+               } finally {
+                   syncTimeoutRef.current = null;
+                   isUploadingRef.current = false;
+                   resolve();
                }
-
-               // ส่งข้อมูลเศษที่เหลือ
-               if (opCount > 0) {
-                   await batch.commit();
-               }
-               resolve();
-
-           } catch (err) {
-               console.error(`Firestore Batch Write Error [${collectionName}]:`, err);
-               resolve();
-           }
+           }, 1000);
        });
     }
   };
@@ -1782,6 +1820,9 @@ function useUserPersistentState(key, initialValue, fbUser) {
   });
 
   const stateRef = useRef(state);
+  const syncTimeoutRef = useRef(null); 
+  const isUploadingRef = useRef(false);
+  const lastLocalUpdateRef = useRef(0);
   const [isSynced, setIsSynced] = useState(false);
   
   // OPTIMIZE: ข้ามโหลดทันทีถ้ามี Cache
@@ -1812,6 +1853,12 @@ function useUserPersistentState(key, initialValue, fbUser) {
     const docRef = doc(db, 'artifacts', appId, 'users', fbUser.uid, 'user_preferences', key);
     
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      // 🛡️ 100% Data Loss Prevention
+      if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
+          setIsLoaded(true);
+          return;
+      }
+
       if (docSnap.exists()) {
         try {
           const parsedData = JSON.parse(docSnap.data().value);
@@ -1839,6 +1886,8 @@ function useUserPersistentState(key, initialValue, fbUser) {
   }, [fbUser, key]);
 
   const setPersistentValue = async (newValue, isRestore = false) => {
+    lastLocalUpdateRef.current = Date.now();
+
     const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
     if (!isRestore && valueToStore === stateRef.current) return;
 
@@ -1852,14 +1901,22 @@ function useUserPersistentState(key, initialValue, fbUser) {
     }
 
     if (db && fbUser && appId) {
+       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+
        return new Promise(async (resolve) => {
-           try {
-               const docRef = doc(db, 'artifacts', appId, 'users', fbUser.uid, 'user_preferences', key);
-               await setDoc(docRef, { value: JSON.stringify(valueToStore) });
-               resolve();
-           } catch(e) {
-               resolve();
-           }
+           syncTimeoutRef.current = setTimeout(async () => {
+               isUploadingRef.current = true;
+               try {
+                   const docRef = doc(db, 'artifacts', appId, 'users', fbUser.uid, 'user_preferences', key);
+                   await setDoc(docRef, { value: JSON.stringify(valueToStore) });
+               } catch(e) {
+                   console.error("User Pref Sync Error", e);
+               } finally {
+                   syncTimeoutRef.current = null;
+                   isUploadingRef.current = false;
+                   resolve();
+               }
+           }, 500);
        });
     }
   };
