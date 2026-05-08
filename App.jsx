@@ -1005,28 +1005,13 @@ const INITIAL_DEPOSITS = [];
 // NEW: Deposit Constants
 const DEPOSIT_TYPES = ['ฝากประจำ', 'สลากออมสิน', 'สลาก ธ.ก.ส.', 'อื่นๆ (ให้ระบุ)'];
 const DEPOSIT_DURATIONS = ['1 เดือน', '2 เดือน', '3 เดือน', '4 เดือน', '5 เดือน', '6 เดือน', '7 เดือน', '8 เดือน', '9 เดือน', '10 เดือน', '11 เดือน', '12 เดือน', '2 ปี', '3 ปี', '4 ปี'];
-
-// NEW: Banks List with Colors
-const BANKS = [
-  { name: 'ธนาคารกรุงเทพ', color: '#1E4598' },
-  { name: 'ธนาคารกสิกรไทย', color: '#00A950' },
-  { name: 'ธนาคารกรุงไทย', color: '#1BA5E1' },
-  { name: 'ธนาคารทหารไทย', color: '#0050F0' },
-  { name: 'ธนาคารไทยพาณิชย์', color: '#4E2A84' },
-  { name: 'ธนาคารกรุงศรีอยุธยา', color: '#FEC43B' },
-  { name: 'ธนาคารเกียรตินาคิน', color: '#0099CC' },
-  { name: 'ธนาคารซีไอเอ็มบีไทย', color: '#7E1F2A' },
-  { name: 'ธนาคารทิสโก้', color: '#004F98' },
-  { name: 'ธนาคารธนชาต', color: '#F04E23' },
-  { name: 'ธนาคารยูโอบี', color: '#00377B' },
-  { name: 'ธนาคารสแตนดาร์ดชาร์เตอร์ด (ไทย)', color: '#0067A5' },
-  { name: 'ธนาคารไทยเครดิตเพื่อรายย่อย', color: '#002D63' },
-  { name: 'ธนาคารแลนด์ แอนด์ เฮาส์', color: '#3A2318' },
-  { name: 'ธนาคารไอซีบีซี (ไทย)', color: '#C60B1E' },
-  { name: 'ธนาคารเพื่อการเกษตรและสหกรณ์การเกษตร', color: '#479540' },
-  { name: 'ธนาคารออมสิน', color: '#EB198C' },
-  { name: 'ธนาคารอาคารสงเคราะห์', color: '#F68222' },
-  { name: 'ธนาคารอิสลามแห่งประเทศไทย', color: '#184D2C' }
+const BANK_LIST = [
+  "ธนาคารกรุงเทพ", "ธนาคารกสิกรไทย", "ธนาคารกรุงไทย", "ธนาคารทหารไทย", "ธนาคารไทยพาณิชย์",
+  "ธนาคารกรุงศรีอยุธยา", "ธนาคารเกียรตินาคิน", "ธนาคารซีไอเอ็มบีไทย", "ธนาคารทิสโก้", "ธนาคารธนชาต",
+  "ธนาคารยูโอบี", "ธนาคารสแตนดาร์ดชาร์เตอร์ด (ไทย)", "ธนาคารไทยเครดิตเพื่อรายย่อย", "ธนาคารแลนด์ แอนด์ เฮาส์",
+  "ธนาคารไอซีบีซี (ไทย)", "ธนาคารพัฒนาวิสาหกิจขนาดกลางและขนาดย่อมแห่งประเทศไทย", "ธนาคารเพื่อการเกษตรและสหกรณ์การเกษตร",
+  "ธนาคารเพื่อการส่งออกและนำเข้าแห่งประเทศไทย", "ธนาคารออมสิน", "ธนาคารอาคารสงเคราะห์", "ธนาคารอิสลามแห่งประเทศไทย",
+  "ธนาคารแห่งประเทศจีน", "ธนาคารซูมิโตโม มิตซุย ทรัสต์ (ไทย)", "ธนาคารฮ่องกงและเซี้ยงไฮ้แบงกิ้งคอร์ปอเรชั่น จำกัด"
 ];
 
 // NEW: Custom 3D Bar Shapes
@@ -4646,7 +4631,7 @@ export default function App() {
           ct = t;
           t = 'อื่นๆ (ให้ระบุ)';
       }
-      setNewDeposit({ ...dep, type: t, customType: ct });
+      setNewDeposit({ ...dep, type: t, customType: ct, bank: dep.bank || '' });
       setIsEditingDeposit(true);
       setShowAddDepositModal(true);
   };
@@ -7834,9 +7819,7 @@ export default function App() {
                                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
                                                       {expiringDeposits.map(d => (
                                                           <div key={d.id} className="bg-white px-3 py-2 rounded border border-orange-200 flex justify-between items-center text-sm shadow-sm">
-                                                              <span className="font-medium text-gray-700 truncate pr-2" title={`${d.type} ${d.bank ? `(${d.bank})` : ''}`}>
-                                                                  {d.type} {d.bank ? `(${d.bank})` : ''} - {Number(d.amount).toLocaleString()} บาท
-                                                              </span>
+                                                              <span className="font-medium text-gray-700 truncate pr-2" title={d.type}>{d.type} - {Number(d.amount).toLocaleString()} บาท</span>
                                                               <span className="text-orange-600 font-bold whitespace-nowrap bg-orange-50 px-2 py-0.5 rounded">เหลือ {calculateDaysRemaining(d.endDate)} วัน</span>
                                                           </div>
                                                       ))}
@@ -8153,8 +8136,8 @@ export default function App() {
                                           <thead className="bg-gray-50 text-gray-600 uppercase">
                                               <tr>
                                                   <th className="p-3 border-b text-center w-12">ลำดับ</th>
-                                                  <th className="p-3 border-b w-48">ประเภทเงินฝาก</th>
-                                                  <th className="p-3 border-b w-48">ธนาคาร</th>
+                                                  <th className="p-3 border-b w-40">ประเภทเงินฝาก</th>
+                                                  <th className="p-3 border-b w-40">ธนาคาร</th>
                                                   <th className="p-3 border-b text-center">ระยะเวลา</th>
                                                   <th className="p-3 border-b text-right">มูลค่า (บาท)</th>
                                                   <th className="p-3 border-b text-center">เริ่ม - ครบกำหนด</th>
@@ -8173,17 +8156,7 @@ export default function App() {
                                                           <tr key={dep.id} className="hover:bg-gray-50 transition-colors">
                                                               <td className="p-3 text-center text-gray-500">{idx + 1}</td>
                                                               <td className="p-3 font-bold text-gray-800">{dep.type}</td>
-                                                              <td className="p-3">
-                                                                  <div className="flex items-center gap-2">
-                                                                      {dep.bank && (
-                                                                          <div 
-                                                                              className="w-3 h-3 rounded-full border border-gray-200 shrink-0 shadow-sm" 
-                                                                              style={{ backgroundColor: BANKS.find(b => b.name === dep.bank)?.color || '#ccc' }}
-                                                                          ></div>
-                                                                      )}
-                                                                      <span className="text-gray-700 font-medium">{dep.bank || '-'}</span>
-                                                                  </div>
-                                                              </td>
+                                                              <td className="p-3 text-gray-700">{dep.bank || '-'}</td>
                                                               <td className="p-3 text-center text-gray-600">{dep.duration}</td>
                                                               <td className="p-3 text-right font-medium text-emerald-700">{Number(dep.amount).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                                                               <td className="p-3 text-center text-gray-600 text-xs">
@@ -13877,25 +13850,47 @@ export default function App() {
                     </div>
                     <div>
                         <label className="block text-sm font-bold text-gray-700 mb-1">ธนาคาร (Bank)</label>
-                        <div className="relative flex items-center">
-                            {newDeposit.bank && (
-                                <div 
-                                    className="absolute left-3 w-3 h-3 rounded-full border border-gray-300 pointer-events-none shadow-sm" 
-                                    style={{ backgroundColor: BANKS.find(b => b.name === newDeposit.bank)?.color || '#ccc' }}
-                                ></div>
-                            )}
-                            <select 
-                                className={`w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200 ${newDeposit.bank ? 'pl-8' : ''}`}
-                                value={newDeposit.bank}
-                                onChange={e => setNewDeposit({...newDeposit, bank: e.target.value})}
-                                required
-                            >
-                                <option value="" disabled>-- เลือกธนาคาร --</option>
-                                {BANKS.map(b => (
-                                    <option key={b.name} value={b.name}>{b.name}</option>
-                                ))}
-                            </select>
+                        <select 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200 bg-white"
+                            value={newDeposit.bank}
+                            onChange={e => setNewDeposit({...newDeposit, bank: e.target.value})}
+                            required
+                        >
+                            <option value="" disabled>-- เลือกธนาคาร --</option>
+                            {BANK_LIST.map(bank => (
+                                <option key={bank} value={bank}>{bank}</option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">มูลค่า (บาท)</label>
+                        <div className="relative">
+                            <span className="absolute left-3 top-2.5 text-gray-500 text-sm">฿</span>
+                            <input 
+                                type="number" 
+                                required 
+                                className="w-full border rounded-md pl-7 p-2 outline-none focus:ring-2 focus:ring-emerald-200"
+                                value={newDeposit.amount}
+                                onChange={e => setNewDeposit({...newDeposit, amount: e.target.value})}
+                                placeholder="0.00"
+                            />
                         </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">ระยะเวลา (Duration)</label>
+                        <select 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200"
+                            value={newDeposit.duration}
+                            onChange={e => setNewDeposit({...newDeposit, duration: e.target.value})}
+                            required
+                        >
+                            {DEPOSIT_DURATIONS.map(dur => (
+                                <option key={dur} value={dur}>{dur}</option>
+                            ))}
+                        </select>
                     </div>
                 </div>
 
