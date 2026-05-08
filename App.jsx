@@ -4096,7 +4096,16 @@ export default function App() {
 
       } else {
           // โหมดบันทึกใหม่ (Create Mode)
-          const prevVal = meter ? meter.lastReading : 0;
+          // FIX: หาค่ายกมาล่าสุดจากประวัติการจดจริงเสมอ ป้องกันข้อมูล cache ผิดพลาด
+          const relatedReadings = utilityReadings.filter(r => r.meterId === utilityForm.meterId);
+          let prevVal = 0;
+          if (relatedReadings.length > 0) {
+              relatedReadings.sort((a, b) => new Date(b.date) - new Date(a.date));
+              prevVal = relatedReadings[0].value;
+          } else {
+              prevVal = meter ? meter.lastReading : 0;
+          }
+          
           let usage = currentValNum - prevVal;
           
           // --- FIX: ป้องกันกราฟพุ่งทะลุในวันแรกที่จด (หากมิเตอร์นั้นค่ายกมาเป็น 0) ---
@@ -10354,7 +10363,22 @@ export default function App() {
                                               <label className="block text-sm font-bold text-gray-700">เลขมิเตอร์ปัจจุบัน (Current)</label>
                                               {utilityForm.meterId && (
                                                   <span className="text-xs text-gray-500 font-medium bg-gray-100 px-2 py-1 rounded">
-                                                      ค่ายกมา: <span className="text-gray-800 font-bold">{meters.find(m => m.id === utilityForm.meterId)?.lastReading || 0}</span>
+                                                      ค่ายกมา: <span className="text-gray-800 font-bold">
+                                                          {(() => {
+                                                              // FIX: แสดงค่ายกมาให้ถูกต้องตรงกับประวัติเสมอ
+                                                              if (utilityForm.id) {
+                                                                  // ถ้าแก้ข้อมูลเก่า ให้แสดงค่ายกมาของบิลใบนั้น
+                                                                  return utilityReadings.find(r => r.id === utilityForm.id)?.prevValue || 0;
+                                                              }
+                                                              // ถ้าสร้างใหม่ ให้ดึงบิลใบล่าสุดมาแสดง
+                                                              const readings = utilityReadings.filter(r => r.meterId === utilityForm.meterId);
+                                                              if (readings.length > 0) {
+                                                                  return readings.sort((a, b) => new Date(b.date) - new Date(a.date))[0].value;
+                                                              }
+                                                              // ถ้ายกมาครั้งแรกสุด ให้ดึงจากข้อมูลมิเตอร์
+                                                              return meters.find(m => m.id === utilityForm.meterId)?.lastReading || 0;
+                                                          })()}
+                                                      </span>
                                                   </span>
                                               )}
                                           </div>
