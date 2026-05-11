@@ -2116,8 +2116,16 @@ export default function App() {
   });
   
   // --- NEW: State สำหรับเลือกช่วงเวลาวิเคราะห์ ---
-  const [utilityAnalysisRange, setUtilityAnalysisRange] = useState('monthly'); // 'monthly', 'yearly'
+  const [utilityAnalysisRange, setUtilityAnalysisRange] = useState('monthly'); // 'monthly', 'yearly', 'custom'
   const [utilityAnalysisYear, setUtilityAnalysisYear] = useState(() => new Date().getFullYear().toString());
+  const [utilityAnalysisStartDate, setUtilityAnalysisStartDate] = useState(() => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+  });
+  const [utilityAnalysisEndDate, setUtilityAnalysisEndDate] = useState(() => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
   
   // --- NEW: State สำหรับวิเคราะห์กราฟ ---
   const [hiddenAnalysisMeters, setHiddenAnalysisMeters] = useState(new Set());
@@ -10673,21 +10681,40 @@ export default function App() {
                                           >
                                               <option value="monthly">รายเดือน</option>
                                               <option value="yearly">รายปี</option>
+                                              <option value="custom">กำหนดช่วงวันที่</option>
                                           </select>
-                                          {utilityAnalysisRange === 'monthly' ? (
+                                          {utilityAnalysisRange === 'monthly' && (
                                               <input 
                                                   type="month" 
                                                   className="border border-gray-300 rounded-md p-1.5 text-sm focus:ring-2 focus:ring-red-200 outline-none bg-white transition-colors cursor-pointer"
                                                   value={utilityAnalysisMonth}
                                                   onChange={(e) => setUtilityAnalysisMonth(e.target.value)}
                                               />
-                                          ) : (
+                                          )}
+                                          {utilityAnalysisRange === 'yearly' && (
                                               <input 
                                                   type="number" 
                                                   className="border border-gray-300 rounded-md p-1.5 text-sm focus:ring-2 focus:ring-red-200 outline-none bg-white transition-colors cursor-pointer w-24 text-center"
                                                   value={utilityAnalysisYear}
                                                   onChange={(e) => setUtilityAnalysisYear(e.target.value)}
                                               />
+                                          )}
+                                          {utilityAnalysisRange === 'custom' && (
+                                              <div className="flex items-center gap-1 bg-white border border-gray-300 rounded-md px-1">
+                                                  <input 
+                                                      type="date" 
+                                                      className="p-1 text-sm outline-none bg-transparent cursor-pointer"
+                                                      value={utilityAnalysisStartDate}
+                                                      onChange={(e) => setUtilityAnalysisStartDate(e.target.value)}
+                                                  />
+                                                  <span className="text-gray-400">-</span>
+                                                  <input 
+                                                      type="date" 
+                                                      className="p-1 text-sm outline-none bg-transparent cursor-pointer"
+                                                      value={utilityAnalysisEndDate}
+                                                      onChange={(e) => setUtilityAnalysisEndDate(e.target.value)}
+                                                  />
+                                              </div>
                                           )}
                                       </div>
                                       <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border border-gray-200">
@@ -10718,20 +10745,32 @@ export default function App() {
 
                                   const projectMeterIds = projectMeters.map(m => m.id);
                                   
-                                  // ปรับการกรองข้อมูลให้รองรับทั้งแบบรายเดือนและรายปี
+                                  // ปรับการกรองข้อมูลให้รองรับทั้งแบบรายเดือน, รายปี และกำหนดเอง
                                   const projectReadings = utilityReadings.filter(r => {
                                       if (!projectMeterIds.includes(r.meterId)) return false;
                                       if (utilityAnalysisRange === 'monthly') {
                                           return r.date.startsWith(utilityAnalysisMonth);
-                                      } else {
+                                      } else if (utilityAnalysisRange === 'yearly') {
                                           return r.date.startsWith(utilityAnalysisYear);
+                                      } else if (utilityAnalysisRange === 'custom') {
+                                          return r.date >= utilityAnalysisStartDate && r.date <= utilityAnalysisEndDate;
                                       }
+                                      return false;
                                   });
 
                                   const chartDataMap = {};
+                                  let totalFilteredWaterUsage = 0;
+                                  let totalFilteredElecUsage = 0;
+
                                   projectReadings.forEach(r => {
                                       const meter = projectMeters.find(m => m.id === r.meterId);
                                       if (!meter) return;
+                                      
+                                      // คำนวณผลรวม (เฉพาะมิเตอร์ที่ไม่ได้ถูกซ่อน)
+                                      if (!hiddenAnalysisMeters.has(meter.id)) {
+                                          if (meter.type === 'Water') totalFilteredWaterUsage += r.usage;
+                                          if (meter.type === 'Electricity') totalFilteredElecUsage += r.usage;
+                                      }
                                       
                                       const dateObj = new Date(r.date);
                                       const monthNames = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
@@ -10755,7 +10794,7 @@ export default function App() {
                                           <div className="text-center text-gray-400 py-20 flex flex-col items-center border-2 border-dashed border-gray-200 rounded-xl bg-gray-50">
                                               <BarChart3 size={48} className="text-gray-300 mb-4"/>
                                               <p className="font-bold text-lg">ยังไม่มีข้อมูลสำหรับการวิเคราะห์</p>
-                                              <p className="text-sm">ไม่พบประวัติการจดมิเตอร์ใน{utilityAnalysisRange === 'monthly' ? `เดือน ${new Date(utilityAnalysisMonth + '-01').toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })}` : `ปี ค.ศ. ${utilityAnalysisYear}`}</p>
+                                              <p className="text-sm">ไม่พบประวัติการจดมิเตอร์ในช่วงเวลาที่เลือก</p>
                                           </div>
                                       );
                                   }
@@ -10765,7 +10804,36 @@ export default function App() {
                                   const elecColors = ['#f97316', '#f59e0b', '#ef4444', '#eab308', '#f43f5e', '#ea580c'];
 
                                   return (
-                                      <div className="flex flex-col gap-8">
+                                      <div className="flex flex-col gap-6">
+                                          {/* --- Summary Cards --- */}
+                                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                              <div className="bg-gradient-to-r from-blue-50 to-white border border-blue-100 p-4 rounded-xl shadow-sm flex items-center justify-between">
+                                                  <div className="flex items-center gap-3">
+                                                      <div className="p-3 bg-blue-100 text-blue-600 rounded-lg"><Droplet size={24}/></div>
+                                                      <div>
+                                                          <div className="text-xs font-bold text-gray-500">ผลรวมปริมาณการใช้น้ำประปา</div>
+                                                          <div className="text-xs text-gray-400">(ตามช่วงเวลาและมิเตอร์ที่เลือก)</div>
+                                                      </div>
+                                                  </div>
+                                                  <div className="text-right">
+                                                      <div className="text-2xl font-black text-blue-700">{totalFilteredWaterUsage.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                                                      <div className="text-sm font-bold text-blue-500">หน่วย (ลบ.ม.)</div>
+                                                  </div>
+                                              </div>
+                                              <div className="bg-gradient-to-r from-orange-50 to-white border border-orange-100 p-4 rounded-xl shadow-sm flex items-center justify-between">
+                                                  <div className="flex items-center gap-3">
+                                                      <div className="p-3 bg-orange-100 text-orange-600 rounded-lg"><Zap size={24}/></div>
+                                                      <div>
+                                                          <div className="text-xs font-bold text-gray-500">ผลรวมปริมาณการใช้ไฟฟ้า</div>
+                                                          <div className="text-xs text-gray-400">(ตามช่วงเวลาและมิเตอร์ที่เลือก)</div>
+                                                      </div>
+                                                  </div>
+                                                  <div className="text-right">
+                                                      <div className="text-2xl font-black text-orange-700">{totalFilteredElecUsage.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                                                      <div className="text-sm font-bold text-orange-500">หน่วย (kWh)</div>
+                                                  </div>
+                                              </div>
+                                          </div>
                                           {/* --- Water Consumption Section --- */}
                                           {waterMeters.length > 0 && (
                                               <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
