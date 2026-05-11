@@ -16850,7 +16850,7 @@ export default function App() {
 
       {showReportRankingModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[80vh]">
                 <div className="p-4 border-b flex flex-col sm:flex-row justify-between items-start sm:items-center bg-purple-50 gap-4 shrink-0">
                     <h2 className="text-xl font-bold text-purple-800 flex items-center gap-2"><BarChart3 size={24}/> จัดอันดับการส่งรายงาน</h2>
                     <div className="flex items-center gap-4 w-full sm:w-auto justify-between">
@@ -16889,21 +16889,36 @@ export default function App() {
                                 <th className="p-3 text-center w-20">อันดับ</th>
                                 <th className="p-3">โครงการ / หน่วยงาน</th>
                                 <th className="p-3 text-center w-32">จำนวนวันส่งแล้ว</th>
+                                <th className="p-3 text-center w-28">% การนำส่ง</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
                             {(() => {
                                 const targetMonthStr = reportRankingMonth || new Date().toISOString().slice(0, 7);
+                                
+                                const [year, month] = targetMonthStr.split('-').map(Number);
+                                const today = new Date();
+                                const isCurrentMonth = today.getFullYear() === year && today.getMonth() + 1 === month;
+                                const daysInMonth = new Date(year, month, 0).getDate();
+                                
+                                let passedDays = daysInMonth;
+                                if (year > today.getFullYear() || (year === today.getFullYear() && month > today.getMonth() + 1)) {
+                                    passedDays = 0;
+                                } else if (isCurrentMonth) {
+                                    passedDays = today.getDate();
+                                }
+
                                 const rankData = projects.map(p => {
                                     const pReports = dailyReports.filter(r => r.projectId === p.id && r.date && r.date.startsWith(targetMonthStr));
                                     const uniqueDays = new Set(pReports.map(r => r.date)).size;
-                                    return { id: p.id, name: p.name, submittedDays: uniqueDays };
+                                    const percentage = passedDays > 0 ? Math.round((uniqueDays / passedDays) * 100) : 0;
+                                    return { id: p.id, name: p.name, submittedDays: uniqueDays, percentage };
                                 }).sort((a, b) => b.submittedDays - a.submittedDays);
 
-                                if (rankData.length === 0) return <tr><td colSpan="3" className="p-8 text-center text-gray-500">ไม่มีข้อมูลหน่วยงาน</td></tr>;
+                                if (rankData.length === 0) return <tr><td colSpan="4" className="p-8 text-center text-gray-500">ไม่มีข้อมูลหน่วยงาน</td></tr>;
                                 
                                 const hasData = rankData.some(d => d.submittedDays > 0);
-                                if (!hasData) return <tr><td colSpan="3" className="p-8 text-center text-gray-500 bg-gray-50">ยังไม่มีการส่งรายงานในเดือนนี้</td></tr>;
+                                if (!hasData) return <tr><td colSpan="4" className="p-8 text-center text-gray-500 bg-gray-50">ยังไม่มีการส่งรายงานในเดือนนี้</td></tr>;
 
                                 return rankData.map((d, i) => (
                                     <tr key={d.id} className={d.id === selectedProject?.id ? 'bg-purple-50/50' : 'hover:bg-gray-50'}>
@@ -16917,6 +16932,16 @@ export default function App() {
                                         </td>
                                         <td className="p-3 text-center font-bold text-purple-600">
                                             {d.submittedDays > 0 ? `${d.submittedDays} วัน` : <span className="text-gray-400 font-normal">0 วัน</span>}
+                                        </td>
+                                        <td className="p-3 text-center">
+                                            <span className={`px-2 py-1 rounded-md text-xs font-bold ${
+                                                d.percentage >= 100 ? 'bg-green-100 text-green-700' : 
+                                                d.percentage >= 80 ? 'bg-yellow-100 text-yellow-700' : 
+                                                d.percentage > 0 ? 'bg-orange-100 text-orange-700' : 
+                                                'bg-gray-100 text-gray-500'
+                                            }`}>
+                                                {d.percentage}%
+                                            </span>
                                         </td>
                                     </tr>
                                 ));
