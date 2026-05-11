@@ -2115,6 +2115,15 @@ export default function App() {
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
   
+  // --- NEW: State สำหรับกรองและส่งออกข้อมูลมิเตอร์ (Export Utilities) ---
+  const [showUtilityExportModal, setShowUtilityExportModal] = useState(false);
+  const [utilityExportConfig, setUtilityExportConfig] = useState({
+      meterId: 'All',
+      startDate: '',
+      endDate: ''
+  });
+  // -----------------------------------------------------------
+
   // --- NEW: State สำหรับเลือกช่วงเวลาวิเคราะห์ ---
   const [utilityAnalysisRange, setUtilityAnalysisRange] = useState('monthly'); // 'monthly', 'yearly', 'custom'
   const [utilityAnalysisYear, setUtilityAnalysisYear] = useState(() => new Date().getFullYear().toString());
@@ -10330,22 +10339,9 @@ export default function App() {
                                   }));
                                   exportToCSV(dataToExport, `Utility_Meters_${selectedProject?.code}`);
                               } else {
-                                  const projMeters = meters.filter(m => m.projectId === selectedProject.id);
-                                  const meterIds = projMeters.map(m => m.id);
-                                  const dataToExport = utilityReadings.filter(r => meterIds.includes(r.meterId)).map(r => {
-                                      const meter = projMeters.find(m => m.id === r.meterId);
-                                      return {
-                                          'วันที่จด (Date)': r.date,
-                                          'ประเภท (Type)': meter?.type === 'Water' ? 'น้ำประปา' : 'ไฟฟ้า',
-                                          'รหัส (Code)': meter?.code || '-',
-                                          'ชื่อมิเตอร์ (Name)': meter?.name || '-',
-                                          'เลขก่อนหน้า (Prev)': r.prevValue,
-                                          'เลขปัจจุบัน (Current)': r.value,
-                                          'จำนวนหน่วย (Usage)': r.usage,
-                                          'ผู้บันทึก (Recorder)': r.recorder || '-'
-                                      };
-                                  });
-                                  exportToCSV(dataToExport, `Utility_Readings_${selectedProject?.code}`);
+                                  // เปิด Modal สำหรับเลือกตัวกรอง แทนการ Export ตรงๆ ทันที
+                                  setUtilityExportConfig({ meterId: 'All', startDate: '', endDate: '' });
+                                  setShowUtilityExportModal(true);
                               }
                           }}><Download size={16}/> CSV</Button>
                           <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExportPDF('utility-print-area', 'Utility_Report.pdf')} disabled={isExporting}>
@@ -18010,6 +18006,129 @@ export default function App() {
                       ) : (
                           <Button variant="primary" onClick={closeConfirm}>{confirmModal.confirmText || 'ตกลง'}</Button>
                       )}
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* NEW: Export Utility Readings Modal */}
+      {showUtilityExportModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+              <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 relative flex flex-col transform transition-all scale-100">
+                  <div className="flex justify-between items-center mb-6 border-b pb-4 shrink-0">
+                      <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                          <Download className="text-blue-500" />
+                          ส่งออกข้อมูลการจดมิเตอร์
+                      </h2>
+                      <button onClick={() => setShowUtilityExportModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
+                  </div>
+                  
+                  <div className="space-y-5">
+                      <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 mb-2">
+                          <p className="text-sm text-blue-800">ระบบจะทำการคำนวณ <strong className="font-bold">"ผลรวมจำนวนหน่วย"</strong> ของมิเตอร์และช่วงวันที่ที่คุณเลือก ให้ต่อท้ายไฟล์แบบอัตโนมัติ</p>
+                      </div>
+
+                      <div>
+                          <label className="block text-sm font-bold text-gray-700 mb-1">เลือกมิเตอร์</label>
+                          <select
+                              className="w-full border border-gray-300 rounded-md p-2.5 outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500 bg-white"
+                              value={utilityExportConfig.meterId}
+                              onChange={e => setUtilityExportConfig({...utilityExportConfig, meterId: e.target.value})}
+                          >
+                              <option value="All">-- ทุกมิเตอร์ (All Meters) --</option>
+                              {meters.filter(m => m.projectId === selectedProject.id).map(m => (
+                                  <option key={m.id} value={m.id}>{m.name} ({m.code})</option>
+                              ))}
+                          </select>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                          <div>
+                              <label className="block text-sm font-bold text-gray-700 mb-1">ตั้งแต่วันที่</label>
+                              <input
+                                  type="date"
+                                  className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500 bg-white"
+                                  value={utilityExportConfig.startDate}
+                                  onChange={e => setUtilityExportConfig({...utilityExportConfig, startDate: e.target.value})}
+                              />
+                          </div>
+                          <div>
+                              <label className="block text-sm font-bold text-gray-700 mb-1">ถึงวันที่</label>
+                              <input
+                                  type="date"
+                                  className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500 bg-white"
+                                  value={utilityExportConfig.endDate}
+                                  onChange={e => setUtilityExportConfig({...utilityExportConfig, endDate: e.target.value})}
+                              />
+                          </div>
+                      </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-6 mt-6 border-t border-gray-200 shrink-0">
+                      <Button variant="secondary" onClick={() => setShowUtilityExportModal(false)}>{t('cancel')}</Button>
+                      <Button
+                          icon={Download}
+                          onClick={() => {
+                              const projMeters = meters.filter(m => m.projectId === selectedProject.id);
+                              const meterIds = projMeters.map(m => m.id);
+
+                              let filteredReadings = utilityReadings.filter(r => meterIds.includes(r.meterId));
+
+                              // Apply Meter Filter
+                              if (utilityExportConfig.meterId !== 'All') {
+                                  filteredReadings = filteredReadings.filter(r => r.meterId === utilityExportConfig.meterId);
+                              }
+
+                              // Apply Date Filter
+                              if (utilityExportConfig.startDate) {
+                                  filteredReadings = filteredReadings.filter(r => r.date >= utilityExportConfig.startDate);
+                              }
+                              if (utilityExportConfig.endDate) {
+                                  filteredReadings = filteredReadings.filter(r => r.date <= utilityExportConfig.endDate);
+                              }
+
+                              // Sort Date Ascending for Export to show progressive usage clearly
+                              filteredReadings.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+                              let totalUsage = 0;
+                              const dataToExport = filteredReadings.map(r => {
+                                  const meter = projMeters.find(m => m.id === r.meterId);
+                                  totalUsage += (r.usage || 0);
+                                  return {
+                                      'วันที่จด (Date)': r.date,
+                                      'ประเภท (Type)': meter?.type === 'Water' ? 'น้ำประปา' : 'ไฟฟ้า',
+                                      'รหัส (Code)': meter?.code || '-',
+                                      'ชื่อมิเตอร์ (Name)': meter?.name || '-',
+                                      'เลขก่อนหน้า (Prev)': r.prevValue,
+                                      'เลขปัจจุบัน (Current)': r.value,
+                                      'จำนวนหน่วย (Usage)': r.usage,
+                                      'ผู้บันทึก (Recorder)': r.recorder || '-'
+                                  };
+                              });
+
+                              if (dataToExport.length > 0) {
+                                  // Append Total Row at the end
+                                  dataToExport.push({
+                                      'วันที่จด (Date)': 'รวมทั้งหมด (Total)',
+                                      'ประเภท (Type)': '',
+                                      'รหัส (Code)': '',
+                                      'ชื่อมิเตอร์ (Name)': '',
+                                      'เลขก่อนหน้า (Prev)': '',
+                                      'เลขปัจจุบัน (Current)': '',
+                                      'จำนวนหน่วย (Usage)': parseFloat(totalUsage.toFixed(2)),
+                                      'ผู้บันทึก (Recorder)': ''
+                                  });
+                                  
+                                  const dateLabel = utilityExportConfig.startDate || utilityExportConfig.endDate ? '_Filtered' : '';
+                                  exportToCSV(dataToExport, `Utility_Readings_${selectedProject?.code}${dateLabel}`);
+                                  setShowUtilityExportModal(false);
+                              } else {
+                                  alert('ไม่พบข้อมูลการจดมิเตอร์ในช่วงเวลาและเงื่อนไขที่เลือก');
+                              }
+                          }}
+                      >
+                          ดาวน์โหลด CSV
+                      </Button>
                   </div>
               </div>
           </div>
