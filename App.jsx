@@ -8391,11 +8391,11 @@ export default function App() {
                                                   }
 
                                                   return dayEvents.map(ev => (
-                                                      <div key={ev.id} className="border border-gray-100 rounded-lg p-3 hover:shadow-md hover:border-indigo-200 transition-all flex gap-3 group relative bg-white">
+                                                      <div key={ev.id} className="border border-gray-100 rounded-lg p-3 hover:shadow-md hover:border-indigo-200 transition-all flex gap-3 group relative bg-white items-center">
                                                           {/* Color Indicator */}
-                                                          <div className={`w-1.5 rounded-full shrink-0 ${ev.color || 'bg-blue-500'}`}></div>
+                                                          <div className={`w-1.5 h-full min-h-[40px] rounded-full shrink-0 ${ev.color || 'bg-blue-500'}`}></div>
                                                           
-                                                          <div className="flex-1 min-w-0 pr-8">
+                                                          <div className="flex-1 min-w-0">
                                                               <div className="flex items-center gap-2 mb-1">
                                                                   <span className="text-xs font-bold text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded flex items-center gap-1">
                                                                       <Clock size={10}/> {ev.time} น.
@@ -8407,17 +8407,17 @@ export default function App() {
                                                               )}
                                                           </div>
 
-                                                          {/* Actions Overlay */}
+                                                          {/* Actions (แสดงปุ่มให้เห็นชัดเจนตลอดเวลา) */}
                                                           {hasPerm('projects', 'edit') && (
-                                                              <div className="absolute top-2 right-2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                              <div className="flex flex-col gap-1.5 shrink-0 pl-2 border-l border-gray-100">
                                                                   <button 
                                                                       onClick={(e) => { e.stopPropagation(); setNewEvent(ev); setShowAddEventModal(true); }}
-                                                                      className="p-1.5 bg-gray-50 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded border border-gray-200" title="แก้ไข"
-                                                                  ><Edit size={12}/></button>
+                                                                      className="p-1.5 bg-gray-50 hover:bg-blue-50 text-gray-500 hover:text-blue-600 rounded border border-gray-200 transition-colors" title="แก้ไขนัดหมาย"
+                                                                  ><Edit size={14}/></button>
                                                                   <button 
                                                                       onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันลบนัดหมาย', `ลบกิจกรรม "${ev.title}" ใช่หรือไม่?`, () => setProjectEvents(prev => prev.filter(p => p.id !== ev.id))); }}
-                                                                      className="p-1.5 bg-gray-50 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded border border-gray-200" title="ลบ"
-                                                                  ><Trash2 size={12}/></button>
+                                                                      className="p-1.5 bg-gray-50 hover:bg-red-50 text-gray-500 hover:text-red-600 rounded border border-gray-200 transition-colors" title="ลบนัดหมาย"
+                                                                  ><Trash2 size={14}/></button>
                                                               </div>
                                                           )}
                                                       </div>
@@ -13930,6 +13930,7 @@ export default function App() {
 
             <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-2 shrink-0">
                 <Button variant="secondary" onClick={() => setShowAddEventModal(false)}>ยกเลิก</Button>
+                {/* FIX: เพิ่ม attribute form="eventForm" เพื่อให้ปุ่มนี้ Submit ฟอร์มด้านบนได้ */}
                 <Button type="submit" form="eventForm" icon={Save} className="bg-indigo-600 hover:bg-indigo-700">บันทึกนัดหมาย</Button>
             </div>
           </div>
