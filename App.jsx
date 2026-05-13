@@ -2395,21 +2395,7 @@ export default function App() {
   });
 
   // --- NEW: Meeting Proxies State ---
-  const [meetingProxies, setMeetingProxies] = usePersistentCollection('bmg_meeting_proxies', [], fbUser);
-  const [showAddProxyModal, setShowAddProxyModal] = useState(false);
-  const [selectedProxyView, setSelectedProxyView] = useState(null);
-  const [newProxy, setNewProxy] = useState({
-      id: null,
-      meetingId: '',
-      date: new Date().toISOString().split('T')[0],
-      ownerName: '',
-      unitNo: '',
-      proxyName: '',
-      proxyRelation: 'บุคคลภายนอก', // บุคคลในครอบครัว, ผู้เช่า, บุคคลภายนอก
-      status: 'Pending' // Pending, Verified, Rejected
-  });
-
-  // --- NEW: Meeting Ballots State ---
+  // --- NEW: Meetings Tab ---
   const [meetingBallots, setMeetingBallots] = usePersistentCollection('bmg_meeting_ballots', [], fbUser);
   const [showAddBallotModal, setShowAddBallotModal] = useState(false);
   const [selectedBallotView, setSelectedBallotView] = useState(null);
@@ -2422,6 +2408,20 @@ export default function App() {
       voterName: '',
       voterType: 'เจ้าของร่วม', // เจ้าของร่วม, ผู้รับมอบฉันทะ
       status: 'Valid' // Valid (บัตรดี), Void (บัตรเสีย)
+  });
+
+  // --- NEW: Project Events (Calendar) State ---
+  const [projectEvents, setProjectEvents] = usePersistentCollection('bmg_project_events', [], fbUser);
+  const [showAddEventModal, setShowAddEventModal] = useState(false);
+  const [currentEventMonth, setCurrentEventMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [selectedEventDate, setSelectedEventDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [newEvent, setNewEvent] = useState({
+      id: null,
+      title: '',
+      date: new Date().toISOString().split('T')[0],
+      time: '09:00',
+      description: '',
+      color: 'bg-blue-500'
   });
 
   // คงใช้ usePersistentState สำหรับข้อมูลที่เป็น Object เดี่ยวๆ
@@ -4777,6 +4777,26 @@ export default function App() {
       setNewDeposit({ ...dep, type: t, customType: ct, bank: b, customBank: cb, interestRate: dep.interestRate || '' });
       setIsEditingDeposit(true);
       setShowAddDepositModal(true);
+  };
+
+  // --- NEW: Project Event Handlers ---
+  const handleSaveEvent = (e) => {
+      e.preventDefault();
+      let nextList;
+      const dataToSave = { ...newEvent };
+
+      if (dataToSave.id) {
+          nextList = projectEvents.map(ev => ev.id === dataToSave.id ? dataToSave : ev);
+      } else {
+          dataToSave.id = generateId();
+          dataToSave.projectId = selectedProject.id;
+          nextList = [...projectEvents, dataToSave];
+      }
+      
+      setProjectEvents(nextList);
+      triggerAutoSync('ProjectEvents_ปฏิทินนัดหมาย', nextList, []);
+      setShowAddEventModal(false);
+      alert('บันทึกกิจกรรม/นัดหมายสำเร็จ');
   };
 
   const handleSaveCompanyInfo = (e) => {
@@ -8257,6 +8277,156 @@ export default function App() {
                                       )}
                                   </Card>
                               </div>
+
+                              {/* NEW: Project Calendar / Events (Google Calendar Style) */}
+                              <Card className="p-0 overflow-hidden mb-6 border-t-4 border-indigo-500 hover:shadow-sm transition-all">
+                                  <div className="p-4 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white gap-4">
+                                      <h3 className="font-bold flex items-center gap-2 text-gray-800">
+                                          <Calendar className="text-indigo-500" size={20}/> 
+                                          ปฏิทินปฏิบัติงานและนัดหมาย (Project Calendar)
+                                      </h3>
+                                      <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+                                          <div className="flex items-center bg-gray-100 rounded-lg p-1">
+                                              <button 
+                                                  onClick={() => {
+                                                      const [y, m] = currentEventMonth.split('-').map(Number);
+                                                      const d = new Date(y, m - 2, 1);
+                                                      setCurrentEventMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+                                                  }} 
+                                                  className="p-1 hover:bg-white rounded shadow-sm text-gray-600 transition"
+                                              ><ChevronLeft size={16}/></button>
+                                              <span className="px-3 text-sm font-bold text-gray-700 w-32 text-center">
+                                                  {new Date(currentEventMonth + '-01').toLocaleDateString('th-TH', { month: 'short', year: 'numeric' })}
+                                              </span>
+                                              <button 
+                                                  onClick={() => {
+                                                      const [y, m] = currentEventMonth.split('-').map(Number);
+                                                      const d = new Date(y, m, 1);
+                                                      setCurrentEventMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+                                                  }} 
+                                                  className="p-1 hover:bg-white rounded shadow-sm text-gray-600 transition"
+                                              ><ChevronRight size={16}/></button>
+                                          </div>
+                                          {hasPerm('projects', 'edit') && (
+                                              <Button size="sm" icon={Plus} className="bg-indigo-600 hover:bg-indigo-700" onClick={() => {
+                                                  setNewEvent({ id: null, title: '', date: selectedEventDate, time: '09:00', description: '', color: 'bg-blue-500' });
+                                                  setShowAddEventModal(true);
+                                              }}>เพิ่มนัดหมาย</Button>
+                                          )}
+                                      </div>
+                                  </div>
+
+                                  <div className="flex flex-col lg:flex-row">
+                                      {/* Left: Monthly Grid */}
+                                      <div className="w-full lg:w-7/12 border-r border-gray-100 bg-gray-50/50 p-4">
+                                          <div className="grid grid-cols-7 gap-1 mb-2 text-center">
+                                              {['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'].map((d, i) => (
+                                                  <div key={d} className={`text-xs font-bold ${i === 0 || i === 6 ? 'text-red-500' : 'text-gray-500'}`}>{d}</div>
+                                              ))}
+                                          </div>
+                                          <div className="grid grid-cols-7 gap-1">
+                                              {(() => {
+                                                  const [y, m] = currentEventMonth.split('-').map(Number);
+                                                  const daysArr = getCalendarDays(y, m);
+                                                  const projEvents = projectEvents.filter(ev => ev.projectId === selectedProject.id);
+
+                                                  return daysArr.map((dayObj, idx) => {
+                                                      if (!dayObj.isCurrentMonth) return <div key={idx} className="h-12 bg-transparent opacity-0"></div>;
+
+                                                      const dateStr = `${dayObj.date.getFullYear()}-${String(dayObj.date.getMonth() + 1).padStart(2, '0')}-${String(dayObj.date.getDate()).padStart(2, '0')}`;
+                                                      const dayEvents = projEvents.filter(ev => ev.date === dateStr);
+                                                      const isSelected = selectedEventDate === dateStr;
+                                                      const isToday = new Date().toISOString().split('T')[0] === dateStr;
+
+                                                      return (
+                                                          <div 
+                                                              key={idx} 
+                                                              onClick={() => setSelectedEventDate(dateStr)}
+                                                              className={`h-16 border rounded-lg p-1 cursor-pointer transition-all flex flex-col items-center ${
+                                                                  isSelected ? 'border-indigo-500 bg-indigo-50 shadow-sm ring-1 ring-indigo-500' : 
+                                                                  isToday ? 'border-orange-300 bg-orange-50' : 
+                                                                  'border-gray-200 bg-white hover:border-indigo-300 hover:bg-gray-50'
+                                                              }`}
+                                                          >
+                                                              <span className={`text-[11px] font-bold w-5 h-5 flex items-center justify-center rounded-full mb-1 ${
+                                                                  isSelected ? 'bg-indigo-600 text-white' : 
+                                                                  isToday ? 'bg-orange-500 text-white' : 
+                                                                  'text-gray-700'
+                                                              }`}>
+                                                                  {dayObj.date.getDate()}
+                                                              </span>
+                                                              
+                                                              <div className="flex flex-wrap justify-center gap-0.5 w-full px-0.5 overflow-hidden">
+                                                                  {dayEvents.slice(0, 3).map(ev => (
+                                                                      <div key={ev.id} className={`w-full h-1.5 rounded-full ${ev.color || 'bg-blue-500'}`} title={ev.title}></div>
+                                                                  ))}
+                                                                  {dayEvents.length > 3 && <span className="text-[8px] text-gray-500 font-bold leading-none">+{dayEvents.length - 3}</span>}
+                                                              </div>
+                                                          </div>
+                                                      );
+                                                  });
+                                              })()}
+                                          </div>
+                                      </div>
+
+                                      {/* Right: Daily Agenda */}
+                                      <div className="w-full lg:w-5/12 bg-white flex flex-col h-[380px]">
+                                          <div className="p-4 border-b border-gray-100 bg-indigo-50/30 shrink-0">
+                                              <h4 className="font-bold text-indigo-900 text-sm flex items-center gap-2">
+                                                  <Calendar size={16} className="text-indigo-500"/>
+                                                  ตารางนัดหมาย: {new Date(selectedEventDate).toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'})}
+                                              </h4>
+                                          </div>
+                                          <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                                              {(() => {
+                                                  const dayEvents = projectEvents.filter(ev => ev.projectId === selectedProject.id && ev.date === selectedEventDate).sort((a,b) => a.time.localeCompare(b.time));
+                                                  
+                                                  if (dayEvents.length === 0) {
+                                                      return (
+                                                          <div className="h-full flex flex-col items-center justify-center text-gray-400">
+                                                              <Calendar size={40} className="mb-2 opacity-30"/>
+                                                              <p className="text-sm">ไม่มีนัดหมายในวันนี้</p>
+                                                          </div>
+                                                      );
+                                                  }
+
+                                                  return dayEvents.map(ev => (
+                                                      <div key={ev.id} className="border border-gray-100 rounded-lg p-3 hover:shadow-md hover:border-indigo-200 transition-all flex gap-3 group relative bg-white">
+                                                          {/* Color Indicator */}
+                                                          <div className={`w-1.5 rounded-full shrink-0 ${ev.color || 'bg-blue-500'}`}></div>
+                                                          
+                                                          <div className="flex-1 min-w-0 pr-8">
+                                                              <div className="flex items-center gap-2 mb-1">
+                                                                  <span className="text-xs font-bold text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                                                      <Clock size={10}/> {ev.time} น.
+                                                                  </span>
+                                                              </div>
+                                                              <h5 className="font-bold text-gray-800 text-sm truncate">{ev.title}</h5>
+                                                              {ev.description && (
+                                                                  <p className="text-xs text-gray-500 mt-1 line-clamp-2">{ev.description}</p>
+                                                              )}
+                                                          </div>
+
+                                                          {/* Actions Overlay */}
+                                                          {hasPerm('projects', 'edit') && (
+                                                              <div className="absolute top-2 right-2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                  <button 
+                                                                      onClick={(e) => { e.stopPropagation(); setNewEvent(ev); setShowAddEventModal(true); }}
+                                                                      className="p-1.5 bg-gray-50 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded border border-gray-200" title="แก้ไข"
+                                                                  ><Edit size={12}/></button>
+                                                                  <button 
+                                                                      onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันลบนัดหมาย', `ลบกิจกรรม "${ev.title}" ใช่หรือไม่?`, () => setProjectEvents(prev => prev.filter(p => p.id !== ev.id))); }}
+                                                                      className="p-1.5 bg-gray-50 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded border border-gray-200" title="ลบ"
+                                                                  ><Trash2 size={12}/></button>
+                                                              </div>
+                                                          )}
+                                                      </div>
+                                                  ));
+                                              })()}
+                                          </div>
+                                      </div>
+                                  </div>
+                              </Card>
 
                               {/* Row 4: Deposits & Savings */}
                               <Card className="p-6 hover:shadow-sm transition-all mt-6 border-t-4 border-emerald-500">
@@ -13677,352 +13847,91 @@ export default function App() {
           </div>
       )}
 
-      {/* Global Floating Notification Bell */}
-      {!isExporting && currentUser && getPendingApprovals().length > 0 && (
-          <div className="fixed bottom-8 right-8 z-[90] animate-fade-in">
-              <button 
-                  onClick={() => setShowNotificationModal(true)}
-                  className="relative flex items-center justify-center w-16 h-16 bg-red-600 hover:bg-red-700 text-white rounded-full shadow-2xl transition-transform hover:scale-110 border-4 border-white"
-                  title="มีรายการรอให้คุณดำเนินการ/อนุมัติ"
-              >
-                  <Bell size={32} className="animate-ring" />
-                  <span className="absolute -top-2 -right-2 bg-white text-red-600 text-sm font-black w-7 h-7 flex items-center justify-center rounded-full shadow-md border-2 border-red-600">
-                      {getPendingApprovals().length > 99 ? '99+' : getPendingApprovals().length}
-                  </span>
-              </button>
-          </div>
-      )}
-
-      {/* Notification List Modal */}
-      {showNotificationModal && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fade-in">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden border border-gray-200">
-                  <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-red-50 shrink-0">
-                      <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center text-red-600">
-                              <Bell className="animate-ring" size={20}/>
-                          </div>
-                          <div>
-                              <h2 className="text-xl font-black text-red-800">
-                                  รายการรอการดำเนินการ
-                              </h2>
-                              <p className="text-xs font-bold text-red-600">ทั้งหมด {getPendingApprovals().length} รายการที่ต้องการตรวจสอบ</p>
-                          </div>
-                      </div>
-                      <button onClick={() => setShowNotificationModal(false)} className="text-gray-400 hover:text-red-600 p-2 rounded-xl hover:bg-red-100 transition-colors">
-                          <X size={24} />
-                      </button>
-                  </div>
-                  <div className="flex-1 overflow-y-auto p-5 space-y-3 bg-gray-50 custom-scrollbar">
-                      {getPendingApprovals().length > 0 ? getPendingApprovals().map(item => (
-                          <div key={item.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm hover:border-red-300 transition-all hover:shadow-md flex flex-col gap-4 group">
-                              <div className="flex justify-between items-start">
-                                  <div className="flex gap-3">
-                                      <div className={`p-2.5 rounded-xl shrink-0 mt-0.5 ${item.type === 'pm' ? 'bg-orange-50 text-orange-600' : item.type === 'repair' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
-                                          {item.type === 'pm' ? <Wrench size={20}/> : item.type === 'repair' ? <Hammer size={20}/> : <Calendar size={20}/>}
-                                      </div>
-                                      <div>
-                                          <h4 className="font-bold text-gray-800 text-sm group-hover:text-red-600 transition-colors">{item.title}</h4>
-                                          <p className="text-xs text-gray-500 font-medium flex items-center gap-1 mt-1">
-                                              <Building2 size={12} className="text-gray-400"/> {item.project.name}
-                                          </p>
-                                      </div>
-                                  </div>
-                                  <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-md shrink-0">
-                                      {new Date(item.date).toLocaleDateString('th-TH', { month: 'short', day: 'numeric', year: 'numeric'})}
-                                  </span>
-                              </div>
-                              <Button 
-                                  size="sm" 
-                                  variant="outline" 
-                                  className="w-full border-red-200 text-red-600 hover:bg-red-50 font-bold shadow-sm"
-                                  onClick={() => {
-                                      setShowNotificationModal(false);
-                                      setSelectedProject(item.project);
-                                      if (item.type === 'pm') {
-                                          setProjectTab('pm');
-                                          setPmSubTab('history');
-                                          setTimeout(() => setSelectedPmHistory(item.record), 300);
-                                      } else if (item.type === 'schedule') {
-                                          setProjectTab('schedule');
-                                          setCurrentMonth(item.month);
-                                      } else if (item.type === 'repair') {
-                                          setProjectTab('repair');
-                                          setRepairFilter('All');
-                                          setTimeout(() => setSelectedRepairView(item.record), 300);
-                                      }
-                                  }}
-                              >
-                                  {item.actionText}
-                              </Button>
-                          </div>
-                      )) : (
-                          <div className="flex flex-col items-center justify-center py-12 text-gray-400">
-                              <CheckCircle size={48} className="mb-3 text-green-500 opacity-50"/>
-                              <p className="font-bold text-gray-500">ยอดเยี่ยม!</p>
-                              <p className="text-sm">ไม่มีรายการรออนุมัติค้างอยู่</p>
-                          </div>
-                      )}
-                  </div>
-              </div>
-          </div>
-      )}
-      
-      {/* Modals */}
-      {showAddUserModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl p-6 m-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-6 border-b pb-4"><h2 className="text-2xl font-bold text-gray-800">{isEditingUser ? t('editUserTitle') : t('newUserTitle')}</h2><button onClick={() => setShowAddUserModal(false)}><X size={24} /></button></div>
-            <form onSubmit={handleSaveUser} className="space-y-6">
-              <div className="flex flex-col md:flex-row gap-6">
-                <div className="flex flex-col items-center gap-3">
-                  <div className="w-32 h-32 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden border-2 border-dashed border-gray-300 relative group">
-                    {newUser.photo ? <img src={newUser.photo} alt="Preview" className="w-full h-full object-cover" /> : <User size={48} className="text-gray-400" />}
-                    <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><label htmlFor="photo-upload" className="cursor-pointer text-white text-xs font-bold flex flex-col items-center"><Upload size={20} className="mb-1" />{t('uploadPhoto')}</label><input id="photo-upload" type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} /></div>
-                  </div>
-                  {newUser.photo && <button type="button" onClick={() => setNewUser({...newUser, photo: null})} className="text-red-500 text-xs hover:underline">{t('removePhoto')}</button>}
-                </div>
-                <div className="flex-1 space-y-4">
-                  <h3 className="text-lg font-semibold text-gray-700 border-b pb-2">{t('personalInfo')}</h3>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">{t('empId')} / {t('username')}</label>
-                          <input 
-                              type="text" 
-                              required 
-                              className={`w-full border rounded-md p-2 ${isEditingUser && currentUser?.username !== 'admin' ? 'bg-gray-100 cursor-not-allowed text-gray-500' : ''}`} 
-                              value={newUser.employeeId} 
-                              onChange={e => {
-                                  const val = e.target.value;
-                                  setNewUser({...newUser, employeeId: val, username: val});
-                              }} 
-                              placeholder="รหัสพนักงาน (ใช้เป็นชื่อเข้าระบบ)" 
-                              disabled={isEditingUser && currentUser?.username !== 'admin'} 
-                          />
-                      </div>
-                      <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">{t('password')}</label>
-                          <input type="text" required className="w-full border rounded-md p-2" value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} />
-                      </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                      <div><label className="block text-sm font-medium text-gray-700 mb-1">{t('firstName')}</label><input type="text" required className="w-full border rounded-md p-2" value={newUser.firstName} onChange={e => setNewUser({...newUser, firstName: e.target.value})} /></div>
-                      <div><label className="block text-sm font-medium text-gray-700 mb-1">{t('lastName')}</label><input type="text" required className="w-full border rounded-md p-2" value={newUser.lastName} onChange={e => setNewUser({...newUser, lastName: e.target.value})} /></div>
-                  </div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">{t('phone')}</label><input type="tel" className="w-full border rounded-md p-2" value={newUser.phone} onChange={e => setNewUser({...newUser, phone: e.target.value})} /></div>
-                </div>
-              </div>
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold text-gray-700 border-b pb-2 flex items-center justify-between">
-                    <span>{t('position')} & {t('col_dept')}</span>
-                    {isEditingUser && currentUser?.username !== 'admin' && <span className="text-xs text-red-500 font-normal">* ไม่อนุญาตให้แก้ไขในโหมดนี้</span>}
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">{t('position')}</label>
-                      <select 
-                          className={`w-full border rounded-md p-2 ${isEditingUser && currentUser?.username !== 'admin' ? 'bg-gray-100 cursor-not-allowed text-gray-500' : ''}`} 
-                          value={newUser.position} 
-                          onChange={e => {
-                              const newPos = e.target.value;
-                              setNewUser({
-                                  ...newUser, 
-                                  position: newPos,
-                                  // แก้ไข: ใช้ getMergedPermissions ป้องกันปัญหา Reference หลุด
-                                  permissions: getMergedPermissions(rolePermissions[newPos])
-                              });
-                          }} 
-                          disabled={isEditingUser && currentUser?.username !== 'admin'}
-                      >
-                          {EMPLOYEE_POSITIONS.map(pos => <option key={pos} value={pos}>{pos}</option>)}
-                      </select>
-                      {newUser.position.startsWith("อื่นๆ") && <input type="text" className={`mt-2 w-full border rounded-md p-2 ${isEditingUser && currentUser?.username !== 'admin' ? 'bg-gray-100 cursor-not-allowed text-gray-500' : 'bg-gray-50'}`} placeholder={t('specifyOther')} value={newUser.otherPosition} onChange={e => setNewUser({...newUser, otherPosition: e.target.value})} disabled={isEditingUser && currentUser?.username !== 'admin'} />}
-                  </div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">{t('currentDept')}</label><select className={`w-full border rounded-md p-2 ${isEditingUser && currentUser?.username !== 'admin' ? 'bg-gray-100 cursor-not-allowed text-gray-500' : ''}`} value={newUser.department} onChange={e => setNewUser({...newUser, department: e.target.value})} disabled={isEditingUser && currentUser?.username !== 'admin'}><option value="">{t('selectDept')}</option><option value="Head Office">Head Office</option>{projects.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}</select></div>
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('accessibleDepts')}</label>
-                    {currentUser?.username === 'admin' ? (
-                        <div className="flex gap-2 mb-2">
-                            <select className="w-full border rounded-md p-2" onChange={handleAddAccessibleDept} defaultValue="">
-                                <option value="" disabled>{t('selectDept')}</option>
-                                <option value="All">All (ทุกหน่วยงาน)</option>
-                                <option value="Head Office">Head Office</option>
-                                {projects.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
-                            </select>
+      {/* NEW: Add Project Event Modal */}
+      {showAddEventModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto p-4 animate-fade-in">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md flex flex-col overflow-hidden">
+            <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-indigo-50 shrink-0">
+              <h2 className="text-lg font-bold text-indigo-900 flex items-center gap-2">
+                <Calendar className="text-indigo-600" size={20}/>
+                {newEvent.id ? 'แก้ไขนัดหมาย/กิจกรรม' : 'เพิ่มนัดหมายใหม่'}
+              </h2>
+              <button onClick={() => setShowAddEventModal(false)} className="text-gray-400 hover:text-red-500 bg-white p-1 rounded-md shadow-sm"><X size={20} /></button>
+            </div>
+            
+            <div className="p-5 flex-1 overflow-y-auto">
+                <form id="eventForm" onSubmit={handleSaveEvent} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">หัวข้อนัดหมาย (Title) <span className="text-red-500">*</span></label>
+                        <input 
+                            type="text" 
+                            required 
+                            className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-200 text-sm"
+                            value={newEvent.title}
+                            onChange={e => setNewEvent({...newEvent, title: e.target.value})}
+                            placeholder="เช่น ประชุมคณะกรรมการ, ล้างแท็งก์น้ำ..."
+                        />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">วันที่ (Date) <span className="text-red-500">*</span></label>
+                            <input 
+                                type="date" 
+                                required 
+                                className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-200 text-sm"
+                                value={newEvent.date}
+                                onChange={e => setNewEvent({...newEvent, date: e.target.value})}
+                            />
                         </div>
-                    ) : (
-                        <div className="text-xs text-red-500 mb-2">* สิทธิ์นี้กำหนดโดย Admin เท่านั้น</div>
-                    )}
-                    <div className="flex flex-wrap gap-2 mt-2">
-                        {newUser.accessibleDepts.length > 0 ? newUser.accessibleDepts.map((dept, index) => (
-                            <div key={index} className="flex items-center gap-1 bg-orange-100 text-orange-800 px-3 py-1 rounded-full text-sm">
-                                <span>{dept === 'All' ? 'All (ทุกหน่วยงาน)' : dept}</span>
-                                {currentUser?.username === 'admin' && (
-                                    <button type="button" onClick={() => removeAccessibleDept(dept)} className="text-orange-600 hover:text-orange-900"><XCircle size={14} /></button>
-                                )}
-                            </div>
-                        )) : (
-                            <span className="text-gray-400 text-sm">- ยังไม่มีหน่วยงานที่เข้าถึงได้ -</span>
-                        )}
-                    </div>
-                </div>
-              </div>
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold text-gray-700 border-b pb-2 flex items-center justify-between">
-                    <span>{t('accessControl')}</span>
-                    {currentUser?.username !== 'admin' && <span className="text-xs text-red-500 font-normal">* สงวนสิทธิ์การกำหนดสิทธิ์ให้สำหรับ Admin เท่านั้น</span>}
-                </h3>
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">{t('permissions')}</label>
-                    <div className="overflow-x-auto border border-gray-200 rounded-lg">
-                        <table className="w-full text-sm text-left">
-                            <thead className="bg-gray-100 text-gray-700">
-                                <tr>
-                                    <th className="p-3 border-b">โมดูล (Module)</th>
-                                    <th className="p-3 border-b text-center w-16">ดู</th>
-                                    <th className="p-3 border-b text-center w-16">บันทึก</th>
-                                    <th className="p-3 border-b text-center w-16">แก้ไข</th>
-                                    <th className="p-3 border-b text-center w-16">อนุมัติ</th>
-                                    <th className="p-3 border-b text-center w-16">ลบ</th>
-                                    <th className="p-3 border-b text-center w-16">พิมพ์</th>
-                                    <th className="p-3 border-b text-center w-20 bg-gray-200">All</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100 bg-white">
-                                {AVAILABLE_MENUS.map(menu => {
-                                    const renderRow = (item, isSub = false) => {
-                                        const perms = newUser.permissions[item.id] || {};
-                                        const isAll = perms.view && perms.save && perms.edit && perms.approve && perms.delete && perms.print;
-                                        return (
-                                            <tr key={item.id} className={`hover:bg-gray-50 transition-colors ${isSub ? 'bg-gray-50/50' : ''}`}>
-                                                <td className={`p-3 font-medium text-gray-800 ${isSub ? 'pl-8 text-xs text-gray-600 border-l-2 border-orange-200' : ''}`}>
-                                                    {isSub && <span className="mr-2 text-gray-400">└</span>}
-                                                    {t(item.label)}
-                                                </td>
-                                                {['view', 'save', 'edit', 'approve', 'delete', 'print'].map(ptype => (
-                                                    <td key={ptype} className="p-3 text-center">
-                                                        <input 
-                                                            type="checkbox" 
-                                                            className="w-4 h-4 accent-orange-600 cursor-pointer disabled:opacity-50" 
-                                                            checked={!!perms[ptype]} 
-                                                            onChange={(e) => handlePermissionChange(item.id, ptype, e.target.checked)} 
-                                                            disabled={currentUser?.username !== 'admin'} 
-                                                        />
-                                                    </td>
-                                                ))}
-                                                <td className="p-3 text-center bg-gray-50 border-l border-gray-100">
-                                                    <input 
-                                                        type="checkbox" 
-                                                        className="w-4 h-4 accent-orange-600 cursor-pointer disabled:opacity-50" 
-                                                        checked={isAll} 
-                                                        onChange={(e) => handlePermissionAll(item.id, e.target.checked)} 
-                                                        disabled={currentUser?.username !== 'admin'} 
-                                                    />
-                                                </td>
-                                            </tr>
-                                        );
-                                    };
-
-                                    return (
-                                        <React.Fragment key={menu.id}>
-                                            {renderRow(menu)}
-                                            {menu.submenus && menu.submenus.map(sub => renderRow(sub, true))}
-                                        </React.Fragment>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 pt-4 border-t"><Button variant="secondary" onClick={() => setShowAddUserModal(false)}>{t('cancel')}</Button><Button type="submit">{t('save')}</Button></div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {showAddProjectModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl p-6 m-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-6 border-b pb-4"><h2 className="text-2xl font-bold text-gray-800">{isEditingProject ? 'แก้ไขข้อมูลหน่วยงาน' : t('newProjectTitle')}</h2><button onClick={() => setShowAddProjectModal(false)}><X size={24} /></button></div>
-            <form onSubmit={handleSaveProject} className="space-y-6">
-              <div className="flex flex-col md:flex-row gap-6">
-                <div className="flex flex-col items-center gap-3">
-                  <div className="w-32 h-32 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden border-2 border-dashed border-gray-300 relative group">{newProject.logo ? <img src={newProject.logo} alt="Project Logo" className="w-full h-full object-cover" /> : <div className="text-center text-gray-400 p-2"><ImageIcon size={32} className="mx-auto mb-1" /><span className="text-xs">{t('projLogo')}</span></div>}<div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><label htmlFor="logo-upload" className="cursor-pointer text-white text-xs font-bold flex flex-col items-center"><Upload size={20} className="mb-1" />{newProject.logo ? 'เปลี่ยนรูปภาพ' : t('uploadLogo')}</label><input id="logo-upload" type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} /></div></div>
-                  {newProject.logo && <button type="button" onClick={() => setNewProject({...newProject, logo: null})} className="text-red-500 text-xs hover:underline">{t('removePhoto')}</button>}
-                </div>
-                <div className="flex-1 space-y-4">
-                  <div><label className="block text-sm font-medium text-gray-700 mb-2">{t('projType')}</label><div className="flex gap-2">{PROJECT_TYPES.map(type => (<button key={type} type="button" onClick={() => setNewProject({...newProject, type})} className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors border ${newProject.type === type ? 'bg-orange-50 border-orange-500 text-orange-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}>{type === 'Condo' ? t('tab_condo') : type === 'Village' ? t('tab_village') : t('tab_office')}</button>))}</div></div>
-                  <div className="grid grid-cols-3 gap-4"><div className="col-span-1"><label className="block text-sm font-medium text-gray-700 mb-1">{t('projCode')}</label><input type="text" readOnly className="w-full border rounded-md p-2 bg-gray-100 text-gray-500 cursor-not-allowed font-mono" value={newProject.code || '-'} /></div><div className="col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">{t('projName')}</label><input type="text" required className="w-full border rounded-md p-2" value={newProject.name} onChange={e => setNewProject({...newProject, name: e.target.value})} /></div></div>
-                  <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-medium text-gray-700 mb-1">{t('officePhone')}</label><input type="tel" className="w-full border rounded-md p-2" value={newProject.phone} onChange={e => setNewProject({...newProject, phone: e.target.value})} /></div><div><label className="block text-sm font-medium text-gray-700 mb-1">{t('taxId')}</label><input type="text" className="w-full border rounded-md p-2" value={newProject.taxId} onChange={e => setNewProject({...newProject, taxId: e.target.value})} /></div></div>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div><label className="block text-sm font-medium text-gray-700 mb-1">{t('projAddress')}</label><textarea className="w-full border rounded-md p-2 h-[120px] resize-none" value={newProject.address} onChange={e => setNewProject({...newProject, address: e.target.value})}></textarea></div>
-                <div className="space-y-3">
-                    <div className="grid grid-cols-2 gap-3">
-                        <div><label className="block text-sm font-medium text-gray-700 mb-1">{t('contractStartDate')}</label><input type="date" className="w-full border rounded-md p-2 text-sm" value={newProject.contractStartDate} onChange={e => setNewProject({...newProject, contractStartDate: e.target.value})} /></div>
-                        <div><label className="block text-sm font-medium text-gray-700 mb-1">{t('contractEndDate')}</label><input type="date" className="w-full border rounded-md p-2 text-sm" value={newProject.contractEndDate} onChange={e => setNewProject({...newProject, contractEndDate: e.target.value})} /></div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">เวลา (Time)</label>
+                            <input 
+                                type="time" 
+                                required 
+                                className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-200 text-sm"
+                                value={newEvent.time}
+                                onChange={e => setNewEvent({...newEvent, time: e.target.value})}
+                            />
+                        </div>
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">มูลค่าสัญญาบริหาร (บาท/เดือน)</label>
-                        <div className="relative">
-                            <span className="absolute left-3 top-2 text-gray-500">฿</span>
-                            <input type="number" className="w-full border rounded-md pl-8 p-2 text-sm" value={newProject.contractValue || ''} onChange={e => setNewProject({...newProject, contractValue: e.target.value})} placeholder="0.00" />
+                        <label className="block text-sm font-bold text-gray-700 mb-1">รายละเอียดเพิ่มเติม (Description)</label>
+                        <textarea 
+                            className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-200 text-sm h-20 resize-none"
+                            value={newEvent.description}
+                            onChange={e => setNewEvent({...newEvent, description: e.target.value})}
+                            placeholder="ระบุรายละเอียด ผู้เข้าร่วม หรือสถานที่..."
+                        ></textarea>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-2">เลือกสีป้ายกำกับ (Color Label)</label>
+                        <div className="flex flex-wrap gap-3 bg-gray-50 p-3 rounded-lg border border-gray-100">
+                            {[
+                                { bg: 'bg-blue-500', name: 'น้ำเงิน' },
+                                { bg: 'bg-green-500', name: 'เขียว' },
+                                { bg: 'bg-red-500', name: 'แดง' },
+                                { bg: 'bg-orange-500', name: 'ส้ม' },
+                                { bg: 'bg-purple-500', name: 'ม่วง' },
+                                { bg: 'bg-teal-500', name: 'มิ้นต์' },
+                                { bg: 'bg-gray-800', name: 'เทาดำ' }
+                            ].map(color => (
+                                <button
+                                    key={color.bg}
+                                    type="button"
+                                    onClick={() => setNewEvent({...newEvent, color: color.bg})}
+                                    className={`w-8 h-8 rounded-full ${color.bg} border-2 transition-transform shadow-sm ${newEvent.color === color.bg ? 'border-gray-900 scale-110 ring-2 ring-gray-200' : 'border-transparent hover:scale-110'}`}
+                                    title={color.name}
+                                />
+                            ))}
                         </div>
                     </div>
-                </div>
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-gray-700 border-b pb-2 mb-4">{t('uploadDocs')}</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {[{ key: 'orchor', label: t('doc_orchor') }, { key: 'committee', label: t('doc_committee') }, { key: 'regulations', label: t('doc_regulations') }, { key: 'resident_rules', label: t('doc_resident_rules') }].map((doc) => (
-                    <div key={doc.key} className="border rounded-md p-3 flex items-center justify-between bg-gray-50">
-                        <div className="flex items-center gap-2 overflow-hidden mr-2">
-                            <File size={20} className="text-gray-400 flex-shrink-0" />
-                            <span className="text-sm truncate font-medium text-gray-700" title={doc.label}>{doc.label}</span>
-                        </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                            {newProject.files && newProject.files[doc.key] ? (
-                                <div className="flex items-center gap-2">
-                                    <span className="text-xs text-green-600 flex items-center gap-1 max-w-[100px] truncate" title={newProject.files[doc.key].name || 'Uploaded'}>
-                                        <CheckCircle size={12} className="shrink-0" /> 
-                                        <span className="truncate">{newProject.files[doc.key].name || 'Uploaded'}</span>
-                                    </span>
-                                    <label className="cursor-pointer text-blue-500 hover:text-blue-700 hover:bg-blue-50 p-1.5 rounded-md transition-colors" title="เปลี่ยนไฟล์ (Replace)">
-                                        <Edit size={14} />
-                                        <input type="file" accept=".pdf,.doc,.docx,.jpg,.png" className="hidden" onChange={(e) => handleProjectFileUpload(e, doc.key)} />
-                                    </label>
-                                    <button 
-                                        type="button" 
-                                        onClick={() => setNewProject(prev => ({ ...prev, files: { ...prev.files, [doc.key]: null } }))} 
-                                        className="text-red-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-md transition-colors"
-                                        title="ลบไฟล์"
-                                    >
-                                        <Trash2 size={14} />
-                                    </button>
-                                </div>
-                            ) : (
-                                <label className="cursor-pointer bg-white border border-gray-300 text-gray-600 px-3 py-1.5 rounded text-xs hover:bg-gray-50 transition-colors flex items-center gap-1 shadow-sm">
-                                    <Upload size={12} /> อัปโหลด
-                                    <input type="file" accept=".pdf,.doc,.docx,.jpg,.png" className="hidden" onChange={(e) => handleProjectFileUpload(e, doc.key)} />
-                                </label>
-                            )}
-                        </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 pt-4 border-t">
-                  <Button variant="secondary" onClick={() => setShowAddProjectModal(false)}>{t('cancel')}</Button>
-                  <Button type="submit" disabled={isSavingProject}>
-                      {isSavingProject ? <><Loader2 size={16} className="animate-spin" /> กำลังบันทึก...</> : t('save')}
-                  </Button>
-              </div>
-            </form>
+                </form>
+            </div>
+
+            <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-2 shrink-0">
+                <Button variant="secondary" onClick={() => setShowAddEventModal(false)}>ยกเลิก</Button>
+                <Button type="submit" form="eventForm" icon={Save} className="bg-indigo-600 hover:bg-indigo-700">บันทึกนัดหมาย</Button>
+            </div>
           </div>
         </div>
       )}
