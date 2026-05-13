@@ -1011,8 +1011,7 @@ const BANK_LIST = [
   "ธนาคารยูโอบี", "ธนาคารสแตนดาร์ดชาร์เตอร์ด (ไทย)", "ธนาคารไทยเครดิตเพื่อรายย่อย", "ธนาคารแลนด์ แอนด์ เฮาส์",
   "ธนาคารไอซีบีซี (ไทย)", "ธนาคารพัฒนาวิสาหกิจขนาดกลางและขนาดย่อมแห่งประเทศไทย", "ธนาคารเพื่อการเกษตรและสหกรณ์การเกษตร",
   "ธนาคารเพื่อการส่งออกและนำเข้าแห่งประเทศไทย", "ธนาคารออมสิน", "ธนาคารอาคารสงเคราะห์", "ธนาคารอิสลามแห่งประเทศไทย",
-  "ธนาคารแห่งประเทศจีน", "ธนาคารซูมิโตโม มิตซุย ทรัสต์ (ไทย)", "ธนาคารฮ่องกงและเซี้ยงไฮ้แบงกิ้งคอร์ปอเรชั่น จำกัด",
-  "อื่นๆ (ให้ระบุ)"
+  "ธนาคารแห่งประเทศจีน", "ธนาคารซูมิโตโม มิตซุย ทรัสต์ (ไทย)", "ธนาคารฮ่องกงและเซี้ยงไฮ้แบงกิ้งคอร์ปอเรชั่น จำกัด"
 ];
 
 // NEW: Custom 3D Bar Shapes
@@ -2265,7 +2264,7 @@ export default function App() {
   const [showAddDepositModal, setShowAddDepositModal] = useState(false);
   const [isEditingDeposit, setIsEditingDeposit] = useState(false);
   const [newDeposit, setNewDeposit] = useState({
-      id: null, type: 'ฝากประจำ', customType: '', bank: '', customBank: '', amount: '', interestRate: '', duration: '12 เดือน', startDate: '', endDate: ''
+      id: null, type: 'ฝากประจำ', customType: '', bank: '', amount: '', interestRate: '', duration: '12 เดือน', startDate: '', endDate: ''
   });
 
   // --- NEW: Meeting Gantt Plans State ---
@@ -4713,8 +4712,7 @@ export default function App() {
       e.preventDefault();
       let nextList;
       const finalType = newDeposit.type === 'อื่นๆ (ให้ระบุ)' ? newDeposit.customType : newDeposit.type;
-      const finalBank = newDeposit.bank === 'อื่นๆ (ให้ระบุ)' ? newDeposit.customBank : newDeposit.bank;
-      const dataToSave = { ...newDeposit, type: finalType, bank: finalBank };
+      const dataToSave = { ...newDeposit, type: finalType };
 
       if (isEditingDeposit) {
           nextList = deposits.map(d => d.id === newDeposit.id ? dataToSave : d);
@@ -4736,15 +4734,7 @@ export default function App() {
           ct = t;
           t = 'อื่นๆ (ให้ระบุ)';
       }
-      
-      let b = dep.bank;
-      let cb = '';
-      if (b && !BANK_LIST.includes(b)) {
-          cb = b;
-          b = 'อื่นๆ (ให้ระบุ)';
-      }
-      
-      setNewDeposit({ ...dep, type: t, customType: ct, bank: b || '', customBank: cb, interestRate: dep.interestRate || '' });
+      setNewDeposit({ ...dep, type: t, customType: ct, bank: dep.bank || '', interestRate: dep.interestRate || '' });
       setIsEditingDeposit(true);
       setShowAddDepositModal(true);
   };
@@ -8274,7 +8264,7 @@ export default function App() {
                                       </h3>
                                       {hasPerm('projects', 'edit') && (
                                           <Button size="sm" icon={Plus} className="bg-emerald-600 hover:bg-emerald-700" onClick={() => {
-                                              setNewDeposit({ id: null, type: 'ฝากประจำ', customType: '', bank: '', customBank: '', amount: '', interestRate: '', duration: '12 เดือน', startDate: '', endDate: '' });
+                                              setNewDeposit({ id: null, type: 'ฝากประจำ', customType: '', bank: '', amount: '', interestRate: '', duration: '12 เดือน', startDate: '', endDate: '' });
                                               setIsEditingDeposit(false);
                                               setShowAddDepositModal(true);
                                           }}>เพิ่มรายการ</Button>
@@ -14077,16 +14067,6 @@ export default function App() {
                                 <option key={bank} value={bank}>{bank}</option>
                             ))}
                         </select>
-                        {newDeposit.bank === 'อื่นๆ (ให้ระบุ)' && (
-                            <input 
-                                type="text" 
-                                className="mt-2 w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200 bg-gray-50"
-                                placeholder="ระบุชื่อธนาคาร หรือสถาบันการเงิน..."
-                                value={newDeposit.customBank || ''}
-                                onChange={e => setNewDeposit({...newDeposit, customBank: e.target.value})}
-                                required
-                            />
-                        )}
                     </div>
                 </div>
 
