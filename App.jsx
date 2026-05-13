@@ -9,7 +9,7 @@ import {
   XCircle, Image as ImageIcon, File, Hourglass, Phone, Mail, LayoutGrid, List, ChevronDown, Save,
   ChevronLeft, ChevronRight, MousePointer2, FileCheck, DollarSign, Camera,
   MapPin, Box, PenTool, Printer as PrinterIcon, History, Folder, Lock,
-  Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2, Bell, Megaphone, Radio, Medal, Landmark
+  Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2, Bell, Megaphone, Radio, Medal, Landmark, RefreshCw
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
@@ -1011,7 +1011,7 @@ const BANK_LIST = [
   "ธนาคารยูโอบี", "ธนาคารสแตนดาร์ดชาร์เตอร์ด (ไทย)", "ธนาคารไทยเครดิตเพื่อรายย่อย", "ธนาคารแลนด์ แอนด์ เฮาส์",
   "ธนาคารไอซีบีซี (ไทย)", "ธนาคารพัฒนาวิสาหกิจขนาดกลางและขนาดย่อมแห่งประเทศไทย", "ธนาคารเพื่อการเกษตรและสหกรณ์การเกษตร",
   "ธนาคารเพื่อการส่งออกและนำเข้าแห่งประเทศไทย", "ธนาคารออมสิน", "ธนาคารอาคารสงเคราะห์", "ธนาคารอิสลามแห่งประเทศไทย",
-  "ธนาคารแห่งประเทศจีน", "ธนาคารซูมิโตโม มิตซุย ทรัสต์ (ไทย)", "ธนาคารฮ่องกงและเซี้ยงไฮ้แบงกิ้งคอร์ปอเรชั่น จำกัด"
+  "ธนาคารแห่งประเทศจีน", "ธนาคารซูมิโตโม มิตซุย ทรัสต์ (ไทย)", "ธนาคารฮ่องกงและเซี้ยงไฮ้แบงกิ้งคอร์ปอเรชั่น จำกัด", "อื่นๆ (ให้ระบุ)"
 ];
 
 // NEW: Custom 3D Bar Shapes
@@ -1404,6 +1404,8 @@ function usePersistentState(key, initialValue, fbUser) {
   const syncTimeoutRef = useRef(null); 
   const isUploadingRef = useRef(false); // NEW: Track upload status
   const lastLocalUpdateRef = useRef(0); // NEW: Track last local edit time
+  const pendingServerDataRef = useRef(null); // NEW: คิวพักข้อมูลหากมีการแก้ไขชนกัน
+  const checkPendingDataInterval = useRef(null);
   const [isSynced, setIsSynced] = useState(false);
   // OPTIMIZE: ถ้ามีข้อมูลใน Cache ให้ถือว่าโหลดเสร็จแล้วทันที ไม่ต้องรอหน้าจอหมุน
   const [isLoaded, setIsLoaded] = useState(() => {
@@ -1435,19 +1437,28 @@ function usePersistentState(key, initialValue, fbUser) {
     let currentFetchId = 0;
 
     const unsubscribe = onSnapshot(docRef, async (docSnap) => {
-      // 🛡️ 100% Data Loss Prevention: ข้ามรับข้อมูล Server ถ้าเพิ่งมีการพิมพ์หรือส่งข้อมูลอยู่
-      if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
-          console.warn(`[BMG Sync] 🛡️ ป้องกันข้อมูล ${key} หาย: ข้ามการดึงข้อมูลจาก Server เนื่องจากมีการแก้ไขภายใน 5 วินาทีล่าสุด`);
-          setIsLoaded(true);
-          return;
-      }
-
       if (docSnap.exists()) {
         currentFetchId++;
         const thisFetchId = currentFetchId;
 
         const data = docSnap.data();
         try {
+          const applyData = (parsedData) => {
+              // --- FIX: Data Loss Prevention ---
+              if (parsedData && typeof parsedData === 'object' && Object.keys(parsedData).length === 0 && stateRef.current && Object.keys(stateRef.current).length > 0) {
+                  console.warn(`[BMG Sync] ป้องกันการทับข้อมูล ${key} ด้วยค่าว่าง`);
+                  return;
+              }
+              // ---------------------------------
+              if (JSON.stringify(stateRef.current) !== JSON.stringify(parsedData)) {
+                  setState(parsedData);
+                  stateRef.current = parsedData;
+                  if (typeof window !== 'undefined') localStorage.setItem(key, JSON.stringify(parsedData));
+              }
+              setIsLoaded(true);
+              setIsSynced(true);
+          };
+
           if (data.totalChunks !== undefined) {
               let fullJson = '';
               let hasChunkError = false;
@@ -1462,46 +1473,57 @@ function usePersistentState(key, initialValue, fbUser) {
               }
               
               if (thisFetchId !== currentFetchId || hasChunkError) return;
-              
-              // 🛡️ Re-check Data Loss Prevention (เผื่อจังหวะที่ดึง Chunk ใช้เวลานาน แล้วผู้ใช้พิมพ์แทรก)
-              if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) return;
 
               if (fullJson) {
                   const parsedData = JSON.parse(fullJson);
-                  // --- FIX: Data Loss Prevention ---
-                  if (parsedData && typeof parsedData === 'object' && Object.keys(parsedData).length === 0 && stateRef.current && Object.keys(stateRef.current).length > 0) {
-                      console.warn(`[BMG Sync] ป้องกันการทับข้อมูล ${key} ด้วยค่าว่าง`);
-                      return;
-                  }
-                  // ---------------------------------
-                  if (JSON.stringify(stateRef.current) !== JSON.stringify(parsedData)) {
-                      setState(parsedData);
-                      stateRef.current = parsedData;
-                      if (typeof window !== 'undefined') localStorage.setItem(key, JSON.stringify(parsedData));
+                  
+                  // 🛡️ 100% Data Loss Prevention: นำข้อมูลเข้าคิวหากผู้ใช้กำลังพิมพ์
+                  if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
+                      pendingServerDataRef.current = parsedData;
+                      if (!checkPendingDataInterval.current) {
+                          checkPendingDataInterval.current = setInterval(() => {
+                              if (Date.now() - lastLocalUpdateRef.current > 5000 && !isUploadingRef.current && !syncTimeoutRef.current) {
+                                  if (pendingServerDataRef.current) {
+                                      applyData(pendingServerDataRef.current);
+                                      pendingServerDataRef.current = null;
+                                  }
+                                  clearInterval(checkPendingDataInterval.current);
+                                  checkPendingDataInterval.current = null;
+                              }
+                          }, 1000);
+                      }
+                  } else {
+                      applyData(parsedData);
                   }
               }
           } else if (data.value) {
               if (thisFetchId !== currentFetchId) return;
               const parsedData = JSON.parse(data.value);
-              // --- FIX: Data Loss Prevention ---
-              if (parsedData && typeof parsedData === 'object' && Object.keys(parsedData).length === 0 && stateRef.current && Object.keys(stateRef.current).length > 0) {
-                  console.warn(`[BMG Sync] ป้องกันการทับข้อมูล ${key} ด้วยค่าว่าง`);
-                  return;
-              }
-              // ---------------------------------
-              if (JSON.stringify(stateRef.current) !== JSON.stringify(parsedData)) {
-                  setState(parsedData);
-                  stateRef.current = parsedData;
-                  if (typeof window !== 'undefined') localStorage.setItem(key, JSON.stringify(parsedData));
+              
+              if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
+                  pendingServerDataRef.current = parsedData;
+                  if (!checkPendingDataInterval.current) {
+                      checkPendingDataInterval.current = setInterval(() => {
+                          if (Date.now() - lastLocalUpdateRef.current > 5000 && !isUploadingRef.current && !syncTimeoutRef.current) {
+                              if (pendingServerDataRef.current) {
+                                  applyData(pendingServerDataRef.current);
+                                  pendingServerDataRef.current = null;
+                              }
+                              clearInterval(checkPendingDataInterval.current);
+                              checkPendingDataInterval.current = null;
+                          }
+                      }, 1000);
+                  }
+              } else {
+                  applyData(parsedData);
               }
           }
         } catch(e) { console.error("Parse error", key, e); }
-        setIsLoaded(true);
       } else if (!isSynced) {
          setPersistentValue(stateRef.current);
          setIsLoaded(true);
+         setIsSynced(true);
       }
-      setIsSynced(true);
     }, (err) => {
       console.error("Sync error", key, err);
       setIsLoaded(true);
@@ -1564,7 +1586,7 @@ function usePersistentState(key, initialValue, fbUser) {
     }
   };
 
-  return [state, setPersistentValue, isLoaded];
+  return [state, setPersistentValue, isLoaded, isSynced];
 }
 
 // --- NEW: Custom Hook for Collection Storage (แก้ปัญหาบันทึกแล้วข้อมูลทับกัน) ---
@@ -1589,6 +1611,9 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
   const syncTimeoutRef = useRef(null); 
   const isUploadingRef = useRef(false); // NEW
   const lastLocalUpdateRef = useRef(0); // NEW
+  const pendingServerDataRef = useRef(null); // NEW: คิวพักข้อมูลหากมีการแก้ไขชนกัน
+  const checkPendingDataInterval = useRef(null);
+  const [isSynced, setIsSynced] = useState(false);
   
   // OPTIMIZE: ข้ามหน้าต่างโหลดดิงทันทีถ้ามีข้อมูลใน Cache อยู่แล้ว
   const [isLoaded, setIsLoaded] = useState(() => {
@@ -1628,69 +1653,76 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
 
     const collRef = collection(db, 'artifacts', appId, 'public', 'data', collectionName);
     const unsubscribe = onSnapshot(collRef, (snapshot) => {
-      // 🛡️ 100% Data Loss Prevention: ข้ามรับข้อมูล Server ถ้ากำลังพิมพ์หรือส่งข้อมูลอยู่
-      if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
-          console.warn(`[BMG Sync] 🛡️ ป้องกันข้อมูล ${collectionName} หาย: ข้ามการดึงข้อมูลจาก Server`);
-          setIsLoaded(true);
-          isLoadedRef.current = true;
-          return;
-      }
-
       const items = [];
       snapshot.forEach(doc => {
           items.push({ ...doc.data(), id: doc.id });
       });
 
       // --- FIX: ระบบป้องกันข้อมูลสูญหาย (Data Loss Prevention) ---
-      // ตรวจสอบกรณี Firebase โหลดไม่ทันแล้วส่งค่าว่าง [] กลับมาทับ Local Storage
       if (items.length === 0 && Array.isArray(stateRef.current) && stateRef.current.length > 0) {
-          // หากใน snapshot ไม่มี docChanges (ไม่ได้เกิดจากการกดลบจริงๆ) ให้ตีความว่าเกิดข้อผิดพลาดในการโหลด
-          if (snapshot.docChanges().length === 0) {
-              console.warn(`[BMG Sync] ป้องกันข้อมูลหายใน ${collectionName} - ดึงข้อมูลจาก Cache กลับไปที่ Server`);
-              stateRef.current.forEach(item => {
-                  if (item && item.id) {
-                      const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, String(item.id));
-                      setDoc(docRef, item).catch(console.error);
-                  }
-              });
+          if (snapshot.metadata.fromCache || snapshot.docChanges().length === 0) {
+              console.warn(`[BMG Sync] ละเว้นข้อมูลว่างเปล่าชั่วคราวใน ${collectionName}`);
               isLoadedRef.current = true;
               setIsLoaded(true);
-              return; // ข้ามการเขียนทับ State ไปเลยเพื่อรักษาสถานะเดิม
+              setIsSynced(true);
+              return; 
           }
       }
       // -------------------------------------------------------
 
-      if (items.length === 0 && Array.isArray(initialValue) && initialValue.length > 0) {
-          setState(initialValue);
-          stateRef.current = initialValue;
-          initialValue.forEach(item => {
-              if (item.id) {
-                  const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, String(item.id));
-                  setDoc(docRef, item).catch(console.error);
-              }
-          });
-      } else {
-          // เปรียบเทียบข้อมูลโดยไม่สนใจลำดับ (ป้องกัน UI กระพริบหรือข้อมูลถูกดึงกลับสลับที่ตอนซิงค์)
-          const isSame = (arr1, arr2) => {
-              if (!Array.isArray(arr1) || !Array.isArray(arr2)) return false;
-              if (arr1.length !== arr2.length) return false;
-              const map1 = new Map(arr1.map(i => [String(i.id), i]));
-              for (const item2 of arr2) {
-                  const item1 = map1.get(String(item2.id));
-                  if (!item1 || JSON.stringify(item1) !== JSON.stringify(item2)) return false;
-              }
-              return true;
-          };
+      const applyData = (dataToApply) => {
+          if (dataToApply.length === 0 && Array.isArray(initialValue) && initialValue.length > 0) {
+              setState(initialValue);
+              stateRef.current = initialValue;
+              initialValue.forEach(item => {
+                  if (item.id) {
+                      const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, String(item.id));
+                      setDoc(docRef, item).catch(console.error);
+                  }
+              });
+          } else {
+              // เปรียบเทียบข้อมูลโดยไม่สนใจลำดับ
+              const isSame = (arr1, arr2) => {
+                  if (!Array.isArray(arr1) || !Array.isArray(arr2)) return false;
+                  if (arr1.length !== arr2.length) return false;
+                  const map1 = new Map(arr1.map(i => [String(i.id), i]));
+                  for (const item2 of arr2) {
+                      const item1 = map1.get(String(item2.id));
+                      if (!item1 || JSON.stringify(item1) !== JSON.stringify(item2)) return false;
+                  }
+                  return true;
+              };
 
-          if (!isSame(stateRef.current, items)) {
-              setState(items);
-              stateRef.current = items;
-              if (typeof window !== 'undefined') localStorage.setItem(collectionName, JSON.stringify(items));
+              if (!isSame(stateRef.current, dataToApply)) {
+                  setState(dataToApply);
+                  stateRef.current = dataToApply;
+                  if (typeof window !== 'undefined') localStorage.setItem(collectionName, JSON.stringify(dataToApply));
+              }
           }
+          isLoadedRef.current = true;
+          setIsLoaded(true);
+          setIsSynced(true);
+      };
+
+      // 🛡️ 100% Data Loss Prevention: นำข้อมูลเข้าคิวถ้าเพิ่งแก้ไข
+      if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
+          pendingServerDataRef.current = items;
+          if (!checkPendingDataInterval.current) {
+              checkPendingDataInterval.current = setInterval(() => {
+                  if (Date.now() - lastLocalUpdateRef.current > 5000 && !isUploadingRef.current && !syncTimeoutRef.current) {
+                      if (pendingServerDataRef.current) {
+                          applyData(pendingServerDataRef.current);
+                          pendingServerDataRef.current = null;
+                      }
+                      clearInterval(checkPendingDataInterval.current);
+                      checkPendingDataInterval.current = null;
+                  }
+              }, 1000);
+          }
+      } else {
+          applyData(items);
       }
 
-      isLoadedRef.current = true;
-      setIsLoaded(true);
     }, (err) => {
       console.error("Collection Sync error", collectionName, err);
       isLoadedRef.current = true;
@@ -1804,7 +1836,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
     }
   };
 
-  return [state, setPersistentValue, isLoaded];
+  return [state, setPersistentValue, isLoaded, isSynced];
 }
 
 // --- NEW: Custom Hook for User Specific Persistent Storage (Theme, UI settings) ---
@@ -1823,6 +1855,8 @@ function useUserPersistentState(key, initialValue, fbUser) {
   const syncTimeoutRef = useRef(null); 
   const isUploadingRef = useRef(false);
   const lastLocalUpdateRef = useRef(0);
+  const pendingServerDataRef = useRef(null);
+  const checkPendingDataInterval = useRef(null);
   const [isSynced, setIsSynced] = useState(false);
   
   // OPTIMIZE: ข้ามโหลดทันทีถ้ามี Cache
@@ -1853,27 +1887,42 @@ function useUserPersistentState(key, initialValue, fbUser) {
     const docRef = doc(db, 'artifacts', appId, 'users', fbUser.uid, 'user_preferences', key);
     
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
-      // 🛡️ 100% Data Loss Prevention
-      if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
-          setIsLoaded(true);
-          return;
-      }
-
-      if (docSnap.exists()) {
-        try {
-          const parsedData = JSON.parse(docSnap.data().value);
+      const applyData = (parsedData) => {
           if (JSON.stringify(stateRef.current) !== JSON.stringify(parsedData)) {
               setState(parsedData);
               stateRef.current = parsedData;
               if (typeof window !== 'undefined') localStorage.setItem(`user_pref_${key}`, JSON.stringify(parsedData));
           }
+          setIsLoaded(true);
+          setIsSynced(true);
+      };
+
+      if (docSnap.exists()) {
+        try {
+          const parsedData = JSON.parse(docSnap.data().value);
+          if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
+              pendingServerDataRef.current = parsedData;
+              if (!checkPendingDataInterval.current) {
+                  checkPendingDataInterval.current = setInterval(() => {
+                      if (Date.now() - lastLocalUpdateRef.current > 5000 && !isUploadingRef.current && !syncTimeoutRef.current) {
+                          if (pendingServerDataRef.current) {
+                              applyData(pendingServerDataRef.current);
+                              pendingServerDataRef.current = null;
+                          }
+                          clearInterval(checkPendingDataInterval.current);
+                          checkPendingDataInterval.current = null;
+                      }
+                  }, 1000);
+              }
+          } else {
+              applyData(parsedData);
+          }
         } catch(e) { console.error("Parse error", key, e); }
-        setIsLoaded(true);
       } else if (!isSynced) {
         setDoc(docRef, { value: JSON.stringify(stateRef.current) }).catch(console.error);
         setIsLoaded(true);
+        setIsSynced(true);
       }
-      setIsSynced(true);
     }, (err) => {
       console.error("Sync error", key, err);
       setIsLoaded(true);
@@ -1921,7 +1970,7 @@ function useUserPersistentState(key, initialValue, fbUser) {
     }
   };
 
-  return [state, setPersistentValue, isLoaded];
+  return [state, setPersistentValue, isLoaded, isSynced];
 }
 
 // --- Main Application ---
@@ -2247,7 +2296,7 @@ export default function App() {
   const [showAddDepositModal, setShowAddDepositModal] = useState(false);
   const [isEditingDeposit, setIsEditingDeposit] = useState(false);
   const [newDeposit, setNewDeposit] = useState({
-      id: null, type: 'ฝากประจำ', customType: '', bank: '', amount: '', interestRate: '', duration: '12 เดือน', startDate: '', endDate: ''
+      id: null, type: 'ฝากประจำ', customType: '', bank: '', customBank: '', amount: '', interestRate: '', duration: '12 เดือน', startDate: '', endDate: ''
   });
 
   // --- NEW: Meeting Gantt Plans State ---
@@ -2310,7 +2359,7 @@ export default function App() {
   const [newProject, setNewProject] = useState({ logo: null, code: '', name: '', type: 'Condo', address: '', phone: '', taxId: '', contractStartDate: '', contractEndDate: '', contractValue: '', status: 'Active', files: { orchor: null, committee: null, regulations: null, resident_rules: null } });
 
   // อัปเกรดเป็น usePersistentCollection สำหรับข้อมูลที่เป็น Array (รายการ) ป้องกันข้อมูลสูญหาย/ทับกัน
-  const [users, setUsers, isUsersLoaded] = usePersistentCollection('bmg_users', INITIAL_USERS, fbUser); 
+  const [users, setUsers, isUsersLoaded, isUsersSynced] = usePersistentCollection('bmg_users', INITIAL_USERS, fbUser); 
   const [projects, setProjects] = usePersistentCollection('bmg_projects', INITIAL_PROJECTS, fbUser);
   const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, fbUser);
   const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, fbUser);
@@ -2439,7 +2488,8 @@ export default function App() {
 
   // --- NEW: ตรวจจับและบันทึกเวลาล่าสุดเมื่อเปิดระบบ (Refresh/Auto-login) เพื่อให้ซิงค์ข้ามเครื่อง ---
   useEffect(() => {
-      if (!currentUser || !isUsersLoaded) return; // บังคับให้รอจนกว่าโหลดข้อมูล Users จาก Firebase สำเร็จก่อน
+      // 🛡️ ป้องกันการใช้ข้อมูลเก่าจาก LocalStorage ไปทับข้อมูลบน Server โดยการรอให้ Sync ข้อมูลจาก Server ให้เสร็จก่อนเสมอ!
+      if (!currentUser || !isUsersSynced) return; 
 
       // ฟังก์ชันสำหรับอัปเดตเวลาล่าสุด
       const updatePresence = () => {
@@ -2469,7 +2519,7 @@ export default function App() {
 
       // ยกเลิกการตั้งเวลาเมื่อผู้ใช้ออกจากระบบหรือปิดหน้าต่าง
       return () => clearInterval(intervalId);
-  }, [currentUser?.id, isUsersLoaded]); // ผูกกับ Dependency 2 ตัวนี้
+  }, [currentUser?.id, isUsersSynced]); // ผูกกับ Dependency 2 ตัวนี้
 
   // --- NEW: Auto-Sync State (สถานะการซิงค์อัตโนมัติ) ---
   const [autoSyncMessage, setAutoSyncMessage] = useState('');
@@ -4693,7 +4743,8 @@ export default function App() {
       e.preventDefault();
       let nextList;
       const finalType = newDeposit.type === 'อื่นๆ (ให้ระบุ)' ? newDeposit.customType : newDeposit.type;
-      const dataToSave = { ...newDeposit, type: finalType };
+      const finalBank = newDeposit.bank === 'อื่นๆ (ให้ระบุ)' ? newDeposit.customBank : newDeposit.bank;
+      const dataToSave = { ...newDeposit, type: finalType, bank: finalBank };
 
       if (isEditingDeposit) {
           nextList = deposits.map(d => d.id === newDeposit.id ? dataToSave : d);
@@ -4715,7 +4766,15 @@ export default function App() {
           ct = t;
           t = 'อื่นๆ (ให้ระบุ)';
       }
-      setNewDeposit({ ...dep, type: t, customType: ct, bank: dep.bank || '', interestRate: dep.interestRate || '' });
+      
+      let b = dep.bank || '';
+      let cb = '';
+      if (b && !BANK_LIST.includes(b)) {
+          cb = b;
+          b = 'อื่นๆ (ให้ระบุ)';
+      }
+
+      setNewDeposit({ ...dep, type: t, customType: ct, bank: b, customBank: cb, interestRate: dep.interestRate || '' });
       setIsEditingDeposit(true);
       setShowAddDepositModal(true);
   };
@@ -13580,8 +13639,17 @@ export default function App() {
                         {selectedProject && <span className="text-[10px] text-orange-600 font-medium truncate">{selectedProject.name}</span>}
                     </div>
                 </div>
-                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center text-sm font-bold text-white shadow-sm border-2 border-white shrink-0">
-                    {currentUser?.firstName?.charAt(0) || 'U'}
+                <div className="flex items-center gap-3 shrink-0">
+                    <button 
+                        onClick={() => window.location.reload()} 
+                        className="text-gray-400 hover:text-orange-500 p-1.5 rounded-full bg-gray-50 border border-gray-200 shadow-sm transition-colors"
+                        title="รีเฟรชข้อมูล (ดึงข้อมูลล่าสุดจากระบบ)"
+                    >
+                        <RefreshCw size={16} />
+                    </button>
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center text-sm font-bold text-white shadow-sm border-2 border-white">
+                        {currentUser?.firstName?.charAt(0) || 'U'}
+                    </div>
                 </div>
             </div>
         )}
@@ -14009,6 +14077,16 @@ export default function App() {
                                 <option key={bank} value={bank}>{bank}</option>
                             ))}
                         </select>
+                        {newDeposit.bank === 'อื่นๆ (ให้ระบุ)' && (
+                            <input 
+                                type="text" 
+                                className="mt-2 w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200 bg-gray-50"
+                                placeholder="ระบุชื่อธนาคาร..."
+                                value={newDeposit.customBank}
+                                onChange={e => setNewDeposit({...newDeposit, customBank: e.target.value})}
+                                required
+                            />
+                        )}
                     </div>
                 </div>
 
