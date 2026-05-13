@@ -1011,7 +1011,8 @@ const BANK_LIST = [
   "ธนาคารยูโอบี", "ธนาคารสแตนดาร์ดชาร์เตอร์ด (ไทย)", "ธนาคารไทยเครดิตเพื่อรายย่อย", "ธนาคารแลนด์ แอนด์ เฮาส์",
   "ธนาคารไอซีบีซี (ไทย)", "ธนาคารพัฒนาวิสาหกิจขนาดกลางและขนาดย่อมแห่งประเทศไทย", "ธนาคารเพื่อการเกษตรและสหกรณ์การเกษตร",
   "ธนาคารเพื่อการส่งออกและนำเข้าแห่งประเทศไทย", "ธนาคารออมสิน", "ธนาคารอาคารสงเคราะห์", "ธนาคารอิสลามแห่งประเทศไทย",
-  "ธนาคารแห่งประเทศจีน", "ธนาคารซูมิโตโม มิตซุย ทรัสต์ (ไทย)", "ธนาคารฮ่องกงและเซี้ยงไฮ้แบงกิ้งคอร์ปอเรชั่น จำกัด"
+  "ธนาคารแห่งประเทศจีน", "ธนาคารซูมิโตโม มิตซุย ทรัสต์ (ไทย)", "ธนาคารฮ่องกงและเซี้ยงไฮ้แบงกิ้งคอร์ปอเรชั่น จำกัด",
+  "อื่นๆ (ให้ระบุ)"
 ];
 
 // NEW: Custom 3D Bar Shapes
@@ -1585,7 +1586,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
   });
 
   const stateRef = useRef(state);
-  const isLoadedRef = useRef(false);
+  const [isLoadedRef, setIsLoadedRef] = useState(false); // Changed to state to trigger re-renders if needed, though ref is usually better. Keeping ref for internal logic but ensuring it's robust.
   const syncTimeoutRef = useRef(null); 
   const isUploadingRef = useRef(false); // NEW
   const lastLocalUpdateRef = useRef(0); // NEW
@@ -1647,13 +1648,14 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
           // หากใน snapshot ไม่มี docChanges (ไม่ได้เกิดจากการกดลบจริงๆ) ให้ตีความว่าเกิดข้อผิดพลาดในการโหลด
           if (snapshot.docChanges().length === 0) {
               console.warn(`[BMG Sync] ป้องกันข้อมูลหายใน ${collectionName} - ดึงข้อมูลจาก Cache กลับไปที่ Server`);
+              // บังคับส่งข้อมูลจาก Cache กลับขึ้นไปบน Firebase แบบเงียบๆ
               stateRef.current.forEach(item => {
                   if (item && item.id) {
                       const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, String(item.id));
+                      // ใช้ .then() หรือ .catch() เพื่อจัดการผลลัพธ์
                       setDoc(docRef, item).catch(console.error);
                   }
               });
-              isLoadedRef.current = true;
               setIsLoaded(true);
               return; // ข้ามการเขียนทับ State ไปเลยเพื่อรักษาสถานะเดิม
           }
@@ -1674,10 +1676,20 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
           const isSame = (arr1, arr2) => {
               if (!Array.isArray(arr1) || !Array.isArray(arr2)) return false;
               if (arr1.length !== arr2.length) return false;
+              
+              // ตรวจสอบข้อมูลเชิงลึก (Deep Compare) เพื่อให้ชัวร์ว่าสิทธิ์ (Permissions) ตรงกันจริงๆ
+              const stringifySafe = (obj) => {
+                  try {
+                      return JSON.stringify(obj, Object.keys(obj).sort());
+                  } catch (e) {
+                      return JSON.stringify(obj);
+                  }
+              };
+
               const map1 = new Map(arr1.map(i => [String(i.id), i]));
               for (const item2 of arr2) {
                   const item1 = map1.get(String(item2.id));
-                  if (!item1 || JSON.stringify(item1) !== JSON.stringify(item2)) return false;
+                  if (!item1 || stringifySafe(item1) !== stringifySafe(item2)) return false;
               }
               return true;
           };
@@ -1689,11 +1701,9 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
           }
       }
 
-      isLoadedRef.current = true;
       setIsLoaded(true);
     }, (err) => {
       console.error("Collection Sync error", collectionName, err);
-      isLoadedRef.current = true;
       setIsLoaded(true);
     });
 
@@ -1743,6 +1753,11 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                        if (n && n.id) newStateMap.set(String(n.id), n);
                    }
 
+                   const stringifySafe = (obj) => {
+                       try { return JSON.stringify(obj, Object.keys(obj).sort()); } 
+                       catch (e) { return JSON.stringify(obj); }
+                   };
+
                    // 1. เพิ่มหรืออัปเดตข้อมูล
                    for (const item of safeValueToStore) {
                        if (!item || !item.id) continue; // ข้ามรายการที่ไม่มี ID (ข้อมูลเสีย)
@@ -1752,7 +1767,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                        // หากเป็นการ Restore จะบังคับเขียนทับเลย ข้ามการเปรียบเทียบข้อมูลเพื่อลดภาระ CPU
                        if (!isRestore) {
                            const oldItem = oldStateMap.get(strId);
-                           if (oldItem && JSON.stringify(oldItem) === JSON.stringify(item)) {
+                           if (oldItem && stringifySafe(oldItem) === stringifySafe(item)) {
                                needsUpdate = false;
                            }
                        }
@@ -2191,8 +2206,11 @@ export default function App() {
       otherResponsible: '',
       startDate: new Date().toISOString().split('T')[0],
       deadline: '',
-      status: 'Pending'
+      status: 'Pending',
+      history: []
   });
+  const [newHistoryDate, setNewHistoryDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [newHistoryNote, setNewHistoryNote] = useState('');
 
   // Supplier Search & Filter State
   const [supplierSearch, setSupplierSearch] = useState('');
@@ -2247,7 +2265,7 @@ export default function App() {
   const [showAddDepositModal, setShowAddDepositModal] = useState(false);
   const [isEditingDeposit, setIsEditingDeposit] = useState(false);
   const [newDeposit, setNewDeposit] = useState({
-      id: null, type: 'ฝากประจำ', customType: '', bank: '', amount: '', interestRate: '', duration: '12 เดือน', startDate: '', endDate: ''
+      id: null, type: 'ฝากประจำ', customType: '', bank: '', customBank: '', amount: '', interestRate: '', duration: '12 เดือน', startDate: '', endDate: ''
   });
 
   // --- NEW: Meeting Gantt Plans State ---
@@ -4684,7 +4702,9 @@ export default function App() {
           setActionPlans([...actionPlans, { ...dataToSave, id, projectId: selectedProject.id }]);
       }
       setShowAddActionPlanModal(false);
-      setNewActionPlan({ id: null, issue: '', details: '', responsible: '', otherResponsible: '', startDate: new Date().toISOString().split('T')[0], deadline: '', status: 'Pending' });
+      setNewActionPlan({ id: null, issue: '', details: '', responsible: '', otherResponsible: '', startDate: new Date().toISOString().split('T')[0], deadline: '', status: 'Pending', history: [] });
+      setNewHistoryDate(new Date().toISOString().split('T')[0]);
+      setNewHistoryNote('');
       alert(t('saveSuccess'));
   };
 
@@ -4693,7 +4713,8 @@ export default function App() {
       e.preventDefault();
       let nextList;
       const finalType = newDeposit.type === 'อื่นๆ (ให้ระบุ)' ? newDeposit.customType : newDeposit.type;
-      const dataToSave = { ...newDeposit, type: finalType };
+      const finalBank = newDeposit.bank === 'อื่นๆ (ให้ระบุ)' ? newDeposit.customBank : newDeposit.bank;
+      const dataToSave = { ...newDeposit, type: finalType, bank: finalBank };
 
       if (isEditingDeposit) {
           nextList = deposits.map(d => d.id === newDeposit.id ? dataToSave : d);
@@ -4715,7 +4736,15 @@ export default function App() {
           ct = t;
           t = 'อื่นๆ (ให้ระบุ)';
       }
-      setNewDeposit({ ...dep, type: t, customType: ct, bank: dep.bank || '', interestRate: dep.interestRate || '' });
+      
+      let b = dep.bank;
+      let cb = '';
+      if (b && !BANK_LIST.includes(b)) {
+          cb = b;
+          b = 'อื่นๆ (ให้ระบุ)';
+      }
+      
+      setNewDeposit({ ...dep, type: t, customType: ct, bank: b || '', customBank: cb, interestRate: dep.interestRate || '' });
       setIsEditingDeposit(true);
       setShowAddDepositModal(true);
   };
@@ -4737,12 +4766,32 @@ export default function App() {
           resp = otherOption || 'อื่นๆ (ให้ระบุ) / Other (Please specify)';
       }
 
-      setNewActionPlan({ ...ap, responsible: resp, otherResponsible: otherResp });
+      setNewActionPlan({ ...ap, responsible: resp, otherResponsible: otherResp, history: ap.history || [] });
+      setNewHistoryDate(new Date().toISOString().split('T')[0]);
+      setNewHistoryNote('');
       setShowAddActionPlanModal(true);
   };
   
   const handleActionPlanStatusChange = (id, newStatus) => {
       setActionPlans(actionPlans.map(ap => ap.id === id ? { ...ap, status: newStatus } : ap));
+  };
+
+  // --- NEW: Action Plan History Handlers ---
+  const handleAddActionPlanHistory = () => {
+      if (!newHistoryNote.trim()) return;
+      const newEntry = { date: newHistoryDate, note: newHistoryNote };
+      setNewActionPlan(prev => ({
+          ...prev,
+          history: [newEntry, ...(prev.history || [])] // เพิ่มไว้บนสุด
+      }));
+      setNewHistoryNote(''); // เคลียร์ช่องพิมพ์หลังจากเพิ่มเสร็จ
+  };
+
+  const handleRemoveActionPlanHistory = (indexToRemove) => {
+      setNewActionPlan(prev => ({
+          ...prev,
+          history: (prev.history || []).filter((_, index) => index !== indexToRemove)
+      }));
   };
 
   const handleContractFileUpload = (e) => {
@@ -5576,11 +5625,27 @@ export default function App() {
 
   const handleSaveUser = (e) => {
       e.preventDefault();
+      
+      // FIX: สร้าง Object ใหม่ 100% ป้องกัน Reference เดิมติดไปทำข้อมูลทับกัน
+      const dataToSave = JSON.parse(JSON.stringify(newUser));
+      
       if (isEditingUser) {
-          setUsers(users.map(u => u.id === newUser.id ? { ...newUser } : u));
+          // โหมดแก้ไข
+          setUsers(users.map(u => u.id === dataToSave.id ? dataToSave : u));
+          
+          // ถ้าแก้ไขตัวเอง ให้อัปเดต currentUser ใน localStorage ด้วย
+          if (currentUser && currentUser.id === dataToSave.id) {
+              setCurrentUser(dataToSave);
+              if (typeof window !== 'undefined') {
+                  try {
+                      localStorage.setItem('bmg_current_user', JSON.stringify(dataToSave));
+                  } catch (e) {}
+              }
+          }
       } else {
-          // แก้ไข: สลับตำแหน่ง ...newUser ไว้ด้านหน้า เพื่อไม่ให้เอา id เดิมมาทับ id ใหม่ (ป้องกันบัค ID ซ้ำในระบบ)
-          setUsers([...users, { ...newUser, id: generateId(), status: 'Active', created_at: new Date().toISOString() }]);
+          // โหมดเพิ่มใหม่
+          const id = generateId();
+          setUsers([...users, { ...dataToSave, id, status: 'Active', created_at: new Date().toISOString() }]);
       }
       setShowAddUserModal(false);
       alert(t('saveSuccess'));
@@ -5608,7 +5673,8 @@ export default function App() {
           // ใช้ค่าจาก user หรือถ้าไม่มีให้ใช้ค่าเริ่มต้น
           position: user.position || EMPLOYEE_POSITIONS[0],
           accessibleDepts: depts,
-          permissions: user.permissions || getDefaultPermissions(),
+          // FIX: สร้าง Copy ของ Permissions ใหม่ 100% เพื่อไม่ให้อ้างอิง Object เดิม
+          permissions: JSON.parse(JSON.stringify(user.permissions || getDefaultPermissions())),
       });
       setIsEditingUser(true);
       setShowAddUserModal(true);
@@ -8208,7 +8274,7 @@ export default function App() {
                                       </h3>
                                       {hasPerm('projects', 'edit') && (
                                           <Button size="sm" icon={Plus} className="bg-emerald-600 hover:bg-emerald-700" onClick={() => {
-                                              setNewDeposit({ id: null, type: 'ฝากประจำ', customType: '', bank: '', amount: '', interestRate: '', duration: '12 เดือน', startDate: '', endDate: '' });
+                                              setNewDeposit({ id: null, type: 'ฝากประจำ', customType: '', bank: '', customBank: '', amount: '', interestRate: '', duration: '12 เดือน', startDate: '', endDate: '' });
                                               setIsEditingDeposit(false);
                                               setShowAddDepositModal(true);
                                           }}>เพิ่มรายการ</Button>
@@ -11371,7 +11437,9 @@ export default function App() {
                                   {isExporting ? t('downloading') : t('downloadPDF')}
                               </Button>
                               {hasPerm('proj_action', 'save') && <Button size="sm" icon={Plus} onClick={() => {
-                                  setNewActionPlan({ id: null, issue: '', details: '', responsible: '', otherResponsible: '', startDate: new Date().toISOString().split('T')[0], deadline: '', status: 'Pending' });
+                                  setNewActionPlan({ id: null, issue: '', details: '', responsible: '', otherResponsible: '', startDate: new Date().toISOString().split('T')[0], deadline: '', status: 'Pending', history: [] });
+                                  setNewHistoryDate(new Date().toISOString().split('T')[0]);
+                                  setNewHistoryNote('');
                                   setShowAddActionPlanModal(true);
                               }}>เพิ่มรายการ</Button>}
                           </div>
@@ -14009,6 +14077,16 @@ export default function App() {
                                 <option key={bank} value={bank}>{bank}</option>
                             ))}
                         </select>
+                        {newDeposit.bank === 'อื่นๆ (ให้ระบุ)' && (
+                            <input 
+                                type="text" 
+                                className="mt-2 w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200 bg-gray-50"
+                                placeholder="ระบุชื่อธนาคาร หรือสถาบันการเงิน..."
+                                value={newDeposit.customBank || ''}
+                                onChange={e => setNewDeposit({...newDeposit, customBank: e.target.value})}
+                                required
+                            />
+                        )}
                     </div>
                 </div>
 
@@ -16393,8 +16471,8 @@ export default function App() {
       {/* Add Action Plan Modal */}
       {showAddActionPlanModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 m-4 relative animate-fade-in">
-            <div className="flex justify-between items-center mb-6 border-b pb-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-xl p-6 m-4 relative animate-fade-in max-h-[95vh] flex flex-col">
+            <div className="flex justify-between items-center mb-4 border-b pb-4 shrink-0">
               <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
                 <CheckCircle className="text-orange-500" />
                 {newActionPlan.id ? 'แก้ไขแผนงาน' : 'เพิ่มแผนปฏิบัติการ (Action Plan)'}
@@ -16402,7 +16480,7 @@ export default function App() {
               <button onClick={() => setShowAddActionPlanModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
             </div>
             
-            <form onSubmit={handleSaveActionPlan} className="space-y-4">
+            <form onSubmit={handleSaveActionPlan} className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-4">
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">หัวข้องาน / ปัญหา (Issue)</label>
                     <input 
@@ -16416,16 +16494,92 @@ export default function App() {
                 </div>
 
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">รายละเอียด (Details)</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">รายละเอียดเบื้องต้น (Initial Details)</label>
                     <textarea 
-                        className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 h-24 resize-none"
+                        className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 h-20 resize-none"
                         value={newActionPlan.details}
                         onChange={e => setNewActionPlan({...newActionPlan, details: e.target.value})}
                         placeholder="ระบุรายละเอียดการปฏิบัติงาน..."
                     ></textarea>
                 </div>
 
-                <div>
+                {/* --- NEW: Tracking History Section --- */}
+                <div className="pt-2 border-t border-gray-200 mt-2">
+                    <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
+                        <History size={16} className="text-orange-500"/> ประวัติการติดตาม (Tracking History)
+                    </h3>
+                    
+                    {/* Add new entry input */}
+                    <div className="flex flex-col sm:flex-row gap-2 mb-3 bg-orange-50 p-3 rounded-lg border border-orange-100">
+                        <input 
+                            type="date" 
+                            className="w-full sm:w-36 border rounded-md p-2 text-sm outline-none focus:ring-2 focus:ring-orange-200 bg-white"
+                            value={newHistoryDate}
+                            onChange={e => setNewHistoryDate(e.target.value)}
+                        />
+                        <div className="flex flex-1 gap-2">
+                            <input 
+                                type="text" 
+                                className="flex-1 border rounded-md p-2 text-sm outline-none focus:ring-2 focus:ring-orange-200 bg-white"
+                                placeholder="อัปเดตความคืบหน้างาน..."
+                                value={newHistoryNote}
+                                onChange={e => setNewHistoryNote(e.target.value)}
+                                onKeyDown={e => { 
+                                    if (e.key === 'Enter') { 
+                                        e.preventDefault(); 
+                                        handleAddActionPlanHistory(); 
+                                    } 
+                                }}
+                            />
+                            <Button type="button" size="sm" icon={Plus} onClick={handleAddActionPlanHistory} disabled={!newHistoryNote.trim()} className="shrink-0">
+                                เพิ่ม
+                            </Button>
+                        </div>
+                    </div>
+
+                    {/* History List Table */}
+                    <div className="max-h-40 overflow-y-auto custom-scrollbar border border-gray-200 rounded-lg bg-white">
+                        {(newActionPlan.history && newActionPlan.history.length > 0) ? (
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-gray-100 text-gray-600 sticky top-0 shadow-sm">
+                                    <tr>
+                                        <th className="p-2.5 border-b w-24 text-center">วันที่</th>
+                                        <th className="p-2.5 border-b">รายละเอียดความคืบหน้า</th>
+                                        <th className="p-2.5 border-b w-10 text-center"></th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {newActionPlan.history.map((h, idx) => (
+                                        <tr key={idx} className="hover:bg-orange-50/50 transition-colors">
+                                            <td className="p-2.5 text-center text-gray-500 font-medium whitespace-nowrap">
+                                                {new Date(h.date).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: '2-digit' })}
+                                            </td>
+                                            <td className="p-2.5 text-gray-800 break-words">{h.note}</td>
+                                            <td className="p-2.5 text-center">
+                                                <button 
+                                                    type="button" 
+                                                    onClick={() => handleRemoveActionPlanHistory(idx)}
+                                                    className="text-gray-400 hover:text-red-500 hover:bg-red-50 p-1 rounded transition-colors"
+                                                    title="ลบรายการนี้"
+                                                >
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        ) : (
+                            <div className="p-6 text-center text-gray-400 text-xs flex flex-col items-center gap-1">
+                                <History size={20} className="text-gray-300"/>
+                                ยังไม่มีประวัติการอัปเดตความคืบหน้า
+                            </div>
+                        )}
+                    </div>
+                </div>
+                {/* --- END Tracking History --- */}
+
+                <div className="pt-4 border-t border-gray-200">
                     <label className="block text-sm font-medium text-gray-700 mb-1">ผู้รับผิดชอบ (Responsible)</label>
                     <select 
                         className="w-full border rounded-md p-2 bg-white outline-none focus:ring-2 focus:ring-orange-200"
@@ -16485,7 +16639,7 @@ export default function App() {
                     </select>
                 </div>
 
-                <div className="flex justify-end gap-2 pt-4 border-t border-gray-200 mt-6">
+                <div className="flex justify-end gap-2 pt-4 border-t border-gray-200 mt-6 shrink-0 sticky bottom-0 bg-white">
                     <Button variant="secondary" onClick={() => setShowAddActionPlanModal(false)}>{t('cancel')}</Button>
                     <Button type="submit" icon={Save}>{t('save')}</Button>
                 </div>
@@ -17037,7 +17191,8 @@ export default function App() {
                     value={editingRole}
                     onChange={e => {
                         setEditingRole(e.target.value);
-                        setEditingRolePerms(getMergedPermissions(rolePermissions[e.target.value]));
+                        // FIX: Ensure deep copy when switching roles
+                        setEditingRolePerms(JSON.parse(JSON.stringify(getMergedPermissions(rolePermissions[e.target.value]))));
                     }}
                 >
                     {EMPLOYEE_POSITIONS.map(pos => <option key={pos} value={pos}>{pos}</option>)}
@@ -17105,7 +17260,9 @@ export default function App() {
             <div className="flex justify-end gap-2 pt-4 mt-4 border-t shrink-0">
                 <Button variant="secondary" onClick={() => setShowRolePermModal(false)}>{t('cancel')}</Button>
                 <Button onClick={() => {
-                    setRolePermissions(prev => ({ ...prev, [editingRole]: editingRolePerms }));
+                    // FIX: Deep copy to prevent state mutation issues
+                    const newPerms = JSON.parse(JSON.stringify(editingRolePerms));
+                    setRolePermissions(prev => ({ ...prev, [editingRole]: newPerms }));
                     setShowRolePermModal(false);
                     alert(`บันทึกแม่แบบสิทธิ์สำหรับตำแหน่ง ${editingRole} สำเร็จ`);
                 }} icon={Save}>{t('save')}</Button>
