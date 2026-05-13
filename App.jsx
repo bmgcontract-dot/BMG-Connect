@@ -13925,13 +13925,11 @@ export default function App() {
                             ))}
                         </div>
                     </div>
+                    <div className="flex justify-end gap-2 pt-4 mt-6 border-t border-gray-100">
+                        <Button variant="secondary" type="button" onClick={() => setShowAddEventModal(false)}>ยกเลิก</Button>
+                        <Button type="submit" icon={Save} className="bg-indigo-600 hover:bg-indigo-700">บันทึกนัดหมาย</Button>
+                    </div>
                 </form>
-            </div>
-
-            <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-2 shrink-0">
-                <Button variant="secondary" onClick={() => setShowAddEventModal(false)}>ยกเลิก</Button>
-                {/* FIX: เพิ่ม attribute form="eventForm" เพื่อให้ปุ่มนี้ Submit ฟอร์มด้านบนได้ */}
-                <Button type="submit" form="eventForm" icon={Save} className="bg-indigo-600 hover:bg-indigo-700">บันทึกนัดหมาย</Button>
             </div>
           </div>
         </div>
