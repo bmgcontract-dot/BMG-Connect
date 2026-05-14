@@ -18680,6 +18680,231 @@ export default function App() {
           </div>
       )}
 
+      {/* NEW: Project Modal (Add / Edit) */}
+      {showAddProjectModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto p-4 animate-fade-in">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl p-6 relative flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center mb-6 border-b pb-4 shrink-0">
+              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <Building2 className="text-orange-500" />
+                {isEditingProject ? 'แก้ไขข้อมูลโครงการ' : t('newProjectTitle')}
+              </h2>
+              <button onClick={() => setShowAddProjectModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
+            </div>
+            
+            <div className="overflow-y-auto custom-scrollbar flex-1 pr-2">
+                <form id="projectForm" onSubmit={handleSaveProject} className="space-y-6 pb-2">
+                    
+                    {/* Basic Info */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        {/* Logo Upload */}
+                        <div className="flex flex-col items-center gap-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
+                            <div className="w-32 h-32 rounded-lg bg-white border border-gray-300 shadow-sm flex items-center justify-center overflow-hidden relative group">
+                                {newProject.logo ? (
+                                    <img src={newProject.logo} alt="Project Logo" className="w-full h-full object-contain" />
+                                ) : (
+                                    <Building2 size={48} className="text-gray-400" />
+                                )}
+                                <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                                    <Camera className="text-white" size={24} />
+                                </div>
+                                <input type="file" accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleLogoUpload} />
+                            </div>
+                            {newProject.logo && (
+                                <button type="button" onClick={() => setNewProject({...newProject, logo: null})} className="text-red-500 text-xs font-bold hover:underline">
+                                    ลบรูปโลโก้
+                                </button>
+                            )}
+                            <div className="text-xs text-gray-500 text-center">
+                                โลโก้จะไปแสดงที่หัวกระดาษเวลาพิมพ์รายงาน
+                            </div>
+                        </div>
+
+                        {/* Details */}
+                        <div className="md:col-span-2 space-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">{t('projType')}</label>
+                                    <select 
+                                        className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 bg-white"
+                                        value={newProject.type}
+                                        onChange={e => setNewProject({...newProject, type: e.target.value})}
+                                    >
+                                        {PROJECT_TYPES.map(type => <option key={type} value={type}>{t(type === 'Condo' ? 'tab_condo' : type === 'Village' ? 'tab_village' : 'tab_office')}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">{t('projCode')}</label>
+                                    <input 
+                                        type="text" 
+                                        required 
+                                        className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 font-mono bg-gray-50"
+                                        value={newProject.code}
+                                        onChange={e => setNewProject({...newProject, code: e.target.value})}
+                                        readOnly
+                                    />
+                                    <span className="text-[10px] text-gray-500 mt-1 block">รหัสจะสร้างอัตโนมัติตามประเภท (C=Condo, V=Village, O=Office)</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">{t('projName')} <span className="text-red-500">*</span></label>
+                                <input 
+                                    type="text" 
+                                    required 
+                                    className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200"
+                                    value={newProject.name}
+                                    onChange={e => setNewProject({...newProject, name: e.target.value})}
+                                    placeholder="เช่น นิติบุคคลหมู่บ้านจัดสรร เดอะวิลเลจ"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">{t('projAddress')}</label>
+                                <div className="relative">
+                                    <MapPin size={16} className="absolute left-3 top-2.5 text-gray-400"/>
+                                    <input 
+                                        type="text" 
+                                        className="w-full border border-gray-300 rounded-md pl-9 p-2 outline-none focus:ring-2 focus:ring-orange-200"
+                                        value={newProject.address}
+                                        onChange={e => setNewProject({...newProject, address: e.target.value})}
+                                        placeholder="ที่อยู่โครงการ..."
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">{t('officePhone')}</label>
+                            <input 
+                                type="tel" 
+                                className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200"
+                                value={newProject.phone}
+                                onChange={e => setNewProject({...newProject, phone: e.target.value})}
+                                placeholder="เบอร์โทรศัพท์สำนักงานนิติฯ"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">{t('taxId')}</label>
+                            <input 
+                                type="text" 
+                                className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200"
+                                value={newProject.taxId}
+                                onChange={e => setNewProject({...newProject, taxId: e.target.value})}
+                                placeholder="เลขประจำตัวผู้เสียภาษี (13 หลัก)"
+                            />
+                        </div>
+                    </div>
+
+                    {/* Contract Info */}
+                    <div className="bg-orange-50 p-4 rounded-xl border border-orange-100">
+                        <h3 className="font-bold text-orange-800 mb-3 flex items-center gap-2"><Briefcase size={16}/> สัญญาว่าจ้างบริหาร (Management Contract)</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">{t('contractStartDate')}</label>
+                                <input 
+                                    type="date" 
+                                    required 
+                                    className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 bg-white"
+                                    value={newProject.contractStartDate}
+                                    onChange={e => setNewProject({...newProject, contractStartDate: e.target.value})}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">{t('contractEndDate')}</label>
+                                <input 
+                                    type="date" 
+                                    required 
+                                    className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 bg-white"
+                                    value={newProject.contractEndDate}
+                                    onChange={e => setNewProject({...newProject, contractEndDate: e.target.value})}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">มูลค่าสัญญา (บาท)</label>
+                                <input 
+                                    type="number" 
+                                    className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 bg-white"
+                                    value={newProject.contractValue || ''}
+                                    onChange={e => setNewProject({...newProject, contractValue: e.target.value})}
+                                    placeholder="0.00"
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Documents Upload */}
+                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                        <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2"><FileText size={16}/> {t('uploadDocs')} <span className="text-xs font-normal text-gray-500">(เฉพาะไฟล์ .PDF ขนาดไม่เกิน 10MB)</span></h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {[
+                                { key: 'orchor', label: t('doc_orchor') }, 
+                                { key: 'committee', label: t('doc_committee') }, 
+                                { key: 'regulations', label: t('doc_regulations') }, 
+                                { key: 'resident_rules', label: t('doc_resident_rules') }
+                            ].map(doc => {
+                                const hasFile = !!newProject.files?.[doc.key];
+                                const fileName = typeof newProject.files?.[doc.key] === 'string' ? newProject.files?.[doc.key] : newProject.files?.[doc.key]?.name;
+                                return (
+                                <div key={doc.key} className="border border-gray-300 bg-white rounded-lg p-3 hover:border-blue-400 transition-colors cursor-pointer relative overflow-hidden group">
+                                    <input 
+                                        type="file" 
+                                        accept=".pdf" 
+                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
+                                        onChange={(e) => handleProjectFileUpload(e, doc.key)} 
+                                        title={`อัปโหลด ${doc.label}`}
+                                    />
+                                    <div className="flex items-center gap-3">
+                                        <div className={`p-2 rounded-lg ${hasFile ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors'}`}>
+                                            {hasFile ? <FileCheck size={20} /> : <Upload size={20} />}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-xs font-bold text-gray-700 truncate">{doc.label}</div>
+                                            {hasFile ? (
+                                                <div className="text-[10px] text-green-600 truncate mt-0.5">{fileName}</div>
+                                            ) : (
+                                                <div className="text-[10px] text-gray-400 mt-0.5 group-hover:text-blue-500 transition-colors">คลิกเพื่ออัปโหลดไฟล์ PDF</div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            )})}
+                        </div>
+                    </div>
+                    
+                    {/* Status for editing */}
+                    {isEditingProject && (
+                        <div className="bg-white p-4 rounded-xl border border-gray-200 flex items-center justify-between">
+                            <label className="font-bold text-gray-700">สถานะโครงการ (Status)</label>
+                            <select 
+                                className="border border-gray-300 rounded-md p-2 outline-none focus:border-orange-500 bg-white font-bold"
+                                value={newProject.status}
+                                onChange={e => setNewProject({...newProject, status: e.target.value})}
+                            >
+                                <option value="Active" className="text-green-600">ใช้งาน (Active)</option>
+                                <option value="Inactive" className="text-gray-500">ปิดโครงการ (Inactive)</option>
+                            </select>
+                        </div>
+                    )}
+
+                </form>
+            </div>
+            
+            <div className="flex justify-end gap-2 pt-4 mt-4 border-t border-gray-200 shrink-0">
+                <Button variant="secondary" onClick={() => setShowAddProjectModal(false)}>{t('cancel')}</Button>
+                <Button type="button" icon={Save} onClick={(e) => {
+                    const form = document.getElementById('projectForm');
+                    if (form && form.reportValidity()) {
+                        handleSaveProject(e);
+                    }
+                }} disabled={isSavingProject}>
+                    {isSavingProject ? <><Loader2 size={16} className="animate-spin" /> กำลังบันทึก...</> : t('save')}
+                </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
