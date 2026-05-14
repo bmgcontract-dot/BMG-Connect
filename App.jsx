@@ -321,6 +321,8 @@ const STANDARD_FORMS = [
     { id: 'f9', category: 'งานผู้รับเหมาและซ่อมบำรุง (Contractor & Maint.)', name: 'แบบฟอร์มขออนุญาตเข้าพื้นที่ทำงาน (Work Permit)', format: 'PDF', size: '140 KB', lastUpdated: '2025-02-10', description: 'ใช้สำหรับผู้รับเหมาภายนอกเพื่อขออนุญาตเข้าพื้นที่ปฏิบัติงาน รวมถึงรายละเอียดผู้ปฏิบัติงาน (Used for external contractors to request area access, including details of the workers.)' },
     { id: 'f10', category: 'งานผู้รับเหมาและซ่อมบำรุง (Contractor & Maint.)', name: 'แบบฟอร์มแจ้งซ่อม (Repair Request Form)', format: 'PDF', size: '130 KB', lastUpdated: '2025-01-20', description: 'ใบแจ้งซ่อมสำหรับทรัพย์สินส่วนกลาง หรือบริการซ่อมแซมภายในพื้นที่ส่วนบุคคล (Form to report issues or request repairs for common property or private units.)' },
     { id: 'f17', category: 'งานผู้รับเหมาและซ่อมบำรุง (Contractor & Maint.)', name: 'แบบฟอร์มขอคืนเงินค้ำประกันตกแต่ง (Renovation Deposit Refund Form)', format: 'PDF', size: '115 KB', lastUpdated: '2026-02-22', description: 'ใช้สำหรับเจ้าของร่วมเพื่อขอรับเงินค้ำประกันความเสียหายคืน หลังจากที่ผู้รับเหมาปฏิบัติงานเสร็จสิ้นและผ่านการตรวจสอบพื้นที่แล้ว (Used to request a refund of the renovation deposit after work completion and inspection.)' },
+    { id: 'f22', category: 'งานผู้รับเหมาและซ่อมบำรุง (Contractor & Maint.)', name: 'แบบฟอร์มตรวจสอบงานตกแต่งต่อเติมเพื่อคืนเงินค้ำประกัน (Renovation Inspection Checklist)', format: 'PDF', size: '145 KB', lastUpdated: '2026-05-14', description: 'รายการตรวจสอบพื้นที่ (Checklist):\n[  ] 1. ไม่มีความเสียหายต่อทรัพย์สินส่วนกลาง (พื้น, ผนัง, ฝ้าเพดาน, ลิฟต์ ฯลฯ)\n[  ] 2. ไม่มีการกองทิ้งขยะ หรือเศษวัสดุก่อสร้างในพื้นที่ส่วนกลาง\n[  ] 3. ระบบไฟฟ้าและระบบประปาส่วนกลางไม่ได้รับผลกระทบ\n[  ] 4. พื้นที่ส่วนกลางบริเวณหน้างานและทางเดินได้รับการทำความสะอาดเรียบร้อย\n[  ] 5. ส่งคืนบัตรผู้รับเหมา / บัตรแลกเข้า ครบถ้วน\n[  ] 6. การตกแต่งต่อเติมเป็นไปตามแบบที่ได้รับอนุญาต และไม่กระทบโครงสร้างหลักอาคาร\n\nสรุปผลการตรวจสอบ:\n(   ) ผ่านเกณฑ์ (สามารถดำเนินการคืนเงินค้ำประกันได้)\n(   ) ไม่ผ่านเกณฑ์ (ต้องดำเนินการแก้ไขความเสียหาย/ทำความสะอาดก่อน)' },
+    { id: 'f23', category: 'งานผู้รับเหมาและซ่อมบำรุง (Contractor & Maint.)', name: 'แบบฟอร์มยินยอมและรับทราบการตกแต่งต่อเติมของห้อง/บ้านข้างเคียง (Neighboring Unit Consent Form)', format: 'PDF', size: '135 KB', lastUpdated: '2026-05-14', description: 'หนังสือยินยอม:\nข้าพเจ้าเจ้าของห้อง/บ้านเลขที่ .......................... ยินยอมและรับทราบการตกแต่งต่อเติมของห้อง/บ้านเลขที่ ..........................\nโดยได้รับทราบว่าระหว่างการปฏิบัติงานอาจมีผลกระทบเรื่องเสียงดัง หรือฝุ่นละออง ในช่วงเวลาที่นิติบุคคลฯ กำหนด\n\nลงชื่อ ........................................................ ผู้ยินยอม (เจ้าของห้อง/บ้านข้างเคียง)\n\nลงชื่อ ........................................................ ผู้ขอตกแต่งต่อเติม' },
 
     // หมวดหมู่: งานบริหารและนิติบุคคล (Juristic & Management)
     { id: 'f11', category: 'งานบริหารและนิติบุคคล (Juristic & Mgmt.)', name: 'แบบฟอร์มร้องเรียนทั่วไป (General Complaint Form)', format: 'PDF', size: '105 KB', lastUpdated: '2024-12-01', description: 'ใช้สำหรับรับเรื่องร้องเรียน ข้อเสนอแนะ หรือปัญหาต่างๆ จากลูกบ้านเพื่อให้ฝ่ายบริหารดำเนินการแก้ไข (Used to submit general complaints, suggestions, or report issues to the management team for resolution.)' },
@@ -2951,11 +2953,11 @@ export default function App() {
   // สร้างและรันรหัสโครงการอัตโนมัติตามประเภท (C, V, O)
   useEffect(() => { 
       if (showAddProjectModal && !isEditingProject) { 
-          const prefix = PROJECT_TYPE_CODES[newProject.type] || 'P'; 
-          // หาเลขสูงสุดของประเภทนั้นๆ เพื่อป้องกันรหัสซ้ำกรณีมีการลบข้อมูล (เพิ่มการตรวจสอบ typeof เพื่อป้องกันบัคกรณีนำเข้าข้อมูลเก่าเป็นตัวเลข)
+          const prefix = PROJECT_TYPE_CODES[newProject.type]; 
+          // หาเลขสูงสุดของประเภทนั้นๆ เพื่อป้องกันรหัสซ้ำกรณีมีการลบข้อมูล
           const existingCodes = projects
-              .filter(p => p.type === newProject.type && p.code && typeof p.code === 'string' && p.code.startsWith(prefix + '-'))
-              .map(p => parseInt(String(p.code).split('-')[1], 10))
+              .filter(p => p.type === newProject.type && p.code && p.code.startsWith(prefix + '-'))
+              .map(p => parseInt(p.code.split('-')[1], 10))
               .filter(n => !isNaN(n));
           const maxCount = existingCodes.length > 0 ? Math.max(...existingCodes) : 0;
           const nextCount = maxCount + 1;
@@ -17679,7 +17681,7 @@ export default function App() {
                                 <p className="mt-4 font-bold">
                                     {selectedFormDetails.category === 'งานบุคคลและภายใน (Internal)' ? 'รายละเอียดการดำเนินงาน / ส่งมอบงาน:' : 'มีความประสงค์เพื่อ:'}
                                 </p>
-                                <div className={`w-full min-h-[100px] border p-3 leading-relaxed text-sm ${isEditingForm ? "border-blue-300 bg-blue-50 outline-none rounded" : "border-gray-300"}`} contentEditable={isEditingForm}>
+                                <div className={`w-full min-h-[100px] border p-3 leading-relaxed text-sm whitespace-pre-wrap ${isEditingForm ? "border-blue-300 bg-blue-50 outline-none rounded" : "border-gray-300"}`} contentEditable={isEditingForm}>
                                     {isEditingForm ? "" : (selectedFormDetails.description || "ระบุรายละเอียดเพิ่มเติมที่นี่...")}
                                 </div>
                                 
