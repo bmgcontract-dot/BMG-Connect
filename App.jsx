@@ -13967,6 +13967,239 @@ export default function App() {
           </div>
       )}
 
+      {/* Add User Modal */}
+      {showAddUserModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto p-4 animate-fade-in">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl p-6 relative flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="flex justify-between items-center mb-6 border-b pb-4 shrink-0">
+              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <Users className="text-orange-500" />
+                {isEditingUser ? t('editUserTitle') : t('newUserTitle')}
+              </h2>
+              <button onClick={() => setShowAddUserModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
+            </div>
+            
+            {/* Scrollable Form */}
+            <div className="overflow-y-auto custom-scrollbar flex-1 pr-2">
+                <form id="userForm" onSubmit={handleSaveUser} className="space-y-6 pb-2">
+                    {/* 1. ข้อมูลส่วนตัว & ล็อกอิน */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        {/* รูปภาพ */}
+                        <div className="flex flex-col items-center gap-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
+                            <div className="w-32 h-32 rounded-full bg-white border-4 border-white shadow-md flex items-center justify-center overflow-hidden relative group">
+                                {newUser.photo ? (
+                                    <img src={newUser.photo} alt="Profile" className="w-full h-full object-cover" />
+                                ) : (
+                                    <User size={48} className="text-gray-400" />
+                                )}
+                                <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                                    <Camera className="text-white" size={24} />
+                                </div>
+                                <input type="file" accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handlePhotoUpload} />
+                            </div>
+                            {newUser.photo && (
+                                <button type="button" onClick={() => setNewUser({...newUser, photo: null})} className="text-red-500 text-xs font-bold hover:underline">
+                                    {t('removePhoto')}
+                                </button>
+                            )}
+                        </div>
+                        {/* ข้อมูล */}
+                        <div className="md:col-span-2 space-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">{t('firstName')} <span className="text-red-500">*</span></label>
+                                    <input type="text" required className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200" value={newUser.firstName} onChange={e => setNewUser({...newUser, firstName: e.target.value})} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">{t('lastName')} <span className="text-red-500">*</span></label>
+                                    <input type="text" required className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200" value={newUser.lastName} onChange={e => setNewUser({...newUser, lastName: e.target.value})} />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">{t('empId')}</label>
+                                    <input type="text" className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 font-mono" value={newUser.employeeId} onChange={e => setNewUser({...newUser, employeeId: e.target.value})} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">{t('phone')}</label>
+                                    <input type="tel" className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200" value={newUser.phone} onChange={e => setNewUser({...newUser, phone: e.target.value})} />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-orange-50 p-4 rounded-lg border border-orange-100">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">{t('username')} <span className="text-red-500">*</span></label>
+                                    <input type="text" required className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200" value={newUser.username} onChange={e => setNewUser({...newUser, username: e.target.value})} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">{t('password')} <span className="text-red-500">*</span></label>
+                                    <input type="text" required className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200" value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 2. ตำแหน่ง & สังกัด */}
+                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-4">
+                        <h3 className="font-bold text-gray-800 border-b pb-2 flex items-center gap-2"><Briefcase size={16}/> ข้อมูลการทำงาน (Work Info)</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">{t('position')}</label>
+                                <select 
+                                    className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 bg-white"
+                                    value={newUser.position}
+                                    onChange={e => {
+                                        setNewUser({...newUser, position: e.target.value});
+                                        if (!isEditingUser) {
+                                            setNewUser(prev => ({...prev, permissions: getMergedPermissions(rolePermissions[e.target.value])}));
+                                        }
+                                    }}
+                                >
+                                    {EMPLOYEE_POSITIONS.map(pos => <option key={pos} value={pos}>{pos}</option>)}
+                                </select>
+                                {newUser.position === 'อื่นๆ (ให้ระบุ) / Other (Please specify)' && (
+                                    <input 
+                                        type="text" 
+                                        className="mt-2 w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200"
+                                        placeholder={t('specifyOther')}
+                                        value={newUser.otherPosition}
+                                        onChange={e => setNewUser({...newUser, otherPosition: e.target.value})}
+                                        required
+                                    />
+                                )}
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">{t('currentDept')}</label>
+                                <select 
+                                    className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 bg-white"
+                                    value={newUser.department}
+                                    onChange={e => setNewUser({...newUser, department: e.target.value})}
+                                >
+                                    <option value="">-- ไม่ระบุ (ส่วนกลาง) --</option>
+                                    <option value="Head Office">Head Office (สำนักงานใหญ่)</option>
+                                    <optgroup label="หน่วยงาน/โครงการ">
+                                        {projects.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                                    </optgroup>
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* สิทธิ์เข้าถึงหลายโครงการ */}
+                        <div className="pt-2">
+                            <label className="block text-sm font-bold text-gray-700 mb-1">{t('accessibleDepts')} (สำหรับ Area Manager / Support)</label>
+                            <div className="flex gap-2 mb-2">
+                                <select className="flex-1 border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 bg-white" onChange={handleAddAccessibleDept} value="">
+                                    <option value="" disabled>{t('selectDept')}</option>
+                                    <option value="All">ทุกหน่วยงาน (All Projects)</option>
+                                    {projects.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                                </select>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {newUser.accessibleDepts && newUser.accessibleDepts.map(dept => (
+                                    <span key={dept} className="bg-orange-100 text-orange-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1 border border-orange-200">
+                                        {dept} <button type="button" onClick={() => removeAccessibleDept(dept)} className="hover:text-red-500"><X size={14} /></button>
+                                    </span>
+                                ))}
+                                {(!newUser.accessibleDepts || newUser.accessibleDepts.length === 0) && (
+                                    <span className="text-sm text-gray-400 italic">ไม่มีการกำหนดสิทธิ์พิเศษ (เห็นเฉพาะหน่วยงานประจำ)</span>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 3. สิทธิ์การใช้งานเมนู (Permissions) */}
+                    <div>
+                        <h3 className="font-bold text-gray-800 border-b pb-2 mb-4 flex items-center gap-2"><Shield size={16}/> {t('permissions')}</h3>
+                        <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-gray-100 text-gray-700">
+                                    <tr>
+                                        <th className="p-3 border-b">โมดูล (Module)</th>
+                                        <th className="p-3 border-b text-center w-16">ดู</th>
+                                        <th className="p-3 border-b text-center w-16">บันทึก</th>
+                                        <th className="p-3 border-b text-center w-16">แก้ไข</th>
+                                        <th className="p-3 border-b text-center w-16">อนุมัติ</th>
+                                        <th className="p-3 border-b text-center w-16">ลบ</th>
+                                        <th className="p-3 border-b text-center w-16">พิมพ์</th>
+                                        <th className="p-3 border-b text-center w-20 bg-gray-200">All</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {AVAILABLE_MENUS.map(menu => {
+                                        const renderRow = (item, isSub = false) => {
+                                            const perms = newUser.permissions[item.id] || {};
+                                            const isAll = perms.view && perms.save && perms.edit && perms.approve && perms.delete && perms.print;
+                                            return (
+                                                <tr key={item.id} className={`hover:bg-gray-50 ${isSub ? 'bg-gray-50/30' : ''}`}>
+                                                    <td className={`p-3 font-medium text-gray-800 ${isSub ? 'pl-8 text-xs text-gray-600 border-l-2 border-orange-200' : ''}`}>
+                                                        {isSub && <span className="mr-2 text-gray-400">└</span>}
+                                                        {t(item.label)}
+                                                    </td>
+                                                    {['view', 'save', 'edit', 'approve', 'delete', 'print'].map(ptype => (
+                                                        <td key={ptype} className="p-3 text-center">
+                                                            <input 
+                                                                type="checkbox" 
+                                                                className="w-4 h-4 accent-orange-600 cursor-pointer" 
+                                                                checked={!!perms[ptype]} 
+                                                                onChange={(e) => handlePermissionChange(item.id, ptype, e.target.checked)} 
+                                                            />
+                                                        </td>
+                                                    ))}
+                                                    <td className="p-3 text-center bg-gray-50 border-l border-gray-100">
+                                                        <input 
+                                                            type="checkbox" 
+                                                            className="w-4 h-4 accent-orange-600 cursor-pointer" 
+                                                            checked={isAll} 
+                                                            onChange={(e) => handlePermissionAll(item.id, e.target.checked)} 
+                                                        />
+                                                    </td>
+                                                </tr>
+                                            );
+                                        };
+                                        return (
+                                            <React.Fragment key={menu.id}>
+                                                {renderRow(menu)}
+                                                {menu.submenus && menu.submenus.map(sub => renderRow(sub, true))}
+                                            </React.Fragment>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* Status for editing */}
+                    {isEditingUser && (
+                        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 flex items-center justify-between">
+                            <label className="font-bold text-gray-700">สถานะผู้ใช้งาน (Status)</label>
+                            <select 
+                                className="border border-gray-300 rounded-md p-2 outline-none focus:border-orange-500 bg-white font-bold"
+                                value={newUser.status}
+                                onChange={e => setNewUser({...newUser, status: e.target.value})}
+                            >
+                                <option value="Active" className="text-green-600">Active (ใช้งานปกติ)</option>
+                                <option value="Inactive" className="text-red-600">Inactive (ระงับการใช้งาน)</option>
+                            </select>
+                        </div>
+                    )}
+                </form>
+            </div>
+            
+            {/* Footer Actions */}
+            <div className="flex justify-end gap-2 pt-4 mt-4 border-t border-gray-200 shrink-0">
+                <Button variant="secondary" onClick={() => setShowAddUserModal(false)}>{t('cancel')}</Button>
+                <Button type="button" icon={Save} onClick={(e) => {
+                    // Trigger form validation manually
+                    const form = document.getElementById('userForm');
+                    if (form && form.reportValidity()) {
+                        handleSaveUser(e);
+                    }
+                }}>{t('save')}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* NEW: Add Project Event Modal */}
       {showAddEventModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto p-4 animate-fade-in">
