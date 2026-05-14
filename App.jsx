@@ -2457,7 +2457,8 @@ export default function App() {
       date: new Date().toISOString().split('T')[0],
       time: '09:00',
       description: '',
-      color: 'bg-blue-500'
+      color: 'bg-blue-500',
+      projectId: ''
   });
 
   // คงใช้ usePersistentState สำหรับข้อมูลที่เป็น Object เดี่ยวๆ
@@ -4937,11 +4938,14 @@ export default function App() {
       let nextList;
       const dataToSave = { ...newEvent };
 
+      if (!dataToSave.projectId) {
+          dataToSave.projectId = selectedProject.id;
+      }
+
       if (dataToSave.id) {
           nextList = projectEvents.map(ev => ev.id === dataToSave.id ? dataToSave : ev);
       } else {
           dataToSave.id = generateId();
-          dataToSave.projectId = selectedProject.id;
           nextList = [...projectEvents, dataToSave];
       }
       
@@ -8462,7 +8466,7 @@ export default function App() {
                                           </div>
                                           {hasPerm('projects', 'edit') && (
                                               <Button size="sm" icon={Plus} className="bg-indigo-600 hover:bg-indigo-700" onClick={() => {
-                                                  setNewEvent({ id: null, title: '', date: selectedEventDate, time: '09:00', description: '', color: 'bg-blue-500' });
+                                                  setNewEvent({ id: null, title: '', date: selectedEventDate, time: '09:00', description: '', color: 'bg-blue-500', projectId: selectedProject.id });
                                                   setShowAddEventModal(true);
                                               }}>เพิ่มนัดหมาย</Button>
                                           )}
@@ -8481,7 +8485,7 @@ export default function App() {
                                               {(() => {
                                                   const [y, m] = currentEventMonth.split('-').map(Number);
                                                   const daysArr = getCalendarDays(y, m);
-                                                  const projEvents = projectEvents.filter(ev => ev.projectId === selectedProject.id);
+                                                  const projEvents = projectEvents.filter(ev => ev.projectId === selectedProject.id || ev.projectId === 'All');
 
                                                   return daysArr.map((dayObj, idx) => {
                                                       if (!dayObj.isCurrentMonth) return <div key={idx} className="h-12 bg-transparent opacity-0"></div>;
@@ -8532,7 +8536,7 @@ export default function App() {
                                           </div>
                                           <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
                                               {(() => {
-                                                  const dayEvents = projectEvents.filter(ev => ev.projectId === selectedProject.id && ev.date === selectedEventDate).sort((a,b) => a.time.localeCompare(b.time));
+                                                  const dayEvents = projectEvents.filter(ev => (ev.projectId === selectedProject.id || ev.projectId === 'All') && ev.date === selectedEventDate).sort((a,b) => a.time.localeCompare(b.time));
                                                   
                                                   if (dayEvents.length === 0) {
                                                       return (
@@ -8554,7 +8558,10 @@ export default function App() {
                                                                       <Clock size={10}/> {ev.time} น.
                                                                   </span>
                                                               </div>
-                                                              <h5 className="font-bold text-gray-800 text-sm truncate">{ev.title}</h5>
+                                                              <h5 className="font-bold text-gray-800 text-sm truncate flex items-center gap-1">
+                                                                  {ev.title}
+                                                                  {ev.projectId === 'All' && <span className="bg-purple-100 text-purple-700 text-[9px] px-1.5 py-0.5 rounded border border-purple-200" title="กิจกรรมส่วนกลาง (แสดงทุกหน่วยงาน)">All</span>}
+                                                              </h5>
                                                               {ev.description && (
                                                                   <p className="text-xs text-gray-500 mt-1 line-clamp-2">{ev.description}</p>
                                                               )}
@@ -14248,6 +14255,19 @@ export default function App() {
             
             <div className="p-5 flex-1 overflow-y-auto">
                 <form id="eventForm" onSubmit={handleSaveEvent} className="space-y-4">
+                    {currentUser?.username === 'admin' && (
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">เป้าหมายโครงการ (Target Project)</label>
+                            <select
+                                className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-200 text-sm bg-gray-50 focus:bg-white transition-colors"
+                                value={newEvent.projectId || selectedProject.id}
+                                onChange={e => setNewEvent({...newEvent, projectId: e.target.value})}
+                            >
+                                <option value={selectedProject.id}>เฉพาะหน่วยงานนี้ ({selectedProject.name})</option>
+                                <option value="All">ทุกหน่วยงาน (All Projects)</option>
+                            </select>
+                        </div>
+                    )}
                     <div>
                         <label className="block text-sm font-bold text-gray-700 mb-1">หัวข้อนัดหมาย (Title) <span className="text-red-500">*</span></label>
                         <input 
@@ -17961,18 +17981,18 @@ export default function App() {
                                 <div className="flex flex-col gap-3">
                                     <div className="flex items-center gap-2">
                                         <Button variant="outline" size="sm" className="bg-white border-blue-200 text-blue-600 hover:bg-blue-50" icon={File} type="button">แนบไฟล์</Button>
-                                        <div className="relative flex-1">
-                                            <LinkIcon size={16} className="absolute left-3 top-2.5 text-gray-400"/>
-                                            <input 
-                                                type="url" 
-                                                className="w-full border border-gray-300 rounded-md pl-9 p-2 outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 text-sm transition-colors"
-                                                value={newAnnouncement.link || ''}
-                                                onChange={e => setNewAnnouncement({...newAnnouncement, link: e.target.value})}
-                                                placeholder="https://..."
-                                            />
-                                        </div>
+                                        <span className="text-xs text-gray-400">Support File Just .PDF Only and File Not Over 10 MB</span>
                                     </div>
-                                    <p className="text-[10px] text-gray-400">* ลิงก์ที่แนบจะถูกแสดงเป็นปุ่มกดที่ด้านล่างของประกาศ</p>
+                                    <div className="relative">
+                                        <LinkIcon size={16} className="absolute left-3 top-2.5 text-gray-400"/>
+                                        <input 
+                                            type="url" 
+                                            className="w-full border border-gray-300 rounded-md pl-9 p-2 text-sm outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all"
+                                            value={newAnnouncement.link || ''}
+                                            onChange={e => setNewAnnouncement({...newAnnouncement, link: e.target.value})}
+                                            placeholder="https:// แนบลิงก์เว็บไซต์เพิ่มเติม (ถ้ามี)"
+                                        />
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -18626,24 +18646,26 @@ export default function App() {
                                           item.type === 'schedule' ? 'bg-pink-100 text-pink-600' :
                                           'bg-red-100 text-red-600'
                                       }`}>
-                                          {item.type === 'pm' ? <Wrench size={20} /> : item.type === 'schedule' ? <Calendar size={20} /> : <Hammer size={20} />}
+                                          {item.type === 'pm' ? <Settings size={20} /> :
+                                           item.type === 'schedule' ? <Calendar size={20} /> :
+                                           <Hammer size={20} />}
                                       </div>
                                       <div className="flex-1 min-w-0">
-                                          <h4 className="font-bold text-sm text-gray-800 group-hover:text-red-600 transition-colors truncate">{item.title}</h4>
-                                          <p className="text-xs text-gray-500 mt-0.5 truncate">{item.project.name}</p>
-                                          <p className="text-[10px] text-gray-400 mt-1 flex items-center gap-1"><Clock size={10} /> {new Date(item.date).toLocaleDateString('th-TH')}</p>
-                                      </div>
-                                      <div className="shrink-0 flex items-center">
-                                          <span className="text-[10px] bg-red-50 text-red-600 font-bold px-2 py-1 rounded-md border border-red-100 group-hover:bg-red-600 group-hover:text-white transition-colors">
-                                              {item.actionText}
-                                          </span>
+                                          <h4 className="font-bold text-gray-800 text-sm group-hover:text-red-600 transition-colors line-clamp-2">{item.title}</h4>
+                                          <div className="text-xs text-gray-500 mt-1 flex items-center gap-1.5 truncate">
+                                              <Building2 size={12} className="text-gray-400 shrink-0"/> <span className="truncate">{item.project.name}</span>
+                                          </div>
+                                          <div className="text-[10px] text-gray-400 mt-1 flex justify-between items-center">
+                                              <span>{new Date(item.date).toLocaleDateString('th-TH', { year: '2-digit', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} น.</span>
+                                              <span className="text-red-500 font-bold bg-red-50 px-2 py-0.5 rounded border border-red-100">{item.actionText}</span>
+                                          </div>
                                       </div>
                                   </div>
                               ))}
                           </div>
                       ) : (
-                          <div className="flex flex-col items-center justify-center py-12 text-center">
-                              <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4">
+                          <div className="text-center py-10">
+                              <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-3 border border-gray-100 shadow-inner">
                                   <CheckCircle size={32} className="text-green-500" />
                               </div>
                               <h3 className="font-bold text-gray-700">ไม่มีรายการแจ้งเตือน</h3>
