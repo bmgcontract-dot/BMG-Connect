@@ -1111,7 +1111,7 @@ const ThreeDMedal = ({ rank }) => {
 };
 
 const ChartGradients = () => (
-  <svg width="0" height="0" style={{ position: 'absolute', pointerEvents: 'none' }}>
+  <svg width="0" height="0" style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', visibility: 'hidden' }}>
     <defs>
       <linearGradient id="colorBlue" x1="0" y1="0" x2="1" y2="1">
         <stop offset="0%" stopColor="#60a5fa" />
@@ -2472,6 +2472,49 @@ export default function App() {
   const [bellPos, setBellPos] = useUserPersistentState('bmg_bell_pos', { right: 24, bottom: 24 }, fbUser);
   const [isDraggingBell, setIsDraggingBell] = useState(false);
   const dragRef = useRef({ startX: 0, startY: 0, startRight: 0, startBottom: 0, isDragging: false });
+
+  // --- NEW: Global Draggable Bell Handlers (Fixed Pointer Capture Bug) ---
+  useEffect(() => {
+      const handleGlobalPointerMove = (e) => {
+          if (!isDraggingBell) return;
+          const dx = dragRef.current.startX - e.clientX; 
+          const dy = dragRef.current.startY - e.clientY;
+          
+          // ป้องกันการคลิกปกติกลายเป็นการลาก (ต้องลากเกิน 3px ถึงจะถือว่าขยับ)
+          if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+              dragRef.current.isDragging = true;
+          }
+
+          if (dragRef.current.isDragging) {
+              // ควบคุมไม่ให้ลากหลุดออกนอกจอ
+              const newRight = Math.max(0, Math.min(window.innerWidth - 60, dragRef.current.startRight + dx));
+              const newBottom = Math.max(0, Math.min(window.innerHeight - 60, dragRef.current.startBottom + dy));
+              setBellPos({ right: newRight, bottom: newBottom });
+          }
+      };
+
+      const handleGlobalPointerUp = () => {
+          if (isDraggingBell) {
+              setIsDraggingBell(false);
+              // ถ้าไม่ได้เป็นการลาก (เป็นการคลิก) ให้เปิดหน้าต่างแจ้งเตือน
+              if (!dragRef.current.isDragging) {
+                  setShowNotificationModal(true);
+              }
+          }
+      };
+
+      if (isDraggingBell) {
+          window.addEventListener('pointermove', handleGlobalPointerMove);
+          window.addEventListener('pointerup', handleGlobalPointerUp);
+          window.addEventListener('pointercancel', handleGlobalPointerUp);
+      }
+
+      return () => {
+          window.removeEventListener('pointermove', handleGlobalPointerMove);
+          window.removeEventListener('pointerup', handleGlobalPointerUp);
+          window.removeEventListener('pointercancel', handleGlobalPointerUp);
+      };
+  }, [isDraggingBell, bellPos, setBellPos]);
 
   // --- NEW: Auto-sync Current User (อัปเดตข้อมูลผู้ใช้แบบ Real-time เผื่อมีการเปลี่ยนสิทธิ์) ---
   useEffect(() => {
@@ -7122,7 +7165,7 @@ export default function App() {
                                               <span className="text-gray-300">-</span>
                                           )}
                                       </td>
-                                      <td className={`p-4 text-center space-x-1 ${isExporting ? 'hidden' : ''}`} onClick={(e) => e.stopPropagation()}>
+                                      <td className={`p-4 text-center space-x-1 ${isExporting ? 'hidden' : ''}`}>
                                           {hasPerm('users', 'edit') && <button className="text-gray-400 hover:text-blue-600 transition-colors p-1.5 rounded-md hover:bg-blue-50" onClick={(e) => { e.stopPropagation(); handleEditUser(user); }} title="แก้ไขข้อมูล"><Edit size={16} /></button>}
                                           {hasPerm('users', 'delete') && <button className="text-gray-400 hover:text-red-600 transition-colors p-1.5 rounded-md hover:bg-red-50" onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบผู้ใช้งาน ${user.firstName} ${user.lastName} ใช่หรือไม่?`, () => setUsers(prev => prev.filter(u => u.id !== user.id))); }} title="ลบข้อมูล"><Trash2 size={16} /></button>}
                                       </td>
@@ -18266,10 +18309,16 @@ export default function App() {
           <div 
               className={`fixed z-[9900] flex items-center justify-center w-14 h-14 rounded-full shadow-[0_8px_20px_rgba(220,38,38,0.5)] cursor-pointer select-none touch-none transition-transform ${isDraggingBell ? 'scale-90 opacity-90' : 'hover:scale-105'} bg-gradient-to-br from-red-500 to-red-700 text-white border-[3px] border-white`}
               style={{ right: `${bellPos.right || 24}px`, bottom: `${bellPos.bottom || 24}px` }}
-              onPointerDown={handleBellPointerDown}
-              onPointerMove={handleBellPointerMove}
-              onPointerUp={handleBellPointerUp}
-              onPointerCancel={handleBellPointerUp}
+              onPointerDown={(e) => {
+                  dragRef.current = {
+                      startX: e.clientX,
+                      startY: e.clientY,
+                      startRight: bellPos.right || 24,
+                      startBottom: bellPos.bottom || 24,
+                      isDragging: false
+                  };
+                  setIsDraggingBell(true);
+              }}
               title="กระดิ่งแจ้งเตือน (ลากเพื่อย้ายตำแหน่งได้)"
           >
               <Bell size={24} className={getPendingApprovals().length > 0 ? "animate-ring" : ""} />
