@@ -7122,7 +7122,7 @@ export default function App() {
                                               <span className="text-gray-300">-</span>
                                           )}
                                       </td>
-                                      <td className={`p-4 text-center space-x-1 ${isExporting ? 'hidden' : ''}`}>
+                                      <td className={`p-4 text-center space-x-1 ${isExporting ? 'hidden' : ''}`} onClick={(e) => e.stopPropagation()}>
                                           {hasPerm('users', 'edit') && <button className="text-gray-400 hover:text-blue-600 transition-colors p-1.5 rounded-md hover:bg-blue-50" onClick={(e) => { e.stopPropagation(); handleEditUser(user); }} title="แก้ไขข้อมูล"><Edit size={16} /></button>}
                                           {hasPerm('users', 'delete') && <button className="text-gray-400 hover:text-red-600 transition-colors p-1.5 rounded-md hover:bg-red-50" onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบผู้ใช้งาน ${user.firstName} ${user.lastName} ใช่หรือไม่?`, () => setUsers(prev => prev.filter(u => u.id !== user.id))); }} title="ลบข้อมูล"><Trash2 size={16} /></button>}
                                       </td>
