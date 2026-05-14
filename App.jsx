@@ -2232,6 +2232,7 @@ export default function App() {
 
   // Action Plan State
   const [showAddActionPlanModal, setShowAddActionPlanModal] = useState(false);
+  const [newActionPlanUpdateText, setNewActionPlanUpdateText] = useState(''); // NEW: State for follow-up input
   const [newActionPlan, setNewActionPlan] = useState({
       id: null,
       issue: '',
@@ -2240,7 +2241,8 @@ export default function App() {
       otherResponsible: '',
       startDate: new Date().toISOString().split('T')[0],
       deadline: '',
-      status: 'Pending'
+      status: 'Pending',
+      updates: [] // NEW: Array to store history
   });
 
   // Supplier Search & Filter State
@@ -2465,6 +2467,11 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useUserPersistentState('bmg_sidebar_open', true, fbUser); // NEW: Sidebar Desktop State (แยกอิสระรายบุคคล)
   const [fullScreenChart, setFullScreenChart] = useState(null); // แก้ไข: ย้าย State สำหรับจัดการ Full Screen Chart ขึ้นมาไว้ตรงนี้
   const [showNotificationModal, setShowNotificationModal] = useState(false); // NEW: State สำหรับแสดง Modal แจ้งเตือน
+
+  // --- NEW: Draggable Bell State ---
+  const [bellPos, setBellPos] = useUserPersistentState('bmg_bell_pos', { right: 24, bottom: 24 }, fbUser);
+  const [isDraggingBell, setIsDraggingBell] = useState(false);
+  const dragRef = useRef({ startX: 0, startY: 0, startRight: 0, startBottom: 0, isDragging: false });
 
   // --- NEW: Auto-sync Current User (อัปเดตข้อมูลผู้ใช้แบบ Real-time เผื่อมีการเปลี่ยนสิทธิ์) ---
   useEffect(() => {
@@ -3411,6 +3418,47 @@ export default function App() {
               ...prev,
               tasks: prev.tasks.filter(t => t.historyRecord?.id !== record.id)
           }));
+      }
+  };
+
+  // --- NEW: Draggable Bell Handlers ---
+  const handleBellPointerDown = (e) => {
+      dragRef.current = {
+          startX: e.clientX,
+          startY: e.clientY,
+          startRight: bellPos.right || 24,
+          startBottom: bellPos.bottom || 24,
+          isDragging: false
+      };
+      setIsDraggingBell(true);
+      e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handleBellPointerMove = (e) => {
+      if (!isDraggingBell) return;
+      const dx = dragRef.current.startX - e.clientX; 
+      const dy = dragRef.current.startY - e.clientY;
+      
+      // ป้องกันการคลิกปกติกลายเป็นการลาก (ต้องลากเกิน 3px ถึงจะถือว่าขยับ)
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+          dragRef.current.isDragging = true;
+      }
+
+      if (dragRef.current.isDragging) {
+          // ควบคุมไม่ให้ลากหลุดออกนอกจอ
+          const newRight = Math.max(0, Math.min(window.innerWidth - 60, dragRef.current.startRight + dx));
+          const newBottom = Math.max(0, Math.min(window.innerHeight - 60, dragRef.current.startBottom + dy));
+          setBellPos({ right: newRight, bottom: newBottom });
+      }
+  };
+
+  const handleBellPointerUp = (e) => {
+      setIsDraggingBell(false);
+      e.currentTarget.releasePointerCapture(e.pointerId);
+      
+      // ถ้าไม่ได้เป็นการลาก (เป็นการคลิก) ให้เปิดหน้าต่างแจ้งเตือน
+      if (!dragRef.current.isDragging) {
+          setShowNotificationModal(true);
       }
   };
 
@@ -4734,9 +4782,36 @@ export default function App() {
           setActionPlans([...actionPlans, { ...dataToSave, id, projectId: selectedProject.id }]);
       }
       setShowAddActionPlanModal(false);
-      setNewActionPlan({ id: null, issue: '', details: '', responsible: '', otherResponsible: '', startDate: new Date().toISOString().split('T')[0], deadline: '', status: 'Pending' });
+      setNewActionPlan({ id: null, issue: '', details: '', responsible: '', otherResponsible: '', startDate: new Date().toISOString().split('T')[0], deadline: '', status: 'Pending', updates: [] });
+      setNewActionPlanUpdateText('');
       alert(t('saveSuccess'));
   };
+
+  // --- NEW: Handlers for Action Plan Updates ---
+  const handleAddActionPlanUpdate = () => {
+      if (!newActionPlanUpdateText.trim()) return;
+      
+      const newUpdate = {
+          id: generateId(),
+          date: new Date().toISOString(),
+          note: newActionPlanUpdateText.trim(),
+          updatedBy: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
+      };
+
+      setNewActionPlan(prev => ({
+          ...prev,
+          updates: [...(prev.updates || []), newUpdate]
+      }));
+      setNewActionPlanUpdateText('');
+  };
+
+  const handleRemoveActionPlanUpdate = (updateId) => {
+      setNewActionPlan(prev => ({
+          ...prev,
+          updates: (prev.updates || []).filter(u => u.id !== updateId)
+      }));
+  };
+  // --------------------------------------------
 
   // --- NEW: Deposit Handlers ---
   const handleSaveDeposit = (e) => {
@@ -4816,7 +4891,8 @@ export default function App() {
           resp = otherOption || 'อื่นๆ (ให้ระบุ) / Other (Please specify)';
       }
 
-      setNewActionPlan({ ...ap, responsible: resp, otherResponsible: otherResp });
+      setNewActionPlan({ ...ap, responsible: resp, otherResponsible: otherResp, updates: ap.updates || [] });
+      setNewActionPlanUpdateText('');
       setShowAddActionPlanModal(true);
   };
   
@@ -11600,7 +11676,8 @@ export default function App() {
                                   {isExporting ? t('downloading') : t('downloadPDF')}
                               </Button>
                               {hasPerm('proj_action', 'save') && <Button size="sm" icon={Plus} onClick={() => {
-                                  setNewActionPlan({ id: null, issue: '', details: '', responsible: '', otherResponsible: '', startDate: new Date().toISOString().split('T')[0], deadline: '', status: 'Pending' });
+                                  setNewActionPlan({ id: null, issue: '', details: '', responsible: '', otherResponsible: '', startDate: new Date().toISOString().split('T')[0], deadline: '', status: 'Pending', updates: [] });
+                                  setNewActionPlanUpdateText('');
                                   setShowAddActionPlanModal(true);
                               }}>เพิ่มรายการ</Button>}
                           </div>
@@ -16378,9 +16455,9 @@ export default function App() {
 
       {/* Add Action Plan Modal */}
       {showAddActionPlanModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 m-4 relative animate-fade-in">
-            <div className="flex justify-between items-center mb-6 border-b pb-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 relative animate-fade-in max-h-[90vh] flex flex-col">
+            <div className="flex justify-between items-center mb-4 border-b pb-4 shrink-0">
               <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
                 <CheckCircle className="text-orange-500" />
                 {newActionPlan.id ? 'แก้ไขแผนงาน' : 'เพิ่มแผนปฏิบัติการ (Action Plan)'}
@@ -16388,94 +16465,158 @@ export default function App() {
               <button onClick={() => setShowAddActionPlanModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
             </div>
             
-            <form onSubmit={handleSaveActionPlan} className="space-y-4">
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">หัวข้องาน / ปัญหา (Issue)</label>
-                    <input 
-                        type="text" 
-                        required 
-                        className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200"
-                        value={newActionPlan.issue}
-                        onChange={e => setNewActionPlan({...newActionPlan, issue: e.target.value})}
-                        placeholder="เช่น ซ่อมแซมไฟทางเดิน, ทาสีรั้วใหม่"
-                    />
-                </div>
-
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">รายละเอียด (Details)</label>
-                    <textarea 
-                        className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 h-24 resize-none"
-                        value={newActionPlan.details}
-                        onChange={e => setNewActionPlan({...newActionPlan, details: e.target.value})}
-                        placeholder="ระบุรายละเอียดการปฏิบัติงาน..."
-                    ></textarea>
-                </div>
-
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">ผู้รับผิดชอบ (Responsible)</label>
-                    <select 
-                        className="w-full border rounded-md p-2 bg-white outline-none focus:ring-2 focus:ring-orange-200"
-                        value={newActionPlan.responsible}
-                        onChange={e => setNewActionPlan({...newActionPlan, responsible: e.target.value})}
-                        required
-                    >
-                        <option value="" disabled>-- เลือกผู้รับผิดชอบ --</option>
-                        {EMPLOYEE_POSITIONS.map(pos => <option key={pos} value={pos}>{pos}</option>)}
-                    </select>
-                    {newActionPlan.responsible.startsWith('อื่นๆ') && (
+            <div className="overflow-y-auto custom-scrollbar flex-1 pr-2">
+                <form id="actionPlanForm" onSubmit={handleSaveActionPlan} className="space-y-4 pb-2">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">หัวข้องาน / ปัญหา (Issue)</label>
                         <input 
                             type="text" 
-                            className="mt-2 w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 bg-gray-50"
-                            placeholder="ระบุชื่อผู้รับผิดชอบหรือหน่วยงาน..."
-                            value={newActionPlan.otherResponsible}
-                            onChange={e => setNewActionPlan({...newActionPlan, otherResponsible: e.target.value})}
+                            required 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200"
+                            value={newActionPlan.issue}
+                            onChange={e => setNewActionPlan({...newActionPlan, issue: e.target.value})}
+                            placeholder="เช่น ซ่อมแซมไฟทางเดิน, ทาสีรั้วใหม่"
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">รายละเอียด (Details)</label>
+                        <textarea 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 h-20 resize-none"
+                            value={newActionPlan.details}
+                            onChange={e => setNewActionPlan({...newActionPlan, details: e.target.value})}
+                            placeholder="ระบุรายละเอียดการปฏิบัติงาน..."
+                        ></textarea>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">ผู้รับผิดชอบ (Responsible)</label>
+                        <select 
+                            className="w-full border rounded-md p-2 bg-white outline-none focus:ring-2 focus:ring-orange-200"
+                            value={newActionPlan.responsible}
+                            onChange={e => setNewActionPlan({...newActionPlan, responsible: e.target.value})}
                             required
-                        />
-                    )}
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">วันที่เริ่ม (Start Date)</label>
-                        <input 
-                            type="date" 
-                            required 
-                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200"
-                            value={newActionPlan.startDate}
-                            onChange={e => setNewActionPlan({...newActionPlan, startDate: e.target.value})}
-                        />
+                        >
+                            <option value="" disabled>-- เลือกผู้รับผิดชอบ --</option>
+                            {EMPLOYEE_POSITIONS.map(pos => <option key={pos} value={pos}>{pos}</option>)}
+                        </select>
+                        {newActionPlan.responsible.startsWith('อื่นๆ') && (
+                            <input 
+                                type="text" 
+                                className="mt-2 w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 bg-gray-50"
+                                placeholder="ระบุชื่อผู้รับผิดชอบหรือหน่วยงาน..."
+                                value={newActionPlan.otherResponsible}
+                                onChange={e => setNewActionPlan({...newActionPlan, otherResponsible: e.target.value})}
+                                required
+                            />
+                        )}
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">กำหนดเสร็จ (Deadline)</label>
-                        <input 
-                            type="date" 
-                            required 
-                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200"
-                            value={newActionPlan.deadline}
-                            onChange={e => setNewActionPlan({...newActionPlan, deadline: e.target.value})}
-                        />
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">วันที่เริ่ม (Start Date)</label>
+                            <input 
+                                type="date" 
+                                required 
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200"
+                                value={newActionPlan.startDate}
+                                onChange={e => setNewActionPlan({...newActionPlan, startDate: e.target.value})}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">กำหนดเสร็จ (Deadline)</label>
+                            <input 
+                                type="date" 
+                                required 
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200"
+                                value={newActionPlan.deadline}
+                                onChange={e => setNewActionPlan({...newActionPlan, deadline: e.target.value})}
+                            />
+                        </div>
                     </div>
-                </div>
 
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">สถานะ (Status)</label>
-                    <select 
-                        className="w-full border rounded-md p-2 bg-white outline-none focus:ring-2 focus:ring-orange-200"
-                        value={newActionPlan.status}
-                        onChange={e => setNewActionPlan({...newActionPlan, status: e.target.value})}
-                    >
-                        <option value="Pending">รอดำเนินการ</option>
-                        <option value="In Progress">อยู่ระหว่างดำเนินการ</option>
-                        <option value="Completed">ดำเนินการแล้วเสร็จ</option>
-                        <option value="Cancelled">ยกเลิกดำเนินการ</option>
-                    </select>
-                </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">สถานะ (Status)</label>
+                        <select 
+                            className="w-full border rounded-md p-2 bg-white outline-none focus:ring-2 focus:ring-orange-200"
+                            value={newActionPlan.status}
+                            onChange={e => setNewActionPlan({...newActionPlan, status: e.target.value})}
+                        >
+                            <option value="Pending">รอดำเนินการ</option>
+                            <option value="In Progress">อยู่ระหว่างดำเนินการ</option>
+                            <option value="Completed">ดำเนินการแล้วเสร็จ</option>
+                            <option value="Cancelled">ยกเลิกดำเนินการ</option>
+                        </select>
+                    </div>
 
-                <div className="flex justify-end gap-2 pt-4 border-t border-gray-200 mt-6">
-                    <Button variant="secondary" onClick={() => setShowAddActionPlanModal(false)}>{t('cancel')}</Button>
-                    <Button type="submit" icon={Save}>{t('save')}</Button>
-                </div>
-            </form>
+                    {/* NEW: Follow-up History Section */}
+                    <div className="pt-4 border-t border-gray-200 mt-4">
+                        <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
+                            <History size={16} className="text-orange-500" />
+                            ประวัติการติดตามงาน (Follow-up History)
+                        </h3>
+
+                        {/* List of updates */}
+                        <div className="space-y-3 mb-4 max-h-48 overflow-y-auto custom-scrollbar pr-2">
+                            {(newActionPlan.updates || []).length > 0 ? (
+                                newActionPlan.updates.map((update, idx) => (
+                                    <div key={update.id || idx} className="bg-gray-50 p-3 rounded-lg border border-gray-200 relative group">
+                                        <div className="flex justify-between items-start mb-1">
+                                            <span className="text-xs font-bold text-gray-700 flex items-center gap-1">
+                                                <User size={12} className="text-orange-500" /> {update.updatedBy}
+                                            </span>
+                                            <span className="text-[10px] text-gray-500">
+                                                {new Date(update.date).toLocaleString('th-TH', { year: '2-digit', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} น.
+                                            </span>
+                                        </div>
+                                        <p className="text-sm text-gray-600 whitespace-pre-wrap mt-1">{update.note}</p>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleRemoveActionPlanUpdate(update.id)}
+                                            className="absolute top-2 right-2 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-100 rounded p-1"
+                                            title="ลบประวัตินี้"
+                                        >
+                                            <X size={12} />
+                                        </button>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="text-center text-xs text-gray-400 py-4 border border-dashed border-gray-200 rounded-lg">
+                                    ยังไม่มีประวัติการอัปเดตงาน
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Add new update input */}
+                        <div className="flex gap-2 items-start bg-orange-50 p-3 rounded-lg border border-orange-100">
+                            <textarea
+                                className="flex-1 border border-gray-300 rounded-md p-2 text-sm h-12 resize-none outline-none focus:ring-2 focus:ring-orange-200 bg-white"
+                                placeholder="พิมพ์อัปเดตความคืบหน้างานที่นี่..."
+                                value={newActionPlanUpdateText}
+                                onChange={(e) => setNewActionPlanUpdateText(e.target.value)}
+                            ></textarea>
+                            <Button
+                                type="button"
+                                variant="primary"
+                                className="h-12 shrink-0 shadow-sm"
+                                onClick={handleAddActionPlanUpdate}
+                            >
+                                เพิ่มประวัติ
+                            </Button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4 border-t border-gray-200 mt-4 shrink-0">
+                <Button variant="secondary" onClick={() => setShowAddActionPlanModal(false)}>{t('cancel')}</Button>
+                <Button type="button" icon={Save} onClick={(e) => {
+                    const form = document.getElementById('actionPlanForm');
+                    if (form.reportValidity()) {
+                        handleSaveActionPlan(e);
+                    }
+                }}>{t('save')}</Button>
+            </div>
           </div>
         </div>
       )}
@@ -18115,6 +18256,89 @@ export default function App() {
                       >
                           ดาวน์โหลด CSV
                       </Button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* NEW: Global Draggable Notification Bell */}
+      {currentUser && !isExporting && (
+          <div 
+              className={`fixed z-[9900] flex items-center justify-center w-14 h-14 rounded-full shadow-[0_8px_20px_rgba(220,38,38,0.5)] cursor-pointer select-none touch-none transition-transform ${isDraggingBell ? 'scale-90 opacity-90' : 'hover:scale-105'} bg-gradient-to-br from-red-500 to-red-700 text-white border-[3px] border-white`}
+              style={{ right: `${bellPos.right || 24}px`, bottom: `${bellPos.bottom || 24}px` }}
+              onPointerDown={handleBellPointerDown}
+              onPointerMove={handleBellPointerMove}
+              onPointerUp={handleBellPointerUp}
+              onPointerCancel={handleBellPointerUp}
+              title="กระดิ่งแจ้งเตือน (ลากเพื่อย้ายตำแหน่งได้)"
+          >
+              <Bell size={24} className={getPendingApprovals().length > 0 ? "animate-ring" : ""} />
+              {getPendingApprovals().length > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-white text-red-600 font-black text-[10px] w-6 h-6 flex items-center justify-center rounded-full border-2 border-red-500 shadow-md">
+                      {getPendingApprovals().length > 99 ? '99+' : getPendingApprovals().length}
+                  </span>
+              )}
+          </div>
+      )}
+
+      {/* NEW: Global Notification Modal */}
+      {showNotificationModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9950] p-4 animate-fade-in" onClick={() => setShowNotificationModal(false)}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col border border-gray-200" onClick={e => e.stopPropagation()}>
+                  <div className="p-4 border-b flex justify-between items-center bg-red-50">
+                      <h2 className="text-xl font-bold text-red-800 flex items-center gap-2">
+                          <Bell className="text-red-600" size={24}/> การแจ้งเตือน / งานรออนุมัติ
+                      </h2>
+                      <button onClick={() => setShowNotificationModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                  </div>
+                  <div className="flex-1 max-h-[60vh] overflow-y-auto custom-scrollbar p-2">
+                      {getPendingApprovals().length > 0 ? (
+                          <div className="space-y-2">
+                              {getPendingApprovals().map((item, idx) => (
+                                  <div 
+                                      key={`${item.id}_${idx}`}
+                                      className="p-3 bg-white border border-gray-100 rounded-xl hover:border-red-300 hover:shadow-md cursor-pointer transition-all flex gap-3 group"
+                                      onClick={() => {
+                                          setShowNotificationModal(false);
+                                          setSelectedProject(item.project);
+                                          setProjectTab(item.type);
+                                          setActiveMenu('projects');
+                                      }}
+                                  >
+                                      <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                                          item.type === 'pm' ? 'bg-orange-100 text-orange-600' :
+                                          item.type === 'schedule' ? 'bg-pink-100 text-pink-600' :
+                                          'bg-red-100 text-red-600'
+                                      }`}>
+                                          {item.type === 'pm' ? <Settings size={20} /> :
+                                           item.type === 'schedule' ? <Calendar size={20} /> :
+                                           <Hammer size={20} />}
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                          <h4 className="font-bold text-gray-800 text-sm group-hover:text-red-600 transition-colors line-clamp-2">{item.title}</h4>
+                                          <div className="text-xs text-gray-500 mt-1 flex items-center gap-1.5 truncate">
+                                              <Building2 size={12} className="text-gray-400 shrink-0"/> <span className="truncate">{item.project.name}</span>
+                                          </div>
+                                          <div className="text-[10px] text-gray-400 mt-1 flex justify-between items-center">
+                                              <span>{new Date(item.date).toLocaleDateString('th-TH', { year: '2-digit', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} น.</span>
+                                              <span className="text-red-500 font-bold bg-red-50 px-2 py-0.5 rounded border border-red-100">{item.actionText}</span>
+                                          </div>
+                                      </div>
+                                  </div>
+                              ))}
+                          </div>
+                      ) : (
+                          <div className="text-center py-10">
+                              <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-3 border border-gray-100 shadow-inner">
+                                  <CheckCircle size={32} className="text-green-500" />
+                              </div>
+                              <h3 className="font-bold text-gray-700">ไม่มีรายการแจ้งเตือน</h3>
+                              <p className="text-sm text-gray-500 mt-1">คุณจัดการงานทุกอย่างเสร็จสิ้นแล้ว</p>
+                          </div>
+                      )}
+                  </div>
+                  <div className="p-4 bg-gray-50 border-t flex justify-end">
+                      <Button variant="secondary" onClick={() => setShowNotificationModal(false)}>ปิดหน้าต่าง</Button>
                   </div>
               </div>
           </div>
