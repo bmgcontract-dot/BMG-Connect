@@ -2951,11 +2951,11 @@ export default function App() {
   // สร้างและรันรหัสโครงการอัตโนมัติตามประเภท (C, V, O)
   useEffect(() => { 
       if (showAddProjectModal && !isEditingProject) { 
-          const prefix = PROJECT_TYPE_CODES[newProject.type]; 
-          // หาเลขสูงสุดของประเภทนั้นๆ เพื่อป้องกันรหัสซ้ำกรณีมีการลบข้อมูล
+          const prefix = PROJECT_TYPE_CODES[newProject.type] || 'P'; 
+          // หาเลขสูงสุดของประเภทนั้นๆ เพื่อป้องกันรหัสซ้ำกรณีมีการลบข้อมูล (เพิ่มการตรวจสอบ typeof เพื่อป้องกันบัคกรณีนำเข้าข้อมูลเก่าเป็นตัวเลข)
           const existingCodes = projects
-              .filter(p => p.type === newProject.type && p.code && p.code.startsWith(prefix + '-'))
-              .map(p => parseInt(p.code.split('-')[1], 10))
+              .filter(p => p.type === newProject.type && p.code && typeof p.code === 'string' && p.code.startsWith(prefix + '-'))
+              .map(p => parseInt(String(p.code).split('-')[1], 10))
               .filter(n => !isNaN(n));
           const maxCount = existingCodes.length > 0 ? Math.max(...existingCodes) : 0;
           const nextCount = maxCount + 1;
