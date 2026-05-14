@@ -17758,14 +17758,14 @@ export default function App() {
 
                         {/* Signatures Area Anchored to Bottom */}
                         <div className="mt-auto pt-6 flex justify-between px-4 md:px-8 text-center shrink-0">
-                            <div className="w-40 md:w-48">
+                            <div className="w-40 md:w-48 mx-auto flex flex-col items-center">
                                 <div className="border-b border-gray-500 w-full mb-2 h-6"></div>
-                                <p className="text-xs md:text-sm">( ........................................................ )</p>
+                                <p className="text-xs md:text-sm whitespace-nowrap">(.......................................)</p>
                                 <p className="mt-1 font-bold text-xs md:text-sm">{selectedFormDetails.category === 'งานบุคคลและภายใน (Internal)' ? 'ผู้ยื่นเรื่อง / ผู้ส่งมอบงาน' : 'ผู้ยื่นคำร้อง'}</p>
                             </div>
-                            <div className="w-40 md:w-48">
+                            <div className="w-40 md:w-48 mx-auto flex flex-col items-center">
                                 <div className="border-b border-gray-500 w-full mb-2 h-6"></div>
-                                <p className="text-xs md:text-sm">( ........................................................ )</p>
+                                <p className="text-xs md:text-sm whitespace-nowrap">(.......................................)</p>
                                 <p className="mt-1 font-bold text-xs md:text-sm">{selectedFormDetails.category === 'งานบุคคลและภายใน (Internal)' ? 'ผู้อนุมัติ / ผู้รับมอบงาน' : 'ผู้รับเรื่อง / เจ้าหน้าที่นิติบุคคล'}</p>
                             </div>
                         </div>
