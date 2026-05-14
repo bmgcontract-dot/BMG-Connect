@@ -17961,18 +17961,18 @@ export default function App() {
                                 <div className="flex flex-col gap-3">
                                     <div className="flex items-center gap-2">
                                         <Button variant="outline" size="sm" className="bg-white border-blue-200 text-blue-600 hover:bg-blue-50" icon={File} type="button">แนบไฟล์</Button>
-                                        <span className="text-xs text-gray-400">Support File Just .PDF Only and File Not Over 10 MB</span>
+                                        <div className="relative flex-1">
+                                            <LinkIcon size={16} className="absolute left-3 top-2.5 text-gray-400"/>
+                                            <input 
+                                                type="url" 
+                                                className="w-full border border-gray-300 rounded-md pl-9 p-2 outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 text-sm transition-colors"
+                                                value={newAnnouncement.link || ''}
+                                                onChange={e => setNewAnnouncement({...newAnnouncement, link: e.target.value})}
+                                                placeholder="https://..."
+                                            />
+                                        </div>
                                     </div>
-                                    <div className="relative">
-                                        <LinkIcon size={16} className="absolute left-3 top-2.5 text-gray-400"/>
-                                        <input 
-                                            type="url" 
-                                            className="w-full border border-gray-300 rounded-md pl-9 p-2 text-sm outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all"
-                                            value={newAnnouncement.link || ''}
-                                            onChange={e => setNewAnnouncement({...newAnnouncement, link: e.target.value})}
-                                            placeholder="https:// แนบลิงก์เว็บไซต์เพิ่มเติม (ถ้ามี)"
-                                        />
-                                    </div>
+                                    <p className="text-[10px] text-gray-400">* ลิงก์ที่แนบจะถูกแสดงเป็นปุ่มกดที่ด้านล่างของประกาศ</p>
                                 </div>
                             </div>
                         </div>
@@ -18626,26 +18626,24 @@ export default function App() {
                                           item.type === 'schedule' ? 'bg-pink-100 text-pink-600' :
                                           'bg-red-100 text-red-600'
                                       }`}>
-                                          {item.type === 'pm' ? <Settings size={20} /> :
-                                           item.type === 'schedule' ? <Calendar size={20} /> :
-                                           <Hammer size={20} />}
+                                          {item.type === 'pm' ? <Wrench size={20} /> : item.type === 'schedule' ? <Calendar size={20} /> : <Hammer size={20} />}
                                       </div>
                                       <div className="flex-1 min-w-0">
-                                          <h4 className="font-bold text-gray-800 text-sm group-hover:text-red-600 transition-colors line-clamp-2">{item.title}</h4>
-                                          <div className="text-xs text-gray-500 mt-1 flex items-center gap-1.5 truncate">
-                                              <Building2 size={12} className="text-gray-400 shrink-0"/> <span className="truncate">{item.project.name}</span>
-                                          </div>
-                                          <div className="text-[10px] text-gray-400 mt-1 flex justify-between items-center">
-                                              <span>{new Date(item.date).toLocaleDateString('th-TH', { year: '2-digit', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} น.</span>
-                                              <span className="text-red-500 font-bold bg-red-50 px-2 py-0.5 rounded border border-red-100">{item.actionText}</span>
-                                          </div>
+                                          <h4 className="font-bold text-sm text-gray-800 group-hover:text-red-600 transition-colors truncate">{item.title}</h4>
+                                          <p className="text-xs text-gray-500 mt-0.5 truncate">{item.project.name}</p>
+                                          <p className="text-[10px] text-gray-400 mt-1 flex items-center gap-1"><Clock size={10} /> {new Date(item.date).toLocaleDateString('th-TH')}</p>
+                                      </div>
+                                      <div className="shrink-0 flex items-center">
+                                          <span className="text-[10px] bg-red-50 text-red-600 font-bold px-2 py-1 rounded-md border border-red-100 group-hover:bg-red-600 group-hover:text-white transition-colors">
+                                              {item.actionText}
+                                          </span>
                                       </div>
                                   </div>
                               ))}
                           </div>
                       ) : (
-                          <div className="text-center py-10">
-                              <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-3 border border-gray-100 shadow-inner">
+                          <div className="flex flex-col items-center justify-center py-12 text-center">
+                              <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4">
                                   <CheckCircle size={32} className="text-green-500" />
                               </div>
                               <h3 className="font-bold text-gray-700">ไม่มีรายการแจ้งเตือน</h3>
