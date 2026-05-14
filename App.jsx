@@ -1576,14 +1576,14 @@ function usePersistentState(key, initialValue, fbUser) {
                    
                    const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
                    await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
-               } catch(err) {
-                   console.error("Firebase Storage Error:", err);
+               } catch (err) {
+                   console.error(`Firestore Single Save Error [${key}]:`, err);
                } finally {
                    syncTimeoutRef.current = null;
                    isUploadingRef.current = false;
                    resolve();
                }
-           }, 1000); 
+           }, 1000);
        });
     }
   };
@@ -1591,7 +1591,7 @@ function usePersistentState(key, initialValue, fbUser) {
   return [state, setPersistentValue, isLoaded, isSynced];
 }
 
-// --- NEW: Custom Hook for Collection Storage (แก้ปัญหาบันทึกแล้วข้อมูลทับกัน) ---
+  // --- NEW: Custom Hook for Collection Storage (แก้ปัญหาบันทึกแล้วข้อมูลทับกัน) ---
 function usePersistentCollection(collectionName, initialValue, fbUser) {
   const [state, setState] = useState(() => {
       if (typeof window !== 'undefined') {
@@ -1601,6 +1601,21 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                   const parsed = JSON.parse(local); 
                   if (!Array.isArray(parsed)) return initialValue; // ป้องกันข้อมูลเป็น null หรือ Object
                   if (Array.isArray(parsed) && parsed.length === 0 && Array.isArray(initialValue) && initialValue.length > 0) return initialValue;
+                  
+                  // --- FIX: Merge Initial Data with Local Data (สำหรับฟอร์มมาตรฐาน) ---
+                  // ป้องกันฟอร์มที่เพิ่งเพิ่มเข้าไปใหม่ในโค้ด (เช่น f22, f23) ไม่ยอมแสดง
+                  if (collectionName === 'bmg_forms_list' && Array.isArray(initialValue)) {
+                      const merged = [...parsed];
+                      let isChanged = false;
+                      initialValue.forEach(initItem => {
+                          if (!merged.find(item => item.id === initItem.id)) {
+                              merged.push(initItem);
+                              isChanged = true;
+                          }
+                      });
+                      if (isChanged) return merged;
+                  }
+                  
                   return parsed;
               } catch(e) { return initialValue; }
           }
@@ -1673,7 +1688,24 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
       // -------------------------------------------------------
 
       const applyData = (dataToApply) => {
-          if (dataToApply.length === 0 && Array.isArray(initialValue) && initialValue.length > 0) {
+          let finalData = [...dataToApply];
+          
+          // --- FIX: Merge Initial Data with Server Data (สำหรับฟอร์มมาตรฐาน) ---
+          if (collectionName === 'bmg_forms_list' && Array.isArray(initialValue)) {
+              let isChanged = false;
+              initialValue.forEach(initItem => {
+                  if (!finalData.find(item => item.id === initItem.id)) {
+                      finalData.push(initItem);
+                      isChanged = true;
+                      
+                      // สั่งอัปเดตฟอร์มที่ขาดหายไปขึ้น Firebase ทันที
+                      const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, String(initItem.id));
+                      setDoc(docRef, initItem).catch(console.error);
+                  }
+              });
+          }
+
+          if (finalData.length === 0 && Array.isArray(initialValue) && initialValue.length > 0) {
               setState(initialValue);
               stateRef.current = initialValue;
               initialValue.forEach(item => {
@@ -1695,10 +1727,10 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                   return true;
               };
 
-              if (!isSame(stateRef.current, dataToApply)) {
-                  setState(dataToApply);
-                  stateRef.current = dataToApply;
-                  if (typeof window !== 'undefined') localStorage.setItem(collectionName, JSON.stringify(dataToApply));
+              if (!isSame(stateRef.current, finalData)) {
+                  setState(finalData);
+                  stateRef.current = finalData;
+                  if (typeof window !== 'undefined') localStorage.setItem(collectionName, JSON.stringify(finalData));
               }
           }
           isLoadedRef.current = true;
