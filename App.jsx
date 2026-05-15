@@ -9,7 +9,8 @@ import {
   XCircle, Image as ImageIcon, File, Hourglass, Phone, Mail, LayoutGrid, List, ChevronDown, Save,
   ChevronLeft, ChevronRight, MousePointer2, FileCheck, DollarSign, Camera,
   MapPin, Box, PenTool, Printer as PrinterIcon, History, Folder, Lock,
-  Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2, Bell, Megaphone, Radio, Medal, Landmark, RefreshCw
+  Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2, Bell, Megaphone, Radio, Medal, Landmark, RefreshCw, QrCode,
+  Package, Archive, ShoppingCart, ArrowDownRight, ArrowUpRight
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
@@ -378,6 +379,7 @@ const AVAILABLE_MENUS = [
         { id: 'proj_forms', label: 'tab_forms' },
         { id: 'proj_contractors', label: 'menu_contractors' },
         { id: 'proj_meeting', label: 'tab_meeting' },
+        { id: 'proj_inventory', label: 'tab_inventory' },
         { id: 'proj_others', label: 'tab_others' }
     ]
   },
@@ -441,6 +443,7 @@ const PROJECT_TABS = [
   { id: 'forms', label: 'tab_forms', icon: Folder, color: 'blue' },
   { id: 'contractors', label: 'menu_contractors', icon: Search, color: 'gray' },
   { id: 'meeting', label: 'tab_meeting', icon: Megaphone, color: 'teal' },
+  { id: 'inventory', label: 'tab_inventory', icon: Package, color: 'emerald' },
   { id: 'others', label: 'tab_others', icon: Layers, color: 'gray' },
 ];
 
@@ -586,6 +589,7 @@ const TRANSLATIONS = {
     tab_audit: "Audit",
     tab_forms: "แบบฟอร์มมาตรฐาน",
     tab_meeting: "ประชุมใหญ่ / กรรมการ",
+    tab_inventory: "คลังวัสดุ/สต๊อก",
     tab_others: "อื่นๆ (Others)",
 
     // Project Detail Content
@@ -666,6 +670,8 @@ const TRANSLATIONS = {
     pm_yearly_summary: "สรุปแผนรายปี",
     pm_registry_title: "ทะเบียนเครื่องจักร (Machine Registry)",
     pm_dashboard: "แดชบอร์ด",
+    inventory_list: "รายการวัสดุอุปกรณ์",
+    inventory_transaction: "ประวัติรับเข้า/เบิกจ่าย",
     
     // PM Plan
     pm_plan_title: "แผนงานบำรุงรักษา (PM Plan)",
@@ -986,6 +992,9 @@ const TRANSLATIONS = {
     freq_Monthly: "Monthly",
     freq_Yearly: "Yearly",
     col_schedule: "Schedule",
+    tab_inventory: "Stock & Inventory",
+    inventory_list: "Inventory List",
+    inventory_transaction: "Transactions",
   }
 };
 
@@ -1003,6 +1012,10 @@ const INITIAL_OTHERS = [];
 const INITIAL_MEETINGS = [];
 const INITIAL_ANNOUNCEMENTS = [];
 const INITIAL_DEPOSITS = [];
+
+// NEW: Inventory Constants
+const INVENTORY_CATEGORIES = ['วัสดุสำนักงาน', 'วัสดุทำความสะอาด', 'วัสดุช่าง', 'อุปกรณ์ไฟฟ้า', 'เบ็ดเตล็ด'];
+const INVENTORY_UNITS = ['ชิ้น', 'อัน', 'กล่อง', 'แพ็ค', 'ลัง', 'ขวด', 'แกลลอน', 'ม้วน', 'เมตร', 'ชุด'];
 
 // NEW: Deposit Constants
 const DEPOSIT_TYPES = ['ฝากประจำ', 'สลากออมสิน', 'สลาก ธ.ก.ส.', 'อื่นๆ (ให้ระบุ)'];
@@ -1187,6 +1200,8 @@ const INITIAL_UTILITY_READINGS = [];
 const INITIAL_ACTION_PLANS = []; 
 const INITIAL_SCHEDULES = []; 
 const INITIAL_CONTRACTORS = [];
+const INITIAL_INVENTORY = [];
+const INITIAL_TRANSACTIONS = [];
 
 // --- Helper for Image Processing (ปรับปรุงใหม่: ย่อขนาดและบีบอัดเพื่อป้องกันปัญหาพื้นที่ Local Storage เต็มและช่วยให้บันทึกภาพได้) ---
 const compressImage = (file) => {
@@ -2284,6 +2299,9 @@ export default function App() {
   const [supplierTypeFilter, setSupplierTypeFilter] = useState('');
   const [supplierCategoryFilter, setSupplierCategoryFilter] = useState('');
   const [selectedSupplierDetails, setSelectedSupplierDetails] = useState(null); // NEW: State สำหรับเก็บข้อมูล Supplier ที่ถูกคลิก
+  const [supplierCategoryDropdownOpen, setSupplierCategoryDropdownOpen] = useState(false); // NEW: State สำหรับเปิด/ปิด Dropdown หมวดงาน
+  const [supplierCategorySearch, setSupplierCategorySearch] = useState(''); // NEW: State สำหรับพิมพ์ค้นหาหมวดงาน
+  const supplierCategoryRef = useRef(null); // NEW: Ref สำหรับตรวจจับคลิกนอก Dropdown หมวดงาน
 
   // Form Details Modal State
   const [selectedFormDetails, setSelectedFormDetails] = useState(null);
@@ -2334,6 +2352,20 @@ export default function App() {
   const [newDeposit, setNewDeposit] = useState({
       id: null, type: 'ฝากประจำ', customType: '', bank: '', customBank: '', amount: '', interestRate: '', duration: '12 เดือน', startDate: '', endDate: ''
   });
+
+  // --- NEW: Inventory State ---
+  const [inventorySubTab, setInventorySubTab] = useState('list'); // 'list', 'transactions'
+  const [showAddInventoryModal, setShowAddInventoryModal] = useState(false);
+  const [isEditingInventory, setIsEditingInventory] = useState(false);
+  const [newInventoryItem, setNewInventoryItem] = useState({
+      id: null, code: '', name: '', category: 'วัสดุสำนักงาน', customCategory: '', quantity: 0, unit: 'ชิ้น', customUnit: '', minThreshold: 5, location: ''
+  });
+  
+  const [showTransactionModal, setShowTransactionModal] = useState(false);
+  const [newTransaction, setNewTransaction] = useState({
+      id: null, itemId: '', type: 'OUT', quantity: 1, requesterName: '', date: new Date().toISOString().split('T')[0], note: ''
+  });
+  const [inventorySearch, setInventorySearch] = useState('');
 
   // --- NEW: Meeting Gantt Plans State ---
   const INITIAL_GANTT_PLANS = [];
@@ -2415,6 +2447,8 @@ export default function App() {
   const [meetingsList, setMeetingsList] = usePersistentCollection('bmg_meetings', INITIAL_MEETINGS, fbUser);
   const [announcements, setAnnouncements] = usePersistentCollection('bmg_announcements', INITIAL_ANNOUNCEMENTS, fbUser);
   const [deposits, setDeposits] = usePersistentCollection('bmg_deposits', INITIAL_DEPOSITS, fbUser);
+  const [inventoryList, setInventoryList] = usePersistentCollection('bmg_inventory', INITIAL_INVENTORY, fbUser);
+  const [inventoryTransactions, setInventoryTransactions] = usePersistentCollection('bmg_inventory_transactions', INITIAL_TRANSACTIONS, fbUser);
 
   // --- NEW: Meeting Invitations State ---
   const [meetingInvitations, setMeetingInvitations] = usePersistentCollection('bmg_meeting_invitations', [], fbUser);
@@ -2507,6 +2541,17 @@ export default function App() {
   const [bellPos, setBellPos] = useUserPersistentState('bmg_bell_pos', { right: 24, bottom: 24 }, fbUser);
   const [isDraggingBell, setIsDraggingBell] = useState(false);
   const dragRef = useRef({ startX: 0, startY: 0, startRight: 0, startBottom: 0, isDragging: false });
+
+  // --- NEW: Global Custom Dropdown Outside Click Handler ---
+  useEffect(() => {
+      const handleClickOutside = (event) => {
+          if (supplierCategoryRef.current && !supplierCategoryRef.current.contains(event.target)) {
+              setSupplierCategoryDropdownOpen(false);
+          }
+      };
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // --- NEW: Global Draggable Bell Handlers (Fixed Pointer Capture Bug) ---
   useEffect(() => {
@@ -3030,6 +3075,16 @@ export default function App() {
         setNewMachine(prev => ({ ...prev, code: generatedCode }));
     }
   }, [showAddMachineModal, selectedProject, machines, isEditingMachine]);
+
+  // Inventory Code Generation Effect
+  useEffect(() => {
+      if (showAddInventoryModal && selectedProject && !isEditingInventory) {
+          const projectItems = inventoryList.filter(i => i.projectId === selectedProject.id);
+          const nextNum = projectItems.length + 1;
+          const generatedCode = `${selectedProject.code}-INV-${String(nextNum).padStart(3, '0')}`;
+          setNewInventoryItem(prev => ({ ...prev, code: generatedCode, requesterName: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : '' }));
+      }
+  }, [showAddInventoryModal, selectedProject, inventoryList, isEditingInventory, currentUser]);
 
   // Repair Code Generation Effect
   useEffect(() => {
@@ -4930,6 +4985,118 @@ export default function App() {
       setNewDeposit({ ...dep, type: t, customType: ct, bank: b, customBank: cb, interestRate: dep.interestRate || '' });
       setIsEditingDeposit(true);
       setShowAddDepositModal(true);
+  };
+
+  // --- NEW: Inventory Handlers ---
+  const handleSaveInventoryItem = (e) => {
+      e.preventDefault();
+      let nextList;
+      const finalCategory = newInventoryItem.category === 'อื่นๆ' ? newInventoryItem.customCategory : newInventoryItem.category;
+      const finalUnit = newInventoryItem.unit === 'อื่นๆ' ? newInventoryItem.customUnit : newInventoryItem.unit;
+      const dataToSave = { ...newInventoryItem, category: finalCategory, unit: finalUnit };
+
+      if (isEditingInventory) {
+          nextList = inventoryList.map(item => item.id === newInventoryItem.id ? dataToSave : item);
+      } else {
+          dataToSave.id = generateId();
+          dataToSave.projectId = selectedProject.id;
+          dataToSave.lastUpdated = new Date().toISOString();
+          nextList = [...inventoryList, dataToSave];
+      }
+
+      setInventoryList(nextList);
+      triggerAutoSync('Inventory_สต๊อกวัสดุ', nextList, []);
+      setShowAddInventoryModal(false);
+      alert('บันทึกรายการวัสดุ/สต๊อกสำเร็จ');
+  };
+
+  const handleEditInventory = (item) => {
+      let cat = item.category;
+      let cCat = '';
+      if (!INVENTORY_CATEGORIES.includes(cat)) { cCat = cat; cat = 'อื่นๆ'; }
+      
+      let unit = item.unit;
+      let cUnit = '';
+      if (!INVENTORY_UNITS.includes(unit)) { cUnit = unit; unit = 'อื่นๆ'; }
+
+      setNewInventoryItem({ ...item, category: cat, customCategory: cCat, unit: unit, customUnit: cUnit });
+      setIsEditingInventory(true);
+      setShowAddInventoryModal(true);
+  };
+
+  const handleSaveTransaction = (e) => {
+      e.preventDefault();
+      
+      // ดึงข้อมูลรายการจากสต๊อกปัจจุบัน
+      const itemInStock = inventoryList.find(i => i.id === newTransaction.itemId);
+      if (!itemInStock) {
+          alert('ไม่พบรายการวัสดุในระบบ');
+          return;
+      }
+
+      // ถ้าเป็นการ "เบิกออก" ต้องตรวจว่ายอดคงเหลือพอหรือไม่
+      if (newTransaction.type === 'OUT' && Number(newTransaction.quantity) > Number(itemInStock.quantity)) {
+          alert(`ไม่สามารถเบิกเกินจำนวนที่มีในสต๊อกได้ (คงเหลือ: ${itemInStock.quantity} ${itemInStock.unit})`);
+          return;
+      }
+
+      const id = generateId();
+      // สร้างสถานะเริ่มต้น
+      const initialStatus = 'Pending';
+      
+      const newTrx = {
+          ...newTransaction,
+          id,
+          projectId: selectedProject.id,
+          status: initialStatus,
+          itemName: itemInStock.name,
+          itemCode: itemInStock.code,
+          unit: itemInStock.unit,
+          requesterName: newTransaction.requesterName || (currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System')
+      };
+
+      const nextTrxList = [newTrx, ...inventoryTransactions];
+      setInventoryTransactions(nextTrxList);
+      triggerAutoSync('Inventory_Transactions_เบิกจ่ายวัสดุ', nextTrxList, []);
+      
+      setShowTransactionModal(false);
+      setNewTransaction({ id: null, itemId: '', type: 'OUT', quantity: 1, requesterName: '', date: new Date().toISOString().split('T')[0], note: '' });
+      alert('ส่งคำร้องทำรายการสำเร็จ รอการอนุมัติ');
+  };
+
+  const handleApproveTransaction = (trx, isApproved) => {
+      const itemInStock = inventoryList.find(i => i.id === trx.itemId);
+      
+      if (isApproved) {
+          if (!itemInStock) {
+              alert('ไม่พบรายการวัสดุอ้างอิงในระบบ ไม่สามารถอนุมัติได้');
+              return;
+          }
+          
+          let newQty = Number(itemInStock.quantity);
+          if (trx.type === 'IN') {
+              newQty += Number(trx.quantity);
+          } else if (trx.type === 'OUT') {
+              if (Number(trx.quantity) > newQty) {
+                  alert(`จำนวนสต๊อกปัจจุบันมีไม่เพียงพอสำหรับการเบิก (${newQty} < ${trx.quantity})`);
+                  return;
+              }
+              newQty -= Number(trx.quantity);
+          }
+
+          // 1. อัปเดตยอดคงเหลือในสต๊อก
+          const updatedInventory = inventoryList.map(item => item.id === itemInStock.id ? { ...item, quantity: newQty, lastUpdated: new Date().toISOString() } : item);
+          setInventoryList(updatedInventory);
+          triggerAutoSync('Inventory_สต๊อกวัสดุ', updatedInventory, []);
+      }
+
+      // 2. อัปเดตสถานะของ Transaction
+      const finalStatus = isApproved ? 'Approved' : 'Rejected';
+      const approverName = currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'Admin';
+      
+      const updatedTrxList = inventoryTransactions.map(t => t.id === trx.id ? { ...t, status: finalStatus, approverName, approvedDate: new Date().toISOString() } : t);
+      setInventoryTransactions(updatedTrxList);
+      triggerAutoSync('Inventory_Transactions_เบิกจ่ายวัสดุ', updatedTrxList, []);
   };
 
   // --- NEW: Project Event Handlers ---
@@ -7763,20 +7930,67 @@ export default function App() {
                                   {availableTypes.map(t => <option key={t} value={t}>{t}</option>)}
                               </select>
                           </div>
-                          <div>
+                          <div className="relative">
                               <label className="block text-xs font-bold text-gray-500 mb-2">หมวดงานบริการ (Category)</label>
-                              <select 
-                                  className="w-full border border-gray-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none bg-white transition-all"
-                                  value={supplierCategoryFilter}
-                                  onChange={(e) => setSupplierCategoryFilter(e.target.value)}
-                              >
-                                  <option value="">-- ทั้งหมด (All Categories) --</option>
-                                  {Object.entries(SERVICE_TYPES).map(([typeKey, categories]) => (
-                                      <optgroup key={typeKey} label={typeKey}>
-                                          {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                                      </optgroup>
-                                  ))}
-                              </select>
+                              <div className="relative" ref={supplierCategoryRef}>
+                                  <div 
+                                      className={`w-full border rounded-md p-2 text-sm bg-white cursor-pointer flex justify-between items-center transition-all ${supplierCategoryDropdownOpen ? 'border-orange-500 ring-2 ring-orange-200' : 'border-gray-300 hover:border-orange-400'}`}
+                                      onClick={() => setSupplierCategoryDropdownOpen(!supplierCategoryDropdownOpen)}
+                                  >
+                                      <span className={`truncate ${supplierCategoryFilter ? 'text-gray-900 font-medium' : 'text-gray-500'}`}>
+                                          {supplierCategoryFilter || '-- ทั้งหมด (All Categories) --'}
+                                      </span>
+                                      <ChevronDown size={14} className={`text-gray-400 transition-transform ${supplierCategoryDropdownOpen ? 'rotate-180' : ''}`} />
+                                  </div>
+                                  
+                                  {supplierCategoryDropdownOpen && (
+                                      <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-300 rounded-md shadow-xl max-h-64 overflow-y-auto custom-scrollbar">
+                                          <div className="sticky top-0 bg-gray-50 p-2 border-b border-gray-200 z-20">
+                                              <div className="relative">
+                                                  <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
+                                                  <input 
+                                                      type="text" 
+                                                      className="w-full border border-gray-300 rounded p-1.5 pl-8 text-sm outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 bg-white"
+                                                      placeholder="พิมพ์ค้นหาหมวดงาน..."
+                                                      value={supplierCategorySearch}
+                                                      onChange={e => setSupplierCategorySearch(e.target.value)}
+                                                      onClick={e => e.stopPropagation()} // ป้องกันการปิด dropdown เมื่อคลิกที่ input
+                                                      autoFocus
+                                                  />
+                                              </div>
+                                          </div>
+                                          <div 
+                                              className={`p-2.5 text-sm cursor-pointer font-medium border-b border-gray-100 ${!supplierCategoryFilter ? 'bg-orange-50 text-orange-700' : 'text-gray-700 hover:bg-gray-50'}`}
+                                              onClick={() => { setSupplierCategoryFilter(''); setSupplierCategoryDropdownOpen(false); setSupplierCategorySearch(''); }}
+                                          >
+                                              -- ทั้งหมด (All Categories) --
+                                          </div>
+                                          {Object.entries(SERVICE_TYPES).map(([typeKey, categories]) => {
+                                              const filteredCats = categories.filter(c => c.toLowerCase().includes(supplierCategorySearch.toLowerCase()));
+                                              if (filteredCats.length === 0) return null;
+                                              return (
+                                                  <div key={typeKey}>
+                                                      <div className="px-3 py-1.5 bg-gray-100 text-[10px] font-bold text-gray-500 uppercase tracking-wider sticky top-[53px] z-10 shadow-sm">
+                                                          {typeKey}
+                                                      </div>
+                                                      {filteredCats.map(c => (
+                                                          <div 
+                                                              key={c} 
+                                                              className={`px-4 py-2 text-sm cursor-pointer ${supplierCategoryFilter === c ? 'bg-orange-50 text-orange-600 font-bold' : 'text-gray-700 hover:bg-gray-50'}`}
+                                                              onClick={() => { setSupplierCategoryFilter(c); setSupplierCategoryDropdownOpen(false); setSupplierCategorySearch(''); }}
+                                                          >
+                                                              {c}
+                                                          </div>
+                                                      ))}
+                                                  </div>
+                                              );
+                                          })}
+                                          {Object.values(SERVICE_TYPES).flat().filter(c => c.toLowerCase().includes(supplierCategorySearch.toLowerCase())).length === 0 && (
+                                              <div className="p-4 text-center text-gray-400 text-sm">ไม่พบหมวดงานที่ค้นหา</div>
+                                          )}
+                                      </div>
+                                  )}
+                              </div>
                           </div>
                       </div>
                   </div>
@@ -13017,6 +13231,245 @@ export default function App() {
               </div>
           )}
 
+          {/* NEW: Inventory Tab (Stock & Consumables) */}
+          {projectTab === 'inventory' && (
+              <div className="space-y-6 animate-fade-in">
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center p-6 border-b border-gray-200 bg-white rounded-t-xl gap-4">
+                      <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 bg-emerald-50 rounded-lg flex items-center justify-center border border-emerald-100">
+                              <Package className="text-emerald-500" size={20}/>
+                          </div>
+                          <h2 className="text-xl font-bold text-gray-800">คลังวัสดุอุปกรณ์ และ วัสดุสิ้นเปลือง (Stock & Consumables)</h2>
+                      </div>
+                      
+                      <div className="flex gap-4 items-center">
+                          <div className="flex bg-gray-100 p-1 rounded-lg">
+                              <button 
+                                  onClick={() => setInventorySubTab('list')} 
+                                  className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${inventorySubTab === 'list' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
+                              >
+                                  รายการสต๊อก (List)
+                              </button>
+                              <button 
+                                  onClick={() => setInventorySubTab('transactions')} 
+                                  className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${inventorySubTab === 'transactions' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
+                              >
+                                  ประวัติรับ/เบิก (Transactions)
+                              </button>
+                          </div>
+                      </div>
+                  </div>
+
+                  {inventorySubTab === 'list' && (
+                      <Card id="print-inventory-area">
+                          <div className="p-4 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white">
+                              <div className="relative w-full md:w-64">
+                                  <Search size={16} className="absolute left-3 top-2.5 text-gray-400" />
+                                  <input 
+                                      type="text"
+                                      placeholder="ค้นหา รหัส, ชื่อวัสดุ..."
+                                      className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-emerald-200 focus:border-emerald-500 outline-none transition-all"
+                                      value={inventorySearch}
+                                      onChange={(e) => setInventorySearch(e.target.value)}
+                                  />
+                              </div>
+                              <div className={`flex gap-2 shrink-0 ${isExporting ? 'hidden' : ''}`}>
+                                  {hasPerm('proj_inventory', 'save') && (
+                                      <>
+                                          <Button size="sm" variant="outline" className="border-emerald-500 text-emerald-600 hover:bg-emerald-50" icon={ShoppingCart} onClick={() => {
+                                              setNewTransaction({ id: null, itemId: '', type: 'OUT', quantity: 1, requesterName: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : '', date: new Date().toISOString().split('T')[0], note: '' });
+                                              setShowTransactionModal(true);
+                                          }}>เบิก/รับเข้า</Button>
+                                          <Button size="sm" icon={Plus} className="bg-emerald-600 hover:bg-emerald-700" onClick={() => {
+                                              setNewInventoryItem({ id: null, code: '', name: '', category: 'วัสดุสำนักงาน', customCategory: '', quantity: 0, unit: 'ชิ้น', customUnit: '', minThreshold: 5, location: '' });
+                                              setIsEditingInventory(false);
+                                              setShowAddInventoryModal(true);
+                                          }}>เพิ่มวัสดุใหม่</Button>
+                                      </>
+                                  )}
+                                  <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-inventory-area', `Inventory_${selectedProject?.code}.pdf`, 'landscape')} disabled={isExporting}>
+                                      {isExporting ? t('downloading') : t('printPDF')}
+                                  </Button>
+                              </div>
+                          </div>
+
+                          <div className={isExporting ? "pb-4" : "overflow-x-auto"}>
+                              <table className="w-full text-sm text-left">
+                                  <thead className="bg-gray-50 text-gray-600">
+                                      <tr>
+                                          <th className="p-3 border-b text-center w-12">{t('col_seq')}</th>
+                                          <th className="p-3 border-b text-center w-28">รหัสวัสดุ</th>
+                                          <th className="p-3 border-b">ชื่อวัสดุอุปกรณ์</th>
+                                          <th className="p-3 border-b">หมวดหมู่</th>
+                                          <th className="p-3 border-b text-right w-24">คงเหลือ</th>
+                                          <th className="p-3 border-b text-center w-24">หน่วยนับ</th>
+                                          <th className="p-3 border-b text-center">สถานะสต๊อก</th>
+                                          <th className={`p-3 border-b text-center w-24 ${isExporting ? 'hidden' : ''}`}>จัดการ</th>
+                                      </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-100 bg-white">
+                                      {(() => {
+                                          const filteredInv = inventoryList.filter(i => {
+                                              if (i.projectId !== selectedProject.id) return false;
+                                              if (inventorySearch) {
+                                                  const s = inventorySearch.toLowerCase();
+                                                  return i.code.toLowerCase().includes(s) || i.name.toLowerCase().includes(s) || i.category.toLowerCase().includes(s);
+                                              }
+                                              return true;
+                                          }).sort((a, b) => a.name.localeCompare(b.name));
+
+                                          if (filteredInv.length === 0) return <tr><td colSpan="8" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">ไม่มีข้อมูลวัสดุในคลัง</td></tr>;
+
+                                          return filteredInv.map((item, index) => {
+                                              const isLowStock = Number(item.quantity) <= Number(item.minThreshold);
+                                              const isOut = Number(item.quantity) === 0;
+                                              
+                                              return (
+                                                  <tr key={item.id} className="hover:bg-gray-50 transition-colors">
+                                                      <td className="p-3 text-center text-gray-500">{index + 1}</td>
+                                                      <td className="p-3 text-center font-mono font-bold text-emerald-600 bg-emerald-50 rounded-md border border-emerald-100">{item.code}</td>
+                                                      <td className="p-3">
+                                                          <div className="font-bold text-gray-800">{item.name}</div>
+                                                          <div className="text-[10px] text-gray-500 mt-0.5">จัดเก็บ: {item.location || '-'}</div>
+                                                      </td>
+                                                      <td className="p-3 text-gray-600">{item.category}</td>
+                                                      <td className={`p-3 text-right font-black text-lg ${isOut ? 'text-red-500' : isLowStock ? 'text-orange-500' : 'text-gray-800'}`}>
+                                                          {Number(item.quantity).toLocaleString()}
+                                                      </td>
+                                                      <td className="p-3 text-center text-gray-600">{item.unit}</td>
+                                                      <td className="p-3 text-center">
+                                                          <span className={`px-2 py-1 rounded-md text-[10px] font-bold border w-24 inline-block text-center shadow-sm ${
+                                                              isOut ? 'bg-red-50 border-red-200 text-red-700' : 
+                                                              isLowStock ? 'bg-orange-50 border-orange-200 text-orange-700' : 
+                                                              'bg-green-50 border-green-200 text-green-700'
+                                                          }`}>
+                                                              {isOut ? 'สินค้าหมด (Out of Stock)' : isLowStock ? `ใกล้หมด (จุดสั่งซื้อ: ${item.minThreshold})` : 'ปกติ (In Stock)'}
+                                                          </span>
+                                                      </td>
+                                                      <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`}>
+                                                          <div className="flex items-center justify-center gap-1">
+                                                              {hasPerm('proj_inventory', 'edit') && (
+                                                                  <button 
+                                                                      onClick={() => handleEditInventory(item)}
+                                                                      className="text-gray-400 hover:text-blue-600 p-1.5 rounded-md hover:bg-blue-50 transition-colors" title="แก้ไขรายการ"
+                                                                  ><Edit size={16} /></button>
+                                                              )}
+                                                              {hasPerm('proj_inventory', 'delete') && (
+                                                                  <button 
+                                                                      onClick={() => showConfirm('ยืนยันการลบ', `ลบรายการวัสดุ "${item.name}" ใช่หรือไม่?`, () => setInventoryList(prev => prev.filter(i => i.id !== item.id)))}
+                                                                      className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors" title="ลบรายการ"
+                                                                  ><Trash2 size={16} /></button>
+                                                              )}
+                                                          </div>
+                                                      </td>
+                                                  </tr>
+                                              );
+                                          });
+                                      })()}
+                                  </tbody>
+                              </table>
+                          </div>
+                      </Card>
+                  )}
+
+                  {inventorySubTab === 'transactions' && (
+                      <Card id="print-inventory-transactions">
+                          <div className="p-4 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white">
+                              <h3 className="font-bold flex items-center gap-2 text-gray-800">
+                                  <History size={20} className="text-blue-600" /> ประวัติการทำรายการเบิก-จ่าย และ รับเข้า
+                              </h3>
+                              <div className={`flex gap-2 shrink-0 ${isExporting ? 'hidden' : ''}`}>
+                                  <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-inventory-transactions', `Inventory_Transactions_${selectedProject?.code}.pdf`, 'landscape')} disabled={isExporting}>
+                                      {isExporting ? t('downloading') : t('printPDF')}
+                                  </Button>
+                              </div>
+                          </div>
+
+                          <div className={isExporting ? "pb-4" : "overflow-x-auto"}>
+                              <table className="w-full text-sm text-left">
+                                  <thead className="bg-gray-50 text-gray-600">
+                                      <tr>
+                                          <th className="p-3 border-b text-center w-12">#</th>
+                                          <th className="p-3 border-b text-center">วันที่ทำรายการ</th>
+                                          <th className="p-3 border-b text-center w-24">ประเภท</th>
+                                          <th className="p-3 border-b">รายการวัสดุ</th>
+                                          <th className="p-3 border-b text-center">จำนวน</th>
+                                          <th className="p-3 border-b">ผู้ทำรายการ (ผู้เบิก)</th>
+                                          <th className="p-3 border-b text-center w-32">สถานะ</th>
+                                          <th className={`p-3 border-b text-center w-32 ${isExporting ? 'hidden' : ''}`}>การอนุมัติ</th>
+                                      </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-100 bg-white">
+                                      {inventoryTransactions.filter(t => t.projectId === selectedProject.id).length > 0 ? (
+                                          inventoryTransactions.filter(t => t.projectId === selectedProject.id)
+                                          .sort((a,b) => new Date(b.date) - new Date(a.date))
+                                          .map((trx, index) => {
+                                              const isManagerOrAdmin = currentUser?.username === 'admin' || currentUser?.position.includes('ผู้จัดการ');
+                                              
+                                              return (
+                                              <tr key={trx.id} className="hover:bg-gray-50 transition-colors">
+                                                  <td className="p-3 text-center text-gray-500">{index + 1}</td>
+                                                  <td className="p-3 text-center text-gray-600">
+                                                      <div className="flex items-center justify-center gap-1"><Calendar size={12}/> {new Date(trx.date).toLocaleDateString('th-TH', { month: 'short', day: 'numeric', year: 'numeric'})}</div>
+                                                  </td>
+                                                  <td className="p-3 text-center">
+                                                      <span className={`px-2 py-1 rounded text-xs font-bold flex items-center justify-center gap-1 w-full border shadow-sm ${
+                                                          trx.type === 'IN' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-red-50 text-red-700 border-red-200'
+                                                      }`}>
+                                                          {trx.type === 'IN' ? <ArrowDownRight size={14}/> : <ArrowUpRight size={14}/>}
+                                                          {trx.type === 'IN' ? 'รับเข้า' : 'เบิกออก'}
+                                                      </span>
+                                                  </td>
+                                                  <td className="p-3">
+                                                      <div className="font-bold text-gray-800 leading-tight">{trx.itemName}</div>
+                                                      <div className="text-[10px] text-gray-500 font-mono mt-0.5">{trx.itemCode}</div>
+                                                      {trx.note && <div className="text-xs text-gray-500 italic mt-1 bg-gray-100 px-2 py-0.5 rounded">เหตุผล: {trx.note}</div>}
+                                                  </td>
+                                                  <td className={`p-3 text-center font-black text-lg ${trx.type === 'IN' ? 'text-blue-600' : 'text-red-600'}`}>
+                                                      {trx.type === 'IN' ? '+' : '-'}{trx.quantity} <span className="text-xs font-medium text-gray-500">{trx.unit}</span>
+                                                  </td>
+                                                  <td className="p-3 text-gray-700">
+                                                      <div className="flex items-center gap-1 font-medium"><User size={12} className="text-gray-400"/> {trx.requesterName}</div>
+                                                  </td>
+                                                  <td className="p-3 text-center">
+                                                      <span className={`px-2 py-1 rounded-md text-xs font-bold border w-full block text-center shadow-sm ${
+                                                          trx.status === 'Approved' ? 'bg-green-50 border-green-200 text-green-700' : 
+                                                          trx.status === 'Rejected' ? 'bg-gray-100 border-gray-300 text-gray-600' : 
+                                                          'bg-orange-50 border-orange-200 text-orange-700 animate-pulse'
+                                                      }`}>
+                                                          {trx.status === 'Approved' ? 'อนุมัติแล้ว' : trx.status === 'Rejected' ? 'ไม่อนุมัติ' : 'รอดำเนินการ'}
+                                                      </span>
+                                                      {trx.status !== 'Pending' && trx.approverName && (
+                                                          <div className="text-[9px] text-gray-400 mt-1 line-clamp-1" title={`โดย: ${trx.approverName}`}>โดย: {trx.approverName}</div>
+                                                      )}
+                                                  </td>
+                                                  <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`}>
+                                                      {trx.status === 'Pending' ? (
+                                                          isManagerOrAdmin ? (
+                                                              <div className="flex flex-col gap-1">
+                                                                  <Button variant="success" size="sm" className="w-full text-[10px] py-1" onClick={() => showConfirm('ยืนยันอนุมัติ', `ยืนยันการทำรายการ ${trx.type === 'IN' ? 'รับเข้า' : 'เบิกจ่าย'} วัสดุ ${trx.itemName} ใช่หรือไม่? (ระบบจะไปตัดสต๊อกอัตโนมัติ)`, () => handleApproveTransaction(trx, true), 'อนุมัติรายการ', 'success')}>อนุมัติ</Button>
+                                                                  <Button variant="danger" size="sm" className="w-full text-[10px] py-1 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100" onClick={() => showConfirm('ยืนยันไม่อนุมัติ', `ปฏิเสธการทำรายการนี้ใช่หรือไม่?`, () => handleApproveTransaction(trx, false), 'ไม่อนุมัติ', 'danger')}>ไม่อนุมัติ</Button>
+                                                              </div>
+                                                          ) : (
+                                                              <span className="text-xs text-gray-400">รอผู้จัดการ</span>
+                                                          )
+                                                      ) : (
+                                                          <span className="text-gray-300">-</span>
+                                                      )}
+                                                  </td>
+                                              </tr>
+                                          )})
+                                      ) : (
+                                          <tr><td colSpan="8" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">ไม่มีประวัติการทำรายการเบิก-รับเข้า</td></tr>
+                                      )}
+                                  </tbody>
+                              </table>
+                          </div>
+                      </Card>
+                  )}
+              </div>
+          )}
+
           {/* NEW: Others Tab */}
           {projectTab === 'others' && (
               <div className="space-y-6 animate-fade-in">
@@ -14838,14 +15291,43 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-col md:flex-row gap-8 mb-6">
-                    {/* รูปภาพ */}
-                    <div className="w-full md:w-1/3 flex flex-col items-center">
+                    {/* รูปภาพและ QR Code */}
+                    <div className="w-full md:w-1/3 flex flex-col items-center gap-4">
                         <div className="w-48 h-48 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden shadow-sm">
                             {selectedAssetView.photo ? (
                                 <img src={selectedAssetView.photo} alt={selectedAssetView.name} className="w-full h-full object-cover" />
                             ) : (
                                 <ImageIcon className="text-gray-300" size={64} />
                             )}
+                        </div>
+                        {/* NEW: QR Code Block */}
+                        <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-sm flex flex-col items-center w-48">
+                            <h4 className="text-xs font-bold text-gray-500 mb-2 flex items-center gap-1"><QrCode size={14}/> QR Code ทรัพย์สิน</h4>
+                            {(() => {
+                                const qrData = `BMG|ASSET|${selectedAssetView.code}|${selectedAssetView.projectId}`;
+                                const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(qrData)}&margin=10`;
+                                return (
+                                    <>
+                                        <img src={qrUrl} alt="QR Code" className="w-32 h-32 border border-gray-100 p-1 rounded bg-white" crossOrigin="anonymous" />
+                                        <div className="flex gap-2 w-full mt-3">
+                                            <Button variant="outline" size="sm" className="flex-1 text-[10px] px-2 border-blue-200 text-blue-600 hover:bg-blue-50" onClick={async () => {
+                                                try {
+                                                    const response = await fetch(qrUrl);
+                                                    const blob = await response.blob();
+                                                    const url = URL.createObjectURL(blob);
+                                                    const a = document.createElement('a');
+                                                    a.href = url;
+                                                    a.download = `QR_Asset_${selectedAssetView.code}.png`;
+                                                    a.click();
+                                                    URL.revokeObjectURL(url);
+                                                } catch (e) {
+                                                    window.open(qrUrl, '_blank');
+                                                }
+                                            }}><Download size={12}/> โหลด QR</Button>
+                                        </div>
+                                    </>
+                                );
+                            })()}
                         </div>
                     </div>
                     {/* ข้อมูล */}
@@ -15164,6 +15646,143 @@ export default function App() {
                 </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* NEW: Selected Machine Details Modal */}
+      {selectedMachineDetails && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl p-8 m-4 max-h-[95vh] overflow-y-auto relative animate-fade-in">
+                <button 
+                    onClick={() => setSelectedMachineDetails(null)} 
+                    className="absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors"
+                >
+                    <X size={24} />
+                </button>
+
+                <div className="mb-6 border-b pb-4">
+                    <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2"><Settings className="text-red-600"/> รายละเอียดเครื่องจักร</h2>
+                    <p className="text-sm text-gray-500">ข้อมูลและสถานะของเครื่องจักร / อุปกรณ์ (Machine Details)</p>
+                </div>
+
+                <div className="flex flex-col md:flex-row gap-8 mb-6">
+                    {/* Photo & QR Code */}
+                    <div className="w-full md:w-1/3 flex flex-col items-center gap-4">
+                        <div className="w-48 h-48 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden shadow-sm">
+                            {selectedMachineDetails.photo ? (
+                                <img src={selectedMachineDetails.photo} alt={selectedMachineDetails.name} className="w-full h-full object-cover" />
+                            ) : (
+                                <Settings className="text-gray-300" size={64} />
+                            )}
+                        </div>
+                        {/* NEW: QR Code Block */}
+                        <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-sm flex flex-col items-center w-48">
+                            <h4 className="text-xs font-bold text-gray-500 mb-2 flex items-center gap-1"><QrCode size={14}/> QR Code เครื่องจักร</h4>
+                            {(() => {
+                                const qrData = `BMG|MACHINE|${selectedMachineDetails.code}|${selectedMachineDetails.projectId}`;
+                                const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(qrData)}&margin=10`;
+                                return (
+                                    <>
+                                        <img src={qrUrl} alt="QR Code" className="w-32 h-32 border border-gray-100 p-1 rounded bg-white" crossOrigin="anonymous" />
+                                        <div className="flex gap-2 w-full mt-3">
+                                            <Button variant="outline" size="sm" className="flex-1 text-[10px] px-2 border-red-200 text-red-600 hover:bg-red-50" onClick={async () => {
+                                                try {
+                                                    const response = await fetch(qrUrl);
+                                                    const blob = await response.blob();
+                                                    const url = URL.createObjectURL(blob);
+                                                    const a = document.createElement('a');
+                                                    a.href = url;
+                                                    a.download = `QR_Machine_${selectedMachineDetails.code}.png`;
+                                                    a.click();
+                                                    URL.revokeObjectURL(url);
+                                                } catch (e) {
+                                                    window.open(qrUrl, '_blank');
+                                                }
+                                            }}><Download size={12}/> โหลด QR</Button>
+                                        </div>
+                                    </>
+                                );
+                            })()}
+                        </div>
+                    </div>
+                    {/* Details */}
+                    <div className="w-full md:w-2/3 space-y-4">
+                        <div className="grid grid-cols-2 gap-y-5 gap-x-4 text-sm bg-gray-50 p-4 rounded-xl border border-gray-100">
+                            <div>
+                                <span className="text-gray-500 block text-xs mb-1">รหัสเครื่องจักร (Code)</span>
+                                <span className="font-mono font-bold text-lg text-red-600 bg-white border border-red-100 px-2 py-1 rounded shadow-sm">{selectedMachineDetails.code}</span>
+                            </div>
+                            <div>
+                                <span className="text-gray-500 block text-xs mb-1">ชื่อเครื่องจักร (Name)</span>
+                                <span className="font-bold text-gray-800 text-base">{selectedMachineDetails.name}</span>
+                            </div>
+                            <div className="col-span-2 border-t border-gray-200 pt-3">
+                                <span className="text-gray-500 block text-xs mb-1">ระบบที่เกี่ยวข้อง (System)</span>
+                                <span className="text-gray-700 bg-white px-3 py-1.5 rounded-md inline-block font-medium border border-gray-200 shadow-sm">{selectedMachineDetails.system}</span>
+                            </div>
+                            <div className="border-t border-gray-200 pt-3">
+                                <span className="text-gray-500 block text-xs mb-1">สถานที่ติดตั้ง (Location)</span>
+                                <span className="text-gray-800 flex items-center gap-1 font-medium"><MapPin size={14} className="text-gray-400"/> {selectedMachineDetails.location || '-'}</span>
+                            </div>
+                            <div className="border-t border-gray-200 pt-3">
+                                <span className="text-gray-500 block text-xs mb-1">จำนวน (Qty)</span>
+                                <span className="text-gray-800 font-bold">{selectedMachineDetails.qty} Unit(s)</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Linked PM Plans */}
+                <div className="mt-4">
+                    <h3 className="font-bold text-gray-700 mb-3 text-sm flex items-center gap-2 border-b pb-2">
+                        <Calendar size={16} className="text-blue-600"/> แผนบำรุงรักษาที่ผูกไว้ (Linked PM Plans)
+                    </h3>
+                    <div className="bg-gray-50 rounded-lg border border-gray-200 max-h-40 overflow-y-auto custom-scrollbar">
+                        {pmPlans.filter(p => p.machineId === selectedMachineDetails.id).length > 0 ? (
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-gray-100 text-gray-600 text-xs sticky top-0">
+                                    <tr>
+                                        <th className="p-2 pl-4">ความถี่ (Frequency)</th>
+                                        <th className="p-2">รายละเอียดกำหนดการ</th>
+                                        <th className="p-2 text-center pr-4">สถานะ</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200 bg-white">
+                                    {pmPlans.filter(p => p.machineId === selectedMachineDetails.id).map(plan => {
+                                        let scheduleText = '-';
+                                        const days = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
+                                        const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+                                        if (plan.frequency === 'Weekly') scheduleText = `ทุกวัน${days[plan.scheduleDetails?.dayOfWeek || 0] || ''}`;
+                                        else if (plan.frequency === 'Monthly') scheduleText = `ทุกวันที่ ${plan.scheduleDetails?.date || 1} ของเดือน`;
+                                        else if (plan.frequency === 'Yearly') scheduleText = `ทุกวันที่ ${plan.scheduleDetails?.date || 1} ${months[parseInt(plan.scheduleDetails?.month || 1)-1] || ''}`;
+                                        else if (plan.frequency === 'Daily') scheduleText = 'ทุกวัน (Everyday)';
+
+                                        return (
+                                            <tr key={plan.id} className="hover:bg-gray-50 transition-colors">
+                                                <td className="p-2 pl-4 font-bold text-blue-700">{t(`freq_${plan.frequency}`)}</td>
+                                                <td className="p-2 text-gray-600">{scheduleText}</td>
+                                                <td className="p-2 text-center pr-4"><Badge status={plan.status} /></td>
+                                            </tr>
+                                        )
+                                    })}
+                                </tbody>
+                            </table>
+                        ) : (
+                            <div className="text-center text-gray-500 text-xs py-6 flex flex-col items-center gap-2">
+                                <FileText size={24} className="text-gray-300"/>
+                                ยังไม่มีแผน PM สำหรับเครื่องจักรนี้
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                <div className="mt-8 flex justify-end gap-2 pt-4 border-t">
+                    {hasPerm('proj_pm', 'edit') && (
+                        <Button variant="outline" icon={Edit} onClick={() => handleEditMachine(selectedMachineDetails)}>แก้ไขข้อมูล</Button>
+                    )}
+                    <Button variant="secondary" onClick={() => setSelectedMachineDetails(null)}>{t('close')}</Button>
+                </div>
+            </div>
         </div>
       )}
 
@@ -18502,18 +19121,18 @@ export default function App() {
                       <div className="grid grid-cols-2 gap-4">
                           <div>
                               <label className="block text-sm font-bold text-gray-700 mb-1">ตั้งแต่วันที่</label>
-                              <input
+                              <input 
                                   type="date"
-                                  className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500 bg-white"
+                                  className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-blue-200"
                                   value={utilityExportConfig.startDate}
                                   onChange={e => setUtilityExportConfig({...utilityExportConfig, startDate: e.target.value})}
                               />
                           </div>
                           <div>
                               <label className="block text-sm font-bold text-gray-700 mb-1">ถึงวันที่</label>
-                              <input
+                              <input 
                                   type="date"
-                                  className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500 bg-white"
+                                  className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-blue-200"
                                   value={utilityExportConfig.endDate}
                                   onChange={e => setUtilityExportConfig({...utilityExportConfig, endDate: e.target.value})}
                               />
@@ -18521,69 +19140,61 @@ export default function App() {
                       </div>
                   </div>
 
-                  <div className="flex justify-end gap-2 pt-6 mt-6 border-t border-gray-200 shrink-0">
+                  <div className="mt-8 flex justify-end gap-2 pt-4 border-t border-gray-100">
                       <Button variant="secondary" onClick={() => setShowUtilityExportModal(false)}>{t('cancel')}</Button>
-                      <Button
-                          icon={Download}
-                          onClick={() => {
-                              const projMeters = meters.filter(m => m.projectId === selectedProject.id);
-                              const meterIds = projMeters.map(m => m.id);
+                      <Button icon={Download} onClick={() => {
+                          const { meterId, startDate, endDate } = utilityExportConfig;
+                          const projMeters = meters.filter(m => m.projectId === selectedProject.id);
+                          
+                          let filteredReadings = utilityReadings.filter(r => {
+                              if (meterId !== 'All' && r.meterId !== meterId) return false;
+                              if (meterId === 'All' && !projMeters.some(m => m.id === r.meterId)) return false;
+                              if (startDate && r.date < startDate) return false;
+                              if (endDate && r.date > endDate) return false;
+                              return true;
+                          }).sort((a,b) => new Date(a.date) - new Date(b.date));
 
-                              let filteredReadings = utilityReadings.filter(r => meterIds.includes(r.meterId));
+                          if (filteredReadings.length === 0) {
+                              alert('ไม่พบข้อมูลการจดมิเตอร์ในช่วงเวลาและเงื่อนไขที่เลือก');
+                              return;
+                          }
 
-                              // Apply Meter Filter
-                              if (utilityExportConfig.meterId !== 'All') {
-                                  filteredReadings = filteredReadings.filter(r => r.meterId === utilityExportConfig.meterId);
-                              }
+                          // คำนวณสรุป
+                          let summaryText = `สรุปการใช้ (${meterId === 'All' ? 'รวมทุกมิเตอร์' : projMeters.find(m=>m.id===meterId)?.name})`;
+                          if (startDate || endDate) summaryText += ` ตั้งแต่ ${startDate||'-'} ถึง ${endDate||'-'}`;
 
-                              // Apply Date Filter
-                              if (utilityExportConfig.startDate) {
-                                  filteredReadings = filteredReadings.filter(r => r.date >= utilityExportConfig.startDate);
-                              }
-                              if (utilityExportConfig.endDate) {
-                                  filteredReadings = filteredReadings.filter(r => r.date <= utilityExportConfig.endDate);
-                              }
+                          const totalUsage = filteredReadings.reduce((sum, r) => sum + (Number(r.usage) || 0), 0);
+                          
+                          const csvData = filteredReadings.map(r => {
+                              const meter = projMeters.find(m => m.id === r.meterId);
+                              return {
+                                  'วันที่ (Date)': r.date,
+                                  'รหัส (Code)': meter?.code || '-',
+                                  'ชื่อมิเตอร์ (Name)': meter?.name || '-',
+                                  'ประเภท (Type)': meter?.type === 'Water' ? 'น้ำประปา' : 'ไฟฟ้า',
+                                  'เลขก่อนหน้า (Prev)': r.prevValue,
+                                  'เลขปัจจุบัน (Current)': r.value,
+                                  'จำนวนหน่วยที่ใช้ (Usage)': r.usage,
+                                  'ผู้บันทึก (Recorder)': r.recorder
+                              };
+                          });
 
-                              // Sort Date Ascending for Export to show progressive usage clearly
-                              filteredReadings.sort((a, b) => new Date(a.date) - new Date(b.date));
+                          csvData.push({ 'วันที่ (Date)': '', 'รหัส (Code)': '', 'ชื่อมิเตอร์ (Name)': '', 'ประเภท (Type)': '', 'เลขก่อนหน้า (Prev)': '', 'เลขปัจจุบัน (Current)': '', 'จำนวนหน่วยที่ใช้ (Usage)': '', 'ผู้บันทึก (Recorder)': '' });
+                          
+                          csvData.push({
+                              'วันที่ (Date)': summaryText,
+                              'รหัส (Code)': '',
+                              'ชื่อมิเตอร์ (Name)': '',
+                              'ประเภท (Type)': '',
+                              'เลขก่อนหน้า (Prev)': '',
+                              'เลขปัจจุบัน (Current)': 'รวมจำนวนหน่วย (Total):',
+                              'จำนวนหน่วยที่ใช้ (Usage)': totalUsage,
+                              'ผู้บันทึก (Recorder)': ''
+                          });
 
-                              let totalUsage = 0;
-                              const dataToExport = filteredReadings.map(r => {
-                                  const meter = projMeters.find(m => m.id === r.meterId);
-                                  totalUsage += (r.usage || 0);
-                                  return {
-                                      'วันที่จด (Date)': r.date,
-                                      'ประเภท (Type)': meter?.type === 'Water' ? 'น้ำประปา' : 'ไฟฟ้า',
-                                      'รหัส (Code)': meter?.code || '-',
-                                      'ชื่อมิเตอร์ (Name)': meter?.name || '-',
-                                      'เลขก่อนหน้า (Prev)': r.prevValue,
-                                      'เลขปัจจุบัน (Current)': r.value,
-                                      'จำนวนหน่วย (Usage)': r.usage,
-                                      'ผู้บันทึก (Recorder)': r.recorder || '-'
-                                  };
-                              });
-
-                              if (dataToExport.length > 0) {
-                                  // Append Total Row at the end
-                                  dataToExport.push({
-                                      'วันที่จด (Date)': 'รวมทั้งหมด (Total)',
-                                      'ประเภท (Type)': '',
-                                      'รหัส (Code)': '',
-                                      'ชื่อมิเตอร์ (Name)': '',
-                                      'เลขก่อนหน้า (Prev)': '',
-                                      'เลขปัจจุบัน (Current)': '',
-                                      'จำนวนหน่วย (Usage)': parseFloat(totalUsage.toFixed(2)),
-                                      'ผู้บันทึก (Recorder)': ''
-                                  });
-                                  
-                                  const dateLabel = utilityExportConfig.startDate || utilityExportConfig.endDate ? '_Filtered' : '';
-                                  exportToCSV(dataToExport, `Utility_Readings_${selectedProject?.code}${dateLabel}`);
-                                  setShowUtilityExportModal(false);
-                              } else {
-                                  alert('ไม่พบข้อมูลการจดมิเตอร์ในช่วงเวลาและเงื่อนไขที่เลือก');
-                              }
-                          }}
-                      >
+                          exportToCSV(csvData, `Utility_Readings_${selectedProject?.code}_Export`);
+                          setShowUtilityExportModal(false);
+                      }}>
                           ดาวน์โหลด CSV
                       </Button>
                   </div>
@@ -18591,97 +19202,106 @@ export default function App() {
           </div>
       )}
 
-      {/* NEW: Global Draggable Notification Bell */}
-      {currentUser && !isExporting && (
-          <div 
-              className={`fixed z-[9900] flex items-center justify-center w-14 h-14 rounded-full shadow-[0_8px_20px_rgba(220,38,38,0.5)] cursor-pointer select-none touch-none transition-transform ${isDraggingBell ? 'scale-90 opacity-90' : 'hover:scale-105'} bg-gradient-to-br from-red-500 to-red-700 text-white border-[3px] border-white`}
-              style={{ right: `${bellPos.right || 24}px`, bottom: `${bellPos.bottom || 24}px` }}
-              onPointerDown={(e) => {
-                  dragRef.current = {
-                      startX: e.clientX,
-                      startY: e.clientY,
-                      startRight: bellPos.right || 24,
-                      startBottom: bellPos.bottom || 24,
-                      isDragging: false
-                  };
-                  setIsDraggingBell(true);
-              }}
-              title="กระดิ่งแจ้งเตือน (ลากเพื่อย้ายตำแหน่งได้)"
-          >
-              <Bell size={24} className={getPendingApprovals().length > 0 ? "animate-ring" : ""} />
-              {getPendingApprovals().length > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-white text-red-600 font-black text-[10px] w-6 h-6 flex items-center justify-center rounded-full border-2 border-red-500 shadow-md">
-                      {getPendingApprovals().length > 99 ? '99+' : getPendingApprovals().length}
-                  </span>
-              )}
-          </div>
-      )}
-
-      {/* NEW: Global Notification Modal */}
+      {/* NEW: Notification Modal (For Pending Approvals in Dashboard) */}
       {showNotificationModal && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9950] p-4 animate-fade-in" onClick={() => setShowNotificationModal(false)}>
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col border border-gray-200" onClick={e => e.stopPropagation()}>
-                  <div className="p-4 border-b flex justify-between items-center bg-red-50">
-                      <h2 className="text-xl font-bold text-red-800 flex items-center gap-2">
-                          <Bell className="text-red-600" size={24}/> การแจ้งเตือน / งานรออนุมัติ
-                      </h2>
-                      <button onClick={() => setShowNotificationModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[1000] p-4 animate-fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden flex flex-col transform transition-all scale-100 max-h-[85vh]">
+                  <div className="p-5 border-b flex items-center justify-between bg-red-50 shrink-0">
+                      <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm bg-red-100 text-red-600 animate-ring">
+                              <Bell size={20} />
+                          </div>
+                          <div>
+                              <h2 className="text-xl font-bold text-red-800">รายการแจ้งเตือน</h2>
+                              <p className="text-sm text-red-600 font-medium">รายการที่รอให้คุณอนุมัติ หรือดำเนินการ</p>
+                          </div>
+                      </div>
+                      <button onClick={() => setShowNotificationModal(false)} className="text-gray-400 hover:text-red-500 transition-colors bg-white p-1 rounded-full"><X size={20} /></button>
                   </div>
-                  <div className="flex-1 max-h-[60vh] overflow-y-auto custom-scrollbar p-2">
-                      {getPendingApprovals().length > 0 ? (
-                          <div className="space-y-2">
-                              {getPendingApprovals().map((item, idx) => (
-                                  <div 
-                                      key={`${item.id}_${idx}`}
-                                      className="p-3 bg-white border border-gray-100 rounded-xl hover:border-red-300 hover:shadow-md cursor-pointer transition-all flex gap-3 group"
-                                      onClick={() => {
-                                          setShowNotificationModal(false);
-                                          setSelectedProject(item.project);
-                                          setProjectTab(item.type);
-                                          setActiveMenu('projects');
-                                      }}
-                                  >
-                                      <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-                                          item.type === 'pm' ? 'bg-orange-100 text-orange-600' :
-                                          item.type === 'schedule' ? 'bg-pink-100 text-pink-600' :
-                                          'bg-red-100 text-red-600'
-                                      }`}>
-                                          {item.type === 'pm' ? <Settings size={20} /> :
-                                           item.type === 'schedule' ? <Calendar size={20} /> :
-                                           <Hammer size={20} />}
-                                      </div>
-                                      <div className="flex-1 min-w-0">
-                                          <h4 className="font-bold text-gray-800 text-sm group-hover:text-red-600 transition-colors line-clamp-2">{item.title}</h4>
-                                          <div className="text-xs text-gray-500 mt-1 flex items-center gap-1.5 truncate">
-                                              <Building2 size={12} className="text-gray-400 shrink-0"/> <span className="truncate">{item.project.name}</span>
-                                          </div>
-                                          <div className="text-[10px] text-gray-400 mt-1 flex justify-between items-center">
-                                              <span>{new Date(item.date).toLocaleDateString('th-TH', { year: '2-digit', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} น.</span>
-                                              <span className="text-red-500 font-bold bg-red-50 px-2 py-0.5 rounded border border-red-100">{item.actionText}</span>
-                                          </div>
-                                      </div>
+                  
+                  <div className="p-0 bg-gray-50 flex-1 overflow-y-auto custom-scrollbar">
+                      {(() => {
+                          const pendingList = getPendingApprovals();
+                          if (pendingList.length === 0) {
+                              return (
+                                  <div className="p-10 flex flex-col items-center justify-center text-gray-400">
+                                      <CheckCircle size={48} className="mb-3 text-green-300" />
+                                      <p className="font-bold text-lg text-gray-500">เยี่ยมมาก!</p>
+                                      <p className="text-sm">ไม่มีรายการใดค้างรอดำเนินการ</p>
                                   </div>
-                              ))}
-                          </div>
-                      ) : (
-                          <div className="text-center py-10">
-                              <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-3 border border-gray-100 shadow-inner">
-                                  <CheckCircle size={32} className="text-green-500" />
+                              );
+                          }
+
+                          return (
+                              <div className="divide-y divide-gray-100">
+                                  {pendingList.map((item, idx) => (
+                                      <div key={idx} className="p-4 bg-white hover:bg-red-50/50 transition-colors flex flex-col sm:flex-row gap-4 items-start sm:items-center group">
+                                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                                              <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 shadow-sm ${
+                                                  item.type === 'pm' ? 'bg-orange-100 text-orange-600' :
+                                                  item.type === 'schedule' ? 'bg-pink-100 text-pink-600' :
+                                                  'bg-blue-100 text-blue-600'
+                                              }`}>
+                                                  {item.type === 'pm' ? <Settings size={20}/> : item.type === 'schedule' ? <Calendar size={20}/> : <Hammer size={20}/>}
+                                              </div>
+                                              <div className="flex-1 min-w-0">
+                                                  <h4 className="font-bold text-gray-800 text-sm md:text-base group-hover:text-red-700 transition-colors flex items-center gap-2">
+                                                      {item.title}
+                                                      {item.type === 'repair' && <span className="bg-red-100 text-red-600 text-[9px] px-1.5 py-0.5 rounded font-bold border border-red-200">ด่วน</span>}
+                                                  </h4>
+                                                  <div className="flex items-center gap-3 text-[11px] md:text-xs text-gray-500 mt-1">
+                                                      <span className="flex items-center gap-1 font-medium"><Building2 size={12}/> {item.project.name}</span>
+                                                      <span className="flex items-center gap-1"><Clock size={12}/> {new Date(item.date).toLocaleDateString('th-TH', { month: 'short', day: 'numeric', year: 'numeric'})}</span>
+                                                  </div>
+                                              </div>
+                                          </div>
+                                          <div className="w-full sm:w-auto shrink-0">
+                                              <Button 
+                                                  variant="outline" 
+                                                  size="sm" 
+                                                  className="w-full sm:w-auto text-xs bg-white hover:bg-red-50 text-red-600 border-red-200 hover:border-red-400 font-bold"
+                                                  onClick={() => {
+                                                      setShowNotificationModal(false);
+                                                      setSelectedProject(item.project);
+                                                      
+                                                      if (item.type === 'pm') {
+                                                          setProjectTab('pm');
+                                                          setPmSubTab('history');
+                                                          setTimeout(() => {
+                                                              setPmHistoryFilterApproval('');
+                                                              setSelectedPmHistory(item.record);
+                                                          }, 300);
+                                                      } else if (item.type === 'schedule') {
+                                                          setProjectTab('schedule');
+                                                          setCurrentMonth(item.month);
+                                                      } else if (item.type === 'repair') {
+                                                          setProjectTab('repair');
+                                                          setTimeout(() => {
+                                                              setSelectedRepairView(item.record);
+                                                          }, 300);
+                                                      }
+                                                  }}
+                                              >
+                                                  {item.actionText} <ArrowRight size={14}/>
+                                              </Button>
+                                          </div>
+                                      </div>
+                                  ))}
                               </div>
-                              <h3 className="font-bold text-gray-700">ไม่มีรายการแจ้งเตือน</h3>
-                              <p className="text-sm text-gray-500 mt-1">คุณจัดการงานทุกอย่างเสร็จสิ้นแล้ว</p>
-                          </div>
-                      )}
+                          );
+                      })()}
                   </div>
-                  <div className="p-4 bg-gray-50 border-t flex justify-end">
+                  
+                  <div className="p-4 border-t bg-gray-50 flex justify-end shrink-0">
                       <Button variant="secondary" onClick={() => setShowNotificationModal(false)}>ปิดหน้าต่าง</Button>
                   </div>
               </div>
           </div>
       )}
 
-      {/* NEW: Project Modal (Add / Edit) */}
-      {showAddProjectModal && (
+      {/* NEW: Inventory Item Modal */}
+{/* NEW: Project Modal (Add / Edit) */}
+{showAddProjectModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto p-4 animate-fade-in">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl p-6 relative flex flex-col max-h-[90vh]">
             <div className="flex justify-between items-center mb-6 border-b pb-4 shrink-0">
