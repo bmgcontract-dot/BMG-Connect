@@ -2366,6 +2366,7 @@ export default function App() {
       id: null, itemId: '', type: 'OUT', quantity: 1, requesterName: '', date: new Date().toISOString().split('T')[0], note: ''
   });
   const [inventorySearch, setInventorySearch] = useState('');
+  const [transactionFilterItem, setTransactionFilterItem] = useState('All'); // FIX: เพิ่มตัวแปร State ตัวกรองที่ขาดหายไป เพื่อป้องกันบัคหน้าขาว
 
   // --- NEW: Meeting Gantt Plans State ---
   const INITIAL_GANTT_PLANS = [];
@@ -2493,6 +2494,14 @@ export default function App() {
       voterType: 'เจ้าของร่วม', // เจ้าของร่วม, ผู้รับมอบฉันทะ
       status: 'Valid' // Valid (บัตรดี), Void (บัตรเสีย)
   });
+
+  // --- NEW: Extended Meeting States ---
+  const [selectedMeetingManageId, setSelectedMeetingManageId] = useState('');
+  const [meetingAttendances, setMeetingAttendances] = usePersistentCollection('bmg_meeting_attendances', [], fbUser);
+  const [meetingAgendas, setMeetingAgendas] = usePersistentCollection('bmg_meeting_agendas', [], fbUser);
+  const [landDocsChecklist, setLandDocsChecklist] = usePersistentState('bmg_meeting_land_docs', {}, fbUser);
+  const [newAttendance, setNewAttendance] = useState({ unitNo: '', ownerName: '', attendeeName: '', type: 'เจ้าของร่วม', weight: 1 });
+  const [newAgendaTitle, setNewAgendaTitle] = useState('');
 
   // --- NEW: Project Events (Calendar) State ---
   const [projectEvents, setProjectEvents] = usePersistentCollection('bmg_project_events', [], fbUser);
@@ -13263,7 +13272,513 @@ export default function App() {
                   </Card>
                   )}
 
-                  {!['plan', 'meeting_list', 'invitation', 'proxy', 'ballot'].includes(meetingSubTab) && (
+                  {/* --- TAB: ใบลงชื่อเข้าร่วมประชุม (Attendance) --- */}
+                  {meetingSubTab === 'attendance' && (
+                      <Card id="print-attendance-area">
+                          <div className="p-4 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white">
+                              <h3 className="font-bold flex items-center gap-2 text-gray-800">
+                                  <Users size={20} className="text-teal-600" /> ใบลงชื่อเข้าร่วมประชุม (Attendance)
+                              </h3>
+                              <div className="flex gap-2 w-full md:w-auto">
+                                  <select 
+                                      className="border border-gray-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-teal-200 outline-none w-full md:w-64"
+                                      value={selectedMeetingManageId}
+                                      onChange={e => setSelectedMeetingManageId(e.target.value)}
+                                  >
+                                      <option value="">-- เลือกการประชุม --</option>
+                                      {meetingsList.filter(m => m.projectId === selectedProject.id).map(m => (
+                                          <option key={m.id} value={m.id}>{m.title}</option>
+                                      ))}
+                                  </select>
+                                  <Button variant="outline" size="sm" icon={PrinterIcon} onClick={() => handleExportPDF('print-attendance-area', 'Attendance_List.pdf', 'portrait')} disabled={isExporting || !selectedMeetingManageId}>
+                                      {isExporting ? t('downloading') : t('printPDF')}
+                                  </Button>
+                              </div>
+                          </div>
+
+                          {selectedMeetingManageId ? (
+                              <div className="p-4">
+                                  {/* Form to add attendance */}
+                                  {hasPerm('proj_meeting', 'save') && !isExporting && (
+                                      <div className="flex flex-wrap gap-3 mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200 items-end shadow-sm">
+                                          <div>
+                                              <label className="block text-xs font-bold text-gray-600 mb-1">ห้อง/เลขที่</label>
+                                              <input type="text" className="border border-gray-300 rounded p-2 text-sm w-24 outline-none focus:border-teal-500" value={newAttendance.unitNo} onChange={e => setNewAttendance({...newAttendance, unitNo: e.target.value})} placeholder="เช่น 101" />
+                                          </div>
+                                          <div>
+                                              <label className="block text-xs font-bold text-gray-600 mb-1">ชื่อเจ้าของ</label>
+                                              <input type="text" className="border border-gray-300 rounded p-2 text-sm w-40 outline-none focus:border-teal-500" value={newAttendance.ownerName} onChange={e => setNewAttendance({...newAttendance, ownerName: e.target.value})} placeholder="ชื่อเจ้าของกรรมสิทธิ์" />
+                                          </div>
+                                          <div>
+                                              <label className="block text-xs font-bold text-gray-600 mb-1">ผู้มาประชุม</label>
+                                              <input type="text" className="border border-gray-300 rounded p-2 text-sm w-40 outline-none focus:border-teal-500" value={newAttendance.attendeeName} onChange={e => setNewAttendance({...newAttendance, attendeeName: e.target.value})} placeholder="ชื่อผู้เข้าประชุมจริง" />
+                                          </div>
+                                          <div>
+                                              <label className="block text-xs font-bold text-gray-600 mb-1">ประเภท</label>
+                                              <select className="border border-gray-300 rounded p-2 text-sm w-32 outline-none focus:border-teal-500 bg-white" value={newAttendance.type} onChange={e => setNewAttendance({...newAttendance, type: e.target.value})}>
+                                                  <option value="เจ้าของร่วม">เจ้าของร่วม</option>
+                                                  <option value="ผู้รับมอบฉันทะ">รับมอบฉันทะ</option>
+                                              </select>
+                                          </div>
+                                          <div>
+                                              <label className="block text-xs font-bold text-gray-600 mb-1">สัดส่วนเสียง (ถ้ามี)</label>
+                                              <input type="number" step="0.01" className="border border-gray-300 rounded p-2 text-sm w-24 outline-none focus:border-teal-500" value={newAttendance.weight} onChange={e => setNewAttendance({...newAttendance, weight: e.target.value})} placeholder="คะแนน" />
+                                          </div>
+                                          <Button className="bg-teal-600 hover:bg-teal-700" onClick={() => {
+                                              if(newAttendance.unitNo && newAttendance.attendeeName) {
+                                                  const id = generateId();
+                                                  const newAtt = { ...newAttendance, id, meetingId: selectedMeetingManageId, checkInTime: new Date().toISOString() };
+                                                  const nextList = [newAtt, ...meetingAttendances];
+                                                  setMeetingAttendances(nextList);
+                                                  triggerAutoSync('Meeting_Attendances_ลงทะเบียน', nextList, []);
+                                                  setNewAttendance({ unitNo: '', ownerName: '', attendeeName: '', type: 'เจ้าของร่วม', weight: 1 });
+                                              } else {
+                                                  alert('กรุณากรอกข้อมูลห้องและชื่อผู้มาประชุมให้ครบถ้วน');
+                                              }
+                                          }}>
+                                              <Plus size={16} className="mr-1"/> ลงทะเบียนเข้างาน
+                                          </Button>
+                                      </div>
+                                  )}
+
+                                  {/* Dashboard summary */}
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                                      <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl text-center shadow-sm">
+                                          <div className="text-blue-600 text-sm font-bold">จำนวนเสียงลงทะเบียนทั้งหมด</div>
+                                          <div className="text-3xl font-black text-blue-800 mt-1">{meetingAttendances.filter(a => a.meetingId === selectedMeetingManageId).length} <span className="text-sm font-normal text-blue-600">รายการ</span></div>
+                                      </div>
+                                      <div className="bg-green-50 border border-green-200 p-4 rounded-xl text-center shadow-sm">
+                                          <div className="text-green-600 text-sm font-bold">มาด้วยตนเอง (เจ้าของร่วม)</div>
+                                          <div className="text-3xl font-black text-green-800 mt-1">{meetingAttendances.filter(a => a.meetingId === selectedMeetingManageId && a.type === 'เจ้าของร่วม').length} <span className="text-sm font-normal text-green-600">รายการ</span></div>
+                                      </div>
+                                      <div className="bg-purple-50 border border-purple-200 p-4 rounded-xl text-center shadow-sm">
+                                          <div className="text-purple-600 text-sm font-bold">รับมอบฉันทะ (Proxy)</div>
+                                          <div className="text-3xl font-black text-purple-800 mt-1">{meetingAttendances.filter(a => a.meetingId === selectedMeetingManageId && a.type === 'ผู้รับมอบฉันทะ').length} <span className="text-sm font-normal text-purple-600">รายการ</span></div>
+                                      </div>
+                                  </div>
+
+                                  {/* Table */}
+                                  <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                                      <table className="w-full text-sm text-left">
+                                          <thead className="bg-gray-100 text-gray-600">
+                                              <tr>
+                                                  <th className="p-3 border-b w-12 text-center">#</th>
+                                                  <th className="p-3 border-b text-center">เวลาเข้า (Check-in)</th>
+                                                  <th className="p-3 border-b text-center">ห้อง/เลขที่</th>
+                                                  <th className="p-3 border-b">ชื่อผู้มาประชุม</th>
+                                                  <th className="p-3 border-b">ชื่อเจ้าของกรรมสิทธิ์</th>
+                                                  <th className="p-3 border-b text-center">ประเภท</th>
+                                                  <th className="p-3 border-b text-right">สัดส่วนเสียง</th>
+                                                  <th className={`p-3 border-b text-center ${isExporting ? 'hidden' : ''}`}>ลบ</th>
+                                              </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-gray-100">
+                                              {meetingAttendances.filter(a => a.meetingId === selectedMeetingManageId).length > 0 ? (
+                                                  meetingAttendances.filter(a => a.meetingId === selectedMeetingManageId).sort((a,b) => new Date(b.checkInTime) - new Date(a.checkInTime)).map((att, idx) => (
+                                                      <tr key={att.id} className="hover:bg-gray-50 transition-colors">
+                                                          <td className="p-3 text-center text-gray-500">{idx+1}</td>
+                                                          <td className="p-3 text-center text-xs text-gray-500 font-mono">
+                                                              {new Date(att.checkInTime).toLocaleTimeString('th-TH')} น.
+                                                          </td>
+                                                          <td className="p-3 text-center font-bold text-gray-800">{att.unitNo}</td>
+                                                          <td className="p-3 font-medium text-gray-900">{att.attendeeName}</td>
+                                                          <td className="p-3 text-gray-600">{att.ownerName || '-'}</td>
+                                                          <td className="p-3 text-center">
+                                                              <span className={`px-2 py-1 rounded text-[10px] font-bold ${att.type === 'เจ้าของร่วม' ? 'bg-blue-100 text-blue-700 border border-blue-200' : 'bg-purple-100 text-purple-700 border border-purple-200'}`}>{att.type}</span>
+                                                          </td>
+                                                          <td className="p-3 text-right text-gray-600 font-medium">{att.weight}</td>
+                                                          <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`}>
+                                                              {hasPerm('proj_meeting', 'delete') && (
+                                                                  <button onClick={() => setMeetingAttendances(prev => prev.filter(a => a.id !== att.id))} className="text-gray-400 hover:text-red-500 p-1 bg-gray-50 hover:bg-red-50 rounded"><Trash2 size={16}/></button>
+                                                              )}
+                                                          </td>
+                                                      </tr>
+                                                  ))
+                                              ) : (
+                                                  <tr><td colSpan="8" className="p-8 text-center text-gray-400 border-dashed border-t">ยังไม่มีผู้ลงทะเบียนเข้างาน</td></tr>
+                                              )}
+                                          </tbody>
+                                      </table>
+                                  </div>
+                              </div>
+                          ) : (
+                              <div className="p-12 text-center text-gray-400">กรุณาเลือกการประชุมจากเมนูด้านบน เพื่อดูหรือจัดการข้อมูลผู้เข้าร่วม</div>
+                          )}
+                      </Card>
+                  )}
+
+                  {/* --- TAB: ระบบนับคะแนน (Voting System) --- */}
+                  {meetingSubTab === 'voting_system' && (
+                      <Card id="print-voting-area">
+                          <div className="p-4 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white">
+                              <h3 className="font-bold flex items-center gap-2 text-gray-800">
+                                  <BarChart3 size={20} className="text-teal-600" /> ระบบนับคะแนน และกราฟ (Voting System)
+                              </h3>
+                              <div className="flex gap-2 w-full md:w-auto">
+                                  <select 
+                                      className="border border-gray-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-teal-200 outline-none w-full md:w-64"
+                                      value={selectedMeetingManageId}
+                                      onChange={e => setSelectedMeetingManageId(e.target.value)}
+                                  >
+                                      <option value="">-- เลือกการประชุม --</option>
+                                      {meetingsList.filter(m => m.projectId === selectedProject.id).map(m => (
+                                          <option key={m.id} value={m.id}>{m.title}</option>
+                                      ))}
+                                  </select>
+                                  <Button variant="outline" size="sm" icon={PrinterIcon} onClick={() => handleExportPDF('print-voting-area', 'Voting_Results.pdf', 'portrait')} disabled={isExporting || !selectedMeetingManageId}>
+                                      {isExporting ? t('downloading') : t('printPDF')}
+                                  </Button>
+                              </div>
+                          </div>
+
+                          {selectedMeetingManageId ? (
+                              <div className="p-6 bg-gray-50/50">
+                                  {/* Add Agenda */}
+                                  {!isExporting && hasPerm('proj_meeting', 'save') && (
+                                      <div className="flex gap-2 mb-6 bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+                                          <input 
+                                              type="text" 
+                                              className="flex-1 border border-gray-300 rounded p-2 text-sm outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500" 
+                                              placeholder="ระบุชื่อวาระการประชุม..." 
+                                              value={newAgendaTitle}
+                                              onChange={e => setNewAgendaTitle(e.target.value)}
+                                              onKeyDown={(e) => {
+                                                  if(e.key === 'Enter' && newAgendaTitle.trim()) {
+                                                      const id = generateId();
+                                                      const seq = meetingAgendas.filter(a => a.meetingId === selectedMeetingManageId).length + 1;
+                                                      const newAgenda = { id, meetingId: selectedMeetingManageId, seq, title: newAgendaTitle.trim(), agree: 0, disagree: 0, abstain: 0, status: 'Open' };
+                                                      const nextList = [...meetingAgendas, newAgenda];
+                                                      setMeetingAgendas(nextList);
+                                                      triggerAutoSync('Meeting_Agendas_วาระ', nextList, []);
+                                                      setNewAgendaTitle('');
+                                                  }
+                                              }}
+                                          />
+                                          <Button className="bg-teal-600 hover:bg-teal-700" onClick={() => {
+                                              if(newAgendaTitle.trim()) {
+                                                  const id = generateId();
+                                                  const seq = meetingAgendas.filter(a => a.meetingId === selectedMeetingManageId).length + 1;
+                                                  const newAgenda = { id, meetingId: selectedMeetingManageId, seq, title: newAgendaTitle.trim(), agree: 0, disagree: 0, abstain: 0, status: 'Open' };
+                                                  const nextList = [...meetingAgendas, newAgenda];
+                                                  setMeetingAgendas(nextList);
+                                                  triggerAutoSync('Meeting_Agendas_วาระ', nextList, []);
+                                                  setNewAgendaTitle('');
+                                              }
+                                          }} icon={Plus}>เพิ่มวาระ</Button>
+                                      </div>
+                                  )}
+
+                                  {/* Agendas List */}
+                                  <div className="space-y-6">
+                                      {meetingAgendas.filter(a => a.meetingId === selectedMeetingManageId).sort((a,b) => a.seq - b.seq).map(agenda => {
+                                          const total = Number(agenda.agree) + Number(agenda.disagree) + Number(agenda.abstain);
+                                          const pAgree = total ? ((agenda.agree / total) * 100).toFixed(1) : 0;
+                                          const pDisagree = total ? ((agenda.disagree / total) * 100).toFixed(1) : 0;
+                                          const pAbstain = total ? ((agenda.abstain / total) * 100).toFixed(1) : 0;
+                                          
+                                          const handleVoteChange = (type, val) => {
+                                              const num = Math.max(0, parseInt(val) || 0);
+                                              setMeetingAgendas(prev => prev.map(a => a.id === agenda.id ? { ...a, [type]: num } : a));
+                                          };
+
+                                          return (
+                                              <div key={agenda.id} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                                                  <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
+                                                      <h4 className="font-bold text-gray-800 text-base flex items-center gap-3">
+                                                          <span className="bg-teal-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs shadow-sm">{agenda.seq}</span>
+                                                          วาระที่ {agenda.seq}: {agenda.title}
+                                                      </h4>
+                                                      {!isExporting && hasPerm('proj_meeting', 'delete') && (
+                                                          <button onClick={() => setMeetingAgendas(prev => prev.filter(a => a.id !== agenda.id))} className="text-gray-400 hover:text-red-500 p-1.5 bg-white rounded-md border shadow-sm transition-colors"><Trash2 size={16}/></button>
+                                                      )}
+                                                  </div>
+                                                  <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
+                                                      {/* Vote Controls */}
+                                                      <div className="space-y-4">
+                                                          <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg shadow-sm">
+                                                              <span className="font-bold text-green-700 w-24">เห็นด้วย</span>
+                                                              {!isExporting && hasPerm('proj_meeting', 'save') ? (
+                                                                  <div className="flex items-center gap-2">
+                                                                      <button onClick={() => handleVoteChange('agree', agenda.agree - 1)} className="w-8 h-8 rounded bg-white border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-100 hover:text-red-500 transition-colors font-bold text-lg">-</button>
+                                                                      <input type="number" className="w-16 text-center border p-1.5 rounded font-bold text-green-700 bg-white shadow-inner focus:ring-1 focus:ring-green-500 outline-none" value={agenda.agree} onChange={e => handleVoteChange('agree', e.target.value)} />
+                                                                      <button onClick={() => handleVoteChange('agree', agenda.agree + 1)} className="w-8 h-8 rounded bg-white border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-100 hover:text-green-600 transition-colors font-bold text-lg">+</button>
+                                                                  </div>
+                                                              ) : <span className="font-black text-2xl text-green-700 bg-white px-4 py-1 rounded shadow-sm border border-green-200">{agenda.agree}</span>}
+                                                          </div>
+                                                          <div className="flex items-center justify-between p-3 bg-red-50 border border-red-200 rounded-lg shadow-sm">
+                                                              <span className="font-bold text-red-700 w-24">ไม่เห็นด้วย</span>
+                                                              {!isExporting && hasPerm('proj_meeting', 'save') ? (
+                                                                  <div className="flex items-center gap-2">
+                                                                      <button onClick={() => handleVoteChange('disagree', agenda.disagree - 1)} className="w-8 h-8 rounded bg-white border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-100 hover:text-red-500 transition-colors font-bold text-lg">-</button>
+                                                                      <input type="number" className="w-16 text-center border p-1.5 rounded font-bold text-red-700 bg-white shadow-inner focus:ring-1 focus:ring-red-500 outline-none" value={agenda.disagree} onChange={e => handleVoteChange('disagree', e.target.value)} />
+                                                                      <button onClick={() => handleVoteChange('disagree', agenda.disagree + 1)} className="w-8 h-8 rounded bg-white border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-100 hover:text-green-600 transition-colors font-bold text-lg">+</button>
+                                                                  </div>
+                                                              ) : <span className="font-black text-2xl text-red-700 bg-white px-4 py-1 rounded shadow-sm border border-red-200">{agenda.disagree}</span>}
+                                                          </div>
+                                                          <div className="flex items-center justify-between p-3 bg-gray-100 border border-gray-300 rounded-lg shadow-sm">
+                                                              <span className="font-bold text-gray-700 w-24">งดออกเสียง</span>
+                                                              {!isExporting && hasPerm('proj_meeting', 'save') ? (
+                                                                  <div className="flex items-center gap-2">
+                                                                      <button onClick={() => handleVoteChange('abstain', agenda.abstain - 1)} className="w-8 h-8 rounded bg-white border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-200 hover:text-red-500 transition-colors font-bold text-lg">-</button>
+                                                                      <input type="number" className="w-16 text-center border p-1.5 rounded font-bold text-gray-700 bg-white shadow-inner focus:ring-1 focus:ring-gray-400 outline-none" value={agenda.abstain} onChange={e => handleVoteChange('abstain', e.target.value)} />
+                                                                      <button onClick={() => handleVoteChange('abstain', agenda.abstain + 1)} className="w-8 h-8 rounded bg-white border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-200 hover:text-green-600 transition-colors font-bold text-lg">+</button>
+                                                                  </div>
+                                                              ) : <span className="font-black text-2xl text-gray-700 bg-white px-4 py-1 rounded shadow-sm border border-gray-300">{agenda.abstain}</span>}
+                                                          </div>
+                                                      </div>
+                                                      
+                                                      {/* Chart (Visual Bars) */}
+                                                      <div className="flex flex-col justify-center bg-gray-50 p-5 rounded-lg border border-gray-100 h-full">
+                                                          <div className="text-sm font-bold text-gray-500 mb-4 text-center">สรุปสัดส่วนผลโหวต (รวม {total} เสียง)</div>
+                                                          {total > 0 ? (
+                                                              <div className="space-y-5">
+                                                                  <div>
+                                                                      <div className="flex justify-between text-xs mb-1.5 font-bold"><span className="text-green-600">เห็นด้วย</span><span className="text-green-700 bg-green-100 px-1.5 rounded">{pAgree}%</span></div>
+                                                                      <div className="w-full bg-white rounded-full h-3.5 border border-gray-200 shadow-inner">
+                                                                          <div className="bg-green-500 h-full rounded-full transition-all duration-500" style={{ width: `${pAgree}%` }}></div>
+                                                                      </div>
+                                                                  </div>
+                                                                  <div>
+                                                                      <div className="flex justify-between text-xs mb-1.5 font-bold"><span className="text-red-600">ไม่เห็นด้วย</span><span className="text-red-700 bg-red-100 px-1.5 rounded">{pDisagree}%</span></div>
+                                                                      <div className="w-full bg-white rounded-full h-3.5 border border-gray-200 shadow-inner">
+                                                                          <div className="bg-red-500 h-full rounded-full transition-all duration-500" style={{ width: `${pDisagree}%` }}></div>
+                                                                      </div>
+                                                                  </div>
+                                                                  <div>
+                                                                      <div className="flex justify-between text-xs mb-1.5 font-bold"><span className="text-gray-500">งดออกเสียง</span><span className="text-gray-600 bg-gray-200 px-1.5 rounded">{pAbstain}%</span></div>
+                                                                      <div className="w-full bg-white rounded-full h-3.5 border border-gray-200 shadow-inner">
+                                                                          <div className="bg-gray-400 h-full rounded-full transition-all duration-500" style={{ width: `${pAbstain}%` }}></div>
+                                                                      </div>
+                                                                  </div>
+                                                              </div>
+                                                          ) : (
+                                                              <div className="flex items-center justify-center h-24 text-gray-400 text-sm border-2 border-dashed border-gray-200 rounded-lg bg-white">ยังไม่มีการลงคะแนนในวาระนี้</div>
+                                                          )}
+                                                      </div>
+                                                  </div>
+                                              </div>
+                                          );
+                                      })}
+                                      {meetingAgendas.filter(a => a.meetingId === selectedMeetingManageId).length === 0 && (
+                                          <div className="text-center p-12 bg-white border-2 border-dashed border-gray-300 rounded-xl text-gray-400 flex flex-col items-center">
+                                              <BarChart3 size={40} className="mb-3 text-gray-300" />
+                                              <p className="font-bold text-gray-500">ยังไม่มีวาระการประชุม</p>
+                                              <p className="text-sm mt-1">กรอกชื่อวาระและกด "เพิ่มวาระ" ด้านบน เพื่อเริ่มต้นระบบนับคะแนน</p>
+                                          </div>
+                                      )}
+                                  </div>
+                              </div>
+                          ) : (
+                              <div className="p-12 text-center text-gray-400">กรุณาเลือกการประชุมจากเมนูด้านบน เพื่อดูหรือจัดการระบบนับคะแนน</div>
+                          )}
+                      </Card>
+                  )}
+
+                  {/* --- TAB: สรุปมติการประชุม (Resolutions) --- */}
+                  {meetingSubTab === 'resolutions' && (
+                      <Card id="print-resolutions-area">
+                          <div className="p-4 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white">
+                              <h3 className="font-bold flex items-center gap-2 text-gray-800">
+                                  <ClipboardCheck size={20} className="text-teal-600" /> สรุปมติการประชุม (Resolutions)
+                              </h3>
+                              <div className="flex gap-2 w-full md:w-auto">
+                                  <select 
+                                      className="border border-gray-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-teal-200 outline-none w-full md:w-64 bg-white"
+                                      value={selectedMeetingManageId}
+                                      onChange={e => setSelectedMeetingManageId(e.target.value)}
+                                  >
+                                      <option value="">-- เลือกการประชุม --</option>
+                                      {meetingsList.filter(m => m.projectId === selectedProject.id).map(m => (
+                                          <option key={m.id} value={m.id}>{m.title}</option>
+                                      ))}
+                                  </select>
+                                  <Button variant="outline" size="sm" icon={PrinterIcon} onClick={() => handleExportPDF('print-resolutions-area', 'Meeting_Resolutions.pdf', 'portrait')} disabled={isExporting || !selectedMeetingManageId}>
+                                      {isExporting ? t('downloading') : t('printPDF')}
+                                  </Button>
+                              </div>
+                          </div>
+
+                          {selectedMeetingManageId ? (
+                              <div className={`p-8 bg-white ${isExporting ? 'w-[190mm] min-w-[190mm] max-w-[190mm] mx-auto' : ''}`}>
+                                  <div className="text-center mb-8 border-b-2 border-gray-800 pb-4">
+                                      <h2 className="text-2xl font-bold uppercase mb-2">สรุปมติการประชุม (Resolutions)</h2>
+                                      <h3 className="text-lg font-bold text-gray-700">{meetingsList.find(m => m.id === selectedMeetingManageId)?.title}</h3>
+                                      <p className="text-sm text-gray-500 mt-2 font-medium">โครงการ: {selectedProject.name}</p>
+                                  </div>
+
+                                  <div className="space-y-6">
+                                      {meetingAgendas.filter(a => a.meetingId === selectedMeetingManageId).sort((a,b) => a.seq - b.seq).map(agenda => {
+                                          const total = Number(agenda.agree) + Number(agenda.disagree) + Number(agenda.abstain);
+                                          // มติที่ประชุม: เห็นด้วย > ไม่เห็นด้วย คือ อนุมัติ (อิงตามคะแนนเสียงข้างมากของที่ประชุมเป็นหลักเบื้องต้น)
+                                          const isPassed = Number(agenda.agree) > Number(agenda.disagree);
+                                          const isTie = Number(agenda.agree) === Number(agenda.disagree) && total > 0;
+                                          
+                                          return (
+                                              <div key={agenda.id} className="border border-gray-300 rounded-lg p-5 bg-gray-50/30">
+                                                  <h4 className="font-bold text-gray-800 text-base mb-4 border-b border-gray-200 pb-2 flex items-center gap-2">
+                                                      วาระที่ {agenda.seq}: <span className="text-teal-700">{agenda.title}</span>
+                                                  </h4>
+                                                  <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
+                                                      <div className="flex justify-between items-center bg-white p-2.5 rounded border border-gray-200 shadow-sm">
+                                                          <span className="text-gray-600 font-medium">คะแนนเห็นด้วย:</span>
+                                                          <span className="font-bold text-green-600 text-base">{agenda.agree} เสียง</span>
+                                                      </div>
+                                                      <div className="flex justify-between items-center bg-white p-2.5 rounded border border-gray-200 shadow-sm">
+                                                          <span className="text-gray-600 font-medium">คะแนนไม่เห็นด้วย:</span>
+                                                          <span className="font-bold text-red-600 text-base">{agenda.disagree} เสียง</span>
+                                                      </div>
+                                                      <div className="flex justify-between items-center bg-white p-2.5 rounded border border-gray-200 shadow-sm">
+                                                          <span className="text-gray-600 font-medium">งดออกเสียง:</span>
+                                                          <span className="font-bold text-gray-600 text-base">{agenda.abstain} เสียง</span>
+                                                      </div>
+                                                      <div className="flex justify-between items-center bg-gray-100 p-2.5 rounded border border-gray-300 shadow-sm">
+                                                          <span className="text-gray-800 font-bold">ผู้ใช้สิทธิ์รวม:</span>
+                                                          <span className="font-black text-gray-800 text-base">{total} เสียง</span>
+                                                      </div>
+                                                  </div>
+                                                  <div className="flex items-center gap-3 bg-white p-3 rounded-lg border border-gray-200 mt-2 shadow-sm">
+                                                      <span className="font-bold text-gray-700">มติที่ประชุม:</span>
+                                                      {total === 0 ? (
+                                                          <span className="text-gray-500 italic">ยังไม่มีการลงมติ</span>
+                                                      ) : isPassed ? (
+                                                          <span className="bg-green-100 text-green-700 px-3 py-1.5 rounded-md text-sm font-bold flex items-center gap-1.5 border border-green-300 shadow-sm"><CheckCircle size={16}/> อนุมัติ (Approved)</span>
+                                                      ) : isTie ? (
+                                                          <span className="bg-yellow-100 text-yellow-700 px-3 py-1.5 rounded-md text-sm font-bold flex items-center gap-1.5 border border-yellow-300 shadow-sm"><AlertTriangle size={16}/> คะแนนเสียงเท่ากัน (Tie)</span>
+                                                      ) : (
+                                                          <span className="bg-red-100 text-red-700 px-3 py-1.5 rounded-md text-sm font-bold flex items-center gap-1.5 border border-red-300 shadow-sm"><XCircle size={16}/> ไม่อนุมัติ (Rejected)</span>
+                                                      )}
+                                                  </div>
+                                              </div>
+                                          );
+                                      })}
+                                      {meetingAgendas.filter(a => a.meetingId === selectedMeetingManageId).length === 0 && (
+                                          <div className="text-center p-8 text-gray-400 border border-dashed rounded-lg bg-gray-50">ไม่มีข้อมูลวาระการประชุม ระบบจะประมวลผลสรุปมติอัตโนมัติเมื่อมีการตั้งค่าวาระในแท็บ "ระบบนับคะแนน"</div>
+                                      )}
+                                  </div>
+
+                                  <div className="mt-16 pt-8 border-t border-gray-400 flex justify-between gap-8 px-4 md:px-12 text-sm text-center" style={{ pageBreakInside: 'avoid' }}>
+                                      <div className="flex-1 flex flex-col items-center">
+                                          <div className="w-40 border-b border-gray-400 mb-2 h-6"></div>
+                                          <div className="font-bold">( ผู้บันทึกการประชุม )</div>
+                                      </div>
+                                      <div className="flex-1 flex flex-col items-center">
+                                          <div className="w-40 border-b border-gray-400 mb-2 h-6"></div>
+                                          <div className="font-bold">( ประธานที่ประชุม )</div>
+                                      </div>
+                                  </div>
+                              </div>
+                          ) : (
+                              <div className="p-12 text-center text-gray-400">กรุณาเลือกการประชุมจากเมนูด้านบน เพื่อดูรายงานสรุปมติ</div>
+                          )}
+                      </Card>
+                  )}
+
+                  {/* --- TAB: เอกสารนำส่งกรมที่ดิน (Land Dept Docs) --- */}
+                  {meetingSubTab === 'land_dept_docs' && (
+                      <Card id="print-land-docs-area">
+                          <div className="p-4 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-yellow-50">
+                              <div>
+                                  <h3 className="font-semibold text-lg flex items-center gap-2 text-yellow-800"><Building2 size={20}/> เช็คลิสต์เอกสารนำส่งกรมที่ดิน</h3>
+                                  <span className="text-xs font-bold bg-yellow-200 text-yellow-800 px-2 py-0.5 rounded inline-block mt-1 border border-yellow-300">ต้องยื่นภายใน 30 วันหลังประชุม</span>
+                              </div>
+                              <div className="flex gap-2 w-full md:w-auto">
+                                  <select 
+                                      className="border border-yellow-300 rounded-md p-2 text-sm outline-none w-full md:w-64 bg-white text-yellow-900 focus:ring-2 focus:ring-yellow-400"
+                                      value={selectedMeetingManageId}
+                                      onChange={e => setSelectedMeetingManageId(e.target.value)}
+                                  >
+                                      <option value="">-- เลือกการประชุม --</option>
+                                      {meetingsList.filter(m => m.projectId === selectedProject.id).map(m => (
+                                          <option key={m.id} value={m.id}>{m.title}</option>
+                                      ))}
+                                  </select>
+                                  <Button variant="outline" size="sm" icon={PrinterIcon} onClick={() => handleExportPDF('print-land-docs-area', 'Land_Dept_Docs_Checklist.pdf', 'portrait')} disabled={isExporting || !selectedMeetingManageId} className="border-yellow-400 text-yellow-800 hover:bg-yellow-100 bg-white">
+                                      {isExporting ? t('downloading') : t('printPDF')}
+                                  </Button>
+                              </div>
+                          </div>
+
+                          {selectedMeetingManageId ? (
+                              <div className={`p-6 bg-white ${isExporting ? 'w-[190mm] min-w-[190mm] max-w-[190mm] mx-auto box-border' : ''}`}>
+                                  {isExporting && (
+                                      <div className="text-center mb-6">
+                                          <h2 className="text-xl font-bold uppercase mb-1">เช็คลิสต์เตรียมเอกสารนำส่งกรมที่ดิน (Land Dept Docs)</h2>
+                                          <p className="text-sm text-gray-600">โครงการ: {selectedProject.name} | อ้างอิง: {meetingsList.find(m => m.id === selectedMeetingManageId)?.title}</p>
+                                      </div>
+                                  )}
+
+                                  <div className="mb-6 text-gray-700 text-sm bg-blue-50 p-4 rounded-lg border border-blue-200 flex items-start gap-3 shadow-sm">
+                                      <Info className="text-blue-500 shrink-0 mt-0.5" size={20}/>
+                                      <div className="leading-relaxed">
+                                          <strong className="text-blue-800">ข้อบังคับตามกฎหมาย:</strong> ตาม พ.ร.บ. อาคารชุด / พ.ร.บ. จัดสรรที่ดิน นิติบุคคลต้องนำส่งเอกสารที่เกี่ยวข้องกับมติที่ประชุมใหญ่ (เช่น การจดทะเบียนแต่งตั้งกรรมการชุดใหม่, การแก้ไขระเบียบข้อบังคับ) ไปจดทะเบียนที่กรมที่ดินภายใน <span className="font-bold text-red-600 underline">30 วัน</span> นับจากวันประชุมใหญ่ หากล่าช้าอาจมีโทษปรับตามกฎหมาย
+                                      </div>
+                                  </div>
+                                  
+                                  <div className="bg-white border border-gray-300 rounded-xl overflow-hidden shadow-sm">
+                                      <div className="p-4 bg-gray-100 font-bold text-gray-800 border-b border-gray-300 text-base flex justify-between items-center">
+                                          รายการเอกสารที่ต้องจัดเตรียม
+                                          <span className="text-xs font-normal text-gray-500 bg-white px-2 py-1 rounded border">ติ๊กถูกเมื่อเตรียมเอกสารครบแล้ว</span>
+                                      </div>
+                                      <div className="divide-y divide-gray-200">
+                                          {[
+                                              { id: 'doc1', label: "หนังสือแจ้งความประสงค์ขอจดทะเบียนเปลี่ยนกรรมการ (ท.ช. 11 หรือ จ.ส. 8)" },
+                                              { id: 'doc2', label: "รายงานการประชุมใหญ่ที่พิมพ์เสร็จสมบูรณ์ และมีลายเซ็นรับรองจากประธานในที่ประชุม" },
+                                              { id: 'doc3', label: "บัญชีรายชื่อผู้เข้าร่วมประชุม (ใบลงทะเบียน) และหลักฐานการเป็นเจ้าของร่วม" },
+                                              { id: 'doc4', label: "หนังสือมอบฉันทะฉบับจริงทั้งหมด ที่ใช้ในการประชุมครั้งนั้น (ถ้ามี)" },
+                                              { id: 'doc5', label: "สำเนาบัตรประจำตัวประชาชน และสำเนาทะเบียนบ้าน ของกรรมการชุดใหม่ทุกคน พร้อมเซ็นรับรองสำเนาถูกต้อง" },
+                                              { id: 'doc6', label: "หนังสือรับรองนิติบุคคลอาคารชุด / นิติบุคคลหมู่บ้านจัดสรร (ชุดปัจจุบัน)" }
+                                          ].map((item, index) => {
+                                              const isChecked = landDocsChecklist[`${selectedMeetingManageId}_${item.id}`] || false;
+                                              return (
+                                                  <label key={item.id} className={`flex items-start gap-4 p-4 cursor-pointer transition-colors group ${isChecked ? 'bg-green-50/30' : 'hover:bg-gray-50'}`}>
+                                                      <div className="mt-0.5">
+                                                          {isExporting ? (
+                                                              <div className="w-4 h-4 border border-gray-800 rounded-sm flex items-center justify-center">
+                                                                  {isChecked && <CheckCircle size={14} className="text-gray-800"/>}
+                                                              </div>
+                                                          ) : (
+                                                              <input 
+                                                                  type="checkbox" 
+                                                                  className="w-5 h-5 text-teal-600 rounded border-gray-300 focus:ring-teal-500 cursor-pointer shadow-sm" 
+                                                                  checked={isChecked}
+                                                                  onChange={(e) => {
+                                                                      if(hasPerm('proj_meeting', 'save')) {
+                                                                          const newChecklist = { ...landDocsChecklist, [`${selectedMeetingManageId}_${item.id}`]: e.target.checked };
+                                                                          setLandDocsChecklist(newChecklist);
+                                                                      }
+                                                                  }}
+                                                                  disabled={!hasPerm('proj_meeting', 'save')}
+                                                              />
+                                                          )}
+                                                      </div>
+                                                      <span className={`text-sm md:text-base leading-relaxed ${isChecked ? 'text-gray-400 line-through' : 'text-gray-800 font-medium group-hover:text-teal-700'}`}>
+                                                          {index + 1}. {item.label}
+                                                      </span>
+                                                  </label>
+                                              );
+                                          })}
+                                      </div>
+                                  </div>
+
+                                  {!isExporting && (
+                                      <div className="mt-6 flex justify-end">
+                                          <button className="bg-teal-600 text-white px-5 py-2.5 rounded-lg hover:bg-teal-700 transition-colors flex items-center gap-2 font-bold shadow-md">
+                                              <Download size={18}/> ดาวน์โหลดแบบฟอร์มกรมที่ดินมาตรฐาน
+                                          </button>
+                                      </div>
+                                  )}
+                              </div>
+                          ) : (
+                              <div className="p-16 text-center text-gray-400 bg-white">
+                                  <Building2 size={48} className="mx-auto mb-4 text-gray-300" />
+                                  <div className="font-bold text-lg text-gray-500">กรุณาเลือกการประชุมจากเมนูด้านบน</div>
+                                  <div className="text-sm mt-1">เพื่อจัดการและตรวจสอบเช็คลิสต์เอกสารส่งกรมที่ดิน</div>
+                              </div>
+                          )}
+                      </Card>
+                  )}
+
+                  {!['plan', 'meeting_list', 'invitation', 'proxy', 'ballot', 'attendance', 'voting_system', 'resolutions', 'land_dept_docs'].includes(meetingSubTab) && (
                       <Card className="p-12 flex flex-col items-center justify-center text-center border-dashed border-2 min-h-[400px] bg-gray-50">
                           <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mb-4 shadow-sm border border-gray-200">
                               <Hammer className="text-gray-400" size={32} />
