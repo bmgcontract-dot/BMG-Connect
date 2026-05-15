@@ -20298,6 +20298,367 @@ export default function App() {
         </div>
       )}
 
+      {/* --- REINSTATED MISSING MODALS --- */}
+      {/* Add Meeting Modal */}
+      {showAddMeetingModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 relative">
+            <div className="flex justify-between items-center mb-6 border-b pb-4">
+              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <Megaphone className="text-teal-500" />
+                {isEditingMeeting ? 'แก้ไขการประชุม' : 'เพิ่มกำหนดการประชุม'}
+              </h2>
+              <button onClick={() => setShowAddMeetingModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+            </div>
+            <form onSubmit={handleSaveMeeting} className="space-y-4">
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">หัวข้อการประชุม <span className="text-red-500">*</span></label>
+                    <input type="text" required className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500" value={newMeeting.title} onChange={e => setNewMeeting({...newMeeting, title: e.target.value})} placeholder="เช่น ประชุมใหญ่สามัญประจำปี 2567" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">ประเภท</label>
+                        <select className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500 bg-white" value={newMeeting.type} onChange={e => setNewMeeting({...newMeeting, type: e.target.value})}>
+                            <option value="AGM">สามัญประจำปี (AGM)</option>
+                            <option value="EGM">วิสามัญ (EGM)</option>
+                            <option value="Committee">คณะกรรมการ (Committee)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">สถานะ</label>
+                        <select className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500 bg-white" value={newMeeting.status} onChange={e => setNewMeeting({...newMeeting, status: e.target.value})}>
+                            <option value="Scheduled">รอดำเนินการ</option>
+                            <option value="Completed">เสร็จสิ้น</option>
+                            <option value="Postponed">เลื่อน</option>
+                            <option value="Cancelled">ยกเลิก</option>
+                        </select>
+                    </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">วันที่</label>
+                        <input type="date" required className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500" value={newMeeting.date} onChange={e => setNewMeeting({...newMeeting, date: e.target.value})} />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">เวลา</label>
+                        <input type="time" required className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500" value={newMeeting.time} onChange={e => setNewMeeting({...newMeeting, time: e.target.value})} />
+                    </div>
+                </div>
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">สถานที่</label>
+                    <input type="text" className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500" value={newMeeting.location} onChange={e => setNewMeeting({...newMeeting, location: e.target.value})} placeholder="เช่น ห้องประชุมชั้น 1" />
+                </div>
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">วาระสำคัญ (Agenda)</label>
+                    <textarea className="w-full border rounded-md p-2 h-20 resize-none outline-none focus:ring-1 focus:ring-teal-500" value={newMeeting.agenda} onChange={e => setNewMeeting({...newMeeting, agenda: e.target.value})} placeholder="ระบุวาระการประชุมโดยสังเขป..."></textarea>
+                </div>
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">แนบรายงานการประชุม (PDF)</label>
+                    <input type="file" accept=".pdf" className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500" onChange={handleMeetingFileUpload} />
+                    {newMeeting.minutesFile && <p className="text-xs text-green-600 mt-1">ไฟล์แนบ: {newMeeting.minutesFile.name}</p>}
+                </div>
+                <div className="flex justify-end gap-2 pt-4 border-t">
+                    <Button variant="secondary" onClick={() => setShowAddMeetingModal(false)}>ยกเลิก</Button>
+                    <Button type="submit" icon={Save}>บันทึกข้อมูล</Button>
+                </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Meeting Details View Modal */}
+      {selectedMeetingView && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 relative">
+                <div className="flex justify-between items-center mb-6 border-b pb-4">
+                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2"><Megaphone className="text-teal-500"/> รายละเอียดการประชุม</h2>
+                    <button onClick={() => setSelectedMeetingView(null)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                </div>
+                <div className="space-y-4 text-sm bg-gray-50 p-4 rounded-lg border border-gray-100">
+                    <div><span className="text-gray-500 block mb-1">หัวข้อการประชุม</span><span className="font-bold text-lg text-gray-800">{selectedMeetingView.title}</span></div>
+                    <div className="grid grid-cols-2 gap-4 border-t border-gray-200 pt-3">
+                        <div><span className="text-gray-500 block mb-1">ประเภท</span><span className="font-medium text-gray-800">{selectedMeetingView.type === 'AGM' ? 'สามัญประจำปี' : selectedMeetingView.type === 'EGM' ? 'วิสามัญ' : 'คณะกรรมการ'}</span></div>
+                        <div><span className="text-gray-500 block mb-1">สถานะ</span><span className="font-medium text-gray-800">{selectedMeetingView.status === 'Completed' ? 'เสร็จสิ้น' : selectedMeetingView.status === 'Postponed' ? 'เลื่อน' : selectedMeetingView.status === 'Cancelled' ? 'ยกเลิก' : 'รอดำเนินการ'}</span></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 border-t border-gray-200 pt-3">
+                        <div><span className="text-gray-500 block mb-1">วันที่</span><span className="font-medium text-gray-800">{new Date(selectedMeetingView.date).toLocaleDateString('th-TH')}</span></div>
+                        <div><span className="text-gray-500 block mb-1">เวลา</span><span className="font-medium text-gray-800">{selectedMeetingView.time} น.</span></div>
+                    </div>
+                    <div className="border-t border-gray-200 pt-3"><span className="text-gray-500 block mb-1">สถานที่</span><span className="font-medium text-gray-800">{selectedMeetingView.location || '-'}</span></div>
+                    <div className="border-t border-gray-200 pt-3"><span className="text-gray-500 block mb-1">วาระสำคัญ</span><span className="font-medium text-gray-800 whitespace-pre-wrap">{selectedMeetingView.agenda || '-'}</span></div>
+                </div>
+                <div className="flex justify-end gap-2 pt-4 mt-4 border-t">
+                    {hasPerm('proj_meeting', 'edit') && <Button variant="outline" icon={Edit} onClick={() => { handleEditMeeting(selectedMeetingView); setSelectedMeetingView(null); }}>แก้ไขข้อมูล</Button>}
+                    <Button variant="secondary" onClick={() => setSelectedMeetingView(null)}>ปิดหน้าต่าง</Button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* Add Invitation Modal */}
+      {showAddInvitationModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 relative">
+                <div className="flex justify-between items-center mb-6 border-b pb-4">
+                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2"><Mail className="text-teal-500"/> หนังสือเชิญประชุม</h2>
+                    <button onClick={() => setShowAddInvitationModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                </div>
+                <form onSubmit={handleSaveInvitation} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">อ้างอิงการประชุม</label>
+                        <select className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500 bg-white" value={newInvitation.meetingId} onChange={e => setNewInvitation({...newInvitation, meetingId: e.target.value})} required>
+                            <option value="" disabled>-- เลือกการประชุม --</option>
+                            {meetingsList.filter(m => m.projectId === selectedProject.id).map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+                        </select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">วันที่ออกหนังสือ</label>
+                            <input type="date" required className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500" value={newInvitation.issueDate} onChange={e => setNewInvitation({...newInvitation, issueDate: e.target.value})} />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">ผู้ลงนาม</label>
+                            <input type="text" className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500" value={newInvitation.signatory} onChange={e => setNewInvitation({...newInvitation, signatory: e.target.value})} />
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">เรื่อง (Title)</label>
+                        <input type="text" required className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500" value={newInvitation.title} onChange={e => setNewInvitation({...newInvitation, title: e.target.value})} />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">เรียน (To)</label>
+                        <input type="text" required className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500" value={newInvitation.recipient} onChange={e => setNewInvitation({...newInvitation, recipient: e.target.value})} />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">เนื้อหา / รายละเอียด</label>
+                        <textarea className="w-full border rounded-md p-2 h-24 resize-none outline-none focus:ring-1 focus:ring-teal-500" value={newInvitation.content} onChange={e => setNewInvitation({...newInvitation, content: e.target.value})}></textarea>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-4 border-t">
+                        <Button variant="secondary" onClick={() => setShowAddInvitationModal(false)}>ยกเลิก</Button>
+                        <Button type="submit" icon={Save}>บันทึกข้อมูล</Button>
+                    </div>
+                </form>
+            </div>
+        </div>
+      )}
+
+      {/* Invitation Details View Modal */}
+      {selectedInvitationView && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 relative">
+                <div className="flex justify-between items-center mb-6 border-b pb-4">
+                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2"><Mail className="text-teal-500"/> รายละเอียดหนังสือเชิญ</h2>
+                    <button onClick={() => setSelectedInvitationView(null)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                </div>
+                <div className="space-y-4 text-sm bg-gray-50 p-4 rounded-lg border border-gray-100">
+                    <div><span className="text-gray-500 block mb-1">เรื่อง (Title)</span><span className="font-bold text-lg text-gray-800">{selectedInvitationView.title}</span></div>
+                    <div className="border-t border-gray-200 pt-3"><span className="text-gray-500 block mb-1">เรียน (To)</span><span className="font-medium text-gray-800">{selectedInvitationView.recipient}</span></div>
+                    <div className="border-t border-gray-200 pt-3"><span className="text-gray-500 block mb-1">อ้างอิงการประชุม</span><span className="font-medium text-teal-700">{meetingsList.find(m => m.id === selectedInvitationView.meetingId)?.title || '-'}</span></div>
+                    <div className="grid grid-cols-2 gap-4 border-t border-gray-200 pt-3">
+                        <div><span className="text-gray-500 block mb-1">วันที่ออกหนังสือ</span><span className="font-medium text-gray-800">{new Date(selectedInvitationView.issueDate).toLocaleDateString('th-TH')}</span></div>
+                        <div><span className="text-gray-500 block mb-1">ผู้ลงนาม</span><span className="font-medium text-gray-800">{selectedInvitationView.signatory || '-'}</span></div>
+                    </div>
+                    <div className="border-t border-gray-200 pt-3"><span className="text-gray-500 block mb-1">เนื้อหา</span><span className="font-medium text-gray-800 whitespace-pre-wrap">{selectedInvitationView.content || '-'}</span></div>
+                </div>
+                <div className="flex justify-end gap-2 pt-4 mt-4 border-t">
+                    <Button variant="secondary" onClick={() => setSelectedInvitationView(null)}>ปิดหน้าต่าง</Button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* Add Proxy Modal */}
+      {showAddProxyModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 relative">
+                <div className="flex justify-between items-center mb-6 border-b pb-4">
+                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2"><FileText className="text-teal-500"/> ใบมอบฉันทะ</h2>
+                    <button onClick={() => setShowAddProxyModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                </div>
+                <form onSubmit={handleSaveProxy} className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">อ้างอิงการประชุม</label>
+                            <select className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500 bg-white" value={newProxy.meetingId} onChange={e => setNewProxy({...newProxy, meetingId: e.target.value})} required>
+                                <option value="" disabled>-- เลือกการประชุม --</option>
+                                {meetingsList.filter(m => m.projectId === selectedProject.id).map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">วันที่รับเอกสาร</label>
+                            <input type="date" required className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500" value={newProxy.date} onChange={e => setNewProxy({...newProxy, date: e.target.value})} />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">ห้อง / เลขที่</label>
+                            <input type="text" required className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500" value={newProxy.unitNo} onChange={e => setNewProxy({...newProxy, unitNo: e.target.value})} placeholder="เช่น 101/5" />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">ชื่อเจ้าของร่วม</label>
+                            <input type="text" required className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500" value={newProxy.ownerName} onChange={e => setNewProxy({...newProxy, ownerName: e.target.value})} placeholder="ผู้มอบฉันทะ" />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">ชื่อผู้รับมอบฉันทะ</label>
+                            <input type="text" required className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500" value={newProxy.proxyName} onChange={e => setNewProxy({...newProxy, proxyName: e.target.value})} />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">ความสัมพันธ์</label>
+                            <input type="text" required className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500" value={newProxy.proxyRelation} onChange={e => setNewProxy({...newProxy, proxyRelation: e.target.value})} placeholder="เช่น ญาติ, ผู้เช่า, บุคคลภายนอก" />
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">สถานะเอกสาร</label>
+                        <select className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500 bg-white" value={newProxy.status} onChange={e => setNewProxy({...newProxy, status: e.target.value})}>
+                            <option value="Pending">รอตรวจสอบ</option>
+                            <option value="Verified">ตรวจสอบแล้ว (ถูกต้อง)</option>
+                            <option value="Rejected">เอกสารไม่สมบูรณ์</option>
+                        </select>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-4 border-t">
+                        <Button variant="secondary" onClick={() => setShowAddProxyModal(false)}>ยกเลิก</Button>
+                        <Button type="submit" icon={Save}>บันทึกข้อมูล</Button>
+                    </div>
+                </form>
+            </div>
+        </div>
+      )}
+
+      {/* Proxy Details View Modal */}
+      {selectedProxyView && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 relative">
+                <div className="flex justify-between items-center mb-6 border-b pb-4">
+                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2"><FileText className="text-teal-500"/> รายละเอียดใบมอบฉันทะ</h2>
+                    <button onClick={() => setSelectedProxyView(null)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                </div>
+                <div className="space-y-4 text-sm bg-gray-50 p-4 rounded-lg border border-gray-100">
+                    <div className="grid grid-cols-2 gap-4">
+                        <div><span className="text-gray-500 block mb-1">ห้อง / เลขที่</span><span className="font-bold text-lg text-gray-800">{selectedProxyView.unitNo}</span></div>
+                        <div><span className="text-gray-500 block mb-1">วันที่รับเอกสาร</span><span className="font-medium text-gray-800">{new Date(selectedProxyView.date).toLocaleDateString('th-TH')}</span></div>
+                    </div>
+                    <div className="border-t border-gray-200 pt-3"><span className="text-gray-500 block mb-1">อ้างอิงการประชุม</span><span className="font-medium text-teal-700">{meetingsList.find(m => m.id === selectedProxyView.meetingId)?.title || '-'}</span></div>
+                    <div className="grid grid-cols-2 gap-4 border-t border-gray-200 pt-3">
+                        <div><span className="text-gray-500 block mb-1">ผู้มอบฉันทะ (เจ้าของร่วม)</span><span className="font-bold text-gray-800">{selectedProxyView.ownerName}</span></div>
+                        <div><span className="text-gray-500 block mb-1">สถานะเอกสาร</span>
+                            <span className={`px-2 py-0.5 rounded text-xs font-bold ${selectedProxyView.status === 'Verified' ? 'bg-green-100 text-green-700' : selectedProxyView.status === 'Rejected' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>
+                                {selectedProxyView.status === 'Verified' ? 'ตรวจสอบแล้ว' : selectedProxyView.status === 'Rejected' ? 'ไม่สมบูรณ์' : 'รอตรวจสอบ'}
+                            </span>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 border-t border-gray-200 pt-3">
+                        <div><span className="text-gray-500 block mb-1">ผู้รับมอบฉันทะ</span><span className="font-bold text-gray-800">{selectedProxyView.proxyName}</span></div>
+                        <div><span className="text-gray-500 block mb-1">ความสัมพันธ์</span><span className="font-medium text-gray-800">{selectedProxyView.proxyRelation}</span></div>
+                    </div>
+                </div>
+                <div className="flex justify-end gap-2 pt-4 mt-4 border-t">
+                    <Button variant="secondary" onClick={() => setSelectedProxyView(null)}>ปิดหน้าต่าง</Button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* Add Ballot Modal */}
+      {showAddBallotModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 relative">
+                <div className="flex justify-between items-center mb-6 border-b pb-4">
+                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2"><CheckSquare className="text-teal-500"/> ใบลงคะแนน</h2>
+                    <button onClick={() => setShowAddBallotModal(false)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                </div>
+                <form onSubmit={handleSaveBallot} className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">อ้างอิงการประชุม</label>
+                            <select className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500 bg-white" value={newBallot.meetingId} onChange={e => setNewBallot({...newBallot, meetingId: e.target.value})} required>
+                                <option value="" disabled>-- เลือกการประชุม --</option>
+                                {meetingsList.filter(m => m.projectId === selectedProject.id).map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">วันที่ออกบัตร</label>
+                            <input type="date" required className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500" value={newBallot.date} onChange={e => setNewBallot({...newBallot, date: e.target.value})} />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">ห้อง / เลขที่</label>
+                            <input type="text" required className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500" value={newBallot.unitNo} onChange={e => setNewBallot({...newBallot, unitNo: e.target.value})} placeholder="เช่น 101/5" />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">ชื่อเจ้าของร่วม</label>
+                            <input type="text" required className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500" value={newBallot.ownerName} onChange={e => setNewBallot({...newBallot, ownerName: e.target.value})} />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">ประเภทผู้ลงคะแนน</label>
+                            <select className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500 bg-white" value={newBallot.voterType} onChange={e => setNewBallot({...newBallot, voterType: e.target.value})}>
+                                <option value="เจ้าของร่วม">เจ้าของร่วม</option>
+                                <option value="ผู้รับมอบฉันทะ">ผู้รับมอบฉันทะ</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">ชื่อผู้ลงคะแนน (ถ้ารับมอบ)</label>
+                            <input type="text" className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500 bg-gray-50 disabled:opacity-50" value={newBallot.voterName} onChange={e => setNewBallot({...newBallot, voterName: e.target.value})} disabled={newBallot.voterType === 'เจ้าของร่วม'} placeholder={newBallot.voterType === 'เจ้าของร่วม' ? "ไม่ต้องระบุ" : "ระบุชื่อผู้รับมอบ"} />
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">สถานะบัตรลงคะแนน</label>
+                        <select className="w-full border rounded-md p-2 outline-none focus:ring-1 focus:ring-teal-500 bg-white" value={newBallot.status} onChange={e => setNewBallot({...newBallot, status: e.target.value})}>
+                            <option value="Valid">บัตรดี (Valid)</option>
+                            <option value="Void">บัตรเสีย (Void)</option>
+                        </select>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-4 border-t">
+                        <Button variant="secondary" onClick={() => setShowAddBallotModal(false)}>ยกเลิก</Button>
+                        <Button type="submit" icon={Save}>บันทึกข้อมูล</Button>
+                    </div>
+                </form>
+            </div>
+        </div>
+      )}
+
+      {/* Ballot Details View Modal */}
+      {selectedBallotView && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 relative">
+                <div className="flex justify-between items-center mb-6 border-b pb-4">
+                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2"><CheckSquare className="text-teal-500"/> รายละเอียดใบลงคะแนน</h2>
+                    <button onClick={() => setSelectedBallotView(null)} className="text-gray-400 hover:text-red-500"><X size={24} /></button>
+                </div>
+                <div className="space-y-4 text-sm bg-gray-50 p-4 rounded-lg border border-gray-100">
+                    <div className="grid grid-cols-2 gap-4">
+                        <div><span className="text-gray-500 block mb-1">ห้อง / เลขที่</span><span className="font-bold text-lg text-gray-800">{selectedBallotView.unitNo}</span></div>
+                        <div><span className="text-gray-500 block mb-1">วันที่ออกบัตร</span><span className="font-medium text-gray-800">{new Date(selectedBallotView.date).toLocaleDateString('th-TH')}</span></div>
+                    </div>
+                    <div className="border-t border-gray-200 pt-3"><span className="text-gray-500 block mb-1">อ้างอิงการประชุม</span><span className="font-medium text-teal-700">{meetingsList.find(m => m.id === selectedBallotView.meetingId)?.title || '-'}</span></div>
+                    <div className="grid grid-cols-2 gap-4 border-t border-gray-200 pt-3">
+                        <div><span className="text-gray-500 block mb-1">ชื่อเจ้าของร่วม</span><span className="font-bold text-gray-800">{selectedBallotView.ownerName}</span></div>
+                        <div><span className="text-gray-500 block mb-1">ประเภทผู้ลงคะแนน</span>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${selectedBallotView.voterType === 'เจ้าของร่วม' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+                                {selectedBallotView.voterType}
+                            </span>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 border-t border-gray-200 pt-3">
+                        <div><span className="text-gray-500 block mb-1">ชื่อผู้ลงคะแนนจริง</span><span className="font-bold text-gray-800">{selectedBallotView.voterName || selectedBallotView.ownerName}</span></div>
+                        <div><span className="text-gray-500 block mb-1">สถานะบัตร</span>
+                            <span className={`px-2 py-0.5 rounded text-xs font-bold ${selectedBallotView.status === 'Valid' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                {selectedBallotView.status === 'Valid' ? 'บัตรดี' : 'บัตรเสีย'}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                <div className="flex justify-end gap-2 pt-4 mt-4 border-t">
+                    <Button variant="secondary" onClick={() => setSelectedBallotView(null)}>ปิดหน้าต่าง</Button>
+                </div>
+            </div>
+        </div>
+      )}
+
     </div>
   );
 }
