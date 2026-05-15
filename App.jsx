@@ -2465,6 +2465,20 @@ export default function App() {
   });
 
   // --- NEW: Meeting Proxies State ---
+  const [meetingProxies, setMeetingProxies] = usePersistentCollection('bmg_meeting_proxies', [], fbUser);
+  const [showAddProxyModal, setShowAddProxyModal] = useState(false);
+  const [selectedProxyView, setSelectedProxyView] = useState(null);
+  const [newProxy, setNewProxy] = useState({
+      id: null,
+      meetingId: '',
+      date: new Date().toISOString().split('T')[0],
+      ownerName: '',
+      unitNo: '',
+      proxyName: '',
+      proxyRelation: 'บุคคลภายนอก',
+      status: 'Pending'
+  });
+
   // --- NEW: Meetings Tab ---
   const [meetingBallots, setMeetingBallots] = usePersistentCollection('bmg_meeting_ballots', [], fbUser);
   const [showAddBallotModal, setShowAddBallotModal] = useState(false);
@@ -2857,6 +2871,36 @@ export default function App() {
                       date: repair.date || new Date().toISOString(),
                       actionText: 'ดูรายการแจ้งซ่อม',
                       record: repair
+                  });
+              }
+          }
+      });
+
+      // 4. วัสดุคงคลังที่ต่ำกว่าจุดสั่งซื้อ (Low Stock) หรือ หมด (Out of Stock)
+      inventoryList.forEach(item => {
+          const proj = projects.find(p => p.id === item.projectId);
+          if (proj && isProjectAccessible(proj.name)) {
+              const qty = Number(item.quantity);
+              const min = Number(item.minThreshold);
+              if (qty === 0) {
+                  pendingItems.push({
+                      id: `inv_out_${item.id}`,
+                      type: 'inventory',
+                      title: `วัสดุหมดสต๊อก: ${item.name} (กรุณาสั่งซื้อ)`,
+                      project: proj,
+                      date: item.lastUpdated || new Date().toISOString(),
+                      actionText: 'จัดการสต๊อก',
+                      record: item
+                  });
+              } else if (qty <= min) {
+                  pendingItems.push({
+                      id: `inv_low_${item.id}`,
+                      type: 'inventory',
+                      title: `วัสดุใกล้หมด: ${item.name} (เหลือ ${qty} ${item.unit})`,
+                      project: proj,
+                      date: item.lastUpdated || new Date().toISOString(),
+                      actionText: 'จัดการสต๊อก',
+                      record: item
                   });
               }
           }
@@ -13261,127 +13305,210 @@ export default function App() {
                   </div>
 
                   {inventorySubTab === 'list' && (
-                      <Card id="print-inventory-area">
-                          <div className="p-4 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white">
-                              <div className="relative w-full md:w-64">
-                                  <Search size={16} className="absolute left-3 top-2.5 text-gray-400" />
-                                  <input 
-                                      type="text"
-                                      placeholder="ค้นหา รหัส, ชื่อวัสดุ..."
-                                      className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-emerald-200 focus:border-emerald-500 outline-none transition-all"
-                                      value={inventorySearch}
-                                      onChange={(e) => setInventorySearch(e.target.value)}
-                                  />
-                              </div>
-                              <div className={`flex gap-2 shrink-0 ${isExporting ? 'hidden' : ''}`}>
-                                  {hasPerm('proj_inventory', 'save') && (
-                                      <>
-                                          <Button size="sm" variant="outline" className="border-emerald-500 text-emerald-600 hover:bg-emerald-50" icon={ShoppingCart} onClick={() => {
-                                              setNewTransaction({ id: null, itemId: '', type: 'OUT', quantity: 1, requesterName: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : '', date: new Date().toISOString().split('T')[0], note: '' });
-                                              setShowTransactionModal(true);
-                                          }}>เบิก/รับเข้า</Button>
-                                          <Button size="sm" icon={Plus} className="bg-emerald-600 hover:bg-emerald-700" onClick={() => {
-                                              setNewInventoryItem({ id: null, code: '', name: '', category: 'วัสดุสำนักงาน', customCategory: '', quantity: 0, unit: 'ชิ้น', customUnit: '', minThreshold: 5, location: '' });
-                                              setIsEditingInventory(false);
-                                              setShowAddInventoryModal(true);
-                                          }}>เพิ่มวัสดุใหม่</Button>
-                                      </>
-                                  )}
-                                  <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-inventory-area', `Inventory_${selectedProject?.code}.pdf`, 'landscape')} disabled={isExporting}>
-                                      {isExporting ? t('downloading') : t('printPDF')}
-                                  </Button>
-                              </div>
-                          </div>
-
-                          <div className={isExporting ? "pb-4" : "overflow-x-auto"}>
-                              <table className="w-full text-sm text-left">
-                                  <thead className="bg-gray-50 text-gray-600">
-                                      <tr>
-                                          <th className="p-3 border-b text-center w-12">{t('col_seq')}</th>
-                                          <th className="p-3 border-b text-center w-28">รหัสวัสดุ</th>
-                                          <th className="p-3 border-b">ชื่อวัสดุอุปกรณ์</th>
-                                          <th className="p-3 border-b">หมวดหมู่</th>
-                                          <th className="p-3 border-b text-right w-24">คงเหลือ</th>
-                                          <th className="p-3 border-b text-center w-24">หน่วยนับ</th>
-                                          <th className="p-3 border-b text-center">สถานะสต๊อก</th>
-                                          <th className={`p-3 border-b text-center w-24 ${isExporting ? 'hidden' : ''}`}>จัดการ</th>
-                                      </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-gray-100 bg-white">
-                                      {(() => {
-                                          const filteredInv = inventoryList.filter(i => {
-                                              if (i.projectId !== selectedProject.id) return false;
-                                              if (inventorySearch) {
-                                                  const s = inventorySearch.toLowerCase();
-                                                  return i.code.toLowerCase().includes(s) || i.name.toLowerCase().includes(s) || i.category.toLowerCase().includes(s);
-                                              }
-                                              return true;
-                                          }).sort((a, b) => a.name.localeCompare(b.name));
-
-                                          if (filteredInv.length === 0) return <tr><td colSpan="8" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">ไม่มีข้อมูลวัสดุในคลัง</td></tr>;
-
-                                          return filteredInv.map((item, index) => {
-                                              const isLowStock = Number(item.quantity) <= Number(item.minThreshold);
-                                              const isOut = Number(item.quantity) === 0;
-                                              
-                                              return (
-                                                  <tr key={item.id} className="hover:bg-gray-50 transition-colors">
-                                                      <td className="p-3 text-center text-gray-500">{index + 1}</td>
-                                                      <td className="p-3 text-center font-mono font-bold text-emerald-600 bg-emerald-50 rounded-md border border-emerald-100">{item.code}</td>
-                                                      <td className="p-3">
-                                                          <div className="font-bold text-gray-800">{item.name}</div>
-                                                          <div className="text-[10px] text-gray-500 mt-0.5">จัดเก็บ: {item.location || '-'}</div>
-                                                      </td>
-                                                      <td className="p-3 text-gray-600">{item.category}</td>
-                                                      <td className={`p-3 text-right font-black text-lg ${isOut ? 'text-red-500' : isLowStock ? 'text-orange-500' : 'text-gray-800'}`}>
-                                                          {Number(item.quantity).toLocaleString()}
-                                                      </td>
-                                                      <td className="p-3 text-center text-gray-600">{item.unit}</td>
-                                                      <td className="p-3 text-center">
-                                                          <span className={`px-2 py-1 rounded-md text-[10px] font-bold border w-24 inline-block text-center shadow-sm ${
-                                                              isOut ? 'bg-red-50 border-red-200 text-red-700' : 
-                                                              isLowStock ? 'bg-orange-50 border-orange-200 text-orange-700' : 
-                                                              'bg-green-50 border-green-200 text-green-700'
-                                                          }`}>
-                                                              {isOut ? 'สินค้าหมด (Out of Stock)' : isLowStock ? `ใกล้หมด (จุดสั่งซื้อ: ${item.minThreshold})` : 'ปกติ (In Stock)'}
+                      <div className="space-y-4">
+                          {(() => {
+                              const outOfStockItems = inventoryList.filter(i => i.projectId === selectedProject.id && Number(i.quantity) === 0);
+                              const lowStockItems = inventoryList.filter(i => i.projectId === selectedProject.id && Number(i.quantity) > 0 && Number(i.quantity) <= Number(i.minThreshold));
+                              
+                              if ((outOfStockItems.length > 0 || lowStockItems.length > 0) && !isExporting) {
+                                  return (
+                                      <div className="flex flex-col gap-3">
+                                          {outOfStockItems.length > 0 && (
+                                              <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg shadow-sm">
+                                                  <div className="flex items-center gap-2 text-red-800 font-bold mb-3">
+                                                      <AlertTriangle size={18} />
+                                                      แจ้งเตือนวัสดุหมดสต๊อก ({outOfStockItems.length} รายการ)
+                                                  </div>
+                                                  <div className="flex flex-wrap gap-2">
+                                                      {outOfStockItems.map(item => (
+                                                          <span 
+                                                              key={item.id} 
+                                                              className="bg-white border border-red-200 text-red-700 px-3 py-1.5 rounded-md text-xs shadow-sm font-medium flex items-center gap-1 cursor-pointer hover:bg-red-100 hover:border-red-300 transition-colors" 
+                                                              onClick={() => setInventorySearch(item.code)}
+                                                              title="คลิกเพื่อค้นหาวัสดุนี้"
+                                                          >
+                                                              <Package size={12}/> {item.name}: <span className="font-black text-red-600">หมด (0)</span>
                                                           </span>
-                                                      </td>
-                                                      <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`}>
-                                                          <div className="flex items-center justify-center gap-1">
-                                                              {hasPerm('proj_inventory', 'edit') && (
-                                                                  <button 
-                                                                      onClick={() => handleEditInventory(item)}
-                                                                      className="text-gray-400 hover:text-blue-600 p-1.5 rounded-md hover:bg-blue-50 transition-colors" title="แก้ไขรายการ"
-                                                                  ><Edit size={16} /></button>
-                                                              )}
-                                                              {hasPerm('proj_inventory', 'delete') && (
-                                                                  <button 
-                                                                      onClick={() => showConfirm('ยืนยันการลบ', `ลบรายการวัสดุ "${item.name}" ใช่หรือไม่?`, () => setInventoryList(prev => prev.filter(i => i.id !== item.id)))}
-                                                                      className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors" title="ลบรายการ"
-                                                                  ><Trash2 size={16} /></button>
-                                                              )}
-                                                          </div>
-                                                      </td>
-                                                  </tr>
-                                              );
-                                          });
-                                      })()}
-                                  </tbody>
-                              </table>
-                          </div>
-                      </Card>
+                                                      ))}
+                                                  </div>
+                                              </div>
+                                          )}
+                                          {lowStockItems.length > 0 && (
+                                              <div className="bg-orange-50 border-l-4 border-orange-500 p-4 rounded-r-lg shadow-sm">
+                                                  <div className="flex items-center gap-2 text-orange-800 font-bold mb-3">
+                                                      <AlertTriangle size={18} />
+                                                      แจ้งเตือนวัสดุใกล้หมด / ต่ำกว่าจุดสั่งซื้อ ({lowStockItems.length} รายการ)
+                                                  </div>
+                                                  <div className="flex flex-wrap gap-2">
+                                                      {lowStockItems.map(item => (
+                                                          <span 
+                                                              key={item.id} 
+                                                              className="bg-white border border-orange-200 text-orange-700 px-3 py-1.5 rounded-md text-xs shadow-sm font-medium flex items-center gap-1 cursor-pointer hover:bg-orange-100 hover:border-orange-300 transition-colors" 
+                                                              onClick={() => setInventorySearch(item.code)}
+                                                              title="คลิกเพื่อค้นหาวัสดุนี้"
+                                                          >
+                                                              <Package size={12}/> {item.name}: เหลือ <span className="font-black text-red-600">{item.quantity}</span> {item.unit}
+                                                          </span>
+                                                      ))}
+                                                  </div>
+                                              </div>
+                                          )}
+                                      </div>
+                                  );
+                              }
+                              return null;
+                          })()}
+                          <Card id="print-inventory-area">
+                              <div className="p-4 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white">
+                                  <div className="relative w-full md:w-64">
+                                      <Search size={16} className="absolute left-3 top-2.5 text-gray-400" />
+                                      <input 
+                                          type="text" 
+                                          placeholder="ค้นหาชื่อ, รหัส, หมวดหมู่..."
+                                          className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-emerald-200"
+                                          value={inventorySearch}
+                                          onChange={(e) => setInventorySearch(e.target.value)}
+                                      />
+                                      {inventorySearch && (
+                                          <button onClick={() => setInventorySearch('')} className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"><X size={16}/></button>
+                                      )}
+                                  </div>
+                                  <div className={`flex gap-2 w-full md:w-auto overflow-x-auto ${isExporting ? 'hidden' : ''}`}>
+                                      <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(inventoryList.filter(i => i.projectId === selectedProject.id), 'inventory_list')}>{t('exportCSV')}</Button>
+                                      <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-inventory-area', `Inventory_${selectedProject?.code}.pdf`, 'landscape')} disabled={isExporting}>
+                                          {isExporting ? t('downloading') : t('printPDF')}
+                                      </Button>
+                                      {hasPerm('proj_inventory', 'save') && <Button size="sm" icon={Plus} onClick={() => {
+                                          setNewInventoryItem({ id: null, code: '', name: '', category: 'วัสดุสำนักงาน', customCategory: '', quantity: 0, unit: 'ชิ้น', customUnit: '', minThreshold: 5, location: '' });
+                                          setIsEditingInventory(false);
+                                          setShowAddInventoryModal(true);
+                                      }} className="bg-emerald-600 hover:bg-emerald-700 whitespace-nowrap">เพิ่มวัสดุใหม่</Button>}
+                                      {hasPerm('proj_inventory', 'save') && <Button size="sm" icon={ArrowUpRight} onClick={() => {
+                                          setNewTransaction({ id: null, itemId: '', type: 'OUT', quantity: 1, requesterName: '', date: new Date().toISOString().split('T')[0], note: '' });
+                                          setShowTransactionModal(true);
+                                      }} className="bg-blue-600 hover:bg-blue-700 whitespace-nowrap hidden sm:flex">เบิก/รับเข้า</Button>}
+                                  </div>
+                              </div>
+
+                              <div className={isExporting ? "pb-4" : "overflow-x-auto"}>
+                                  <table className="w-full text-sm text-left">
+                                      <thead className="bg-gray-50 text-gray-600">
+                                          <tr>
+                                              <th className="p-3 border-b text-center w-12">#</th>
+                                              <th className="p-3 border-b text-center w-24">รหัสวัสดุ</th>
+                                              <th className="p-3 border-b">ชื่อวัสดุ/อุปกรณ์</th>
+                                              <th className="p-3 border-b w-32">หมวดหมู่</th>
+                                              <th className="p-3 border-b text-right w-24">คงเหลือ</th>
+                                              <th className="p-3 border-b text-center w-20">หน่วยนับ</th>
+                                              <th className="p-3 border-b text-center w-32">สถานะ</th>
+                                              <th className={`p-3 border-b text-center w-20 ${isExporting ? 'hidden' : ''}`}>จัดการ</th>
+                                          </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-gray-100 bg-white">
+                                          {(() => {
+                                              const searchLower = inventorySearch.toLowerCase();
+                                              const filteredInv = inventoryList
+                                                  .filter(i => i.projectId === selectedProject.id)
+                                                  .filter(i => !inventorySearch || 
+                                                      i.name.toLowerCase().includes(searchLower) || 
+                                                      i.code.toLowerCase().includes(searchLower) || 
+                                                      i.category.toLowerCase().includes(searchLower)
+                                                  )
+                                                  .sort((a,b) => {
+                                                      // เรียงลำดับ: หมด -> ใกล้หมด -> ปกติ
+                                                      const aOut = Number(a.quantity) === 0;
+                                                      const bOut = Number(b.quantity) === 0;
+                                                      if (aOut && !bOut) return -1;
+                                                      if (!aOut && bOut) return 1;
+                                                      
+                                                      const aLow = Number(a.quantity) <= Number(a.minThreshold);
+                                                      const bLow = Number(b.quantity) <= Number(b.minThreshold);
+                                                      if (aLow && !bLow) return -1;
+                                                      if (!aLow && bLow) return 1;
+
+                                                      return a.name.localeCompare(b.name);
+                                                  });
+
+                                              if (filteredInv.length === 0) return <tr><td colSpan="8" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">ไม่มีข้อมูลวัสดุในคลัง</td></tr>;
+
+                                              return filteredInv.map((item, index) => {
+                                                  const isOut = Number(item.quantity) === 0;
+                                                  const isLowStock = !isOut && Number(item.quantity) <= Number(item.minThreshold);
+                                                  
+                                                  return (
+                                                      <tr key={item.id} className="hover:bg-gray-50 transition-colors">
+                                                          <td className="p-3 text-center text-gray-500">{index + 1}</td>
+                                                          <td className="p-3 text-center font-mono font-bold text-emerald-600 bg-emerald-50 rounded-md border border-emerald-100">{item.code}</td>
+                                                          <td className="p-3">
+                                                              <div className="font-bold text-gray-800">{item.name}</div>
+                                                              <div className="text-[10px] text-gray-500 mt-0.5">จัดเก็บ: {item.location || '-'}</div>
+                                                          </td>
+                                                          <td className="p-3 text-gray-600">{item.category}</td>
+                                                          <td className={`p-3 text-right font-black text-lg ${isOut ? 'text-red-500' : isLowStock ? 'text-orange-500' : 'text-gray-800'}`}>
+                                                              {Number(item.quantity).toLocaleString()}
+                                                          </td>
+                                                          <td className="p-3 text-center text-gray-600">{item.unit}</td>
+                                                          <td className="p-3 text-center">
+                                                              <span className={`px-2 py-1 rounded-md text-[10px] font-bold border w-24 inline-block text-center shadow-sm ${
+                                                                  isOut ? 'bg-red-50 border-red-200 text-red-700' : 
+                                                                  isLowStock ? 'bg-orange-50 border-orange-200 text-orange-700' : 
+                                                                  'bg-green-50 border-green-200 text-green-700'
+                                                              }`}>
+                                                                  {isOut ? 'หมด (Out)' : isLowStock ? `ใกล้หมด (Min: ${item.minThreshold})` : 'ปกติ (Normal)'}
+                                                              </span>
+                                                          </td>
+                                                          <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`}>
+                                                              <div className="flex items-center justify-center gap-1">
+                                                                  {hasPerm('proj_inventory', 'edit') && (
+                                                                      <button 
+                                                                          onClick={() => handleEditInventory(item)}
+                                                                          className="text-gray-400 hover:text-blue-600 p-1.5 rounded-md hover:bg-blue-50 transition-colors" title="แก้ไขรายการ"
+                                                                      ><Edit size={16} /></button>
+                                                                  )}
+                                                                  {hasPerm('proj_inventory', 'delete') && (
+                                                                      <button 
+                                                                          onClick={() => showConfirm('ยืนยันการลบ', `ลบรายการวัสดุ "${item.name}" ใช่หรือไม่?`, () => setInventoryList(prev => prev.filter(i => i.id !== item.id)))}
+                                                                          className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors" title="ลบรายการ"
+                                                                      ><Trash2 size={16} /></button>
+                                                                  )}
+                                                              </div>
+                                                          </td>
+                                                      </tr>
+                                                  );
+                                              });
+                                          })()}
+                                      </tbody>
+                                  </table>
+                              </div>
+                          </Card>
+                      </div>
                   )}
 
                   {inventorySubTab === 'transactions' && (
                       <Card id="print-inventory-transactions">
                           <div className="p-4 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white">
-                              <h3 className="font-bold flex items-center gap-2 text-gray-800">
+                              <h3 className="font-bold flex items-center gap-2 text-gray-800 shrink-0">
                                   <History size={20} className="text-blue-600" /> ประวัติการทำรายการเบิก-จ่าย และ รับเข้า
                               </h3>
-                              <div className={`flex gap-2 shrink-0 ${isExporting ? 'hidden' : ''}`}>
-                                  <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-inventory-transactions', `Inventory_Transactions_${selectedProject?.code}.pdf`, 'landscape')} disabled={isExporting}>
-                                      {isExporting ? t('downloading') : t('printPDF')}
-                                  </Button>
+                              <div className={`flex flex-col sm:flex-row gap-3 items-start sm:items-center w-full md:w-auto ${isExporting ? 'hidden' : ''}`}>
+                                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                                      <label className="text-xs font-bold text-gray-500 whitespace-nowrap">ตัวกรองวัสดุ:</label>
+                                      <select
+                                          className="w-full sm:w-56 border border-gray-300 rounded-md p-1.5 text-xs focus:ring-2 focus:ring-blue-200 outline-none bg-white cursor-pointer"
+                                          value={transactionFilterItem}
+                                          onChange={(e) => setTransactionFilterItem(e.target.value)}
+                                      >
+                                          <option value="All">-- ทั้งหมด (All Items) --</option>
+                                          {inventoryList.filter(i => i.projectId === selectedProject.id).sort((a,b) => a.name.localeCompare(b.name)).map(item => (
+                                              <option key={item.id} value={item.id}>[{item.code}] {item.name}</option>
+                                          ))}
+                                      </select>
+                                  </div>
+                                  <div className="flex gap-2 shrink-0">
+                                      <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-inventory-transactions', `Inventory_Transactions_${selectedProject?.code}.pdf`, 'landscape')} disabled={isExporting}>
+                                          {isExporting ? t('downloading') : t('printPDF')}
+                                      </Button>
+                                  </div>
                               </div>
                           </div>
 
@@ -13400,10 +13527,16 @@ export default function App() {
                                       </tr>
                                   </thead>
                                   <tbody className="divide-y divide-gray-100 bg-white">
-                                      {inventoryTransactions.filter(t => t.projectId === selectedProject.id).length > 0 ? (
-                                          inventoryTransactions.filter(t => t.projectId === selectedProject.id)
-                                          .sort((a,b) => new Date(b.date) - new Date(a.date))
-                                          .map((trx, index) => {
+                                      {(() => {
+                                          const filteredTransactions = inventoryTransactions
+                                              .filter(t => t.projectId === selectedProject.id && (transactionFilterItem === 'All' || t.itemId === transactionFilterItem))
+                                              .sort((a,b) => new Date(b.date) - new Date(a.date));
+
+                                          if (filteredTransactions.length === 0) {
+                                              return <tr><td colSpan="8" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">ไม่มีประวัติการทำรายการที่ตรงกับเงื่อนไขการค้นหา</td></tr>;
+                                          }
+
+                                          return filteredTransactions.map((trx, index) => {
                                               const isManagerOrAdmin = currentUser?.username === 'admin' || currentUser?.position.includes('ผู้จัดการ');
                                               
                                               return (
@@ -13458,10 +13591,9 @@ export default function App() {
                                                       )}
                                                   </td>
                                               </tr>
-                                          )})
-                                      ) : (
-                                          <tr><td colSpan="8" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">ไม่มีประวัติการทำรายการเบิก-รับเข้า</td></tr>
-                                      )}
+                                              );
+                                          });
+                                      })()}
                                   </tbody>
                               </table>
                           </div>
