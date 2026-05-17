@@ -2674,17 +2674,6 @@ export default function App() {
       return () => clearInterval(intervalId);
   }, [currentUser?.id, isUsersSynced]); // ผูกกับ Dependency 2 ตัวนี้
 
-  // --- NEW: Global Custom Dropdown Outside Click Handler (Added back) ---
-  useEffect(() => {
-      const handleClickOutside = (event) => {
-          if (supplierCategoryRef.current && !supplierCategoryRef.current.contains(event.target)) {
-              setSupplierCategoryDropdownOpen(false);
-          }
-      };
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
   // --- NEW: Auto-Sync State (สถานะการซิงค์อัตโนมัติ) ---
   const [autoSyncMessage, setAutoSyncMessage] = useState('');
 
@@ -15110,21 +15099,6 @@ export default function App() {
           )}
         </div>
       </main>
-
-      {/* --- NEW: Floating Notification Bell --- */}
-      {currentUser && !isExporting && getPendingApprovals().length > 0 && (
-          <div 
-              className={`fixed z-[9998] flex items-center justify-center w-14 h-14 bg-red-600 rounded-full shadow-2xl cursor-pointer hover:bg-red-700 transition-all ${isDraggingBell ? 'scale-110 opacity-80' : 'hover:scale-105'}`}
-              style={{ right: `${bellPos.right}px`, bottom: `${bellPos.bottom}px`, touchAction: 'none' }}
-              onPointerDown={handleBellPointerDown}
-              title="ลากเพื่อย้ายตำแหน่ง หรือคลิกเพื่อดูแจ้งเตือน"
-          >
-              <Bell className="text-white animate-ring" size={28} />
-              <span className="absolute -top-1 -right-1 bg-white text-red-600 text-xs font-black w-6 h-6 flex items-center justify-center rounded-full border-2 border-red-600 shadow-sm">
-                  {getPendingApprovals().length > 99 ? '99+' : getPendingApprovals().length}
-              </span>
-          </div>
-      )}
 
       {/* NEW: Auto Sync Floating Status Toast */}
       {autoSyncMessage && !isExporting && (
