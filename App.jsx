@@ -36,6 +36,13 @@ const MANUAL_FIREBASE_CONFIG = {
   measurementId: "G-4B69L2731M"
 };
 
+// --- NEW: Google Drive / Sheets Configuration ---
+// นำ URL ที่ได้จากการ Deploy Google Apps Script (Web App) ของคุณมาวางที่นี่
+const GOOGLE_SCRIPT_CONFIG = {
+  SHEETS_URL: "https://script.google.com/macros/s/AKfycbzmNdR7LVpfUossHkcNH_onBPTG2dw6GuJzh5JilthkMwW-Sdr4s0lFjPKwSsCBTg/exec", 
+  DRIVE_URL: "https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec"
+};
+
 try {
   let firebaseConfig = null;
   
@@ -2519,7 +2526,71 @@ export default function App() {
   });
 
   // คงใช้ usePersistentState สำหรับข้อมูลที่เป็น Object เดี่ยวๆ
-  const [schedules, setSchedules] = usePersistentState('bmg_schedules', {}, fbUser);
+  // --- FIX: เปลี่ยนวิธีเก็บ schedules ให้ฉลาดขึ้น ลดภาระการโหลด ---
+  const [schedules, setSchedules] = useState(() => {
+      if (typeof window !== 'undefined') {
+          try {
+              const local = localStorage.getItem('bmg_schedules_v2');
+              if (local) return JSON.parse(local);
+              // Migrate old data if v2 doesn't exist
+              const oldLocal = localStorage.getItem('bmg_schedules');
+              if (oldLocal) return JSON.parse(oldLocal);
+          } catch(e) { return {}; }
+      }
+      return {};
+  });
+
+  const schedulesRef = useRef(schedules);
+  const syncScheduleTimeoutRef = useRef(null);
+  
+  useEffect(() => {
+      schedulesRef.current = schedules;
+  }, [schedules]);
+
+  // Sync Schedule Data
+  useEffect(() => {
+      if (!db || !fbUser || !appId) return;
+
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', 'bmg_schedules_v2');
+      
+      const unsubscribe = onSnapshot(docRef, async (docSnap) => {
+          if (docSnap.exists()) {
+              const data = docSnap.data();
+              if (data.totalChunks !== undefined) {
+                  let fullJson = '';
+                  let hasChunkError = false;
+                  for (let i = 0; i < data.totalChunks; i++) {
+                      const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `bmg_schedules_v2_${i}`);
+                      const chunkSnap = await getDoc(chunkRef);
+                      if (chunkSnap.exists()) {
+                          fullJson += chunkSnap.data().chunk;
+                      } else {
+                          hasChunkError = true;
+                      }
+                  }
+                  
+                  if (!hasChunkError && fullJson) {
+                      try {
+                          const parsedData = JSON.parse(fullJson);
+                          if (JSON.stringify(schedulesRef.current) !== JSON.stringify(parsedData)) {
+                              setSchedules(parsedData);
+                              schedulesRef.current = parsedData;
+                              if (typeof window !== 'undefined') {
+                                  localStorage.setItem('bmg_schedules_v2', JSON.stringify(parsedData));
+                              }
+                          }
+                      } catch (e) {
+                          console.error("Parse error for schedules v2", e);
+                      }
+                  }
+              }
+          }
+      }, (err) => {
+          console.error("Sync error for schedules", err);
+      });
+
+      return () => unsubscribe();
+  }, [fbUser]);
   
   const getLocalMonthStr = () => {
       const d = new Date();
@@ -2747,8 +2818,8 @@ export default function App() {
 
   // --- NEW: Helper Function สำหรับ Auto-Sync ไปยัง Google Sheets/Drive ---
   const triggerAutoSync = (tableName, dataList, files = []) => {
-      const GOOGLE_SCRIPT_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbzmNdR7LVpfUossHkcNH_onBPTG2dw6GuJzh5JilthkMwW-Sdr4s0lFjPKwSsCBTg/exec';
-      const GOOGLE_SCRIPT_DRIVE_URL = 'https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec';
+      const GOOGLE_SCRIPT_SHEETS_URL = GOOGLE_SCRIPT_CONFIG.SHEETS_URL;
+      const GOOGLE_SCRIPT_DRIVE_URL = GOOGLE_SCRIPT_CONFIG.DRIVE_URL;
 
       setAutoSyncMessage(`กำลังซิงค์ ${tableName} ไปยังคลาวด์...`);
 
@@ -2927,9 +2998,7 @@ export default function App() {
           let fileName = fileObj?.name || defaultName;
           let fileData = null;
 
-          // ❗ กำหนด URL ของ Google Apps Script สำหรับดึงไฟล์ที่นี่ (ดึงจาก Drive ข้ามเครื่อง)
-          // เปลี่ยนคำว่า YOUR_GOOGLE_SCRIPT_WEB_APP_URL_HERE เป็น URL ที่ได้จากการ Deploy แบบ Web App (doGet)
-          const GOOGLE_SCRIPT_GET_FILE_URL = 'https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec'; 
+          const GOOGLE_SCRIPT_GET_FILE_URL = GOOGLE_SCRIPT_CONFIG.DRIVE_URL; 
 
           // --- 1. ลองดึงข้อมูลจาก Local (IndexedDB) ของเครื่องนี้ก่อน ---
           if (fileObj?.isLocal && fileObj?.fileId) {
@@ -3203,6 +3272,75 @@ export default function App() {
       if (selectedProject) {
           const noteKey = `${selectedProject.id}_${currentMonth}`;
           setScheduleNotes(prev => ({ ...prev, [noteKey]: scheduleNote }));
+          
+          // --- FIX: แยกการเซฟ Schedules ออกมาทำแบบมีระบบป้องกัน ---
+          const scheduleData = schedulesRef.current;
+          
+          if (typeof window !== 'undefined') {
+              localStorage.setItem('bmg_schedules_v2', JSON.stringify(scheduleData));
+          }
+
+          // --- NEW: ส่ง Backup ของ Schedule ขึ้น Google Drive เป็นไฟล์ JSON ด้วย ---
+          if (GOOGLE_SCRIPT_CONFIG.DRIVE_URL && !GOOGLE_SCRIPT_CONFIG.DRIVE_URL.includes('YOUR_')) {
+              try {
+                  // กรองข้อมูลเฉพาะของเดือนนี้และโครงการนี้ เพื่อไม่ให้ไฟล์ใหญ่เกินไป
+                  const currentProjSchedules = {};
+                  Object.keys(scheduleData).forEach(k => {
+                      if (k.includes(currentMonth)) currentProjSchedules[k] = scheduleData[k];
+                  });
+
+                  // แปลง Object เป็น Base64 string ให้เซฟลง Drive ได้
+                  const jsonString = JSON.stringify(currentProjSchedules);
+                  const base64Data = btoa(unescape(encodeURIComponent(jsonString)));
+
+                  fetch(GOOGLE_SCRIPT_CONFIG.DRIVE_URL, {
+                      method: 'POST',
+                      mode: 'no-cors',
+                      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                      body: JSON.stringify({
+                          filename: `Schedule_${selectedProject.code}_${currentMonth}.json`,
+                          mimeType: 'application/json',
+                          data: base64Data,
+                          folderName: `Schedule_Backups_${selectedProject.code}`
+                      })
+                  }).catch(e => console.error("Drive Backup Error", e));
+              } catch (e) {
+                  console.error("Failed to backup schedule to Drive", e);
+              }
+          }
+
+          if (db && fbUser && appId) {
+              if (syncScheduleTimeoutRef.current) clearTimeout(syncScheduleTimeoutRef.current);
+              
+              // แจ้งผู้ใช้ว่ากำลังบันทึก (เพราะข้อมูลอาจจะใหญ่)
+              setAutoSyncMessage('กำลังบันทึกข้อมูลตารางงาน...');
+
+              syncScheduleTimeoutRef.current = setTimeout(async () => {
+                  try {
+                      const jsonStr = JSON.stringify(scheduleData);
+                      const CHUNK_SIZE = 900000; 
+                      const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
+                      
+                      for (let i = 0; i < totalChunks; i++) {
+                          const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `bmg_schedules_v2_${i}`);
+                          const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+                          await setDoc(chunkRef, { chunk: chunkData });
+                      }
+                      
+                      const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', 'bmg_schedules_v2');
+                      await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
+                      
+                      setAutoSyncMessage('บันทึกตารางงานสำเร็จ');
+                      setTimeout(() => setAutoSyncMessage(''), 3000);
+                  } catch (err) {
+                      console.error(`Firestore Schedule Save Error:`, err);
+                      alert('เกิดข้อผิดพลาดในการบันทึกตารางงาน (กรุณาลองอีกครั้ง)');
+                      setAutoSyncMessage('');
+                  } finally {
+                      syncScheduleTimeoutRef.current = null;
+                  }
+              }, 1000);
+          }
           
           // --- NEW: Workflow Logic ---
           const approvalKey = `${selectedProject.id}_${currentMonth}`;
@@ -4163,7 +4301,7 @@ export default function App() {
           // --- อัปโหลดรูปทรัพย์สินเข้า Drive อัตโนมัติ (แบบแสดงสถานะชัดเจน) ---
           if (savedAsset.photo && savedAsset.photo.startsWith('data:image')) {
               setAutoSyncMessage('กำลังอัปโหลดรูปลง Google Drive...');
-              const GOOGLE_SCRIPT_DRIVE_URL = 'https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec';
+              const GOOGLE_SCRIPT_DRIVE_URL = GOOGLE_SCRIPT_CONFIG.DRIVE_URL;
               
               const match = savedAsset.photo.match(/^data:(.+);base64,(.+)$/);
               if (match) {
@@ -4242,7 +4380,7 @@ export default function App() {
           // --- อัปโหลดรูปเครื่องมือเข้า Drive อัตโนมัติ ---
           if (savedTool.photo && savedTool.photo.startsWith('data:image')) {
               setAutoSyncMessage('กำลังอัปโหลดรูปลง Google Drive...');
-              const GOOGLE_SCRIPT_DRIVE_URL = 'https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec';
+              const GOOGLE_SCRIPT_DRIVE_URL = GOOGLE_SCRIPT_CONFIG.DRIVE_URL;
               
               const match = savedTool.photo.match(/^data:(.+);base64,(.+)$/);
               if (match) {
@@ -4319,7 +4457,7 @@ export default function App() {
           // --- อัปโหลดรูปเครื่องจักรเข้า Drive อัตโนมัติ ---
           if (savedMachine.photo && savedMachine.photo.startsWith('data:image')) {
               setAutoSyncMessage('กำลังอัปโหลดรูปลง Google Drive...');
-              const GOOGLE_SCRIPT_DRIVE_URL = 'https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec';
+              const GOOGLE_SCRIPT_DRIVE_URL = GOOGLE_SCRIPT_CONFIG.DRIVE_URL;
               
               const match = savedMachine.photo.match(/^data:(.+);base64,(.+)$/);
               if (match) {
@@ -5265,7 +5403,7 @@ export default function App() {
           // --- อัปโหลดไฟล์รายงานการประชุมเข้า Drive อัตโนมัติ ---
           if (savedMeeting.minutesFile && savedMeeting.minutesFile.data && savedMeeting.minutesFile.data.startsWith('data:')) {
               setAutoSyncMessage('กำลังอัปโหลดไฟล์รายงานการประชุมลง Google Drive...');
-              const GOOGLE_SCRIPT_DRIVE_URL = 'https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec';
+              const GOOGLE_SCRIPT_DRIVE_URL = GOOGLE_SCRIPT_CONFIG.DRIVE_URL;
               
               const match = savedContract.minutesFile.data.match(/^data:(.+);base64,(.+)$/);
               if (match) {
@@ -5780,11 +5918,10 @@ export default function App() {
 
   // --- NEW: Google Sheets Sync Handler ---
   const handleSyncToGoogleSheets = async () => {
-      // ❗ คำเตือน: นำ Web App URL ที่ได้จาก Google Apps Script มาวางแทนข้อความในเครื่องหมายคำพูดด้านล่างนี้
-      const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzmNdR7LVpfUossHkcNH_onBPTG2dw6GuJzh5JilthkMwW-Sdr4s0lFjPKwSsCBTg/exec';
+      const GOOGLE_SCRIPT_URL = GOOGLE_SCRIPT_CONFIG.SHEETS_URL;
       
       // ปรับปรุงเงื่อนไขการตรวจสอบใหม่ ให้เช็คแค่ค่าว่างหรือค่า Placeholder เดิม
-      if(!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL === 'YOUR_GOOGLE_SCRIPT_WEB_APP_URL_HERE') {
+      if(!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL === 'https://script.google.com/macros/s/AKfycbwfT0oHRnpZIPbtxM8vG5cBaMlOQnNTGjDWNngPRF5yQPZ3AKkBZvGbmiRkf2WnpdEP/exec') {
           alert("กรุณานำ Web App URL ของ Google Apps Script มาใส่ในโค้ดก่อนใช้งานฟังก์ชันนี้");
           return;
       }
@@ -5833,7 +5970,7 @@ export default function App() {
 
   // --- NEW: Google Drive Backup Handler ---
   const handleBackupToDrive = async () => {
-      const GOOGLE_SCRIPT_DRIVE_URL = 'https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec';
+      const GOOGLE_SCRIPT_DRIVE_URL = GOOGLE_SCRIPT_CONFIG.DRIVE_URL;
       
       if(!GOOGLE_SCRIPT_DRIVE_URL || GOOGLE_SCRIPT_DRIVE_URL.includes('YOUR_')) {
           alert("กรุณานำ Web App URL ของ Google Apps Script สำหรับบันทึกลง Drive มาใส่ในโค้ดก่อนใช้งานฟังก์ชันนี้");
@@ -6175,7 +6312,7 @@ export default function App() {
           // --- อัปโหลดไฟล์สัญญาเข้า Drive อัตโนมัติ ---
           if (savedContract.file && savedContract.file.data && savedContract.file.data.startsWith('data:')) {
               setAutoSyncMessage('กำลังอัปโหลดไฟล์สัญญาลง Google Drive...');
-              const GOOGLE_SCRIPT_DRIVE_URL = 'https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec';
+              const GOOGLE_SCRIPT_DRIVE_URL = GOOGLE_SCRIPT_CONFIG.DRIVE_URL;
               
               const match = savedContract.file.data.match(/^data:(.+);base64,(.+)$/);
               if (match) {
