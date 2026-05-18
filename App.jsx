@@ -5206,16 +5206,25 @@ export default function App() {
       let savedReport;
       let nextList; // สร้างตัวแปรรอรับ List ล่าสุด
       
+      // ป้องกันการสร้างรายงานซ้ำซ้อนในวันเดียวกัน (Enforce 1 report per day)
+      let finalId = newDailyReport.id;
+      if (!finalId) {
+          const existing = dailyReports.find(r => r.projectId === selectedProject.id && r.date === newDailyReport.date);
+          if (existing) {
+              finalId = existing.id;
+          }
+      }
+
       // FIX: ไม่นำ Side Effect ไปใส่ใน setState และคำนวณ State ด้วยตนเองก่อนเซฟ
-      if (newDailyReport.id) {
+      if (finalId) {
           // Update existing report
-          savedReport = { ...newDailyReport };
-          nextList = dailyReports.map(r => r.id === newDailyReport.id ? savedReport : r);
+          savedReport = { ...newDailyReport, id: finalId, projectId: selectedProject.id };
+          nextList = dailyReports.map(r => r.id === finalId ? savedReport : r);
       } else {
           // Create new report
           const id = generateId();
           savedReport = { ...newDailyReport, id, projectId: selectedProject.id };
-          nextList = [...dailyReports, savedReport];
+          nextList = [savedReport, ...dailyReports]; // เพิ่มไว้ด้านบนสุด
       }
 
       // สั่ง Update State แบบชัดเจน
@@ -5236,7 +5245,20 @@ export default function App() {
 
   const handleEditDailyReport = (report) => {
       setSelectedDailyReport(null); // ปิดหน้าต่างรายละเอียดเดิมก่อน เพื่อไม่ให้ซ้อนกัน
-      setNewDailyReport({ ...report });
+      
+      // ตรวจสอบและเติมโครงสร้างข้อมูลให้ครบถ้วนป้องกันบัคโครงสร้างเก่าหาย
+      const safeReport = {
+          ...report,
+          manpower: { juristic: 0, security: 0, cleaning: 0, gardening: 0, sweeper: 0, other: 0, otherLabel: '', ...(report.manpower || {}) },
+          performance: { 
+              juristic: { details: '', images: [] }, security: { details: '', images: [] }, cleaning: { details: '', images: [] },
+              gardening: { details: '', images: [] }, sweeper: { details: '', images: [] }, other: { details: '', images: [] },
+              ...(report.performance || {})
+          },
+          income: { commonFee: 0, lateFee: 0, water: 0, parking: 0, violation: 0, other: 0, otherLabel: '', ...(report.income || {}) }
+      };
+
+      setNewDailyReport(JSON.parse(JSON.stringify(safeReport))); // Deep copy
       setShowAddDailyReportModal(true); // เปิดหน้าต่างฟอร์มแก้ไขทันที
   };
 
@@ -13289,18 +13311,26 @@ export default function App() {
                             {showDailyStats ? 'ซ่อนสถิติ' : 'สถิติย้อนหลัง'}
                         </Button>
                         {hasPerm('proj_daily', 'save') && <Button icon={Plus} onClick={() => {
-                            setNewDailyReport({
-                                id: null,
-                                date: new Date().toISOString().split('T')[0],
-                                manpower: { juristic: 0, security: 0, cleaning: 0, gardening: 0, sweeper: 0, other: 0, otherLabel: '' },
-                                performance: { 
-                                    juristic: { details: '', images: [] }, security: { details: '', images: [] }, cleaning: { details: '', images: [] },
-                                    gardening: { details: '', images: [] }, sweeper: { details: '', images: [] }, other: { details: '', images: [] }
-                                },
-                                income: { commonFee: 0, lateFee: 0, water: 0, parking: 0, violation: 0, other: 0, otherLabel: '' },
-                                note: '', reporter: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : ''
-                            });
-                            setShowAddDailyReportModal(true);
+                            const todayStr = new Date().toISOString().split('T')[0];
+                            const existingTodayReport = dailyReports.find(r => r.projectId === selectedProject.id && r.date === todayStr);
+
+                            if (existingTodayReport) {
+                                // ถ้ามีของวันนี้อยู่แล้ว ให้เปิดโหมด Edit แทนเพื่อแก้ไขแทนการสร้างซ้ำ
+                                handleEditDailyReport(existingTodayReport);
+                            } else {
+                                setNewDailyReport({
+                                    id: null,
+                                    date: todayStr,
+                                    manpower: { juristic: 0, security: 0, cleaning: 0, gardening: 0, sweeper: 0, other: 0, otherLabel: '' },
+                                    performance: { 
+                                        juristic: { details: '', images: [] }, security: { details: '', images: [] }, cleaning: { details: '', images: [] },
+                                        gardening: { details: '', images: [] }, sweeper: { details: '', images: [] }, other: { details: '', images: [] }
+                                    },
+                                    income: { commonFee: 0, lateFee: 0, water: 0, parking: 0, violation: 0, other: 0, otherLabel: '' },
+                                    note: '', reporter: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : ''
+                                });
+                                setShowAddDailyReportModal(true);
+                            }
                         }}>{t('createDailyReport')}</Button>}
                     </div>
                 </div>
