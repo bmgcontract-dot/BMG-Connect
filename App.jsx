@@ -1674,10 +1674,10 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
   useEffect(() => {
     if (!db || !appId || !selectedProject) return;
 
-    // Use a unique collection for each project's central fee data to prevent mixing
+    // 1. ซิงค์สถานะการติดตามของแต่ละบ้าน (Status, Notes, Histories)
     const statusColRef = collection(db, 'artifacts', appId, 'public', 'data', `house_statuses_${selectedProject.id}`);
     
-    const unsubscribe = onSnapshot(statusColRef, (snapshot) => {
+    const unsubscribeStatuses = onSnapshot(statusColRef, (snapshot) => {
       const loadedStatuses = {};
       const loadedNotes = {};
       const loadedHistories = {};
@@ -1698,7 +1698,32 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
       console.error("Firestore onSnapshot error:", error);
     });
 
-    return () => unsubscribe();
+    // 2. NEW: ซิงค์ข้อมูลดิบรายการลูกหนี้ (Raw CSV Data) ที่เคยอัปโหลดไว้ล่าสุด
+    const rawDataRef = doc(db, 'artifacts', appId, 'public', 'data', `central_fee_raw_${selectedProject.id}`, 'latest');
+    
+    const unsubscribeRawData = onSnapshot(rawDataRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.payload) {
+          try {
+            setRawData(JSON.parse(data.payload));
+            if (data.projectTitle) setProjectTitle(data.projectTitle);
+            if (data.reportDate) setReportDate(data.reportDate);
+          } catch(e) {
+            console.error("Error parsing raw data from Cloud", e);
+          }
+        }
+      } else {
+        setRawData([]); // ถ้ายืนยันว่ายังไม่มีข้อมูลใน Cloud ให้ล้างค่า (Clear)
+      }
+    }, (error) => {
+      console.error("Firestore Raw Data sync error:", error);
+    });
+
+    return () => {
+      unsubscribeStatuses();
+      unsubscribeRawData();
+    };
   }, [db, appId, selectedProject]);
 
   // --- CSV Parser Logic ---
@@ -1712,16 +1737,26 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
       processCSV(text);
     };
     reader.readAsText(file, encoding);
+    e.target.value = null; // รีเซ็ต input เพื่อให้กดอัปโหลดไฟล์เดิมซ้ำได้
   };
 
   const processCSV = (csvText) => {
     const lines = csvText.split('\n').map(line => line.trim()).filter(line => line !== '');
     
+    let newProjectTitle = projectTitle;
+    let newReportDate = reportDate;
+
     if (lines.length >= 3) {
       const row1 = lines[0].replace(/,+$/, '').trim();
       const row3 = lines[2].replace(/,+$/, '').trim();
-      if (row1) setProjectTitle(row1);
-      if (row3) setReportDate(row3);
+      if (row1) {
+          newProjectTitle = row1;
+          setProjectTitle(row1);
+      }
+      if (row3) {
+          newReportDate = row3;
+          setReportDate(row3);
+      }
     }
 
     let headerIndex = -1;
@@ -1733,7 +1768,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
     }
 
     if (headerIndex === -1) {
-      console.error("รูปแบบไฟล์ไม่ถูกต้อง");
+      alert("รูปแบบไฟล์ไม่ถูกต้อง กรุณาใช้ไฟล์รายงานลูกหนี้ค้างชำระจากระบบบัญชี");
       return;
     }
 
@@ -1775,6 +1810,31 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
     });
 
     setRawData(parsedData);
+
+    // --- NEW: บันทึกข้อมูลที่แปลงสำเร็จขึ้น Cloud อัตโนมัติ (Online Sync) ---
+    if (db && appId && selectedProject) {
+        try {
+            const rawDataRef = doc(db, 'artifacts', appId, 'public', 'data', `central_fee_raw_${selectedProject.id}`, 'latest');
+            setDoc(rawDataRef, {
+                payload: JSON.stringify(parsedData), // แปลง Array เป็น String เพื่อป้องกันปัญหา Nested Array บน Firestore
+                projectTitle: newProjectTitle,
+                reportDate: newReportDate,
+                updatedAt: new Date().toISOString(),
+                updatedBy: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
+            }).then(() => {
+                alert('อัปโหลดและซิงค์ตารางข้อมูลลูกหนี้ขึ้นระบบออนไลน์สำเร็จ ทุกเครื่องจะมองเห็นข้อมูลนี้ตรงกัน!');
+                setIsSettingsOpen(false); // ปิดหน้าต่างการตั้งค่า
+            }).catch(e => {
+                console.error("Save CSV to Cloud Error:", e);
+                alert('เกิดข้อผิดพลาดในการบันทึกขึ้น Cloud: ' + e.message);
+            });
+        } catch (e) {
+            console.error(e);
+        }
+    } else {
+        alert('อัปโหลดสำเร็จ (ระบบกำลังทำงานในโหมดออฟไลน์ ข้อมูลจะอยู่เฉพาะในเครื่องนี้)');
+        setIsSettingsOpen(false);
+    }
   };
 
   // --- Data Aggregation ---
