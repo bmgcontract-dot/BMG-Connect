@@ -1422,7 +1422,16 @@ function usePersistentState(key, initialValue, fbUser) {
       if (typeof window !== 'undefined') {
           const local = localStorage.getItem(key);
           if (local) {
-              try { return JSON.parse(local); } catch(e) { return initialValue; }
+              try { 
+                  const parsed = JSON.parse(local); 
+                  // 🛡️ FIX: บังคับให้เป็น Array เสมอ หากค่าเริ่มต้นเป็น Array ป้องกันแอปพังหน้าขาว (Crash)
+                  if (Array.isArray(initialValue)) {
+                      if (!Array.isArray(parsed)) {
+                          return (parsed && typeof parsed === 'object') ? Object.values(parsed) : [...initialValue];
+                      }
+                  }
+                  return parsed; 
+              } catch(e) { return initialValue; }
           }
       }
       return initialValue;
@@ -1472,16 +1481,26 @@ function usePersistentState(key, initialValue, fbUser) {
         const data = docSnap.data();
         try {
           const applyData = (parsedData) => {
+              let finalData = parsedData;
+              
+              // 🛡️ FIX: บังคับการแปลงชนิดข้อมูล กรณีข้อมูลถูกเซฟจาก Firebase กลับมาเป็น Object แทน Array
+              if (Array.isArray(initialValue) && !Array.isArray(parsedData)) {
+                  finalData = (parsedData && typeof parsedData === 'object') ? Object.values(parsedData) : [];
+              }
+
               // --- FIX: Data Loss Prevention ---
-              if (parsedData && typeof parsedData === 'object' && Object.keys(parsedData).length === 0 && stateRef.current && Object.keys(stateRef.current).length > 0) {
+              const isFinalEmpty = Array.isArray(finalData) ? finalData.length === 0 : (!finalData || (typeof finalData === 'object' && Object.keys(finalData || {}).length === 0));
+              const isCurrentNotEmpty = Array.isArray(stateRef.current) ? stateRef.current.length > 0 : (stateRef.current && typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length > 0);
+
+              if (isFinalEmpty && isCurrentNotEmpty) {
                   console.warn(`[BMG Sync] ป้องกันการทับข้อมูล ${key} ด้วยค่าว่าง`);
                   return;
               }
               // ---------------------------------
-              if (JSON.stringify(stateRef.current) !== JSON.stringify(parsedData)) {
-                  setState(parsedData);
-                  stateRef.current = parsedData;
-                  if (typeof window !== 'undefined') localStorage.setItem(key, JSON.stringify(parsedData));
+              if (JSON.stringify(stateRef.current) !== JSON.stringify(finalData)) {
+                  setState(finalData);
+                  stateRef.current = finalData;
+                  if (typeof window !== 'undefined') localStorage.setItem(key, JSON.stringify(finalData));
               }
               setIsLoaded(true);
               setIsSynced(true);
@@ -1631,7 +1650,8 @@ const FEE_STATUS_OPTIONS = [
   "ทำเรื่องบังคับคดี",
   "อายัดทรัพย์",
   "อยู่ระหว่างขายทอดตลาด",
-  "ผ่อนชำระ"
+  "ผ่อนชำระ",
+  "อื่นๆ (ให้ระบุ)"
 ];
 
 const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
@@ -1659,6 +1679,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
   const [selectedHouse, setSelectedHouse] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [tempStatus, setTempStatus] = useState("");
+  const [tempCustomStatus, setTempCustomStatus] = useState(""); 
   const [tempNote, setTempNote] = useState(""); 
   
   const [tempHistory, setTempHistory] = useState([]); 
@@ -1729,9 +1750,8 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
         } else if (data.payload) {
             // Backward compatibility
             try {
-                setRawData(JSON.parse(data.payload));
-                if (data.projectTitle) setProjectTitle(data.projectTitle);
-                if (data.reportDate) setReportDate(data.reportDate);
+                const parsed = JSON.parse(data.payload);
+                setRawData(Array.isArray(parsed) ? parsed : (parsed?.payload || []));
             } catch(e) { console.error("Error parsing raw data from Cloud", e); }
         }
       } else {
@@ -2009,7 +2029,16 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
 
   const handleOpenModal = (house) => {
     setSelectedHouse(house);
-    setTempStatus(house.customStatus || "");
+    
+    const currentStatus = house.customStatus || "";
+    if (currentStatus && !FEE_STATUS_OPTIONS.includes(currentStatus)) {
+        setTempStatus("อื่นๆ (ให้ระบุ)");
+        setTempCustomStatus(currentStatus);
+    } else {
+        setTempStatus(currentStatus);
+        setTempCustomStatus("");
+    }
+
     setTempNote(house.note || "");
     setTempHistory(house.historyLogs || []);
     setNewHistoryDate(getTodayStr());
@@ -2036,6 +2065,8 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
 
   const handleSaveStatus = async () => {
     if (selectedHouse) {
+      const finalStatusToSave = tempStatus === "อื่นๆ (ให้ระบุ)" ? tempCustomStatus : tempStatus;
+
       if (db && appId && selectedProject) {
         try {
           const safeId = selectedHouse.houseNo.replace(/\//g, '-');
@@ -2043,7 +2074,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
           
           await setDoc(docRef, {
             houseNo: selectedHouse.houseNo,
-            status: tempStatus,
+            status: finalStatusToSave,
             note: tempNote,
             history: tempHistory,
             updatedAt: new Date().toISOString(),
@@ -2054,7 +2085,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
           console.error("Error saving to Cloud:", error);
         }
       } else {
-        setCustomStatuses(prev => ({ ...prev, [selectedHouse.houseNo]: tempStatus }));
+        setCustomStatuses(prev => ({ ...prev, [selectedHouse.houseNo]: finalStatusToSave }));
         setNotes(prev => ({ ...prev, [selectedHouse.houseNo]: tempNote }));
         setHistories(prev => ({ ...prev, [selectedHouse.houseNo]: tempHistory }));
       }
@@ -2601,6 +2632,15 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
                       <option key={i} value={opt}>{opt}</option>
                     ))}
                   </select>
+                  {tempStatus === "อื่นๆ (ให้ระบุ)" && (
+                      <input 
+                          type="text" 
+                          className="mt-2 w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-orange-200 outline-none bg-gray-50 focus:bg-white text-sm transition-colors shadow-inner"
+                          placeholder="ระบุสถานะอื่นๆ..."
+                          value={tempCustomStatus}
+                          onChange={(e) => setTempCustomStatus(e.target.value)}
+                      />
+                  )}
                 </div>
                 
                 <div>
@@ -3523,7 +3563,8 @@ export default function App() {
   const [dismissedAnnouncements, setDismissedAnnouncements] = useState(() => {
       if (typeof window !== 'undefined') {
           try {
-              return JSON.parse(localStorage.getItem('bmg_dismissed_announcements') || '[]');
+              const parsed = JSON.parse(localStorage.getItem('bmg_dismissed_announcements') || '[]');
+              return Array.isArray(parsed) ? parsed : [];
           } catch(e) { return []; }
       }
       return [];
@@ -9090,7 +9131,8 @@ export default function App() {
 
     // --- NEW: Drag & Drop Logic for Schedule ---
     const projectStaffForSchedule = users.filter(u => u.department === selectedProject.name);
-    const currentOrder = projectStaffOrder[selectedProject.id] || [];
+    const rawOrder = projectStaffOrder[selectedProject.id];
+    const currentOrder = Array.isArray(rawOrder) ? rawOrder : [];
     
     // เรียงลำดับพนักงานตามที่ถูกบันทึกไว้ (ถ้ามี)
     const sortedStaff = [...projectStaffForSchedule].sort((a, b) => {
