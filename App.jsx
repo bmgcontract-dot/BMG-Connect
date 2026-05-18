@@ -1608,7 +1608,7 @@ function usePersistentState(key, initialValue, fbUser) {
                isUploadingRef.current = true;
                try {
                    const jsonStr = JSON.stringify(stateRef.current); // ใช้ state ล่าสุดเสมอ
-                   const CHUNK_SIZE = 900000; 
+                   const CHUNK_SIZE = 250000; // FIX: ลดขนาด Chunk ลงจาก 900000 เป็น 250000 เพื่อป้องกัน 1MB Limit สำหรับภาษาไทย
                    const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
                    
                    for (let i = 0; i < totalChunks; i++) {
@@ -1660,6 +1660,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
   const [filterStatus, setFilterStatus] = useState('ทั้งหมด'); 
   const [filterMinAmount, setFilterMinAmount] = useState(''); 
   const [filterMaxAmount, setFilterMaxAmount] = useState(''); 
+  const [fullScreenFeeChart, setFullScreenFeeChart] = useState(null); // NEW: State สำหรับแสดงกราฟเต็มจอ
   
   const [projectTitle, setProjectTitle] = useState('ระบบสรุปค้างค่าส่วนกลาง (Central Fee Manager)');
   const [reportDate, setReportDate] = useState('บริหารจัดการโดย บริษัท เบสท์ มิลเลี่ยน กรุ๊ป จำกัด');
@@ -1865,7 +1866,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
                 });
                 
                 // ใช้เทคนิค Chunking ตัดข้อมูลเป็นส่วนๆ ป้องกันปัญหาไฟล์เกินข้อจำกัด 1MB ของฐานข้อมูล
-                const CHUNK_SIZE = 900000;
+                const CHUNK_SIZE = 250000; // FIX: ลดขนาดลงเพื่อรองรับอักขระภาษาไทย
                 const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
 
                 for (let i = 0; i < totalChunks; i++) {
@@ -2281,7 +2282,10 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
 
             {dashboardStats && (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex flex-col">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex flex-col relative group">
+                  <button onClick={() => setFullScreenFeeChart('top5')} className="absolute top-4 right-4 p-2 text-gray-400 hover:text-orange-600 bg-gray-50 hover:bg-orange-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 z-10" title="ขยายเต็มจอ">
+                      <Maximize2 size={16} />
+                  </button>
                   <div className="flex items-center gap-2 mb-2">
                     <BarChart3 className="w-5 h-5 text-red-700" />
                     <h3 className="text-lg font-bold text-gray-800">5 อันดับค้างสูงสุด</h3>
@@ -2313,7 +2317,10 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
                   </div>
                 </div>
 
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 relative group">
+                  <button onClick={() => setFullScreenFeeChart('aging')} className="absolute top-4 right-4 p-2 text-gray-400 hover:text-orange-600 bg-gray-50 hover:bg-orange-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 z-10" title="ขยายเต็มจอ">
+                      <Maximize2 size={16} />
+                  </button>
                   <div className="flex items-center gap-2 mb-6">
                     <PieChartIcon className="w-5 h-5 text-red-700" />
                     <h3 className="text-lg font-bold text-gray-800">ช่วงเวลาค้างชำระ</h3>
@@ -2345,7 +2352,10 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
                   </div>
                 </div>
 
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 relative group">
+                  <button onClick={() => setFullScreenFeeChart('status')} className="absolute top-4 right-4 p-2 text-gray-400 hover:text-orange-600 bg-gray-50 hover:bg-orange-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 z-10" title="ขยายเต็มจอ">
+                      <Maximize2 size={16} />
+                  </button>
                   <div className="flex items-center gap-2 mb-6">
                     <PieChartIcon className="w-5 h-5 text-red-700" />
                     <h3 className="text-lg font-bold text-gray-800">สรุปตามสถานะติดตาม</h3>
@@ -2578,6 +2588,137 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
           </div>
         )}
       </div>
+
+      {/* Full Screen Chart Modal for Central Fee */}
+      {fullScreenFeeChart && dashboardStats && (
+        <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 md:p-8 backdrop-blur-sm animate-fade-in" onClick={() => setFullScreenFeeChart(null)}>
+            <div className="bg-white rounded-2xl w-full h-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-gray-700" onClick={e => e.stopPropagation()}>
+                <div className="p-4 md:p-6 border-b flex justify-between items-center bg-gray-50 shrink-0">
+                    <h2 className="text-xl md:text-2xl font-bold flex items-center gap-3 text-gray-800">
+                        {fullScreenFeeChart === 'top5' && <><BarChart3 className="text-red-700"/> 5 อันดับค้างสูงสุด</>}
+                        {fullScreenFeeChart === 'aging' && <><PieChartIcon className="text-red-700"/> ช่วงเวลาค้างชำระ</>}
+                        {fullScreenFeeChart === 'status' && <><PieChartIcon className="text-red-700"/> สรุปตามสถานะติดตาม</>}
+                    </h2>
+                    <button onClick={() => setFullScreenFeeChart(null)} className="p-2 hover:bg-red-100 text-gray-500 hover:text-red-600 rounded-full transition-colors"><X size={24} /></button>
+                </div>
+                <div className="flex-1 p-6 md:p-10 min-h-0 bg-white flex flex-col justify-center items-center overflow-y-auto custom-scrollbar">
+                    
+                    {fullScreenFeeChart === 'top5' && (
+                        <div className="w-full h-full min-h-[400px] flex items-end justify-around gap-4 pb-8 pt-16 overflow-x-auto">
+                            {dashboardStats.topDebtors.map((house, idx) => {
+                                const percent = Math.max((house.totalAmount / dashboardStats.maxDebt) * 100, 2); 
+                                return (
+                                    <div key={idx} className="flex flex-col items-center justify-end h-full flex-1 max-w-[120px] group relative cursor-pointer">
+                                        <div className="absolute -top-16 bg-gray-800 text-white text-sm px-4 py-2 rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-20 transition-all duration-300 shadow-lg text-center transform translate-y-2 group-hover:translate-y-0">
+                                            <span className="text-gray-300">ห้อง {house.houseNo}</span><br/>
+                                            <span className="font-bold text-red-400 text-xl">{formatMoney(house.totalAmount)}</span>
+                                            <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-3 h-3 bg-gray-800 rotate-45"></div>
+                                        </div>
+                                        <div className="w-full max-w-[80px] bg-gray-100 rounded-t-xl flex items-end h-full shadow-inner">
+                                            <div 
+                                                className="w-full bg-gradient-to-t from-red-600 to-red-400 rounded-t-xl transition-all duration-500 group-hover:from-red-700 group-hover:to-red-500 shadow-md" 
+                                                style={{ height: `${percent}%` }}
+                                            ></div>
+                                        </div>
+                                        <div className="mt-4 text-center w-full">
+                                            <span className="text-base font-bold text-gray-700 whitespace-nowrap">
+                                                {house.houseNo}
+                                            </span>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    {fullScreenFeeChart === 'aging' && (
+                        <div className="w-full max-w-4xl space-y-8">
+                            {dashboardStats.agingBands.map((band, idx) => {
+                                const percent = Math.max((band.amount / dashboardStats.maxBandAmount) * 100, 0);
+                                return (
+                                    <div key={idx} className={`p-6 rounded-2xl border border-transparent shadow-sm ${band.amount > 0 ? band.bg + ' border-gray-200' : 'bg-gray-50'}`}>
+                                        <div className="flex justify-between items-center mb-4">
+                                            <div className="flex items-center gap-4">
+                                                <div className={`w-5 h-5 rounded-full shadow-inner ${band.color}`}></div>
+                                                <span className={`text-xl font-bold ${band.amount > 0 ? band.text : 'text-gray-500'}`}>{band.label}</span>
+                                            </div>
+                                            <div className="text-right flex flex-col">
+                                                <span className="text-3xl font-black text-gray-800">{formatMoney(band.amount)}</span>
+                                                <span className="text-base text-gray-500 font-medium">({band.count} หลัง)</span>
+                                            </div>
+                                        </div>
+                                        <div className="w-full bg-black/5 rounded-full h-4 overflow-hidden shadow-inner">
+                                            <div 
+                                                className={`${band.color} h-4 rounded-full transition-all duration-500`} 
+                                                style={{ width: `${percent}%` }}
+                                            ></div>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    )}
+
+                    {fullScreenFeeChart === 'status' && (
+                        <div className="w-full max-w-5xl flex flex-col lg:flex-row items-center justify-center gap-16">
+                            <div className="relative w-80 h-80 shrink-0">
+                                <svg viewBox="0 0 42 42" className="w-full h-full transform -rotate-90 drop-shadow-2xl">
+                                    {(() => {
+                                        let cumulative = 0;
+                                        const totalAmount = dashboardStats.statusesArray.reduce((acc, s) => acc + s.amount, 0) || 1;
+                                        return dashboardStats.statusesArray.map((status, idx) => {
+                                            const percent = (status.amount / totalAmount) * 100;
+                                            const offset = -cumulative;
+                                            cumulative += percent;
+                                            return (
+                                                <circle
+                                                    key={idx}
+                                                    cx="21" cy="21" r="15.91549431"
+                                                    fill="transparent"
+                                                    stroke={status.hex}
+                                                    strokeWidth="7"
+                                                    strokeDasharray={`${percent} ${100 - percent}`}
+                                                    strokeDashoffset={offset}
+                                                    className="transition-all duration-500 hover:stroke-width-[8.5] cursor-pointer"
+                                                />
+                                            );
+                                        });
+                                    })()}
+                                </svg>
+                                <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/60 rounded-full m-8 backdrop-blur-md border border-gray-100 shadow-sm">
+                                    <span className="text-base text-gray-500 font-bold">รวมทั้งหมด</span>
+                                    <span className="text-6xl font-black text-gray-800 my-1">
+                                        {dashboardStats.statusesArray.reduce((acc, s) => acc + s.count, 0)}
+                                    </span>
+                                    <span className="text-base text-gray-500 font-medium">รายการ</span>
+                                </div>
+                            </div>
+                            <div className="w-full lg:w-1/2 space-y-5 overflow-y-auto max-h-[600px] pr-4 custom-scrollbar">
+                                {dashboardStats.statusesArray.map((status, idx) => {
+                                    const totalAmount = dashboardStats.statusesArray.reduce((a,b)=>a+b.amount,0) || 1;
+                                    const percent = ((status.amount / totalAmount) * 100).toFixed(1);
+                                    return (
+                                        <div key={idx} className="flex justify-between items-center bg-gray-50 p-5 rounded-2xl border border-gray-200 hover:shadow-lg transition-all hover:-translate-y-1 bg-gradient-to-r from-white to-gray-50">
+                                            <div className="flex items-center gap-4">
+                                                <div className="w-6 h-6 rounded-full flex-shrink-0 shadow-inner" style={{ backgroundColor: status.hex }}></div>
+                                                <span className="font-bold text-gray-800 text-xl">
+                                                    {status.label}
+                                                </span>
+                                            </div>
+                                            <div className="text-right flex flex-col">
+                                                <span className="font-black text-gray-900 text-2xl">{formatMoney(status.amount)}</span>
+                                                <span className="text-base text-gray-500 font-medium mt-1">{status.count} ห้อง <span className="mx-2 text-gray-300">|</span> {percent}%</span>
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+      )}
 
       {/* Downloading Overlay */}
       {isDownloading && (
@@ -4180,7 +4321,7 @@ export default function App() {
               syncScheduleTimeoutRef.current = setTimeout(async () => {
                   try {
                       const jsonStr = JSON.stringify(scheduleData);
-                      const CHUNK_SIZE = 900000; 
+                      const CHUNK_SIZE = 250000; // FIX: ลดขนาด Chunk ลงเพื่อป้องกันขีดจำกัด
                       const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
                       
                       for (let i = 0; i < totalChunks; i++) {
