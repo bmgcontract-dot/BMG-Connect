@@ -2458,20 +2458,24 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
                     {filteredData.length > 0 ? (
                       filteredData.map((row, idx) => (
                         <tr key={idx} className="hover:bg-orange-50 transition-colors">
-                          <td 
-                            className="p-3 font-medium text-blue-600 hover:text-blue-800 cursor-pointer flex items-center gap-1.5"
-                            onClick={() => handleOpenModal(row)}
-                            title="คลิกเพื่อจัดการสถานะและประวัติทวงถาม"
-                          >
-                            <span className="hover:underline bg-blue-50 px-2 py-1 rounded border border-blue-100">{row.houseNo}</span>
-                            {row.historyLogs && row.historyLogs.length > 0 && (
-                              <span className="flex items-center gap-0.5 text-[9px] bg-yellow-100 text-yellow-800 px-1.5 py-0.5 rounded-full font-bold" title="มีการบันทึกประวัติการติดตามแล้ว">
-                                <History className="w-3 h-3" />
-                                {row.historyLogs.length}
-                              </span>
-                            )}
+                          <td className="p-3">
+                            <div 
+                              className="font-medium text-blue-600 hover:text-blue-800 cursor-pointer flex items-center gap-1.5"
+                              onClick={() => handleOpenModal(row)}
+                              title="คลิกเพื่อจัดการสถานะและประวัติทวงถาม"
+                            >
+                              <span className="hover:underline bg-blue-50 px-2 py-1 rounded border border-blue-100">{row.houseNo}</span>
+                              {row.historyLogs && row.historyLogs.length > 0 && (
+                                <span className="flex items-center gap-0.5 text-[9px] bg-yellow-100 text-yellow-800 px-1.5 py-0.5 rounded-full font-bold" title="มีการบันทึกประวัติการติดตามแล้ว">
+                                  <History className="w-3 h-3" />
+                                  {row.historyLogs.length}
+                                </span>
+                              )}
+                            </div>
                           </td>
-                          <td className="p-3 text-gray-700 line-clamp-1" title={row.name}>{row.name}</td>
+                          <td className="p-3 text-gray-700">
+                            <div className="line-clamp-2 max-w-[200px]" title={row.name}>{row.name}</div>
+                          </td>
                           <td className="p-3 text-center">
                             <span className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs font-bold border border-gray-200">
                               {row.invoiceCount}
@@ -2511,8 +2515,8 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
                               </span>
                             )}
                           </td>
-                          <td className="p-3 text-xs text-gray-500 max-w-[120px] truncate" title={row.note}>
-                            {row.note || "-"}
+                          <td className="p-3 text-xs text-gray-500">
+                            <div className="max-w-[120px] truncate" title={row.note}>{row.note || "-"}</div>
                           </td>
                         </tr>
                       ))
