@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Users, Building2, BarChart3, Settings, LogOut, 
   Plus, Search, FileText, Download, Trash2, Edit, 
@@ -10,7 +10,7 @@ import {
   ChevronLeft, ChevronRight, MousePointer2, FileCheck, DollarSign, Camera,
   MapPin, Box, PenTool, Printer as PrinterIcon, History, Folder, Lock,
   Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2, Bell, Megaphone, Radio, Medal, Landmark, RefreshCw, QrCode,
-  Package, Archive, ShoppingCart, ArrowDownRight, ArrowUpRight, FileSpreadsheet, ListChecks
+  Package, Archive, ShoppingCart, ArrowDownRight, ArrowUpRight, FileSpreadsheet, ListChecks, Home, MessageSquare, PieChart as PieChartIcon
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
@@ -2186,7 +2186,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
 
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                   <div className="flex items-center gap-2 mb-6">
-                    <PieChart className="w-5 h-5 text-red-700" />
+                    <PieChartIcon className="w-5 h-5 text-red-700" />
                     <h3 className="text-lg font-bold text-gray-800">ช่วงเวลาค้างชำระ</h3>
                   </div>
                   <div className="space-y-3">
@@ -2218,7 +2218,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
 
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                   <div className="flex items-center gap-2 mb-6">
-                    <PieChart className="w-5 h-5 text-red-700" />
+                    <PieChartIcon className="w-5 h-5 text-red-700" />
                     <h3 className="text-lg font-bold text-gray-800">สรุปตามสถานะติดตาม</h3>
                   </div>
                   <div className="flex flex-col items-center">
