@@ -13218,10 +13218,26 @@ export default function App() {
 
                           <div className={`flex gap-2 shrink-0 ${isExporting ? 'hidden' : ''}`}>
                               {hasPerm('proj_action', 'save') && (
-                                  <label className="cursor-pointer flex items-center justify-center gap-1 px-3 py-1.5 text-xs rounded-md font-medium transition-colors bg-green-600 text-white hover:bg-green-700 shadow-sm" title="นำเข้าข้อมูลจากไฟล์ .csv">
-                                      <Upload size={14} /> นำเข้า CSV
-                                      <input type="file" accept=".csv" className="hidden" onChange={handleImportActionPlanCSV} />
-                                  </label>
+                                  <>
+                                      <button 
+                                          onClick={() => {
+                                              const csvContent = '\uFEFFissue,details,responsible,startDate,deadline,status\n"ตัวอย่าง: ซ่อมหลอดไฟทางเดิน","เปลี่ยนหลอดไฟชั้น 1","ช่างประจำอาคาร","2026-05-18","2026-05-20","Pending"';
+                                              const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                                              const link = document.createElement("a");
+                                              link.href = URL.createObjectURL(blob);
+                                              link.download = "ActionPlan_Template.csv";
+                                              link.click();
+                                          }}
+                                          className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs rounded-md font-bold transition-colors bg-white border border-green-500 text-green-600 hover:bg-green-50 shadow-sm"
+                                          title="ดาวน์โหลดไฟล์ตัวอย่าง (CSV Template)"
+                                      >
+                                          <FileSpreadsheet size={14} /> Template
+                                      </button>
+                                      <label className="cursor-pointer flex items-center justify-center gap-1 px-3 py-1.5 text-xs rounded-md font-medium transition-colors bg-green-600 text-white hover:bg-green-700 shadow-sm" title="นำเข้าข้อมูลจากไฟล์ .csv">
+                                          <Upload size={14} /> นำเข้า CSV
+                                          <input type="file" accept=".csv" className="hidden" onChange={handleImportActionPlanCSV} />
+                                      </label>
+                                  </>
                               )}
                               <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(actionPlans.filter(a => a.projectId === selectedProject.id && (actionPlanFilter === 'All' || a.status === actionPlanFilter)), 'action_plans')}>{t('exportCSV')}</Button>
                               <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-action-plan-area', `Action_Plan_${selectedProject?.code || 'List'}.pdf`, 'landscape')} disabled={isExporting}>
