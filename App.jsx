@@ -10,7 +10,7 @@ import {
   ChevronLeft, ChevronRight, MousePointer2, FileCheck, DollarSign, Camera,
   MapPin, Box, PenTool, Printer as PrinterIcon, History, Folder, Lock,
   Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2, Bell, Megaphone, Radio, Medal, Landmark, RefreshCw, QrCode,
-  Package, Archive, ShoppingCart, ArrowDownRight, ArrowUpRight
+  Package, Archive, ShoppingCart, ArrowDownRight, ArrowUpRight, FileSpreadsheet, ListChecks
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
@@ -372,6 +372,7 @@ const AVAILABLE_MENUS = [
     label: 'menu_projects',
     submenus: [
         { id: 'proj_overview', label: 'tab_overview' },
+        { id: 'proj_centralfee', label: 'tab_centralfee' },
         { id: 'proj_contracts', label: 'tab_contracts' },
         { id: 'proj_staff', label: 'tab_staff' },
         { id: 'proj_schedule', label: 'tab_schedule' },
@@ -436,6 +437,7 @@ const getMergedPermissions = (templatePerms) => {
 
 const PROJECT_TABS = [
   { id: 'overview', label: 'tab_overview', icon: BarChart3, color: 'blue' },
+  { id: 'centralfee', label: 'tab_centralfee', icon: DollarSign, color: 'emerald' },
   { id: 'contracts', label: 'tab_contracts', icon: Briefcase, color: 'cyan' },
   { id: 'staff', label: 'tab_staff', icon: Users, color: 'green' },
   { id: 'schedule', label: 'tab_schedule', icon: Calendar, color: 'pink' },
@@ -595,6 +597,7 @@ const TRANSLATIONS = {
     tab_action: "Action Plan",
     tab_audit: "Audit",
     tab_forms: "แบบฟอร์มมาตรฐาน",
+    tab_centralfee: "ติดตามค่าส่วนกลาง",
     tab_meeting: "ประชุมใหญ่ / กรรมการ",
     tab_inventory: "คลังวัสดุ/สต๊อก",
     tab_others: "อื่นๆ (Others)",
@@ -866,6 +869,7 @@ const TRANSLATIONS = {
     tab_action: "Action Plan",
     tab_audit: "Audit",
     tab_forms: "Standard Forms",
+    tab_centralfee: "Central Fee Tracking",
     tab_meeting: "Meetings",
     tab_others: "Others",
     projectKPI: "Project KPI",
@@ -1613,421 +1617,1086 @@ function usePersistentState(key, initialValue, fbUser) {
   return [state, setPersistentValue, isLoaded, isSynced];
 }
 
-  // --- NEW: Custom Hook for Collection Storage (แก้ปัญหาบันทึกแล้วข้อมูลทับกัน) ---
-function usePersistentCollection(collectionName, initialValue, fbUser) {
-  const [state, setState] = useState(() => {
-      if (typeof window !== 'undefined') {
-          const local = localStorage.getItem(collectionName);
-          if (local) {
-              try { 
-                  const parsed = JSON.parse(local); 
-                  if (!Array.isArray(parsed)) return initialValue; // ป้องกันข้อมูลเป็น null หรือ Object
-                  if (Array.isArray(parsed) && parsed.length === 0 && Array.isArray(initialValue) && initialValue.length > 0) return initialValue;
-                  
-                  // --- FIX: Merge Initial Data with Local Data (สำหรับฟอร์มมาตรฐาน) ---
-                  // ป้องกันฟอร์มที่เพิ่งเพิ่มเข้าไปใหม่ในโค้ด (เช่น f22, f23) ไม่ยอมแสดง
-                  if (collectionName === 'bmg_forms_list' && Array.isArray(initialValue)) {
-                      const merged = [...parsed];
-                      let isChanged = false;
-                      initialValue.forEach(initItem => {
-                          if (!merged.find(item => item.id === initItem.id)) {
-                              merged.push(initItem);
-                              isChanged = true;
-                          }
-                      });
-                      if (isChanged) return merged;
-                  }
-                  
-                  return parsed;
-              } catch(e) { return initialValue; }
-          }
-      }
-      return initialValue;
-  });
+// --- Custom Hooks Helpers (Arrays & User Specific) ---
+const usePersistentCollection = (key, initialValue, fbUser) => usePersistentState(key, initialValue, fbUser);
+const useUserPersistentState = (key, initialValue, fbUser) => usePersistentState(fbUser?.uid ? `${key}_${fbUser.uid}` : key, initialValue, fbUser);
 
-  const stateRef = useRef(state);
-  const isLoadedRef = useRef(false);
-  const syncTimeoutRef = useRef(null); 
-  const isUploadingRef = useRef(false); // NEW
-  const lastLocalUpdateRef = useRef(0); // NEW
-  const pendingServerDataRef = useRef(null); // NEW: คิวพักข้อมูลหากมีการแก้ไขชนกัน
-  const checkPendingDataInterval = useRef(null);
-  const [isSynced, setIsSynced] = useState(false);
+// --- NEW: Central Fee Manager Module Component ---
+const FEE_STATUS_OPTIONS = [
+  "อายัดที่สำนักงานที่ดินแล้ว",
+  "ออกหนังสือเตือนจากทนาย ครั้งที่ 1",
+  "ออกหนังสือเตือนจากทนาย ครั้งที่ 2",
+  "ฟ้องดำเนินคดี",
+  "ศาลมีคำพิพากษาแล้ว",
+  "ทำเรื่องบังคับคดี",
+  "อายัดทรัพย์",
+  "อยู่ระหว่างขายทอดตลาด",
+  "ผ่อนชำระ"
+];
+
+const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
+  const [rawData, setRawData] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterStatus, setFilterStatus] = useState('ทั้งหมด'); 
+  const [filterMinAmount, setFilterMinAmount] = useState(''); 
+  const [filterMaxAmount, setFilterMaxAmount] = useState(''); 
   
-  // OPTIMIZE: ข้ามหน้าต่างโหลดดิงทันทีถ้ามีข้อมูลใน Cache อยู่แล้ว
-  const [isLoaded, setIsLoaded] = useState(() => {
-      if (typeof window !== 'undefined') {
-          const local = localStorage.getItem(collectionName);
-          if (local && local !== '[]') {
-              isLoadedRef.current = true;
-              return true;
-          }
-      }
-      return false;
-  });
+  const [projectTitle, setProjectTitle] = useState('ระบบสรุปค้างค่าส่วนกลาง (Central Fee Manager)');
+  const [reportDate, setReportDate] = useState('บริหารจัดการโดย บริษัท เบสท์ มิลเลี่ยน กรุ๊ป จำกัด');
 
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [encoding, setEncoding] = useState('windows-874'); 
+  const [freezeThresholdMonths, setFreezeThresholdMonths] = useState(6); 
+  const [noticeThresholdDays, setNoticeThresholdDays] = useState(90); 
+
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const [customStatuses, setCustomStatuses] = useState({});
+  const [notes, setNotes] = useState({}); 
+  const [histories, setHistories] = useState({}); 
+  
+  const [selectedHouse, setSelectedHouse] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [tempStatus, setTempStatus] = useState("");
+  const [tempNote, setTempNote] = useState(""); 
+  
+  const [tempHistory, setTempHistory] = useState([]); 
+  const getTodayStr = () => {
+    const tzOffset = (new Date()).getTimezoneOffset() * 60000;
+    return (new Date(Date.now() - tzOffset)).toISOString().split('T')[0];
+  };
+  const [newHistoryDate, setNewHistoryDate] = useState(getTodayStr());
+  const [newHistoryAction, setNewHistoryAction] = useState("โทรติดตาม");
+  const [newHistoryDetail, setNewHistoryDetail] = useState("");
+
+  // --- Firebase Cloud Data Sync ---
   useEffect(() => {
-      stateRef.current = state;
-  }, [state]);
+    if (!db || !appId || !selectedProject) return;
 
-  useEffect(() => {
-    if (!db) {
-        setIsLoaded(true);
-        isLoadedRef.current = true;
-        return;
-    }
-
-    // OPTIMIZE: ขยายเวลาบังคับข้าม (Timeout) เป็น 5 วินาที เพื่อให้ชัวร์ว่าโหลดข้อมูลพนักงานเสร็จก่อนแสดงหน้า Login
-    const fallbackTimer = setTimeout(() => {
-        if (!isLoadedRef.current) {
-            console.warn("Firebase sync timeout for collection:", collectionName);
-            setIsLoaded(true);
-            isLoadedRef.current = true;
+    // Use a unique collection for each project's central fee data to prevent mixing
+    const statusColRef = collection(db, 'artifacts', appId, 'public', 'data', `house_statuses_${selectedProject.id}`);
+    
+    const unsubscribe = onSnapshot(statusColRef, (snapshot) => {
+      const loadedStatuses = {};
+      const loadedNotes = {};
+      const loadedHistories = {};
+      
+      snapshot.docs.forEach(docSnap => {
+        const data = docSnap.data();
+        if (data.houseNo) {
+          if (data.status) loadedStatuses[data.houseNo] = data.status;
+          if (data.note) loadedNotes[data.houseNo] = data.note;
+          if (data.history) loadedHistories[data.houseNo] = data.history;
         }
-    }, 5000);
-
-    if (!fbUser || !appId) {
-        return () => clearTimeout(fallbackTimer);
-    }
-
-    const collRef = collection(db, 'artifacts', appId, 'public', 'data', collectionName);
-    const unsubscribe = onSnapshot(collRef, (snapshot) => {
-      const items = [];
-      snapshot.forEach(doc => {
-          items.push({ ...doc.data(), id: doc.id });
       });
-
-      // --- FIX: ระบบป้องกันข้อมูลสูญหาย (Data Loss Prevention) ---
-      if (items.length === 0 && Array.isArray(stateRef.current) && stateRef.current.length > 0) {
-          if (snapshot.metadata.fromCache || snapshot.docChanges().length === 0) {
-              console.warn(`[BMG Sync] ละเว้นข้อมูลว่างเปล่าชั่วคราวใน ${collectionName}`);
-              isLoadedRef.current = true;
-              setIsLoaded(true);
-              setIsSynced(true);
-              return; 
-          }
-      }
-      // -------------------------------------------------------
-
-      const applyData = (dataToApply) => {
-          let finalData = [...dataToApply];
-          
-          // --- FIX: Merge Initial Data with Server Data (สำหรับฟอร์มมาตรฐาน) ---
-          if (collectionName === 'bmg_forms_list' && Array.isArray(initialValue)) {
-              let isChanged = false;
-              initialValue.forEach(initItem => {
-                  if (!finalData.find(item => item.id === initItem.id)) {
-                      finalData.push(initItem);
-                      isChanged = true;
-                      
-                      // สั่งอัปเดตฟอร์มที่ขาดหายไปขึ้น Firebase ทันที
-                      const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, String(initItem.id));
-                      setDoc(docRef, initItem).catch(console.error);
-                  }
-              });
-          }
-
-          if (finalData.length === 0 && Array.isArray(initialValue) && initialValue.length > 0) {
-              setState(initialValue);
-              stateRef.current = initialValue;
-              initialValue.forEach(item => {
-                  if (item.id) {
-                      const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, String(item.id));
-                      setDoc(docRef, item).catch(console.error);
-                  }
-              });
-          } else {
-              // เปรียบเทียบข้อมูลโดยไม่สนใจลำดับ
-              const isSame = (arr1, arr2) => {
-                  if (!Array.isArray(arr1) || !Array.isArray(arr2)) return false;
-                  if (arr1.length !== arr2.length) return false;
-                  const map1 = new Map(arr1.map(i => [String(i.id), i]));
-                  for (const item2 of arr2) {
-                      const item1 = map1.get(String(item2.id));
-                      if (!item1 || JSON.stringify(item1) !== JSON.stringify(item2)) return false;
-                  }
-                  return true;
-              };
-
-              if (!isSame(stateRef.current, finalData)) {
-                  setState(finalData);
-                  stateRef.current = finalData;
-                  if (typeof window !== 'undefined') localStorage.setItem(collectionName, JSON.stringify(finalData));
-              }
-          }
-          isLoadedRef.current = true;
-          setIsLoaded(true);
-          setIsSynced(true);
-      };
-
-      // 🛡️ 100% Data Loss Prevention: นำข้อมูลเข้าคิวถ้าเพิ่งแก้ไข
-      if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
-          pendingServerDataRef.current = items;
-          if (!checkPendingDataInterval.current) {
-              checkPendingDataInterval.current = setInterval(() => {
-                  if (Date.now() - lastLocalUpdateRef.current > 5000 && !isUploadingRef.current && !syncTimeoutRef.current) {
-                      if (pendingServerDataRef.current) {
-                          applyData(pendingServerDataRef.current);
-                          pendingServerDataRef.current = null;
-                      }
-                      clearInterval(checkPendingDataInterval.current);
-                      checkPendingDataInterval.current = null;
-                  }
-              }, 1000);
-          }
-      } else {
-          applyData(items);
-      }
-
-    }, (err) => {
-      console.error("Collection Sync error", collectionName, err);
-      isLoadedRef.current = true;
-      setIsLoaded(true);
+      
+      setCustomStatuses(loadedStatuses);
+      setNotes(loadedNotes);
+      setHistories(loadedHistories);
+    }, (error) => {
+      console.error("Firestore onSnapshot error:", error);
     });
 
-    return () => {
-        clearTimeout(fallbackTimer);
-        unsubscribe();
+    return () => unsubscribe();
+  }, [db, appId, selectedProject]);
+
+  // --- CSV Parser Logic ---
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const text = evt.target.result;
+      processCSV(text);
     };
-  }, [fbUser, collectionName]);
-
-  const setPersistentValue = async (newValue, isRestore = false) => {
-    lastLocalUpdateRef.current = Date.now(); // บันทึกเวลา
-
-    const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
-    if (!isRestore && valueToStore === stateRef.current) return;
-
-    // เพิ่มการป้องกัน (Safety Guard) บังคับให้เป็น Array เสมอ ป้องกันระบบล่มหากไฟล์ Backup ผิดเพี้ยน
-    const oldState = Array.isArray(stateRef.current) ? stateRef.current : [];
-    const safeValueToStore = Array.isArray(valueToStore) ? valueToStore : [];
-
-    setState(safeValueToStore);
-    stateRef.current = safeValueToStore;
-    
-    if (typeof window !== 'undefined') {
-        // ผลักการทำงานของ LocalStorage ไปไว้คิวหลังสุด เพื่อไม่ให้หน้าจอค้าง
-        setTimeout(() => {
-            try { localStorage.setItem(collectionName, JSON.stringify(safeValueToStore)); } catch (e) {}
-        }, 0);
-    }
-
-    if (db && fbUser && appId && isLoadedRef.current) {
-       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-
-       return new Promise(async (resolve) => {
-           syncTimeoutRef.current = setTimeout(async () => {
-               isUploadingRef.current = true;
-               try {
-                   let batch = writeBatch(db);
-                   let opCount = 0;
-                   
-                   const oldStateMap = new Map();
-                   for (const o of oldState) {
-                       if (o && o.id) oldStateMap.set(String(o.id), o);
-                   }
-
-                   const newStateMap = new Map();
-                   for (const n of safeValueToStore) {
-                       if (n && n.id) newStateMap.set(String(n.id), n);
-                   }
-
-                   // 1. เพิ่มหรืออัปเดตข้อมูล
-                   for (const item of safeValueToStore) {
-                       if (!item || !item.id) continue; // ข้ามรายการที่ไม่มี ID (ข้อมูลเสีย)
-                       const strId = String(item.id);
-                       
-                       let needsUpdate = true;
-                       // หากเป็นการ Restore จะบังคับเขียนทับเลย ข้ามการเปรียบเทียบข้อมูลเพื่อลดภาระ CPU
-                       if (!isRestore) {
-                           const oldItem = oldStateMap.get(strId);
-                           if (oldItem && JSON.stringify(oldItem) === JSON.stringify(item)) {
-                               needsUpdate = false;
-                           }
-                       }
-
-                       if (needsUpdate) {
-                           const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, strId);
-                           batch.set(docRef, item);
-                           opCount++;
-                       }
-                       
-                       // ตัดรอบส่งเมื่อครบ 400 รายการ และรอให้สำเร็จก่อนทำชุดถัดไป
-                       if (opCount >= 400) {
-                           await batch.commit(); 
-                           batch = writeBatch(db);
-                           opCount = 0;
-                           await new Promise(r => setTimeout(r, 20)); // พัก UI 20ms ป้องกันหน้าจอค้าง
-                       }
-                   }
-
-                   // 2. ลบข้อมูลที่ไม่มีในก้อนใหม่
-                   for (const oldId of oldStateMap.keys()) {
-                       if (!newStateMap.has(oldId)) {
-                           const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, oldId);
-                           batch.delete(docRef);
-                           opCount++;
-                       }
-                       
-                       if (opCount >= 400) {
-                           await batch.commit();
-                           batch = writeBatch(db);
-                           opCount = 0;
-                           await new Promise(r => setTimeout(r, 20));
-                       }
-                   }
-
-                   // ส่งข้อมูลเศษที่เหลือ
-                   if (opCount > 0) {
-                       await batch.commit();
-                   }
-               } catch (err) {
-                   console.error(`Firestore Batch Write Error [${collectionName}]:`, err);
-               } finally {
-                   syncTimeoutRef.current = null;
-                   isUploadingRef.current = false;
-                   resolve();
-               }
-           }, 1000);
-       });
-    }
+    reader.readAsText(file, encoding);
   };
 
-  return [state, setPersistentValue, isLoaded, isSynced];
-}
+  const processCSV = (csvText) => {
+    const lines = csvText.split('\n').map(line => line.trim()).filter(line => line !== '');
+    
+    if (lines.length >= 3) {
+      const row1 = lines[0].replace(/,+$/, '').trim();
+      const row3 = lines[2].replace(/,+$/, '').trim();
+      if (row1) setProjectTitle(row1);
+      if (row3) setReportDate(row3);
+    }
 
-// --- NEW: Custom Hook for User Specific Persistent Storage (Theme, UI settings) ---
-function useUserPersistentState(key, initialValue, fbUser) {
-  const [state, setState] = useState(() => {
-      if (typeof window !== 'undefined') {
-          const local = localStorage.getItem(`user_pref_${key}`);
-          if (local) {
-              try { return JSON.parse(local); } catch(e) { return initialValue; }
-          }
+    let headerIndex = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes('ลำดับ') && lines[i].includes('บ้านเลขที่')) {
+        headerIndex = i;
+        break;
       }
-      return initialValue;
-  });
-
-  const stateRef = useRef(state);
-  const syncTimeoutRef = useRef(null); 
-  const isUploadingRef = useRef(false);
-  const lastLocalUpdateRef = useRef(0);
-  const pendingServerDataRef = useRef(null);
-  const checkPendingDataInterval = useRef(null);
-  const [isSynced, setIsSynced] = useState(false);
-  
-  // OPTIMIZE: ข้ามโหลดทันทีถ้ามี Cache
-  const [isLoaded, setIsLoaded] = useState(() => {
-      if (typeof window !== 'undefined' && localStorage.getItem(`user_pref_${key}`)) return true;
-      return false;
-  });
-
-  useEffect(() => {
-      stateRef.current = state;
-  }, [state]);
-
-  useEffect(() => {
-    if (!db) {
-        setIsLoaded(true);
-        return;
     }
 
-    // OPTIMIZE: ขยายเวลาบังคับข้าม (Timeout) เป็น 4 วินาที
-    const fallbackTimer = setTimeout(() => {
-        setIsLoaded(true);
-    }, 4000);
-
-    if (!fbUser || !appId) {
-        return () => clearTimeout(fallbackTimer);
+    if (headerIndex === -1) {
+      console.error("รูปแบบไฟล์ไม่ถูกต้อง");
+      return;
     }
-    
-    const docRef = doc(db, 'artifacts', appId, 'users', fbUser.uid, 'user_preferences', key);
-    
-    const unsubscribe = onSnapshot(docRef, (docSnap) => {
-      const applyData = (parsedData) => {
-          if (JSON.stringify(stateRef.current) !== JSON.stringify(parsedData)) {
-              setState(parsedData);
-              stateRef.current = parsedData;
-              if (typeof window !== 'undefined') localStorage.setItem(`user_pref_${key}`, JSON.stringify(parsedData));
-          }
-          setIsLoaded(true);
-          setIsSynced(true);
+
+    const dataLines = lines.slice(headerIndex + 2);
+    const parsedData = [];
+
+    let lastHouseNo = "";
+    let lastName = "";
+
+    dataLines.forEach(line => {
+      const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(c => c.replace(/"/g, '').trim());
+      
+      if (cols[0]?.includes('รวม') || cols[1]?.includes('รวม')) return;
+
+      const houseNo = cols[1];
+      const name = cols[2];
+      
+      if (houseNo) lastHouseNo = houseNo;
+      if (name) lastName = name;
+
+      const detail = cols[5];
+      const overdueDays = parseInt(cols[8]) || 0;
+
+      let amount = 0;
+      for (let i = 9; i < cols.length; i++) {
+        const val = parseFloat(cols[i]?.replace(/,/g, ''));
+        if (!isNaN(val)) amount += val;
+      }
+
+      if (lastHouseNo && amount > 0) {
+        parsedData.push({
+          houseNo: lastHouseNo,
+          name: lastName,
+          detail,
+          overdueDays,
+          amount
+        });
+      }
+    });
+
+    setRawData(parsedData);
+  };
+
+  // --- Data Aggregation ---
+  const summaryData = useMemo(() => {
+    const grouped = {};
+
+    rawData.forEach(item => {
+      if (!grouped[item.houseNo]) {
+        grouped[item.houseNo] = {
+          houseNo: item.houseNo,
+          name: item.name,
+          totalAmount: 0,
+          maxOverdueDays: 0,
+          invoiceCount: 0,
+        };
+      }
+      grouped[item.houseNo].totalAmount += item.amount;
+      grouped[item.houseNo].invoiceCount += 1;
+      if (item.overdueDays > grouped[item.houseNo].maxOverdueDays) {
+        grouped[item.houseNo].maxOverdueDays = item.overdueDays;
+      }
+    });
+
+    return Object.values(grouped).map(house => {
+      const years = Math.floor(house.maxOverdueDays / 365);
+      const months = Math.floor((house.maxOverdueDays % 365) / 30);
+      
+      let durationStr = "";
+      if (years > 0) durationStr += `${years} ปี `;
+      if (months > 0) durationStr += `${months} เดือน`;
+      if (years === 0 && months === 0) durationStr = `${house.maxOverdueDays} วัน`;
+
+      const isFreeze = house.maxOverdueDays > (freezeThresholdMonths * 30);
+
+      let actionRequired = "โทร/ส่งข้อความติดตาม";
+      if (isFreeze) {
+        actionRequired = "ส่งเรื่องอายัดกรมที่ดิน";
+      } else if (house.maxOverdueDays > noticeThresholdDays) {
+        actionRequired = "ออกจดหมายทวงถาม (Notice)";
+      }
+
+      const customStatus = customStatuses[house.houseNo] || null;
+      const note = notes[house.houseNo] || "";
+      const historyLogs = histories[house.houseNo] || [];
+
+      return {
+        ...house,
+        durationStr,
+        isFreeze,
+        actionRequired,
+        customStatus,
+        note,
+        historyLogs
       };
+    }).sort((a, b) => b.totalAmount - a.totalAmount); 
 
-      if (docSnap.exists()) {
+  }, [rawData, freezeThresholdMonths, noticeThresholdDays, customStatuses, notes, histories]);
+
+  // --- Filtering ---
+  const filteredData = useMemo(() => {
+    return summaryData.filter(item => {
+      const matchSearch = item.houseNo.includes(searchTerm) || item.name.includes(searchTerm);
+      const finalStatus = item.customStatus ? item.customStatus : (item.isFreeze ? "เตรียมอายัด" : "ปกติ");
+      const matchStatus = filterStatus === 'ทั้งหมด' ? true : finalStatus === filterStatus;
+      
+      let matchAmount = true;
+      const min = filterMinAmount === '' ? 0 : parseFloat(filterMinAmount);
+      const max = filterMaxAmount === '' ? Infinity : parseFloat(filterMaxAmount);
+      
+      if (item.totalAmount < min || item.totalAmount > max) {
+        matchAmount = false;
+      }
+
+      return matchSearch && matchStatus && matchAmount;
+    });
+  }, [summaryData, searchTerm, filterStatus, filterMinAmount, filterMaxAmount]);
+
+  // --- KPIs ---
+  const totalDebt = summaryData.reduce((sum, item) => sum + item.totalAmount, 0);
+  const totalHouses = summaryData.length;
+  const freezeCount = summaryData.filter(item => item.isFreeze).length;
+  const filteredTotalAmount = filteredData.reduce((sum, item) => sum + item.totalAmount, 0);
+
+  // --- Dashboard Data ---
+  const dashboardStats = useMemo(() => {
+    if (summaryData.length === 0) return null;
+
+    const topDebtors = summaryData.slice(0, 5); 
+    const maxDebt = topDebtors[0]?.totalAmount || 1;
+
+    const agingBands = [
+      { label: 'ไม่เกิน 3 เดือน', min: 0, max: 90, count: 0, amount: 0, color: 'bg-green-500', text: 'text-green-700', bg: 'bg-green-50' },
+      { label: '3 - 6 เดือน', min: 91, max: 180, count: 0, amount: 0, color: 'bg-yellow-500', text: 'text-yellow-700', bg: 'bg-yellow-50' },
+      { label: '6 - 12 เดือน', min: 181, max: 365, count: 0, amount: 0, color: 'bg-orange-500', text: 'text-orange-700', bg: 'bg-orange-50' },
+      { label: 'เกิน 1 ปีขึ้นไป', min: 366, max: 99999, count: 0, amount: 0, color: 'bg-red-500', text: 'text-red-700', bg: 'bg-red-50' },
+    ];
+
+    const statusCounts = {};
+    const customColors = ['#a855f7', '#3b82f6', '#f59e0b', '#06b6d4', '#ec4899', '#14b8a6'];
+    let customColorIndex = 0;
+
+    summaryData.forEach(item => {
+      const days = item.maxOverdueDays;
+      const band = agingBands.find(b => days >= b.min && days <= b.max);
+      if (band) {
+        band.count += 1;
+        band.amount += item.totalAmount;
+      }
+
+      const finalStatus = item.customStatus ? item.customStatus : (item.isFreeze ? "เตรียมอายัด" : "ปกติ");
+      if (!statusCounts[finalStatus]) {
+        let hex = customColors[customColorIndex % customColors.length];
+        if (item.customStatus) customColorIndex++;
+
+        if (finalStatus === "ปกติ") hex = '#22c55e'; 
+        if (finalStatus === "เตรียมอายัด") hex = '#ef4444'; 
+        
+        statusCounts[finalStatus] = { label: finalStatus, count: 0, amount: 0, hex };
+      }
+      statusCounts[finalStatus].count += 1;
+      statusCounts[finalStatus].amount += item.totalAmount;
+    });
+
+    const maxBandAmount = Math.max(...agingBands.map(b => b.amount)) || 1;
+    const statusesArray = Object.values(statusCounts).sort((a, b) => b.count - a.count);
+    const maxStatusAmount = Math.max(...statusesArray.map(s => s.amount)) || 1;
+
+    return { topDebtors, maxDebt, agingBands, maxBandAmount, statusesArray, maxStatusAmount };
+  }, [summaryData]);
+
+  const formatMoney = (amount) => {
+    return new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB' }).format(amount);
+  };
+
+  const handleOpenModal = (house) => {
+    setSelectedHouse(house);
+    setTempStatus(house.customStatus || "");
+    setTempNote(house.note || "");
+    setTempHistory(house.historyLogs || []);
+    setNewHistoryDate(getTodayStr());
+    setNewHistoryAction("โทรติดตาม");
+    setNewHistoryDetail("");
+    setIsModalOpen(true);
+  };
+
+  const handleAddHistory = () => {
+    if (!newHistoryDetail.trim()) return;
+    const newLog = {
+      id: Date.now().toString(),
+      date: newHistoryDate,
+      action: newHistoryAction,
+      detail: newHistoryDetail.trim(),
+    };
+    setTempHistory([newLog, ...tempHistory]);
+    setNewHistoryDetail("");
+  };
+
+  const handleRemoveHistory = (id) => {
+    setTempHistory(tempHistory.filter(h => h.id !== id));
+  };
+
+  const handleSaveStatus = async () => {
+    if (selectedHouse) {
+      if (db && appId && selectedProject) {
         try {
-          const parsedData = JSON.parse(docSnap.data().value);
-          if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
-              pendingServerDataRef.current = parsedData;
-              if (!checkPendingDataInterval.current) {
-                  checkPendingDataInterval.current = setInterval(() => {
-                      if (Date.now() - lastLocalUpdateRef.current > 5000 && !isUploadingRef.current && !syncTimeoutRef.current) {
-                          if (pendingServerDataRef.current) {
-                              applyData(pendingServerDataRef.current);
-                              pendingServerDataRef.current = null;
-                          }
-                          clearInterval(checkPendingDataInterval.current);
-                          checkPendingDataInterval.current = null;
-                      }
-                  }, 1000);
-              }
-          } else {
-              applyData(parsedData);
-          }
-        } catch(e) { console.error("Parse error", key, e); }
-      } else if (!isSynced) {
-        setDoc(docRef, { value: JSON.stringify(stateRef.current) }).catch(console.error);
-        setIsLoaded(true);
-        setIsSynced(true);
+          const safeId = selectedHouse.houseNo.replace(/\//g, '-');
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', `house_statuses_${selectedProject.id}`, safeId);
+          
+          await setDoc(docRef, {
+            houseNo: selectedHouse.houseNo,
+            status: tempStatus,
+            note: tempNote,
+            history: tempHistory,
+            updatedAt: new Date().toISOString(),
+            updatedBy: currentUser?.firstName || 'System'
+          }, { merge: true });
+
+        } catch (error) {
+          console.error("Error saving to Cloud:", error);
+        }
+      } else {
+        setCustomStatuses(prev => ({ ...prev, [selectedHouse.houseNo]: tempStatus }));
+        setNotes(prev => ({ ...prev, [selectedHouse.houseNo]: tempNote }));
+        setHistories(prev => ({ ...prev, [selectedHouse.houseNo]: tempHistory }));
       }
-    }, (err) => {
-      console.error("Sync error", key, err);
-      setIsLoaded(true);
-    });
-
-    return () => {
-        clearTimeout(fallbackTimer);
-        unsubscribe();
-    };
-  }, [fbUser, key]);
-
-  const setPersistentValue = async (newValue, isRestore = false) => {
-    lastLocalUpdateRef.current = Date.now();
-
-    const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
-    if (!isRestore && valueToStore === stateRef.current) return;
-
-    setState(valueToStore);
-    stateRef.current = valueToStore;
-    
-    if (typeof window !== 'undefined') {
-        setTimeout(() => {
-            try { localStorage.setItem(`user_pref_${key}`, JSON.stringify(valueToStore)); } catch (e) {}
-        }, 0);
     }
+    setIsModalOpen(false);
+  };
 
-    if (db && fbUser && appId) {
-       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+  const loadScript = (src) => {
+    return new Promise((resolve, reject) => {
+      if (document.querySelector(`script[src="${src}"]`)) {
+        resolve();
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = src;
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+  };
 
-       return new Promise(async (resolve) => {
-           syncTimeoutRef.current = setTimeout(async () => {
-               isUploadingRef.current = true;
-               try {
-                   const docRef = doc(db, 'artifacts', appId, 'users', fbUser.uid, 'user_preferences', key);
-                   await setDoc(docRef, { value: JSON.stringify(valueToStore) });
-               } catch(e) {
-                   console.error("User Pref Sync Error", e);
-               } finally {
-                   syncTimeoutRef.current = null;
-                   isUploadingRef.current = false;
-                   resolve();
-               }
-           }, 500);
-       });
+  const downloadCSV = () => {
+    const headers = ["บ้านเลขที่", "ชื่อเจ้าของ", "ค้างชำระ (งวด)", "ระยะเวลาที่ค้าง", "ยอดค้างรวม (บาท)", "จะต้องดำเนินการ", "สถานะ", "หมายเหตุ"];
+    const csvRows = [headers.join(",")];
+    
+    filteredData.forEach(row => {
+      const finalStatus = row.customStatus || (row.isFreeze ? "เตรียมอายัด" : "ปกติ");
+      const values = [
+        `"${row.houseNo}"`,
+        `"${row.name}"`,
+        row.invoiceCount,
+        `"${row.durationStr}"`,
+        row.totalAmount,
+        `"${row.actionRequired}"`,
+        `"${finalStatus}"`,
+        `"${row.note || ""}"`
+      ];
+      csvRows.push(values.join(","));
+    });
+    
+    const csvContent = "\uFEFF" + csvRows.join("\n"); 
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `รายงานค้างส่วนกลาง_${selectedProject.code}_${new Date().getTime()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const downloadImage = async () => {
+    setIsDownloading(true);
+    try {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+      const element = document.getElementById('dashboard-content-fee');
+      const canvas = await window.html2canvas(element, { scale: 2, useCORS: true, backgroundColor: '#f9fafb' });
+      const dataUrl = canvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.download = `หน้าปัดรายงาน_${selectedProject.code}_${new Date().getTime()}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch (error) {
+      console.error("Error generating image:", error);
+    } finally {
+      setIsDownloading(false);
     }
   };
 
-  return [state, setPersistentValue, isLoaded, isSynced];
-}
+  const downloadPDF = async () => {
+    setIsDownloading(true);
+    try {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+      
+      const element = document.getElementById('dashboard-content-fee');
+      const canvas = await window.html2canvas(element, { scale: 2, useCORS: true, backgroundColor: '#f9fafb' });
+      const imgData = canvas.toDataURL('image/png');
+      
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      
+      const imgWidth = 210; 
+      const pageHeight = 297; 
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      let heightLeft = imgHeight;
+      let position = 0;
+      
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+      
+      while (heightLeft >= 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+      
+      pdf.save(`รายงานสรุป_${selectedProject.code}_${new Date().getTime()}.pdf`);
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  return (
+    <div className="bg-gray-50 text-gray-800 rounded-xl overflow-hidden shadow-sm border border-gray-200 animate-fade-in">
+      <div className="p-4 border-b flex justify-between items-center bg-white">
+          <div>
+              <h3 className="font-bold flex items-center gap-2 text-gray-800">
+                  <DollarSign size={20} className="text-emerald-500" />
+                  ติดตามค่าส่วนกลางค้างชำระ (Central Fee Tracking)
+              </h3>
+              <p className="text-sm text-gray-500 mt-1">อัปโหลดไฟล์ Excel/CSV จากระบบบัญชี เพื่อวิเคราะห์และติดตามสถานะลูกหนี้รายตัว</p>
+          </div>
+          <div className="flex gap-2 items-center">
+              {rawData.length > 0 && (
+                  <div className="relative">
+                      <button 
+                          onClick={() => setShowExportMenu(!showExportMenu)}
+                          className="flex justify-center items-center gap-2 px-4 py-2 bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 rounded-lg transition font-medium shadow-sm text-sm"
+                      >
+                          <Download className="w-4 h-4" /> ส่งออก
+                      </button>
+                      {showExportMenu && (
+                          <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-xl border border-gray-100 z-[60] overflow-hidden text-left">
+                              <button onClick={() => { downloadCSV(); setShowExportMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3 text-sm text-gray-700 border-b border-gray-50">
+                                  <FileSpreadsheet className="w-4 h-4 text-green-600"/> เป็นไฟล์ CSV
+                              </button>
+                              <button onClick={() => { downloadImage(); setShowExportMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3 text-sm text-gray-700 border-b border-gray-50">
+                                  <ImageIcon className="w-4 h-4 text-blue-600"/> เป็นรูปภาพ (PNG)
+                              </button>
+                              <button onClick={() => { downloadPDF(); setShowExportMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3 text-sm text-gray-700">
+                                  <FileText className="w-4 h-4 text-red-600"/> เป็นไฟล์เอกสาร (PDF)
+                              </button>
+                          </div>
+                      )}
+                  </div>
+              )}
+              <button 
+                  onClick={() => setIsSettingsOpen(true)}
+                  className="flex justify-center items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-900 text-white rounded-lg transition font-medium shadow-sm text-sm"
+              >
+                  <Upload className="w-4 h-4" /> นำเข้า / ตั้งค่า
+              </button>
+          </div>
+      </div>
+
+      <div className="p-6">
+        {rawData.length > 0 ? (
+          <div id="dashboard-content-fee" className="space-y-6 bg-gray-50 p-2 -mx-2 -mt-2">
+            
+            {/* Header For PDF Export */}
+            <div className="text-center py-4 bg-white rounded-xl shadow-sm border border-gray-200 mb-2">
+                <h2 className="text-xl font-bold text-gray-800">{projectTitle}</h2>
+                <p className="text-sm text-gray-500 mt-1">{reportDate}</p>
+                <p className="text-xs text-gray-400 mt-1">โครงการ: {selectedProject.name}</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex items-center gap-4">
+                <div className="p-4 bg-green-100 rounded-full text-green-600 shrink-0">
+                  <DollarSign className="w-8 h-8" />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 font-medium">ยอดหนี้คงค้างรวมทั้งหมด</p>
+                  <p className="text-2xl font-bold text-gray-900">{formatMoney(totalDebt)}</p>
+                </div>
+              </div>
+              
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex items-center gap-4">
+                <div className="p-4 bg-orange-100 rounded-full text-orange-600 shrink-0">
+                  <Home className="w-8 h-8" />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 font-medium">จำนวนห้อง/บ้าน ที่มียอดค้าง</p>
+                  <p className="text-2xl font-bold text-gray-900">{totalHouses} <span className="text-lg font-normal text-gray-500">หลัง</span></p>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-red-200 p-6 flex items-center gap-4 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-2 h-full bg-red-500"></div>
+                <div className="p-4 bg-red-100 rounded-full text-red-600 shrink-0">
+                  <AlertTriangle className="w-8 h-8" />
+                </div>
+                <div>
+                  <p className="text-sm text-red-600 font-medium">ห้องที่เข้าข่ายอายัดกรมที่ดิน</p>
+                  <p className="text-2xl font-bold text-red-700">{freezeCount} <span className="text-lg font-normal text-red-500">หลัง</span></p>
+                </div>
+              </div>
+            </div>
+
+            {dashboardStats && (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex flex-col">
+                  <div className="flex items-center gap-2 mb-2">
+                    <BarChart3 className="w-5 h-5 text-red-700" />
+                    <h3 className="text-lg font-bold text-gray-800">5 อันดับค้างสูงสุด</h3>
+                  </div>
+                  <div className="flex-1 flex items-end justify-start sm:justify-around gap-2 sm:gap-4 h-[250px] pb-2 pt-12 overflow-x-auto custom-scrollbar">
+                    {dashboardStats.topDebtors.map((house, idx) => {
+                      const percent = Math.max((house.totalAmount / dashboardStats.maxDebt) * 100, 2); 
+                      return (
+                        <div key={idx} className="flex flex-col items-center justify-end h-full min-w-[48px] max-w-[64px] flex-1 group relative cursor-pointer flex-shrink-0">
+                          <div className="absolute -top-12 bg-gray-800 text-white text-[11px] px-3 py-1.5 rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-20 transition-all duration-300 shadow-lg text-center leading-tight transform translate-y-2 group-hover:translate-y-0">
+                            <span className="text-gray-300">ห้อง {house.houseNo}</span><br/>
+                            <span className="font-bold text-red-400">{formatMoney(house.totalAmount)}</span>
+                            <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-gray-800 rotate-45"></div>
+                          </div>
+                          <div className="w-full max-w-[36px] bg-gray-100 rounded-t-md flex items-end h-full">
+                            <div 
+                              className="w-full bg-red-500 rounded-t-md transition-all duration-500 group-hover:bg-red-600" 
+                              style={{ height: `${percent}%` }}
+                            ></div>
+                          </div>
+                          <div className="mt-2 text-center w-full h-10 relative">
+                            <span className="text-[11px] text-gray-600 whitespace-nowrap absolute top-2 left-1/2 transform -translate-x-1/2 -rotate-45 origin-center">
+                              {house.houseNo}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                  <div className="flex items-center gap-2 mb-6">
+                    <PieChart className="w-5 h-5 text-red-700" />
+                    <h3 className="text-lg font-bold text-gray-800">ช่วงเวลาค้างชำระ</h3>
+                  </div>
+                  <div className="space-y-3">
+                    {dashboardStats.agingBands.map((band, idx) => {
+                       const percent = Math.max((band.amount / dashboardStats.maxBandAmount) * 100, 0);
+                       return (
+                        <div key={idx} className={`p-2.5 rounded-lg border border-transparent ${band.amount > 0 ? band.bg + ' border-gray-200' : 'bg-gray-50'}`}>
+                          <div className="flex justify-between items-center mb-1.5">
+                            <div className="flex items-center gap-2">
+                              <div className={`w-3 h-3 rounded-full ${band.color}`}></div>
+                              <span className={`text-sm font-semibold ${band.amount > 0 ? band.text : 'text-gray-500'}`}>{band.label}</span>
+                            </div>
+                            <div className="text-right flex flex-col leading-tight">
+                              <span className="text-sm font-bold text-gray-800">{formatMoney(band.amount)}</span>
+                              <span className="text-xs text-gray-500">({band.count} หลัง)</span>
+                            </div>
+                          </div>
+                          <div className="w-full bg-black/5 rounded-full h-1.5 overflow-hidden">
+                            <div 
+                              className={`${band.color} h-1.5 rounded-full transition-all duration-500`} 
+                              style={{ width: `${percent}%` }}
+                            ></div>
+                          </div>
+                        </div>
+                       )
+                    })}
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                  <div className="flex items-center gap-2 mb-6">
+                    <PieChart className="w-5 h-5 text-red-700" />
+                    <h3 className="text-lg font-bold text-gray-800">สรุปตามสถานะติดตาม</h3>
+                  </div>
+                  <div className="flex flex-col items-center">
+                    <div className="relative w-40 h-40 mb-6">
+                      <svg viewBox="0 0 42 42" className="w-full h-full transform -rotate-90">
+                        {(() => {
+                          let cumulative = 0;
+                          const totalAmount = dashboardStats.statusesArray.reduce((acc, s) => acc + s.amount, 0) || 1;
+                          return dashboardStats.statusesArray.map((status, idx) => {
+                            const percent = (status.amount / totalAmount) * 100;
+                            const offset = -cumulative;
+                            cumulative += percent;
+                            return (
+                              <circle
+                                key={idx}
+                                cx="21" cy="21" r="15.91549431"
+                                fill="transparent"
+                                stroke={status.hex}
+                                strokeWidth="6"
+                                strokeDasharray={`${percent} ${100 - percent}`}
+                                strokeDashoffset={offset}
+                                className="transition-all duration-500"
+                              />
+                            );
+                          });
+                        })()}
+                      </svg>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center">
+                        <span className="text-xs text-gray-500">รวมทั้งหมด</span>
+                        <span className="text-xl font-bold text-gray-800">
+                          {dashboardStats.statusesArray.reduce((acc, s) => acc + s.count, 0)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="w-full space-y-3 overflow-y-auto max-h-[140px] pr-1 custom-scrollbar">
+                      {dashboardStats.statusesArray.map((status, idx) => {
+                        const totalAmount = dashboardStats.statusesArray.reduce((a,b)=>a+b.amount,0) || 1;
+                        const percent = ((status.amount / totalAmount) * 100).toFixed(1);
+                        return (
+                          <div key={idx} className="flex justify-between items-center text-sm border-b border-gray-50 pb-2 last:border-0">
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: status.hex }}></div>
+                              <span className="font-medium text-gray-700 truncate max-w-[100px]" title={status.label}>
+                                {status.label}
+                              </span>
+                            </div>
+                            <div className="text-right flex flex-col leading-tight">
+                              <span className="font-bold text-gray-800">{formatMoney(status.amount)}</span>
+                              <span className="text-[10px] text-gray-500">({status.count} ห้อง - {percent}%)</span>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            )}
+
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mt-6">
+              <div className="p-4 border-b border-gray-200 bg-gray-50 flex flex-col xl:flex-row justify-between items-center gap-4">
+                <div className="relative w-full xl:w-64 shrink-0">
+                  <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
+                  <input 
+                    type="text" 
+                    placeholder="ค้นหาห้อง/บ้าน หรือ ชื่อ..." 
+                    className="w-full pl-9 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 outline-none text-sm"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                </div>
+                
+                <div className="flex flex-col sm:flex-row items-center gap-4 w-full xl:w-auto">
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <span className="text-sm font-medium text-gray-700 whitespace-nowrap">ยอดค้าง:</span>
+                    <div className="flex items-center gap-1">
+                      <input 
+                        type="number" 
+                        placeholder="ขั้นต่ำ" 
+                        className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:ring-2 focus:ring-red-500 outline-none bg-white text-gray-700"
+                        value={filterMinAmount}
+                        onChange={(e) => setFilterMinAmount(e.target.value)}
+                      />
+                      <span className="text-gray-500">-</span>
+                      <input 
+                        type="number" 
+                        placeholder="สูงสุด" 
+                        className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:ring-2 focus:ring-red-500 outline-none bg-white text-gray-700"
+                        value={filterMaxAmount}
+                        onChange={(e) => setFilterMaxAmount(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <span className="text-sm font-medium text-gray-700 whitespace-nowrap">สถานะ:</span>
+                    <select 
+                      className="w-full sm:w-auto border border-gray-300 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-red-500 outline-none bg-white text-gray-700"
+                      value={filterStatus}
+                      onChange={(e) => setFilterStatus(e.target.value)}
+                    >
+                      <option value="ทั้งหมด">-- แสดงทุกสถานะ --</option>
+                      <option value="ปกติ">ปกติ</option>
+                      <option value="เตรียมอายัด">เตรียมอายัด</option>
+                      {FEE_STATUS_OPTIONS.map((opt, i) => (
+                        <option key={i} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-blue-50/80 px-4 py-2 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-2">
+                <span className="text-blue-800 font-semibold flex items-center gap-2 text-sm">
+                  <ListChecks className="w-4 h-4" /> สรุปข้อมูลตามเงื่อนไข
+                </span>
+                <div className="flex items-center gap-6 text-sm">
+                  <span className="text-blue-900">พบ <span className="font-bold">{filteredData.length}</span> รายการ</span>
+                  <span className="text-blue-900">ยอดค้างรวม <span className="font-bold text-red-600">{formatMoney(filteredTotalAmount)}</span></span>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-gray-100 text-gray-600 text-xs uppercase tracking-wider border-b border-gray-200">
+                      <th className="p-3 font-semibold w-24">ห้อง/บ้าน</th>
+                      <th className="p-3 font-semibold">ชื่อเจ้าของ</th>
+                      <th className="p-3 font-semibold text-center w-24">ค้าง (งวด)</th>
+                      <th className="p-3 font-semibold w-28">ระยะเวลาที่ค้าง</th>
+                      <th className="p-3 font-semibold text-right w-32">ยอดค้าง (บาท)</th>
+                      <th className="p-3 font-semibold w-36">ต้องดำเนินการ</th>
+                      <th className="p-3 font-semibold text-center w-36">สถานะปัจจุบัน</th>
+                      <th className="p-3 font-semibold">หมายเหตุ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 text-sm">
+                    {filteredData.length > 0 ? (
+                      filteredData.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-orange-50 transition-colors">
+                          <td 
+                            className="p-3 font-medium text-blue-600 hover:text-blue-800 cursor-pointer flex items-center gap-1.5"
+                            onClick={() => handleOpenModal(row)}
+                            title="คลิกเพื่อจัดการสถานะและประวัติทวงถาม"
+                          >
+                            <span className="hover:underline bg-blue-50 px-2 py-1 rounded border border-blue-100">{row.houseNo}</span>
+                            {row.historyLogs && row.historyLogs.length > 0 && (
+                              <span className="flex items-center gap-0.5 text-[9px] bg-yellow-100 text-yellow-800 px-1.5 py-0.5 rounded-full font-bold" title="มีการบันทึกประวัติการติดตามแล้ว">
+                                <History className="w-3 h-3" />
+                                {row.historyLogs.length}
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3 text-gray-700 line-clamp-1" title={row.name}>{row.name}</td>
+                          <td className="p-3 text-center">
+                            <span className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs font-bold border border-gray-200">
+                              {row.invoiceCount}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            <div className="flex items-center gap-1.5 text-gray-600 font-medium">
+                              <Clock className="w-3.5 h-3.5 text-gray-400" />
+                              {row.durationStr}
+                            </div>
+                            <div className="text-[10px] text-gray-400 mt-0.5">({row.maxOverdueDays} วัน)</div>
+                          </td>
+                          <td className="p-3 text-right font-bold text-red-600">
+                            {row.totalAmount.toLocaleString('th-TH', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-3">
+                            <span className={`inline-block px-2 py-1 rounded text-[10px] font-bold border ${
+                              row.isFreeze ? 'bg-red-50 text-red-700 border-red-200' :
+                              row.maxOverdueDays > noticeThresholdDays ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                              'bg-blue-50 text-blue-700 border-blue-200'
+                            }`}>
+                              {row.actionRequired}
+                            </span>
+                          </td>
+                          <td className="p-3 text-center">
+                            {row.customStatus ? (
+                              <span className="inline-flex items-center px-2 py-1 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200 w-full justify-center text-center leading-tight shadow-sm">
+                                {row.customStatus}
+                              </span>
+                            ) : row.isFreeze ? (
+                              <span className="inline-flex items-center justify-center gap-1 w-full px-2 py-1 rounded text-[10px] font-bold bg-red-50 text-red-700 border border-red-200 shadow-sm">
+                                <AlertTriangle className="w-3 h-3" /> เตรียมอายัด
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center justify-center gap-1 w-full px-2 py-1 rounded text-[10px] font-bold bg-green-50 text-green-700 border border-green-200 shadow-sm">
+                                <CheckCircle className="w-3 h-3" /> ปกติ
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3 text-xs text-gray-500 max-w-[120px] truncate" title={row.note}>
+                            {row.note || "-"}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan="8" className="p-8 text-center text-gray-500 border-b border-dashed">
+                          ไม่พบข้อมูลที่ตรงกับเงื่อนไข
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center py-20 bg-white rounded-xl shadow-sm border border-gray-200 border-dashed mt-4">
+            <FileSpreadsheet className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-800 mb-1">ยังไม่มีข้อมูลยอดค้างส่วนกลาง</h3>
+            <p className="text-gray-500 mb-6 text-sm">กรุณานำเข้าไฟล์รายงานลูกหนี้คงค้าง (CSV ที่โหลดจากระบบบัญชี) เพื่อเริ่มต้น</p>
+            <button 
+              onClick={() => setIsSettingsOpen(true)}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-gray-800 hover:bg-gray-900 text-white rounded-lg transition font-medium shadow-sm text-sm"
+            >
+              <Settings className="w-4 h-4" />
+              นำเข้าไฟล์ผ่านเมนูการตั้งค่า
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Downloading Overlay */}
+      {isDownloading && (
+        <div className="fixed inset-0 bg-black/70 z-[100] flex flex-col items-center justify-center text-white backdrop-blur-sm animate-fade-in">
+          <Loader2 className="w-12 h-12 animate-spin text-orange-500 mb-4" />
+          <p className="text-lg font-bold">กำลังสร้างไฟล์รายงาน...</p>
+          <p className="text-sm text-gray-300 mt-1">กรุณารอสักครู่ ห้ามปิดหน้าต่างนี้</p>
+        </div>
+      )}
+
+      {/* House Manage Modal */}
+      {isModalOpen && selectedHouse && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full flex flex-col max-h-[90vh]">
+            
+            <div className="bg-gray-50 border-b border-gray-200 px-6 py-4 flex justify-between items-center rounded-t-xl shrink-0">
+              <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                  <Home className="text-orange-500" /> จัดการสถานะและการทวงถาม: ห้อง {selectedHouse.houseNo}
+              </h3>
+              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-red-500 transition-colors bg-white rounded p-1 border shadow-sm">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
+              {/* Left Column */}
+              <div className="w-full lg:w-1/2 p-6 overflow-y-auto border-b lg:border-b-0 lg:border-r border-gray-200 space-y-5 custom-scrollbar">
+                <div>
+                  <p className="text-xs font-bold text-gray-500 mb-1">ชื่อเจ้าของ</p>
+                  <p className="font-bold text-gray-800 text-lg bg-gray-50 px-3 py-2 rounded border border-gray-100">{selectedHouse.name}</p>
+                </div>
+                <div className="flex justify-between items-center bg-red-50 p-4 rounded-xl border border-red-100 shadow-sm">
+                  <div>
+                    <p className="text-xs font-bold text-red-600 mb-1">ยอดค้างรวมทั้งหมด</p>
+                    <p className="font-black text-red-700 text-2xl">{formatMoney(selectedHouse.totalAmount)}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs font-bold text-red-600 mb-1">ระยะเวลาที่ค้าง</p>
+                    <p className="font-bold text-red-700 text-lg">{selectedHouse.durationStr}</p>
+                  </div>
+                </div>
+                
+                <div className="pt-2 border-t border-gray-100 mt-4">
+                  <label className="block text-sm font-bold text-gray-700 mb-2">อัปเดตสถานะทางกฎหมาย / การติดตาม</label>
+                  <select 
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-orange-200 outline-none bg-white text-sm font-medium text-gray-800 shadow-sm cursor-pointer"
+                    value={tempStatus}
+                    onChange={(e) => setTempStatus(e.target.value)}
+                  >
+                    <option value="">-- ให้ระบบประเมินอัตโนมัติตามอายุหนี้ --</option>
+                    {FEE_STATUS_OPTIONS.map((opt, i) => (
+                      <option key={i} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">หมายเหตุทั่วไปของบ้านหลังนี้</label>
+                  <textarea 
+                    className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-orange-200 outline-none resize-none bg-gray-50 focus:bg-white text-sm transition-colors h-24"
+                    placeholder="พิมพ์บันทึกหรือข้อควรระวังพิเศษ..."
+                    value={tempNote}
+                    onChange={(e) => setTempNote(e.target.value)}
+                  ></textarea>
+                </div>
+              </div>
+
+              {/* Right Column */}
+              <div className="w-full lg:w-1/2 p-6 flex flex-col bg-gray-50 overflow-hidden">
+                <label className="block text-sm font-bold text-gray-800 mb-3 flex items-center gap-2 shrink-0">
+                  <History className="w-4 h-4 text-blue-600" />
+                  บันทึกประวัติการติดต่อทวงถาม (Follow-ups)
+                </label>
+                
+                {/* Form to add new log */}
+                <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-4 shrink-0">
+                  <div className="flex gap-2 mb-3">
+                    <input 
+                      type="date" 
+                      className="border border-gray-300 rounded-md px-2 py-1.5 text-xs focus:ring-1 focus:ring-blue-500 outline-none flex-1 font-medium bg-gray-50 focus:bg-white"
+                      value={newHistoryDate}
+                      onChange={(e) => setNewHistoryDate(e.target.value)}
+                    />
+                    <select
+                      className="border border-gray-300 rounded-md px-2 py-1.5 text-xs focus:ring-1 focus:ring-blue-500 outline-none flex-1 font-medium bg-gray-50 focus:bg-white cursor-pointer"
+                      value={newHistoryAction}
+                      onChange={(e) => setNewHistoryAction(e.target.value)}
+                    >
+                      <option value="โทรติดตาม">โทรติดตาม</option>
+                      <option value="ส่งจดหมายเตือน">ส่งจดหมายเตือน</option>
+                      <option value="ส่ง Line/SMS">ส่ง Line/SMS</option>
+                      <option value="เข้าพบ">เข้าพบ</option>
+                      <option value="ลูกบ้านติดต่อมา">ลูกบ้านติดต่อมา</option>
+                      <option value="อื่นๆ">อื่นๆ</option>
+                    </select>
+                  </div>
+                  <div className="flex gap-2 items-start">
+                    <textarea 
+                      placeholder="ผลการพูดคุย หรือ คำมั่นสัญญาการจ่ายเงิน..."
+                      className="border border-gray-300 rounded-md px-3 py-2 text-xs focus:ring-1 focus:ring-blue-500 outline-none flex-1 h-12 resize-none bg-gray-50 focus:bg-white transition-colors"
+                      value={newHistoryDetail}
+                      onChange={(e) => setNewHistoryDetail(e.target.value)}
+                    ></textarea>
+                    <button 
+                      onClick={handleAddHistory}
+                      disabled={!newHistoryDetail.trim()}
+                      className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-3 h-12 rounded-md transition flex items-center justify-center gap-1 text-xs font-bold shrink-0 shadow-sm"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> เพิ่ม
+                    </button>
+                  </div>
+                </div>
+
+                {/* History List */}
+                <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-2">
+                  {tempHistory.length > 0 ? (
+                    tempHistory.map((log) => (
+                      <div key={log.id} className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm relative group hover:border-blue-300 transition-colors">
+                        <div className="flex justify-between items-start mb-1.5">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100 flex items-center gap-1">
+                            <Clock size={10}/> {log.action}
+                          </span>
+                          <span className="text-[10px] text-gray-500 font-medium">
+                            {new Date(log.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-700 mt-1 leading-relaxed whitespace-pre-wrap">{log.detail}</p>
+                        <button 
+                          onClick={() => handleRemoveHistory(log.id)}
+                          className="absolute top-2 right-2 p-1 bg-red-50 text-red-500 rounded border border-red-100 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500 hover:text-white"
+                          title="ลบประวัตินี้"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-gray-400 py-10 bg-white rounded-xl border border-dashed border-gray-300">
+                      <MessageSquare className="w-8 h-8 mb-2 opacity-30" />
+                      <p className="text-xs font-medium">ยังไม่มีประวัติการทวงถามของบ้านหลังนี้</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-gray-100 px-6 py-4 flex justify-end gap-3 border-t border-gray-200 shrink-0 rounded-b-xl">
+              <button 
+                onClick={() => setIsModalOpen(false)}
+                className="px-5 py-2 rounded-lg text-gray-600 bg-white border border-gray-300 hover:bg-gray-50 transition text-sm font-bold shadow-sm"
+              >
+                ยกเลิก
+              </button>
+              <button 
+                onClick={handleSaveStatus}
+                className="px-5 py-2 rounded-lg text-white bg-orange-600 hover:bg-orange-700 transition text-sm font-bold shadow-sm flex items-center gap-2"
+              >
+                <Save size={16}/> บันทึกการเปลี่ยนแปลง
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Settings / Upload Modal */}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden">
+            <div className="bg-gray-800 px-6 py-4 flex justify-between items-center text-white">
+              <h3 className="text-lg font-bold flex items-center gap-2">
+                <Settings className="w-5 h-5 text-orange-400" />
+                ตั้งค่าระบบ & นำเข้าข้อมูล
+              </h3>
+              <button onClick={() => setIsSettingsOpen(false)} className="hover:text-red-400 transition bg-white/10 rounded-full p-1">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-6 space-y-6">
+              
+              <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 shadow-sm">
+                <label className="block text-sm font-bold text-blue-900 mb-3 flex items-center gap-1.5"><Upload size={16}/> 1. นำเข้าข้อมูลรายงานลูกหนี้ (CSV)</label>
+                <div className="flex flex-col gap-3">
+                  <label className="cursor-pointer bg-white text-blue-700 px-4 py-3 rounded-lg border border-blue-200 hover:border-blue-500 hover:text-blue-800 transition-colors flex items-center justify-center gap-2 font-bold w-full shadow-sm">
+                    <FileSpreadsheet className="w-5 h-5" />
+                    <span>เลือกไฟล์ CSV / Excel เพื่อนำเข้า</span>
+                    <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+                  </label>
+                  {rawData.length > 0 && (
+                    <div className="text-xs text-green-700 flex items-center gap-1 font-bold justify-center mt-1 bg-green-100 py-1.5 rounded-md border border-green-200">
+                      <CheckCircle className="w-4 h-4" /> พบข้อมูลสำเร็จจำนวน {rawData.length} แถว
+                    </div>
+                  )}
+                  <div className="mt-2 pt-3 border-t border-blue-200">
+                    <p className="text-[11px] text-blue-800 mb-1.5 font-bold flex items-center gap-1"><AlertTriangle size={12}/> หากอัปโหลดแล้วภาษาไทยเป็นต่างด้าว ให้เปลี่ยนการเข้ารหัส:</p>
+                    <select 
+                      className="w-full border border-blue-200 rounded-md px-3 py-2 text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-700 cursor-pointer shadow-sm"
+                      value={encoding} 
+                      onChange={(e) => setEncoding(e.target.value)}
+                    >
+                      <option value="windows-874">Windows-874 (ปกติสำหรับการ Save จาก Excel)</option>
+                      <option value="utf-8">UTF-8 (ไฟล์เข้ารหัสแบบใหม่)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border border-gray-200 p-4 rounded-xl shadow-sm">
+                <label className="block text-sm font-bold text-gray-800 mb-3 flex items-center gap-1.5"><Mail size={16} className="text-orange-500"/> 2. เกณฑ์การออกจดหมายทวงถาม (Notice)</label>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-gray-600 font-medium">แจ้งเตือนเมื่อค้างชำระเกิน:</span>
+                  <input 
+                    type="number" 
+                    min="1" 
+                    className="w-20 px-2 py-1.5 border border-gray-300 rounded-md text-center focus:ring-2 focus:ring-orange-500 outline-none text-sm font-bold shadow-inner bg-gray-50 focus:bg-white transition-colors"
+                    value={noticeThresholdDays}
+                    onChange={(e) => setNoticeThresholdDays(Number(e.target.value))}
+                  />
+                  <span className="text-xs text-gray-600 font-medium">วัน</span>
+                </div>
+              </div>
+
+              <div className="border border-gray-200 p-4 rounded-xl shadow-sm">
+                <label className="block text-sm font-bold text-red-700 mb-3 flex items-center gap-1.5"><AlertTriangle size={16}/> 3. เกณฑ์การอายัดกรมที่ดิน</label>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-gray-600 font-medium">แจ้งเตือนสถานะเตรียมอายัด เมื่อค้างเกิน:</span>
+                  <input 
+                    type="number" 
+                    min="1" 
+                    max="120"
+                    className="w-16 px-2 py-1.5 border border-gray-300 rounded-md text-center focus:ring-2 focus:ring-red-500 outline-none text-sm font-bold shadow-inner bg-gray-50 focus:bg-white transition-colors"
+                    value={freezeThresholdMonths}
+                    onChange={(e) => setFreezeThresholdMonths(Number(e.target.value))}
+                  />
+                  <span className="text-xs text-gray-600 font-medium">เดือน</span>
+                </div>
+              </div>
+
+            </div>
+            <div className="bg-gray-50 px-6 py-4 flex justify-end gap-3 border-t border-gray-200">
+              <button 
+                onClick={() => setIsSettingsOpen(false)}
+                className="px-6 py-2.5 rounded-lg text-white bg-gray-800 hover:bg-gray-900 transition font-bold shadow-sm flex items-center gap-2 text-sm"
+              >
+                <CheckCircle size={16}/> ปิดและบันทึกการตั้งค่า
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // --- Main Application ---
 
@@ -3006,7 +3675,7 @@ export default function App() {
           }
 
           // --- 2. ถ้าเครื่องนี้ไม่มีไฟล์ (เปิดจากเครื่องอื่น) ให้ไปดึงจาก Google Drive ---
-          if (!fileData && GOOGLE_SCRIPT_GET_FILE_URL && GOOGLE_SCRIPT_GET_FILE_URL !== 'YOUR_GOOGLE_SCRIPT_WEB_APP_URL_HERE') {
+          if (!fileData && GOOGLE_SCRIPT_GET_FILE_URL && !GOOGLE_SCRIPT_GET_FILE_URL.includes('YOUR_')) {
               console.log(`กำลังดึงข้อมูลไฟล์จาก Google Drive...`);
               try {
                   // ตอนที่เรา Backup ไฟล์ลง Drive ระบบตั้งชื่อไว้แบบนี้ Document_{fileId}.pdf
@@ -3306,6 +3975,56 @@ export default function App() {
                   }).catch(e => console.error("Drive Backup Error", e));
               } catch (e) {
                   console.error("Failed to backup schedule to Drive", e);
+              }
+          }
+
+          // --- NEW: ซิงค์ตารางงานเข้า Google Sheets อัตโนมัติ (แยกรายเดือน/รายโครงการ) ---
+          if (GOOGLE_SCRIPT_CONFIG.SHEETS_URL && !GOOGLE_SCRIPT_CONFIG.SHEETS_URL.includes('YOUR_')) {
+              try {
+                  const [year, month] = currentMonth.split('-').map(Number);
+                  const numDays = new Date(year, month, 0).getDate();
+                  const daysInMonth = Array.from({ length: numDays }, (_, i) => i + 1);
+                  
+                  // จัดเรียงพนักงานตามที่แสดงผลในหน้าจอ
+                  const projectStaff = users.filter(u => u.department === selectedProject.name);
+                  const currentOrder = projectStaffOrder[selectedProject.id] || [];
+                  const staffToExport = [...projectStaff].sort((a, b) => {
+                      let idxA = currentOrder.indexOf(a.id);
+                      let idxB = currentOrder.indexOf(b.id);
+                      if (idxA === -1) idxA = 9999;
+                      if (idxB === -1) idxB = 9999;
+                      return idxA - idxB;
+                  });
+
+                  // สร้างรูปแบบข้อมูลให้เป็นตารางสำหรับ Google Sheets
+                  const sheetData = staffToExport.map((user, index) => {
+                      let row = {
+                          'ลำดับ': index + 1,
+                          'รหัสพนักงาน': user.employeeId || '-',
+                          'ชื่อ-สกุล': `${user.firstName} ${user.lastName}`,
+                          'ตำแหน่ง': user.position,
+                          'โครงการ': selectedProject.name,
+                          'ประจำเดือน': currentMonth
+                      };
+                      
+                      daysInMonth.forEach(d => {
+                          const dateString = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                          const planKey = `${user.id}_${dateString}`;
+                          const actKey = `${user.id}_${dateString}_act`;
+                          
+                          row[`${d} (Plan)`] = scheduleData[planKey] || '';
+                          row[`${d} (Act)`] = scheduleData[actKey] !== undefined ? scheduleData[actKey] : (scheduleData[planKey] || '');
+                      });
+                      
+                      row['หมายเหตุ (ตลอดเดือน)'] = scheduleNote || '';
+                      return row;
+                  });
+
+                  // ชื่อชีต: Schedule_รหัสโครงการ_เดือน (เช่น Schedule_C-001_2026-05)
+                  const sheetName = `Schedule_${selectedProject.code}_${currentMonth}`;
+                  triggerAutoSync(sheetName, sheetData, []);
+              } catch(e) {
+                  console.error("Auto-sync schedule to Sheets error", e);
               }
           }
 
@@ -5921,7 +6640,7 @@ export default function App() {
       const GOOGLE_SCRIPT_URL = GOOGLE_SCRIPT_CONFIG.SHEETS_URL;
       
       // ปรับปรุงเงื่อนไขการตรวจสอบใหม่ ให้เช็คแค่ค่าว่างหรือค่า Placeholder เดิม
-      if(!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL === 'https://script.google.com/macros/s/AKfycbwfT0oHRnpZIPbtxM8vG5cBaMlOQnNTGjDWNngPRF5yQPZ3AKkBZvGbmiRkf2WnpdEP/exec') {
+      if(!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes('YOUR_')) {
           alert("กรุณานำ Web App URL ของ Google Apps Script มาใส่ในโค้ดก่อนใช้งานฟังก์ชันนี้");
           return;
       }
@@ -5946,7 +6665,17 @@ export default function App() {
               'UtilityMeters_มิเตอร์': meters,
               'UtilityReadings_จดมิเตอร์': utilityReadings,
               'DailyReports_รายงานประจำวัน': dailyReports,
-              'Announcements_ประกาศ': announcements
+              'Announcements_ประกาศ': announcements,
+              // NEW: ส่งสถานะการอนุมัติตารางงานไปด้วย
+              'Schedule_Approvals_สถานะตารางงาน': Object.keys(scheduleApprovals).map(key => {
+                  const [projectId, month] = key.split('_');
+                  const proj = projects.find(p => p.id === projectId);
+                  return {
+                      'โครงการ': proj ? proj.name : projectId,
+                      'เดือน': month,
+                      ...scheduleApprovals[key]
+                  };
+              })
           };
 
           // แก้ไขปัญหา CORS Error: ใช้ mode 'no-cors' เพื่อส่งออกข้อมูลเบื้องหลังโดยไม่รออ่าน Response จาก Google
@@ -12580,6 +13309,16 @@ export default function App() {
           {/* New Contractors/Suppliers Tab */}
           {projectTab === 'contractors' && ContractorVendorList()}
 
+          {/* NEW: Central Fee Tracking Tab */}
+          {projectTab === 'centralfee' && (
+              <CentralFeeManagerTab 
+                  selectedProject={selectedProject} 
+                  currentUser={currentUser} 
+                  db={db} 
+                  appId={appId} 
+              />
+          )}
+
           {/* NEW: Meetings Tab */}
           {projectTab === 'meeting' && (
               <div className="space-y-6 animate-fade-in">
@@ -12613,9 +13352,9 @@ export default function App() {
 
                   {/* --- TAB: แผนการจัดประชุม (Gantt Chart) --- */}
                   {meetingSubTab === 'plan' && (
-                      <div className="animate-fade-in">
+                      <Card className="p-0 overflow-hidden relative">
                           {!editingGanttPlan ? (
-                              <Card>
+                              <div>
                                   <div className="p-4 border-b flex justify-between items-center bg-white">
                                       <div>
                                           <h3 className="font-bold flex items-center gap-2 text-gray-800">
@@ -12697,9 +13436,9 @@ export default function App() {
                                           </tbody>
                                       </table>
                                   </div>
-                              </Card>
+                              </div>
                           ) : (
-                              <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col relative overflow-hidden">
+                              <div className="bg-white flex flex-col relative overflow-hidden">
                                   {/* Editor Toolbar */}
                                   <div className={`p-4 border-b flex flex-wrap justify-between items-center bg-gray-50 gap-4 ${isExporting ? 'hidden' : ''}`}>
                                       <div className="flex items-center gap-3">
@@ -12720,8 +13459,8 @@ export default function App() {
                                           </div>
                                       </div>
                                       <div className="flex items-center gap-2">
-                                          <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-gantt-area', `Meeting_Plan_${selectedProject.code}.pdf`, 'landscape', [15, 10, 15, 10])} disabled={isExporting}>
-                                              {isExporting ? t('downloading') : t('printPDF')}
+                                          <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-gantt-area', `Meeting_Plan_${selectedProject?.code}.pdf`, 'landscape')} disabled={isExporting}>
+                                              {isExporting ? t('downloading') : t('downloadPDF')}
                                           </Button>
                                           {hasPerm('proj_meeting', 'save') && (
                                               <Button size="sm" icon={Save} className="bg-teal-600 hover:bg-teal-700" onClick={() => {
@@ -12976,7 +13715,7 @@ export default function App() {
                                   </div>
                               </div>
                           )}
-                      </div>
+                      </Card>
                   )}
 
                   {/* --- TAB: บันทึก/รายการประชุม (Old 'plan' tab) --- */}
