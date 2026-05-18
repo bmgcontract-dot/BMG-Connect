@@ -1674,7 +1674,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
   useEffect(() => {
     if (!db || !appId || !selectedProject) return;
 
-    // 1. ซิงค์สถานะการติดตามของแต่ละบ้าน (Status, Notes, Histories)
+    // Use a unique collection for each project's central fee data to prevent mixing
     const statusColRef = collection(db, 'artifacts', appId, 'public', 'data', `house_statuses_${selectedProject.id}`);
     
     const unsubscribeStatuses = onSnapshot(statusColRef, (snapshot) => {
@@ -1699,40 +1699,40 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
     });
 
     // 2. NEW: ซิงค์ข้อมูลดิบรายการลูกหนี้ (Raw CSV Data) ที่เคยอัปโหลดไว้ล่าสุด
-    const rawDataRef = doc(db, 'artifacts', appId, 'public', 'data', `central_fee_raw_${selectedProject.id}`, 'latest');
+    // FIX: เปลี่ยนมาใช้โครงสร้าง app_state เพื่อรองรับระบบ Chunking ป้องกันปัญหาข้อมูลเกิน 1MB ทำให้เครื่องอื่นโหลดไม่ขึ้น
+    const rawDataRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', `central_fee_raw_${selectedProject.id}`);
     
     const unsubscribeRawData = onSnapshot(rawDataRef, async (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
+        // รองรับระบบ Chunking
         if (data.totalChunks !== undefined) {
-          try {
             let fullJson = '';
-            let hasError = false;
+            let hasChunkError = false;
             for (let i = 0; i < data.totalChunks; i++) {
-                const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', `central_fee_raw_${selectedProject.id}_chunks`, `chunk_${i}`);
+                const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `central_fee_raw_${selectedProject.id}_${i}`);
                 const chunkSnap = await getDoc(chunkRef);
                 if (chunkSnap.exists()) {
                     fullJson += chunkSnap.data().chunk;
                 } else {
-                    hasError = true;
+                    hasChunkError = true;
                 }
             }
-            if (!hasError && fullJson) {
-                setRawData(JSON.parse(fullJson));
+            if (!hasChunkError && fullJson) {
+                try {
+                    const parsed = JSON.parse(fullJson);
+                    setRawData(parsed.payload || []);
+                    if (parsed.projectTitle) setProjectTitle(parsed.projectTitle);
+                    if (parsed.reportDate) setReportDate(parsed.reportDate);
+                } catch(e) { console.error("Error parsing chunks", e); }
+            }
+        } else if (data.payload) {
+            // Backward compatibility
+            try {
+                setRawData(JSON.parse(data.payload));
                 if (data.projectTitle) setProjectTitle(data.projectTitle);
                 if (data.reportDate) setReportDate(data.reportDate);
-            }
-          } catch (e) {
-            console.error("Error parsing chunked raw data from Cloud", e);
-          }
-        } else if (data.payload) {
-          try {
-            setRawData(JSON.parse(data.payload));
-            if (data.projectTitle) setProjectTitle(data.projectTitle);
-            if (data.reportDate) setReportDate(data.reportDate);
-          } catch(e) {
-            console.error("Error parsing raw data from Cloud", e);
-          }
+            } catch(e) { console.error("Error parsing raw data from Cloud", e); }
         }
       } else {
         setRawData([]); // ถ้ายืนยันว่ายังไม่มีข้อมูลใน Cloud ให้ล้างค่า (Clear)
@@ -1752,18 +1752,16 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    setIsDownloading(true); // เปิดหน้าจอโหลดเพื่อป้องกันการกดซ้ำ
     const reader = new FileReader();
-    reader.onload = async (evt) => {
+    reader.onload = (evt) => {
       const text = evt.target.result;
-      await processCSV(text);
-      setIsDownloading(false); // ปิดหน้าจอโหลด
+      processCSV(text);
     };
     reader.readAsText(file, encoding);
     e.target.value = null; // รีเซ็ต input เพื่อให้กดอัปโหลดไฟล์เดิมซ้ำได้
   };
 
-  const processCSV = async (csvText) => {
+  const processCSV = (csvText) => {
     const lines = csvText.split('\n').map(line => line.trim()).filter(line => line !== '');
     
     let newProjectTitle = projectTitle;
@@ -1837,30 +1835,39 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
     // --- NEW: บันทึกข้อมูลที่แปลงสำเร็จขึ้น Cloud อัตโนมัติ (Online Sync) ---
     if (db && appId && selectedProject) {
         try {
-            const jsonStr = JSON.stringify(parsedData);
-            const CHUNK_SIZE = 900000; // หั่นทีละประมาณ 900 KB (ต่ำกว่า 1MB Limit)
-            const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
-            
-            for (let i = 0; i < totalChunks; i++) {
-                const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', `central_fee_raw_${selectedProject.id}_chunks`, `chunk_${i}`);
-                const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                await setDoc(chunkRef, { chunk: chunkData });
-            }
+            const syncData = async () => {
+                const jsonStr = JSON.stringify({
+                    payload: parsedData,
+                    projectTitle: newProjectTitle,
+                    reportDate: newReportDate,
+                    updatedAt: new Date().toISOString(),
+                    updatedBy: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
+                });
+                
+                // ใช้เทคนิค Chunking ตัดข้อมูลเป็นส่วนๆ ป้องกันปัญหาไฟล์เกินข้อจำกัด 1MB ของฐานข้อมูล
+                const CHUNK_SIZE = 900000;
+                const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
 
-            const rawDataRef = doc(db, 'artifacts', appId, 'public', 'data', `central_fee_raw_${selectedProject.id}`, 'latest');
-            await setDoc(rawDataRef, {
-                totalChunks: totalChunks,
-                projectTitle: newProjectTitle,
-                reportDate: newReportDate,
-                updatedAt: new Date().toISOString(),
-                updatedBy: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
+                for (let i = 0; i < totalChunks; i++) {
+                    const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `central_fee_raw_${selectedProject.id}_${i}`);
+                    const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+                    await setDoc(chunkRef, { chunk: chunkData });
+                    await new Promise(r => setTimeout(r, 10)); // พัก UI
+                }
+
+                const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', `central_fee_raw_${selectedProject.id}`);
+                await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
+            };
+
+            syncData().then(() => {
+                alert('อัปโหลดและซิงค์ตารางข้อมูลลูกหนี้ขึ้นระบบออนไลน์สำเร็จ ทุกเครื่องจะมองเห็นข้อมูลนี้ตรงกัน!');
+                setIsSettingsOpen(false); // ปิดหน้าต่างการตั้งค่า
+            }).catch(e => {
+                console.error("Save CSV to Cloud Error:", e);
+                alert('เกิดข้อผิดพลาดในการบันทึกขึ้น Cloud: ' + e.message);
             });
-
-            alert('อัปโหลดและซิงค์ตารางข้อมูลลูกหนี้ขึ้นระบบออนไลน์สำเร็จ ทุกเครื่องจะมองเห็นข้อมูลนี้ตรงกัน!');
-            setIsSettingsOpen(false); // ปิดหน้าต่างการตั้งค่า
         } catch (e) {
-            console.error("Save CSV to Cloud Error:", e);
-            alert('เกิดข้อผิดพลาดในการบันทึกขึ้น Cloud: ' + e.message);
+            console.error(e);
         }
     } else {
         alert('อัปโหลดสำเร็จ (ระบบกำลังทำงานในโหมดออฟไลน์ ข้อมูลจะอยู่เฉพาะในเครื่องนี้)');
@@ -2541,7 +2548,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
       {isDownloading && (
         <div className="fixed inset-0 bg-black/70 z-[100] flex flex-col items-center justify-center text-white backdrop-blur-sm animate-fade-in">
           <Loader2 className="w-12 h-12 animate-spin text-orange-500 mb-4" />
-          <p className="text-lg font-bold">กำลังประมวลผลข้อมูล...</p>
+          <p className="text-lg font-bold">กำลังสร้างไฟล์รายงาน...</p>
           <p className="text-sm text-gray-300 mt-1">กรุณารอสักครู่ ห้ามปิดหน้าต่างนี้</p>
         </div>
       )}
