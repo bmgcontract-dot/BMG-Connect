@@ -1660,6 +1660,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
   const [filterStatus, setFilterStatus] = useState('ทั้งหมด'); 
   const [filterMinAmount, setFilterMinAmount] = useState(''); 
   const [filterMaxAmount, setFilterMaxAmount] = useState(''); 
+  const [feeSortOrder, setFeeSortOrder] = useState('amount_desc'); // NEW: State สำหรับการเรียงลำดับ
   const [fullScreenFeeChart, setFullScreenFeeChart] = useState(null); // NEW: State สำหรับแสดงกราฟเต็มจอ
   
   const [projectTitle, setProjectTitle] = useState('ระบบสรุปค้างค่าส่วนกลาง (Central Fee Manager)');
@@ -1954,7 +1955,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
 
   // --- Filtering ---
   const filteredData = useMemo(() => {
-    return summaryData.filter(item => {
+    let result = summaryData.filter(item => {
       const matchSearch = item.houseNo.includes(searchTerm) || item.name.includes(searchTerm);
       const finalStatus = item.customStatus ? item.customStatus : (item.isFreeze ? "เตรียมอายัด" : "ปกติ");
       const matchStatus = filterStatus === 'ทั้งหมด' ? true : finalStatus === filterStatus;
@@ -1969,7 +1970,21 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
 
       return matchSearch && matchStatus && matchAmount;
     });
-  }, [summaryData, searchTerm, filterStatus, filterMinAmount, filterMaxAmount]);
+
+    // Apply Sorting (จัดเรียงข้อมูลแบบธรรมชาติ เพื่อให้เลขที่บ้าน /2 มาก่อน /10)
+    result.sort((a, b) => {
+      if (feeSortOrder === 'amount_desc') {
+        return b.totalAmount - a.totalAmount;
+      } else if (feeSortOrder === 'house_asc') {
+        return a.houseNo.localeCompare(b.houseNo, undefined, { numeric: true, sensitivity: 'base' });
+      } else if (feeSortOrder === 'house_desc') {
+        return b.houseNo.localeCompare(a.houseNo, undefined, { numeric: true, sensitivity: 'base' });
+      }
+      return 0;
+    });
+
+    return result;
+  }, [summaryData, searchTerm, filterStatus, filterMinAmount, filterMaxAmount, feeSortOrder]);
 
   // --- KPIs ---
   const totalDebt = summaryData.reduce((sum, item) => sum + item.totalAmount, 0);
@@ -2431,8 +2446,8 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
                   />
                 </div>
                 
-                <div className="flex flex-col sm:flex-row items-center gap-4 w-full xl:w-auto">
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="flex flex-col sm:flex-row flex-wrap items-center gap-4 w-full xl:w-auto xl:justify-end">
+                  <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
                     <span className="text-sm font-medium text-gray-700 whitespace-nowrap">ยอดค้าง:</span>
                     <div className="flex items-center gap-1">
                       <input 
@@ -2453,10 +2468,10 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
                     <span className="text-sm font-medium text-gray-700 whitespace-nowrap">สถานะ:</span>
                     <select 
-                      className="w-full sm:w-auto border border-gray-300 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-red-500 outline-none bg-white text-gray-700"
+                      className="w-full sm:w-auto border border-gray-300 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-red-500 outline-none bg-white text-gray-700 cursor-pointer"
                       value={filterStatus}
                       onChange={(e) => setFilterStatus(e.target.value)}
                     >
@@ -2466,6 +2481,19 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
                       {FEE_STATUS_OPTIONS.map((opt, i) => (
                         <option key={i} value={opt}>{opt}</option>
                       ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                    <span className="text-sm font-medium text-gray-700 whitespace-nowrap">เรียง:</span>
+                    <select 
+                      className="w-full sm:w-auto border border-gray-300 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-red-500 outline-none bg-white text-gray-700 cursor-pointer"
+                      value={feeSortOrder}
+                      onChange={(e) => setFeeSortOrder(e.target.value)}
+                    >
+                      <option value="amount_desc">ยอดค้าง (มากไปน้อย)</option>
+                      <option value="house_asc">บ้านเลขที่ (น้อยไปมาก)</option>
+                      <option value="house_desc">บ้านเลขที่ (มากไปน้อย)</option>
                     </select>
                   </div>
                 </div>
