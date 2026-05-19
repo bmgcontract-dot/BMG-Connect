@@ -7273,8 +7273,7 @@ export default function App() {
           // ใช้ค่าจาก user หรือถ้าไม่มีให้ใช้ค่าเริ่มต้น
           position: user.position || EMPLOYEE_POSITIONS[0],
           accessibleDepts: depts,
-          // แก้ไข: ใช้ getMergedPermissions เพื่อให้แน่ใจว่าโครงสร้างสิทธิ์ครบถ้วนเสมอ (ป้องกันปัญหาเซฟแล้วไม่จำ)
-          permissions: getMergedPermissions(user.permissions || getDefaultPermissions()),
+          permissions: user.permissions || getDefaultPermissions(),
       });
       setIsEditingUser(true);
       setShowAddUserModal(true);
@@ -8381,18 +8380,7 @@ export default function App() {
   const UserManagement = () => {
       // Logic สำหรับการกรองและการเรียงลำดับ
       const safeUsers = Array.isArray(users) ? users.filter(Boolean) : [];
-      
-      // FIX: กรองรายชื่อที่ซ้ำซ้อนกัน (Duplicate) โดยยึดเอาข้อมูลที่อัปเดตล่าสุด
-      const uniqueUsersMap = new Map();
-      safeUsers.forEach(u => {
-          // ใช้ username หรือ employeeId เป็นคีย์หลักในการตรวจสอบความซ้ำซ้อน
-          const key = (u.username || u.employeeId || u.id).toString().trim().toLowerCase();
-          // หากมีข้อมูลซ้ำ จะถูกทับด้วยรายการใหม่ล่าสุด
-          uniqueUsersMap.set(key, u);
-      });
-      const uniqueUsers = Array.from(uniqueUsersMap.values());
-
-      const filteredUsers = uniqueUsers
+      const filteredUsers = safeUsers
           .filter(u => userDeptFilter ? u.department === userDeptFilter : true)
           .filter(u => userRoleFilter ? u.position === userRoleFilter : true)
           .sort((a, b) => {
@@ -8436,7 +8424,6 @@ export default function App() {
 
                   const headers = parseCSVLine(lines[0]);
                   const newUsers = [];
-                  const existingUsernames = new Set(uniqueUsers.map(u => (u.username || '').toString().trim().toLowerCase()));
                   
                   for (let i = 1; i < lines.length; i++) {
                       if (!lines[i].trim()) continue;
@@ -8449,39 +8436,33 @@ export default function App() {
                       
                       // เช็คเฉพาะฟิลด์บังคับ คือ username และ firstName
                       if (userObj.username && userObj.firstName) {
-                          const finalUsername = userObj.username.toString().trim();
-                          const checkKey = finalUsername.toLowerCase();
-                          
-                          // ป้องกันการนำเข้าข้อมูลที่ซ้ำกับในระบบหรือซ้ำกันเองในไฟล์ CSV
-                          if (!existingUsernames.has(checkKey)) {
-                              existingUsernames.add(checkKey);
-                              newUsers.push({
-                                  id: generateId(),
-                                  employeeId: finalUsername, // บังคับให้รหัสพนักงานเป็นค่าเดียวกับชื่อผู้ใช้งาน
-                                  firstName: userObj.firstName || '',
-                                  lastName: userObj.lastName || '',
-                                  position: userObj.position || EMPLOYEE_POSITIONS[0], // ค่าเริ่มต้น
-                                  department: userObj.department || 'Head Office',
-                                  phone: userObj.phone || '',
-                                  username: finalUsername, // บังคับให้ชื่อผู้ใช้งานเป็นค่าเดียวกับรหัสพนักงาน
-                                  password: userObj.password || '1234', // รหัสผ่านตั้งต้นถ้าไม่ได้ใส่มา
-                                  status: 'Active',
-                                  created_at: new Date().toISOString(),
-                                  accessibleDepts: [],
-                                  permissions: getDefaultPermissions(),
-                                  photo: null
-                              });
-                          }
+                          const finalUsername = userObj.username;
+                          newUsers.push({
+                              id: generateId(),
+                              employeeId: finalUsername, // บังคับให้รหัสพนักงานเป็นค่าเดียวกับชื่อผู้ใช้งาน
+                              firstName: userObj.firstName || '',
+                              lastName: userObj.lastName || '',
+                              position: userObj.position || EMPLOYEE_POSITIONS[0], // ค่าเริ่มต้น
+                              department: userObj.department || 'Head Office',
+                              phone: userObj.phone || '',
+                              username: finalUsername, // บังคับให้ชื่อผู้ใช้งานเป็นค่าเดียวกับรหัสพนักงาน
+                              password: userObj.password || '1234', // รหัสผ่านตั้งต้นถ้าไม่ได้ใส่มา
+                              status: 'Active',
+                              created_at: new Date().toISOString(),
+                              accessibleDepts: [],
+                              permissions: getDefaultPermissions(),
+                              photo: null
+                          });
                       }
                   }
                   
                   if (newUsers.length > 0) {
-                      showConfirm('ยืนยันการนำเข้า', `พบข้อมูลพนักงานใหม่ที่ไม่ซ้ำซ้อน ${newUsers.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
+                      showConfirm('ยืนยันการนำเข้า', `พบข้อมูลพนักงานใหม่ที่ถูกต้อง ${newUsers.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
                           setUsers(prev => [...prev, ...newUsers]);
                           alert('นำเข้าข้อมูลพนักงานสำเร็จแล้ว!');
                       }, 'ยืนยันการนำเข้า', 'info');
                   } else {
-                      alert('ไม่พบข้อมูลพนักงานที่ถูกต้องในไฟล์ (กรุณาตรวจสอบว่ามีคอลัมน์ username และ firstName หรือข้อมูลอาจจะซ้ำกับในระบบอยู่แล้ว)');
+                      alert('ไม่พบข้อมูลพนักงานที่ถูกต้องในไฟล์ (กรุณาตรวจสอบว่ามีคอลัมน์ username และ firstName)');
                   }
               } catch (error) {
                   alert('เกิดข้อผิดพลาดในการอ่านไฟล์ CSV โปรดตรวจสอบรูปแบบไฟล์');
