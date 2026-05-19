@@ -7241,10 +7241,25 @@ export default function App() {
 
   const handleSaveUser = (e) => {
       if (e && e.preventDefault) e.preventDefault();
+      
+      const newUsername = (newUser.username || '').trim().toLowerCase();
+      
       if (isEditingUser) {
+          // หากกำลังแก้ไข ตรวจสอบว่าไม่ได้เปลี่ยนไปใช้ Username ของคนอื่น
+          const isDuplicate = users.some(u => u.id !== newUser.id && (u.username || '').trim().toLowerCase() === newUsername);
+          if (isDuplicate) {
+              alert('ไม่สามารถบันทึกได้ เนื่องจากชื่อผู้ใช้งาน (Username) นี้มีผู้ใช้อื่นใช้งานอยู่แล้ว');
+              return;
+          }
           // FIX: ใช้ Functional Update เพื่อป้องกันปัญหา Race Condition นำข้อมูลเก่ามาเซฟทับเมื่อมีอัปเดตออนไลน์ซ้อนกัน
           setUsers(prevUsers => prevUsers.map(u => u.id === newUser.id ? { ...newUser } : u));
       } else {
+          // ตรวจสอบ Username ซ้ำก่อนสร้างบัญชีใหม่
+          const isDuplicate = users.some(u => (u.username || '').trim().toLowerCase() === newUsername);
+          if (isDuplicate) {
+              alert('ไม่สามารถเพิ่มผู้ใช้งานได้ เนื่องจากชื่อผู้ใช้งาน (Username) นี้มีอยู่ในระบบแล้ว');
+              return;
+          }
           setUsers(prevUsers => [...prevUsers, { ...newUser, id: generateId(), status: 'Active', created_at: new Date().toISOString() }]);
       }
       setShowAddUserModal(false);
@@ -8378,6 +8393,32 @@ export default function App() {
 };
 
   const UserManagement = () => {
+      // --- NEW: Auto Deduplicate Users in Database ---
+      useEffect(() => {
+          if (!users || users.length === 0 || currentUser?.username !== 'admin') return;
+          
+          const seen = new Set();
+          const uniqueUsers = [];
+          let hasDuplicate = false;
+          
+          for (const u of users) {
+              if (!u) continue;
+              const key = u.username ? u.username.toLowerCase().trim() : u.id;
+              if (!seen.has(key)) {
+                  seen.add(key);
+                  uniqueUsers.push(u);
+              } else {
+                  hasDuplicate = true;
+              }
+          }
+          
+          // ทำการคลีนข้อมูลซ้ำออกจากระบบเบื้องหลัง และบันทึกลง Database อัตโนมัติ
+          if (hasDuplicate) {
+              setUsers(uniqueUsers);
+              console.log("ระบบได้ทำการลบรายชื่อผู้ใช้งานที่ซ้ำซ้อนออกให้อัตโนมัติ");
+          }
+      }, [users, currentUser]);
+
       // Logic สำหรับการกรองและการเรียงลำดับ
       const safeUsers = Array.isArray(users) ? users.filter(Boolean) : [];
       const filteredUsers = safeUsers
@@ -8425,6 +8466,9 @@ export default function App() {
                   const headers = parseCSVLine(lines[0]);
                   const newUsers = [];
                   
+                  // ดึง username ที่มีอยู่ในระบบแล้ว (เพื่อตรวจสอบการซ้ำ)
+                  const existingUsernames = new Set((users || []).map(u => (u.username || '').toLowerCase().trim()));
+                  
                   for (let i = 1; i < lines.length; i++) {
                       if (!lines[i].trim()) continue;
                       
@@ -8436,23 +8480,29 @@ export default function App() {
                       
                       // เช็คเฉพาะฟิลด์บังคับ คือ username และ firstName
                       if (userObj.username && userObj.firstName) {
-                          const finalUsername = userObj.username;
-                          newUsers.push({
-                              id: generateId(),
-                              employeeId: finalUsername, // บังคับให้รหัสพนักงานเป็นค่าเดียวกับชื่อผู้ใช้งาน
-                              firstName: userObj.firstName || '',
-                              lastName: userObj.lastName || '',
-                              position: userObj.position || EMPLOYEE_POSITIONS[0], // ค่าเริ่มต้น
-                              department: userObj.department || 'Head Office',
-                              phone: userObj.phone || '',
-                              username: finalUsername, // บังคับให้ชื่อผู้ใช้งานเป็นค่าเดียวกับรหัสพนักงาน
-                              password: userObj.password || '1234', // รหัสผ่านตั้งต้นถ้าไม่ได้ใส่มา
-                              status: 'Active',
-                              created_at: new Date().toISOString(),
-                              accessibleDepts: [],
-                              permissions: getDefaultPermissions(),
-                              photo: null
-                          });
+                          const finalUsername = userObj.username.trim();
+                          const lowerUsername = finalUsername.toLowerCase();
+                          
+                          // หากไม่พบว่าซ้ำในระบบ ให้เพิ่มเข้าไป
+                          if (!existingUsernames.has(lowerUsername)) {
+                              existingUsernames.add(lowerUsername); // อัปเดตรายการซ้ำสำหรับรอบการวนลูปนี้
+                              newUsers.push({
+                                  id: generateId(),
+                                  employeeId: finalUsername, // บังคับให้รหัสพนักงานเป็นค่าเดียวกับชื่อผู้ใช้งาน
+                                  firstName: userObj.firstName || '',
+                                  lastName: userObj.lastName || '',
+                                  position: userObj.position || EMPLOYEE_POSITIONS[0], // ค่าเริ่มต้น
+                                  department: userObj.department || 'Head Office',
+                                  phone: userObj.phone || '',
+                                  username: finalUsername, // บังคับให้ชื่อผู้ใช้งานเป็นค่าเดียวกับรหัสพนักงาน
+                                  password: userObj.password || '1234', // รหัสผ่านตั้งต้นถ้าไม่ได้ใส่มา
+                                  status: 'Active',
+                                  created_at: new Date().toISOString(),
+                                  accessibleDepts: [],
+                                  permissions: getDefaultPermissions(),
+                                  photo: null
+                              });
+                          }
                       }
                   }
                   
@@ -8462,7 +8512,7 @@ export default function App() {
                           alert('นำเข้าข้อมูลพนักงานสำเร็จแล้ว!');
                       }, 'ยืนยันการนำเข้า', 'info');
                   } else {
-                      alert('ไม่พบข้อมูลพนักงานที่ถูกต้องในไฟล์ (กรุณาตรวจสอบว่ามีคอลัมน์ username และ firstName)');
+                      alert('ไม่พบข้อมูลพนักงานใหม่ที่ถูกต้องในไฟล์ หรือ รายชื่อพนักงานเหล่านี้มีอยู่ในระบบแล้ว');
                   }
               } catch (error) {
                   alert('เกิดข้อผิดพลาดในการอ่านไฟล์ CSV โปรดตรวจสอบรูปแบบไฟล์');
