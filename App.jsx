@@ -7240,20 +7240,33 @@ export default function App() {
   };
 
   const handleSaveUser = (e) => {
-      e.preventDefault();
-      if (isEditingUser) {
-          setUsers(users.map(u => u.id === newUser.id ? { ...newUser } : u));
-      } else {
-          // แก้ไข: สลับตำแหน่ง ...newUser ไว้ด้านหน้า เพื่อไม่ให้เอา id เดิมมาทับ id ใหม่ (ป้องกันบัค ID ซ้ำในระบบ)
-          setUsers([...users, { ...newUser, id: generateId(), status: 'Active', created_at: new Date().toISOString() }]);
-      }
+      if (e && e.preventDefault) e.preventDefault();
+      
+      // FIX: Deep copy เพื่อป้องกันปัญหา Reference ค้างและอัปเดตข้อมูลสิทธิ์ (Permissions) ไม่สำเร็จ
+      const finalUser = JSON.parse(JSON.stringify(newUser));
+      
+      setUsers(prevUsers => {
+          let nextList;
+          if (isEditingUser) {
+              nextList = prevUsers.map(u => u.id === finalUser.id ? finalUser : u);
+          } else {
+              nextList = [...prevUsers, { ...finalUser, id: generateId(), status: 'Active', created_at: new Date().toISOString() }];
+          }
+          
+          // สั่งซิงค์ลง Google Sheets อัตโนมัติด้วย
+          setTimeout(() => triggerAutoSync('Users_พนักงาน', nextList, []), 0);
+          return nextList;
+      });
+      
       setShowAddUserModal(false);
       alert(t('saveSuccess'));
   };
 
   const handleEditUser = (user) => {
-      // แปลงข้อมูล accessibleDepts ให้เป็น Array เสมอ ป้องกัน Error
-      let depts = user.accessibleDepts || [];
+      // FIX: Deep copy ข้อมูลผู้ใช้งานป้องกันการแก้ไขค่าต้นฉบับก่อนกดบันทึก
+      const userCopy = JSON.parse(JSON.stringify(user));
+      
+      let depts = userCopy.accessibleDepts || [];
       if (typeof depts === 'string') {
           depts = depts.split(', ').filter(Boolean);
       }
@@ -7269,11 +7282,12 @@ export default function App() {
           username: '',
           password: '',
           photo: null,
-          ...user,
+          ...userCopy,
           // ใช้ค่าจาก user หรือถ้าไม่มีให้ใช้ค่าเริ่มต้น
-          position: user.position || EMPLOYEE_POSITIONS[0],
+          position: userCopy.position || EMPLOYEE_POSITIONS[0],
           accessibleDepts: depts,
-          permissions: user.permissions || getDefaultPermissions(),
+          // ผสานสิทธิ์ที่ขาดหายไปกับ Default เสมอ ป้องกันโหลดสิทธิ์เก่าแล้วระบบไม่จดจำ
+          permissions: getMergedPermissions(userCopy.permissions),
       });
       setIsEditingUser(true);
       setShowAddUserModal(true);
