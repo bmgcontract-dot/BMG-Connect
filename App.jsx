@@ -1608,7 +1608,7 @@ function usePersistentState(key, initialValue, fbUser) {
                isUploadingRef.current = true;
                try {
                    const jsonStr = JSON.stringify(stateRef.current); // ใช้ state ล่าสุดเสมอ
-                   const CHUNK_SIZE = 250000; // FIX: ลดขนาด Chunk ลงจาก 900000 เป็น 250000 เพื่อป้องกัน 1MB Limit สำหรับภาษาไทย
+                   const CHUNK_SIZE = 100000; // FIX: ลดขนาด Chunk ลงเหลือ 100000 เพื่อป้องกัน 1MB Limit อย่างเด็ดขาดสำหรับภาษาไทย (3 bytes/char)
                    const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
                    
                    for (let i = 0; i < totalChunks; i++) {
@@ -7240,12 +7240,12 @@ export default function App() {
   };
 
   const handleSaveUser = (e) => {
-      e.preventDefault();
+      if (e && e.preventDefault) e.preventDefault();
       if (isEditingUser) {
-          setUsers(users.map(u => u.id === newUser.id ? { ...newUser } : u));
+          // FIX: ใช้ Functional Update เพื่อป้องกันปัญหา Race Condition นำข้อมูลเก่ามาเซฟทับเมื่อมีอัปเดตออนไลน์ซ้อนกัน
+          setUsers(prevUsers => prevUsers.map(u => u.id === newUser.id ? { ...newUser } : u));
       } else {
-          // แก้ไข: สลับตำแหน่ง ...newUser ไว้ด้านหน้า เพื่อไม่ให้เอา id เดิมมาทับ id ใหม่ (ป้องกันบัค ID ซ้ำในระบบ)
-          setUsers([...users, { ...newUser, id: generateId(), status: 'Active', created_at: new Date().toISOString() }]);
+          setUsers(prevUsers => [...prevUsers, { ...newUser, id: generateId(), status: 'Active', created_at: new Date().toISOString() }]);
       }
       setShowAddUserModal(false);
       alert(t('saveSuccess'));
@@ -7273,7 +7273,7 @@ export default function App() {
           // ใช้ค่าจาก user หรือถ้าไม่มีให้ใช้ค่าเริ่มต้น
           position: user.position || EMPLOYEE_POSITIONS[0],
           accessibleDepts: depts,
-          permissions: user.permissions || getDefaultPermissions(),
+          permissions: getMergedPermissions(user.permissions), // FIX: ใช้ getMergedPermissions เพื่อรักษาโครงสร้างเมนูให้ครบถ้วนเสมอ ป้องกันเซฟไม่ติด
       });
       setIsEditingUser(true);
       setShowAddUserModal(true);
