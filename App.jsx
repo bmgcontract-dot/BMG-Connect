@@ -3699,6 +3699,33 @@ export default function App() {
       }
   }, [users]);
 
+  // --- NEW: Auto Deduplicate Users in Database (ย้ายออกมาจาก UserManagement เพื่อป้องกัน Hook Crash) ---
+  useEffect(() => {
+      const userArray = Array.isArray(users) ? users : [];
+      if (userArray.length === 0 || currentUser?.username !== 'admin') return;
+      
+      const seen = new Set();
+      const uniqueUsers = [];
+      let hasDuplicate = false;
+      
+      for (const u of userArray) {
+          if (!u) continue;
+          const key = u.username ? u.username.toLowerCase().trim() : u.id;
+          if (!seen.has(key)) {
+              seen.add(key);
+              uniqueUsers.push(u);
+          } else {
+              hasDuplicate = true;
+          }
+      }
+      
+      // ทำการคลีนข้อมูลซ้ำออกจากระบบเบื้องหลัง และบันทึกลง Database อัตโนมัติ
+      if (hasDuplicate) {
+          setUsers(uniqueUsers);
+          console.log("ระบบได้ทำการลบรายชื่อผู้ใช้งานที่ซ้ำซ้อนออกให้อัตโนมัติ");
+      }
+  }, [users, currentUser, setUsers]);
+
   // --- NEW: ตรวจจับและบันทึกเวลาล่าสุดเมื่อเปิดระบบ (Refresh/Auto-login) เพื่อให้ซิงค์ข้ามเครื่อง ---
   useEffect(() => {
       // 🛡️ ป้องกันการใช้ข้อมูลเก่าจาก LocalStorage ไปทับข้อมูลบน Server โดยการรอให้ Sync ข้อมูลจาก Server ให้เสร็จก่อนเสมอ!
@@ -8393,34 +8420,10 @@ export default function App() {
 };
 
   const UserManagement = () => {
-      // --- NEW: Auto Deduplicate Users in Database ---
-      useEffect(() => {
-          if (!users || users.length === 0 || currentUser?.username !== 'admin') return;
-          
-          const seen = new Set();
-          const uniqueUsers = [];
-          let hasDuplicate = false;
-          
-          for (const u of users) {
-              if (!u) continue;
-              const key = u.username ? u.username.toLowerCase().trim() : u.id;
-              if (!seen.has(key)) {
-                  seen.add(key);
-                  uniqueUsers.push(u);
-              } else {
-                  hasDuplicate = true;
-              }
-          }
-          
-          // ทำการคลีนข้อมูลซ้ำออกจากระบบเบื้องหลัง และบันทึกลง Database อัตโนมัติ
-          if (hasDuplicate) {
-              setUsers(uniqueUsers);
-              console.log("ระบบได้ทำการลบรายชื่อผู้ใช้งานที่ซ้ำซ้อนออกให้อัตโนมัติ");
-          }
-      }, [users, currentUser]);
-
       // Logic สำหรับการกรองและการเรียงลำดับ
       const safeUsers = Array.isArray(users) ? users.filter(Boolean) : [];
+      const safeProjects = Array.isArray(projects) ? projects : []; // ป้องกันกรณีดึงข้อมูลไม่สมบูรณ์
+      
       const filteredUsers = safeUsers
           .filter(u => userDeptFilter ? u.department === userDeptFilter : true)
           .filter(u => userRoleFilter ? u.position === userRoleFilter : true)
@@ -8467,7 +8470,7 @@ export default function App() {
                   const newUsers = [];
                   
                   // ดึง username ที่มีอยู่ในระบบแล้ว (เพื่อตรวจสอบการซ้ำ)
-                  const existingUsernames = new Set((users || []).map(u => (u.username || '').toLowerCase().trim()));
+                  const existingUsernames = new Set(safeUsers.map(u => (u.username || '').toLowerCase().trim()));
                   
                   for (let i = 1; i < lines.length; i++) {
                       if (!lines[i].trim()) continue;
@@ -8588,7 +8591,7 @@ export default function App() {
                       >
                           <option value="">-- ทั้งหมด (All) --</option>
                           <option value="Head Office">Head Office</option>
-                          {projects.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                          {safeProjects.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
                       </select>
                   </div>
                   <div>
