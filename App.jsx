@@ -1418,13 +1418,11 @@ const getAllFilesLocally = async () => {
 // --- Custom Hook for Persistent Storage (Firebase or LocalStorage Fallback) ---
 function usePersistentState(key, initialValue, fbUser) {
   const [state, setState] = useState(() => {
-      // FIX: โหลดข้อมูลจาก Cache (Local Storage) ขึ้นมาแสดงผลทันทีก่อนเสมอ (Optimistic Load) เพื่อแก้ปัญหาโหลดหน้าเว็บช้า
       if (typeof window !== 'undefined') {
           const local = localStorage.getItem(key);
           if (local) {
               try { 
                   const parsed = JSON.parse(local); 
-                  // 🛡️ FIX: บังคับให้เป็น Array เสมอ หากค่าเริ่มต้นเป็น Array ป้องกันแอปพังหน้าขาว (Crash)
                   if (Array.isArray(initialValue)) {
                       if (!Array.isArray(parsed)) {
                           return (parsed && typeof parsed === 'object') ? Object.values(parsed) : [...initialValue];
@@ -1451,8 +1449,11 @@ function usePersistentState(key, initialValue, fbUser) {
   });
 
   useEffect(() => {
-      stateRef.current = state;
-  }, [state]);
+      // 🛡️ FIX: บังคับให้เป็น Array อีกครั้ง ก่อนนำไปเซ็ตค่าให้ stateRef ป้องกันปัญหาข้อมูลกลายเป็น Object
+      stateRef.current = Array.isArray(initialValue) && !Array.isArray(state) 
+                       ? (state && typeof state === 'object' ? Object.values(state) : []) 
+                       : state;
+  }, [state, initialValue]);
 
   useEffect(() => {
     if (!db) {
@@ -1483,12 +1484,10 @@ function usePersistentState(key, initialValue, fbUser) {
           const applyData = (parsedData) => {
               let finalData = parsedData;
               
-              // 🛡️ FIX: บังคับการแปลงชนิดข้อมูล กรณีข้อมูลถูกเซฟจาก Firebase กลับมาเป็น Object แทน Array
               if (Array.isArray(initialValue) && !Array.isArray(parsedData)) {
                   finalData = (parsedData && typeof parsedData === 'object') ? Object.values(parsedData) : [];
               }
 
-              // --- FIX: Data Loss Prevention ---
               const isFinalEmpty = Array.isArray(finalData) ? finalData.length === 0 : (!finalData || (typeof finalData === 'object' && Object.keys(finalData || {}).length === 0));
               const isCurrentNotEmpty = Array.isArray(stateRef.current) ? stateRef.current.length > 0 : (stateRef.current && typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length > 0);
 
@@ -1497,7 +1496,14 @@ function usePersistentState(key, initialValue, fbUser) {
                   return;
               }
               // ---------------------------------
-              if (JSON.stringify(stateRef.current) !== JSON.stringify(finalData)) {
+              
+              // 🛡️ FIX: บังคับให้เป็น Array ก่อนจะตรวจสอบเงื่อนไข JSON.stringify ป้องกันโครงสร้างข้อมูลเปลี่ยนแล้วทำให้หน้าขาว
+              let stateToCompare = stateRef.current;
+              if (Array.isArray(initialValue) && !Array.isArray(stateToCompare)) {
+                  stateToCompare = (stateToCompare && typeof stateToCompare === 'object') ? Object.values(stateToCompare) : [];
+              }
+
+              if (JSON.stringify(stateToCompare) !== JSON.stringify(finalData)) {
                   setState(finalData);
                   stateRef.current = finalData;
                   if (typeof window !== 'undefined') localStorage.setItem(key, JSON.stringify(finalData));
@@ -1583,10 +1589,15 @@ function usePersistentState(key, initialValue, fbUser) {
   }, [fbUser, key]);
 
   const setPersistentValue = async (newValue, isRestore = false) => {
-    lastLocalUpdateRef.current = Date.now(); // บันทึกเวลาที่แก้ล่าสุด เพื่อกัน Firebase มาทับ
+    lastLocalUpdateRef.current = Date.now(); 
 
-    const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
-    if (!isRestore && valueToStore === stateRef.current) return;
+    // 🛡️ FIX: บังคับให้เป็น Array หากค่าเริ่มต้นเป็น Array ป้องกันการเซ็ต State เป็น Object ไปยังระบบ
+    let valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
+    if (Array.isArray(initialValue) && !Array.isArray(valueToStore)) {
+        valueToStore = (valueToStore && typeof valueToStore === 'object') ? Object.values(valueToStore) : [];
+    }
+
+    if (!isRestore && JSON.stringify(valueToStore) === JSON.stringify(stateRef.current)) return;
 
     setState(valueToStore);
     stateRef.current = valueToStore;
@@ -1603,12 +1614,12 @@ function usePersistentState(key, initialValue, fbUser) {
        if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
 
        return new Promise((resolve) => {
-           // NEW: หน่วงเวลา 1 วินาที หลังจากหยุดพิมพ์/คลิก ค่อยเซฟขึ้น Database
            syncTimeoutRef.current = setTimeout(async () => {
                isUploadingRef.current = true;
                try {
-                   const jsonStr = JSON.stringify(stateRef.current); // ใช้ state ล่าสุดเสมอ
-                   const CHUNK_SIZE = 250000; // FIX: ลดขนาด Chunk ลงจาก 900000 เป็น 250000 เพื่อป้องกัน 1MB Limit สำหรับภาษาไทย
+                   // 🛡️ FIX: ใช้ valueToStore ที่ถูกจัดรูปแบบแล้วเพื่อป้องกันข้อมูลแปลกปลอมขึ้นคลาวด์
+                   const jsonStr = JSON.stringify(valueToStore); 
+                   const CHUNK_SIZE = 250000; 
                    const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
                    
                    for (let i = 0; i < totalChunks; i++) {
@@ -3885,8 +3896,8 @@ export default function App() {
       let pendingItems = [];
 
       // 1. นับจำนวนประวัติ PM ที่รออนุมัติ
-      (Array.isArray(pmHistoryList) ? pmHistoryList : []).forEach(record => {
-          const proj = (Array.isArray(projects) ? projects : []).find(p => p.id === record.projectId);
+      pmHistoryList.forEach(record => {
+          const proj = projects.find(p => p.id === record.projectId);
           if (proj && isProjectAccessible(proj.name)) {
               const status = record.approvalStatus;
               if ((status === 'Pending Chief' && (isChiefUser || isAdminUser)) || 
@@ -3905,9 +3916,9 @@ export default function App() {
       });
 
       // 2. นับจำนวนตารางงาน (Schedule) ที่รออนุมัติ
-      Object.keys(scheduleApprovals || {}).forEach(key => {
+      Object.keys(scheduleApprovals).forEach(key => {
           const [projectId, month] = key.split('_');
-          const proj = (Array.isArray(projects) ? projects : []).find(p => p.id === projectId);
+          const proj = projects.find(p => p.id === projectId);
           if (proj && isProjectAccessible(proj.name)) {
               const approval = scheduleApprovals[key];
               if ((approval.status === 'Pending Manager' && (isManagerUser || isAdminUser)) || 
@@ -3929,8 +3940,8 @@ export default function App() {
       // 3. นับจำนวนรายการแจ้งซ่อมที่รอดำเนินการ (สำหรับช่าง)
       const isTechnicianUser = (currentUser?.position || '').includes('ช่าง') || isAdminUser;
       
-      (Array.isArray(repairs) ? repairs : []).forEach(repair => {
-          const proj = (Array.isArray(projects) ? projects : []).find(p => p.id === repair.projectId);
+      repairs.forEach(repair => {
+          const proj = projects.find(p => p.id === repair.projectId);
           if (proj && isProjectAccessible(proj.name)) {
               if (repair.inspectionResult === 'รอดำเนินการ' && isTechnicianUser) {
                   pendingItems.push({
@@ -3947,8 +3958,8 @@ export default function App() {
       });
 
       // 4. วัสดุคงคลังที่ต่ำกว่าจุดสั่งซื้อ (Low Stock) หรือ หมด (Out of Stock)
-      (Array.isArray(inventoryList) ? inventoryList : []).forEach(item => {
-          const proj = (Array.isArray(projects) ? projects : []).find(p => p.id === item.projectId);
+      inventoryList.forEach(item => {
+          const proj = projects.find(p => p.id === item.projectId);
           if (proj && isProjectAccessible(proj.name)) {
               const qty = Number(item.quantity);
               const min = Number(item.minThreshold);
@@ -4115,7 +4126,7 @@ export default function App() {
       if (currentUser.username === 'admin') return true;
       
       // แปลงข้อมูลเป็น Array เพื่อการตรวจสอบที่แม่นยำ ป้องกันบัคข้อมูลผิดประเภท
-      const accessibleDeptsStr = currentUser.accessibleDepts || [];
+      const accessibleDeptsStr = currentUser.accessibleDepts;
       const accessibleArray = Array.isArray(accessibleDeptsStr) ? accessibleDeptsStr : (typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : []);
       
       if (accessibleArray.includes('All') || accessibleArray.length > 0) return true;
@@ -7796,10 +7807,9 @@ export default function App() {
       const pendingApprovalCount = pendingItems.length;
 
       // ดึงข้อมูลโครงการเฉพาะที่ผู้ใช้มีสิทธิ์เข้าถึง สำหรับแสดงผลแดชบอร์ดให้สอดคล้องกับสิทธิ์
-      const safeProjects = Array.isArray(projects) ? projects : [];
-      const visibleProjectsDashboard = safeProjects.filter(p => {
+      const visibleProjectsDashboard = projects.filter(p => {
           if (currentUser?.username === 'admin') return true;
-          const accessibleDeptsStr = currentUser?.accessibleDepts || [];
+          const accessibleDeptsStr = currentUser?.accessibleDepts;
           const accessibleArray = Array.isArray(accessibleDeptsStr) ? accessibleDeptsStr : (typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : []);
           if (accessibleArray.includes('All')) return true;
           return p.name === currentUser?.department || accessibleArray.includes(p.name);
@@ -7817,7 +7827,7 @@ export default function App() {
 
       // 2. จำนวนพนักงาน แยกตามหน่วยงาน
       const empByDeptMap = {};
-      (Array.isArray(users) ? users : []).forEach(u => {
+      users.forEach(u => {
           const dept = u.department || 'ไม่ระบุสังกัด';
           empByDeptMap[dept] = (empByDeptMap[dept] || 0) + 1;
       });
@@ -7826,25 +7836,22 @@ export default function App() {
           .sort((a, b) => b.employeeCount - a.employeeCount);
 
       // 3. ลำดับผลคะแนน Audit (จากมากไปน้อย)
-      const safeAudits = Array.isArray(audits) ? audits : [];
       const auditRankData = visibleProjectsDashboard.map(p => {
-          const pAudits = safeAudits.filter(a => a.projectId === p.id);
+          const pAudits = audits.filter(a => a.projectId === p.id);
           const avg = pAudits.length > 0 ? (pAudits.reduce((sum, a) => sum + a.score, 0) / pAudits.length) : 0;
           return { name: p.name, avgScore: parseFloat(avg.toFixed(1)) };
       }).filter(d => d.avgScore > 0).sort((a, b) => b.avgScore - a.avgScore);
 
       // 4. สถิติการส่งรายงานประจำวัน
-      const safeDailyReports = Array.isArray(dailyReports) ? dailyReports : [];
       const reportRankData = visibleProjectsDashboard.map(p => {
-          const currentMonthReports = safeDailyReports.filter(r => r.projectId === p.id && r.date && r.date.startsWith(currentMonthStr));
+          const currentMonthReports = dailyReports.filter(r => r.projectId === p.id && r.date.startsWith(currentMonthStr));
           const uniqueReportDays = new Set(currentMonthReports.map(r => r.date)).size;
           return { name: p.name, submittedDays: uniqueReportDays };
       }).sort((a, b) => b.submittedDays - a.submittedDays);
 
       // 5. สถานะ Action Plan แยกตามหน่วยงาน
-      const safeActionPlans = Array.isArray(actionPlans) ? actionPlans : [];
       const actionPlanData = visibleProjectsDashboard.map(p => {
-          const projAPs = safeActionPlans.filter(a => a.projectId === p.id);
+          const projAPs = actionPlans.filter(a => a.projectId === p.id);
           const counts = { name: p.name, pending: 0, inProgress: 0, completed: 0, cancelled: 0 };
           projAPs.forEach(ap => {
               if(ap.status === 'Pending') counts.pending++;
@@ -7856,9 +7863,7 @@ export default function App() {
       }).filter(p => (p.pending + p.inProgress + p.completed + p.cancelled) > 0);
 
       // NEW: ดึงประกาศล่าสุดสำหรับแสดงใน Dashboard
-      const safeAnnouncements = Array.isArray(announcements) ? announcements : [];
-      const visibleAnnouncementsDashboard = safeAnnouncements.filter(a => {
-          if (!a.date) return false;
+      const visibleAnnouncementsDashboard = announcements.filter(a => {
           const todayLocal = new Date();
           todayLocal.setHours(0,0,0,0);
           const startD = new Date(a.date);
@@ -7872,20 +7877,18 @@ export default function App() {
           if (currentUser?.username === 'admin') return true;
           if (a.projectId === 'All') return true;
           
-          const accessibleDeptsStr = currentUser?.accessibleDepts || [];
+          const accessibleDeptsStr = currentUser?.accessibleDepts;
           const accessibleArray = Array.isArray(accessibleDeptsStr) ? accessibleDeptsStr : (typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : []);
           
           if (accessibleArray.includes('All')) return true;
-          const project = safeProjects.find(p => p.id === a.projectId);
+          const project = projects.find(p => p.id === a.projectId);
           if (!project) return false;
           return project.name === currentUser?.department || accessibleArray.includes(project.name);
-      }).sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0)).slice(0, 3); // แสดงแค่ 3 รายการล่าสุด
+      }).sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0, 3); // แสดงแค่ 3 รายการล่าสุด
 
       // NEW: 6. สถานะ PM แยกตามหน่วยงาน (เดือนปัจจุบัน)
-      const safePmPlans = Array.isArray(pmPlans) ? pmPlans : [];
-      const safePmHistoryList = Array.isArray(pmHistoryList) ? pmHistoryList : [];
       const pmStatusData = visibleProjectsDashboard.map(p => {
-          const pPlans = safePmPlans.filter(plan => plan.projectId === p.id && plan.status === 'Active');
+          const pPlans = pmPlans.filter(plan => plan.projectId === p.id && plan.status === 'Active');
           const [year, month] = currentMonthStr.split('-').map(Number);
           const daysInMonth = new Date(year, month, 0).getDate();
 
@@ -7907,7 +7910,7 @@ export default function App() {
                   if (shouldRun) {
                       totalTasks++;
                       // ตรวจสอบว่ามีการบันทึกประวัติการทำ PM หรือไม่
-                      const historyRecord = safePmHistoryList.find(h => h.pmPlanId === plan.id && h.date === dateString);
+                      const historyRecord = pmHistoryList.find(h => h.pmPlanId === plan.id && h.date === dateString);
                       if (historyRecord && historyRecord.approvalStatus !== 'Rejected') {
                           completedTasks++;
                       }
@@ -7924,8 +7927,8 @@ export default function App() {
       }).filter(p => p.total > 0);
 
       // Summary KPIs
-      const totalPendingAPs = safeActionPlans.filter(a => a.status === 'Pending' || a.status === 'In Progress').length;
-      const totalAuditsAvg = safeAudits.length > 0 ? (safeAudits.reduce((s, a) => s + (a.score || 0), 0) / safeAudits.length).toFixed(1) : 0;
+      const totalPendingAPs = actionPlans.filter(a => a.status === 'Pending' || a.status === 'In Progress').length;
+      const totalAuditsAvg = audits.length > 0 ? (audits.reduce((s, a) => s + a.score, 0) / audits.length).toFixed(1) : 0;
 
       // 6. Project Contracts Expiry (Sorted from least days to most)
       const projectContractsData = visibleProjectsDashboard.map(p => {
@@ -15086,9 +15089,8 @@ export default function App() {
                   {inventorySubTab === 'list' && (
                       <div className="space-y-4">
                           {(() => {
-                              const safeInventoryList = Array.isArray(inventoryList) ? inventoryList : [];
-                              const outOfStockItems = safeInventoryList.filter(i => i.projectId === selectedProject.id && Number(i.quantity) === 0);
-                              const lowStockItems = safeInventoryList.filter(i => i.projectId === selectedProject.id && Number(i.quantity) > 0 && Number(i.quantity) <= Number(i.minThreshold));
+                              const outOfStockItems = inventoryList.filter(i => i.projectId === selectedProject.id && Number(i.quantity) === 0);
+                              const lowStockItems = inventoryList.filter(i => i.projectId === selectedProject.id && Number(i.quantity) > 0 && Number(i.quantity) <= Number(i.minThreshold));
                               
                               if ((outOfStockItems.length > 0 || lowStockItems.length > 0) && !isExporting) {
                                   return (
@@ -15154,7 +15156,7 @@ export default function App() {
                                       )}
                                   </div>
                                   <div className={`flex gap-2 w-full md:w-auto overflow-x-auto ${isExporting ? 'hidden' : ''}`}>
-                                      <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV((Array.isArray(inventoryList) ? inventoryList : []).filter(i => i.projectId === selectedProject.id), 'inventory_list')}>{t('exportCSV')}</Button>
+                                      <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(inventoryList.filter(i => i.projectId === selectedProject.id), 'inventory_list')}>{t('exportCSV')}</Button>
                                       <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-inventory-area', `Inventory_${selectedProject?.code}.pdf`, 'landscape')} disabled={isExporting}>
                                           {isExporting ? t('downloading') : t('printPDF')}
                                       </Button>
@@ -15187,13 +15189,12 @@ export default function App() {
                                       <tbody className="divide-y divide-gray-100 bg-white">
                                           {(() => {
                                               const searchLower = inventorySearch.toLowerCase();
-                                              const safeInventoryList = Array.isArray(inventoryList) ? inventoryList : [];
-                                              const filteredInv = safeInventoryList
+                                              const filteredInv = inventoryList
                                                   .filter(i => i.projectId === selectedProject.id)
                                                   .filter(i => !inventorySearch || 
-                                                      (i.name && i.name.toLowerCase().includes(searchLower)) || 
-                                                      (i.code && i.code.toLowerCase().includes(searchLower)) || 
-                                                      (i.category && i.category.toLowerCase().includes(searchLower))
+                                                      i.name.toLowerCase().includes(searchLower) || 
+                                                      i.code.toLowerCase().includes(searchLower) || 
+                                                      i.category.toLowerCase().includes(searchLower)
                                                   )
                                                   .sort((a,b) => {
                                                       // เรียงลำดับ: หมด -> ใกล้หมด -> ปกติ
@@ -15207,7 +15208,7 @@ export default function App() {
                                                       if (aLow && !bLow) return -1;
                                                       if (!aLow && bLow) return 1;
 
-                                                      return (a.name || '').localeCompare(b.name || '');
+                                                      return a.name.localeCompare(b.name);
                                                   });
 
                                               if (filteredInv.length === 0) return <tr><td colSpan="8" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">ไม่มีข้อมูลวัสดุในคลัง</td></tr>;
@@ -15280,7 +15281,7 @@ export default function App() {
                                           onChange={(e) => setTransactionFilterItem(e.target.value)}
                                       >
                                           <option value="All">-- ทั้งหมด (All Items) --</option>
-                                          {(Array.isArray(inventoryList) ? inventoryList : []).filter(i => i.projectId === selectedProject.id).sort((a,b) => (a.name||'').localeCompare(b.name||'')).map(item => (
+                                          {inventoryList.filter(i => i.projectId === selectedProject.id).sort((a,b) => a.name.localeCompare(b.name)).map(item => (
                                               <option key={item.id} value={item.id}>[{item.code}] {item.name}</option>
                                           ))}
                                       </select>
@@ -15309,10 +15310,9 @@ export default function App() {
                                   </thead>
                                   <tbody className="divide-y divide-gray-100 bg-white">
                                       {(() => {
-                                          const safeTransactions = Array.isArray(inventoryTransactions) ? inventoryTransactions : [];
-                                          const filteredTransactions = safeTransactions
+                                          const filteredTransactions = inventoryTransactions
                                               .filter(t => t.projectId === selectedProject.id && (transactionFilterItem === 'All' || t.itemId === transactionFilterItem))
-                                              .sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0));
+                                              .sort((a,b) => new Date(b.date) - new Date(a.date));
 
                                           if (filteredTransactions.length === 0) {
                                               return <tr><td colSpan="8" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">ไม่มีประวัติการทำรายการที่ตรงกับเงื่อนไขการค้นหา</td></tr>;
@@ -15325,7 +15325,7 @@ export default function App() {
                                               <tr key={trx.id} className="hover:bg-gray-50 transition-colors">
                                                   <td className="p-3 text-center text-gray-500">{index + 1}</td>
                                                   <td className="p-3 text-center text-gray-600">
-                                                      <div className="flex items-center justify-center gap-1"><Calendar size={12}/> {trx.date ? new Date(trx.date).toLocaleDateString('th-TH', { month: 'short', day: 'numeric', year: 'numeric'}) : '-'}</div>
+                                                      <div className="flex items-center justify-center gap-1"><Calendar size={12}/> {new Date(trx.date).toLocaleDateString('th-TH', { month: 'short', day: 'numeric', year: 'numeric'})}</div>
                                                   </td>
                                                   <td className="p-3 text-center">
                                                       <span className={`px-2 py-1 rounded text-xs font-bold flex items-center justify-center gap-1 w-full border shadow-sm ${
