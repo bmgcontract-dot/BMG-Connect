@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, Component } from 'react';
 import { 
   Users, Building2, BarChart3, Settings, LogOut, 
   Plus, Search, FileText, Download, Trash2, Edit, 
@@ -16,6 +16,48 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line
 } from 'recharts';
+
+// --- NEW: Error Boundary Component ---
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("BMG App Error Caught:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+          <div className="bg-white p-8 rounded-2xl shadow-xl max-w-lg w-full text-center border border-red-100">
+            <div className="w-20 h-20 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-6">
+              <AlertTriangle size={40} />
+            </div>
+            <h1 className="text-2xl font-bold text-gray-800 mb-2">เกิดข้อผิดพลาดในการแสดงผล</h1>
+            <p className="text-gray-600 mb-6">ขออภัย ระบบพบข้อผิดพลาดบางอย่าง กรุณารีเฟรชหน้าจอเพื่อลองใหม่</p>
+            <div className="bg-gray-100 p-4 rounded-lg text-left overflow-auto max-h-32 mb-6">
+                <code className="text-xs text-red-500 break-words">{this.state.error?.toString()}</code>
+            </div>
+            <button 
+              onClick={() => window.location.reload()}
+              className="bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-6 rounded-xl transition-colors w-full"
+            >
+              รีเฟรชหน้าจอ (Reload)
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
@@ -1973,7 +2015,8 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
       const min = filterMinAmount === '' ? 0 : parseFloat(filterMinAmount);
       const max = filterMaxAmount === '' ? Infinity : parseFloat(filterMaxAmount);
       
-      if (item.totalAmount < min || item.totalAmount > max) {
+      const totalAmount = item.totalAmount || 0; // ป้องกัน item.totalAmount เป็น undefined
+      if (totalAmount < min || totalAmount > max) {
         matchAmount = false;
       }
 
@@ -4122,7 +4165,12 @@ export default function App() {
       return false; // ถ้าเป็นพนักงานประจำหน่วยงานปกติ จะถูกล็อค
   };
 
-  // แก้ไขขั้นสูง: ถอด html2pdf.js และโหลดเอนจิน html-to-image + jsPDF เพื่อแก้ภาษาไทย 100%
+  // --- NEW: Safe Render Wrapper ---
+  // ป้องกันการแครชหาก projects หรือ users ยังไม่พร้อมหรือเป็นรูปแบบที่ไม่ถูกต้อง
+  const safeProjects = Array.isArray(projects) ? projects : [];
+  const safeUsers = Array.isArray(users) ? users : [];
+
+  // แก้ไขระดับขั้นสูง: เขียนระบบ Generate PDF ใหม่ด้วย html-to-image
   useEffect(() => { 
       if (!document.getElementById('html-to-image-script')) {
           const script1 = document.createElement('script'); 
@@ -10116,14 +10164,10 @@ export default function App() {
                                                                   <div className="mt-1 flex items-center justify-center gap-1"><Hourglass size={12} className="text-gray-400"/> {new Date(dep.endDate).toLocaleDateString('th-TH', { month: 'short', year: '2-digit', day: 'numeric'})}</div>
                                                               </td>
                                                               <td className="p-3 text-center">
-                                                                  <span className={`px-2 py-1 rounded-md text-xs font-bold border inline-block w-full text-center ${
-                                                                      isExpired ? 'bg-red-50 border-red-200 text-red-700' :
-                                                                      isExpiring ? 'bg-orange-50 border-orange-200 text-orange-700' :
-                                                                      'bg-green-50 border-green-200 text-green-700'
-                                                                  }`}>
-                                                                      {isExpired ? 'ครบกำหนดแล้ว' : `เหลือ ${remDays} วัน`}
-                                                                  </span>
-                                                              </td>
+                    <span className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs font-bold border border-gray-200">
+                      {row.invoiceCount || 0}
+                    </span>
+                  </td>
                                                               {hasPerm('projects', 'edit') && (
                                                                   <td className="p-3 text-center">
                                                                       <div className="flex items-center justify-center gap-1">
@@ -15980,6 +16024,7 @@ export default function App() {
   if (!currentUser) return renderLoginView();
 
   return (
+    <ErrorBoundary>
     <div className={`flex min-h-screen font-sans transition-colors duration-300 w-full overflow-x-hidden ${!isExporting ? (theme === 'dark' ? 'dark-theme' : theme === 'sweet' ? 'sweet-theme' : theme === 'crimson' ? 'crimson-theme' : theme === 'sunset' ? 'sunset-theme' : 'bg-gray-100 text-gray-900') : 'bg-gray-100 text-gray-900'}`}>
       {/* ซ่อนลูกศรขึ้น-ลง ของ input type="number" ทั้งระบบ และเพิ่ม Dark Mode Styles */}
       <style>{`
@@ -21182,7 +21227,7 @@ export default function App() {
           return (
               <div 
                   className="fixed z-[9990] flex items-center justify-center cursor-pointer touch-none"
-                  style={{ right: `${bellPos.right}px`, bottom: `${bellPos.bottom}px` }}
+                  style={{ right: `${bellPos?.right || 24}px`, bottom: `${bellPos?.bottom || 24}px` }}
                   onPointerDown={handleBellPointerDown}
                   title="รายการแจ้งเตือน / ลากเพื่อย้ายตำแหน่ง"
               >
@@ -21198,5 +21243,6 @@ export default function App() {
           );
       })()}
     </div>
+    </ErrorBoundary>
   );
 }
