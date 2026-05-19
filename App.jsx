@@ -1418,11 +1418,13 @@ const getAllFilesLocally = async () => {
 // --- Custom Hook for Persistent Storage (Firebase or LocalStorage Fallback) ---
 function usePersistentState(key, initialValue, fbUser) {
   const [state, setState] = useState(() => {
+      // FIX: โหลดข้อมูลจาก Cache (Local Storage) ขึ้นมาแสดงผลทันทีก่อนเสมอ (Optimistic Load) เพื่อแก้ปัญหาโหลดหน้าเว็บช้า
       if (typeof window !== 'undefined') {
           const local = localStorage.getItem(key);
           if (local) {
               try { 
                   const parsed = JSON.parse(local); 
+                  // 🛡️ FIX: บังคับให้เป็น Array เสมอ หากค่าเริ่มต้นเป็น Array ป้องกันแอปพังหน้าขาว (Crash)
                   if (Array.isArray(initialValue)) {
                       if (!Array.isArray(parsed)) {
                           return (parsed && typeof parsed === 'object') ? Object.values(parsed) : [...initialValue];
@@ -1449,11 +1451,8 @@ function usePersistentState(key, initialValue, fbUser) {
   });
 
   useEffect(() => {
-      // 🛡️ FIX: บังคับให้เป็น Array อีกครั้ง ก่อนนำไปเซ็ตค่าให้ stateRef ป้องกันปัญหาข้อมูลกลายเป็น Object
-      stateRef.current = Array.isArray(initialValue) && !Array.isArray(state) 
-                       ? (state && typeof state === 'object' ? Object.values(state) : []) 
-                       : state;
-  }, [state, initialValue]);
+      stateRef.current = state;
+  }, [state]);
 
   useEffect(() => {
     if (!db) {
@@ -1484,10 +1483,12 @@ function usePersistentState(key, initialValue, fbUser) {
           const applyData = (parsedData) => {
               let finalData = parsedData;
               
+              // 🛡️ FIX: บังคับการแปลงชนิดข้อมูล กรณีข้อมูลถูกเซฟจาก Firebase กลับมาเป็น Object แทน Array
               if (Array.isArray(initialValue) && !Array.isArray(parsedData)) {
                   finalData = (parsedData && typeof parsedData === 'object') ? Object.values(parsedData) : [];
               }
 
+              // --- FIX: Data Loss Prevention ---
               const isFinalEmpty = Array.isArray(finalData) ? finalData.length === 0 : (!finalData || (typeof finalData === 'object' && Object.keys(finalData || {}).length === 0));
               const isCurrentNotEmpty = Array.isArray(stateRef.current) ? stateRef.current.length > 0 : (stateRef.current && typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length > 0);
 
@@ -1496,14 +1497,7 @@ function usePersistentState(key, initialValue, fbUser) {
                   return;
               }
               // ---------------------------------
-              
-              // 🛡️ FIX: บังคับให้เป็น Array ก่อนจะตรวจสอบเงื่อนไข JSON.stringify ป้องกันโครงสร้างข้อมูลเปลี่ยนแล้วทำให้หน้าขาว
-              let stateToCompare = stateRef.current;
-              if (Array.isArray(initialValue) && !Array.isArray(stateToCompare)) {
-                  stateToCompare = (stateToCompare && typeof stateToCompare === 'object') ? Object.values(stateToCompare) : [];
-              }
-
-              if (JSON.stringify(stateToCompare) !== JSON.stringify(finalData)) {
+              if (JSON.stringify(stateRef.current) !== JSON.stringify(finalData)) {
                   setState(finalData);
                   stateRef.current = finalData;
                   if (typeof window !== 'undefined') localStorage.setItem(key, JSON.stringify(finalData));
@@ -1589,15 +1583,10 @@ function usePersistentState(key, initialValue, fbUser) {
   }, [fbUser, key]);
 
   const setPersistentValue = async (newValue, isRestore = false) => {
-    lastLocalUpdateRef.current = Date.now(); 
+    lastLocalUpdateRef.current = Date.now(); // บันทึกเวลาที่แก้ล่าสุด เพื่อกัน Firebase มาทับ
 
-    // 🛡️ FIX: บังคับให้เป็น Array หากค่าเริ่มต้นเป็น Array ป้องกันการเซ็ต State เป็น Object ไปยังระบบ
-    let valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
-    if (Array.isArray(initialValue) && !Array.isArray(valueToStore)) {
-        valueToStore = (valueToStore && typeof valueToStore === 'object') ? Object.values(valueToStore) : [];
-    }
-
-    if (!isRestore && JSON.stringify(valueToStore) === JSON.stringify(stateRef.current)) return;
+    const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
+    if (!isRestore && valueToStore === stateRef.current) return;
 
     setState(valueToStore);
     stateRef.current = valueToStore;
@@ -1614,12 +1603,12 @@ function usePersistentState(key, initialValue, fbUser) {
        if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
 
        return new Promise((resolve) => {
+           // NEW: หน่วงเวลา 1 วินาที หลังจากหยุดพิมพ์/คลิก ค่อยเซฟขึ้น Database
            syncTimeoutRef.current = setTimeout(async () => {
                isUploadingRef.current = true;
                try {
-                   // 🛡️ FIX: ใช้ valueToStore ที่ถูกจัดรูปแบบแล้วเพื่อป้องกันข้อมูลแปลกปลอมขึ้นคลาวด์
-                   const jsonStr = JSON.stringify(valueToStore); 
-                   const CHUNK_SIZE = 250000; 
+                   const jsonStr = JSON.stringify(stateRef.current); // ใช้ state ล่าสุดเสมอ
+                   const CHUNK_SIZE = 250000; // FIX: ลดขนาด Chunk ลงจาก 900000 เป็น 250000 เพื่อป้องกัน 1MB Limit สำหรับภาษาไทย
                    const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
                    
                    for (let i = 0; i < totalChunks; i++) {
