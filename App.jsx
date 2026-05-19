@@ -7273,7 +7273,8 @@ export default function App() {
           // ใช้ค่าจาก user หรือถ้าไม่มีให้ใช้ค่าเริ่มต้น
           position: user.position || EMPLOYEE_POSITIONS[0],
           accessibleDepts: depts,
-          permissions: user.permissions || getDefaultPermissions(),
+          // แก้ไข: ใช้ getMergedPermissions เพื่อให้แน่ใจว่าโครงสร้างสิทธิ์ครบถ้วนเสมอ (ป้องกันปัญหาเซฟแล้วไม่จำ)
+          permissions: getMergedPermissions(user.permissions || getDefaultPermissions()),
       });
       setIsEditingUser(true);
       setShowAddUserModal(true);
