@@ -3109,6 +3109,7 @@ export default function App() {
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null, confirmText: 'ยืนยันการลบ', type: 'danger' });
 
   // NEW: State สำหรับตัวกรองหน้าจัดการผู้ใช้งาน
+  const [userSearchTerm, setUserSearchTerm] = useState('');
   const [userDeptFilter, setUserDeptFilter] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState('');
   const [userSortOrder, setUserSortOrder] = useState('desc');
@@ -8429,18 +8430,16 @@ export default function App() {
 };
 
   const UserManagement = () => {
-      const [searchTerm, setSearchTerm] = useState('');
-
       // Logic สำหรับการกรองและการเรียงลำดับ
       const safeUsers = Array.isArray(users) ? users.filter(Boolean) : [];
       const filteredUsers = safeUsers
           .filter(u => {
-              const searchLower = searchTerm.toLowerCase();
-              const matchSearch = searchTerm === '' || 
-                  (u.firstName || '').toLowerCase().includes(searchLower) ||
-                  (u.lastName || '').toLowerCase().includes(searchLower) ||
-                  (u.employeeId || '').toLowerCase().includes(searchLower) ||
-                  (u.username || '').toLowerCase().includes(searchLower);
+              const searchLower = String(userSearchTerm || '').toLowerCase();
+              const matchSearch = searchLower === '' || 
+                  String(u.firstName || '').toLowerCase().includes(searchLower) ||
+                  String(u.lastName || '').toLowerCase().includes(searchLower) ||
+                  String(u.employeeId || '').toLowerCase().includes(searchLower) ||
+                  String(u.username || '').toLowerCase().includes(searchLower);
 
               // FIX: ป้องกันบัคจอขาวกรณี accessibleDepts ถูกบันทึกเป็น String ในข้อมูลเก่า
               const accDepts = Array.isArray(u.accessibleDepts) ? u.accessibleDepts : (typeof u.accessibleDepts === 'string' ? u.accessibleDepts.split(', ').filter(Boolean) : []);
@@ -8590,8 +8589,8 @@ export default function App() {
                                   type="text" 
                                   placeholder="ค้นหา ชื่อ, รหัสพนักงาน, Username..." 
                                   className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-200 outline-none text-sm transition-shadow"
-                                  value={searchTerm}
-                                  onChange={(e) => setSearchTerm(e.target.value)}
+                                  value={userSearchTerm}
+                                  onChange={(e) => setUserSearchTerm(e.target.value)}
                               />
                           </div>
                       </div>
