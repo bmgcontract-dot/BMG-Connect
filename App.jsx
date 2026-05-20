@@ -3109,9 +3109,9 @@ export default function App() {
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null, confirmText: 'ยืนยันการลบ', type: 'danger' });
 
   // NEW: State สำหรับตัวกรองหน้าจัดการผู้ใช้งาน
-  const [userDeptFilter, setUserDeptFilter] = useState('');
-  const [userRoleFilter, setUserRoleFilter] = useState('');
-  const [userSortOrder, setUserSortOrder] = useState('desc');
+  const [userDeptFilter, setUserDeptFilter] = useState('all');
+  const [userRoleFilter, setUserRoleFilter] = useState('all');
+  const [userSortOrder, setUserSortOrder] = useState('asc');
 
   // NEW: State สำหรับตัวกรองหน้าโครงการ
   const [projectTypeFilter, setProjectTypeFilter] = useState('');
@@ -8443,12 +8443,12 @@ export default function App() {
                   (u.username || '').toLowerCase().includes(searchLower);
 
               // FIX 3: กรองด้วยหน่วยงาน (Department) ให้แม่นยำ
-              const matchDept = !userDeptFilter || userDeptFilter === 'all' || 
+              const matchDept = userDeptFilter === 'all' || 
                   u.department === userDeptFilter ||
                   (u.accessibleDepts && u.accessibleDepts.includes(userDeptFilter));
 
               // FIX 3: กรองด้วยตำแหน่ง (Position) ให้แม่นยำ
-              const matchRole = !userRoleFilter || userRoleFilter === 'all' || u.position === userRoleFilter;
+              const matchRole = userRoleFilter === 'all' || u.position === userRoleFilter;
 
               return matchSearch && matchDept && matchRole;
           })
