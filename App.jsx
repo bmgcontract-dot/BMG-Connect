@@ -3109,10 +3109,9 @@ export default function App() {
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null, confirmText: 'ยืนยันการลบ', type: 'danger' });
 
   // NEW: State สำหรับตัวกรองหน้าจัดการผู้ใช้งาน
-  const [userSearchFilter, setUserSearchFilter] = useState('');
   const [userDeptFilter, setUserDeptFilter] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState('');
-  const [userSortOrder, setUserSortOrder] = useState('asc'); // ตั้งค่าเริ่มต้นเป็น น้อยไปมาก
+  const [userSortOrder, setUserSortOrder] = useState('desc');
 
   // NEW: State สำหรับตัวกรองหน้าโครงการ
   const [projectTypeFilter, setProjectTypeFilter] = useState('');
@@ -7266,22 +7265,22 @@ export default function App() {
   const handleSaveUser = (e) => {
       e.preventDefault();
 
-      // --- FIX 1: ป้องกัน รหัสพนักงาน (employeeId) และ ชื่อผู้ใช้ (username) ซ้ำซ้อน ---
-      const empId = (newUser.employeeId || '').trim();
-      const uName = (newUser.username || '').trim();
+      // --- FIX 1: ป้องกัน รหัสพนักงาน (employeeId) และ ชื่อผู้ใช้ (username) ซ้ำซ้อนอย่างเข้มงวด ---
+      const empId = (newUser.employeeId || '').trim().toLowerCase();
+      const uName = (newUser.username || '').trim().toLowerCase();
       
       if (empId) {
-          const isEmpIdDuplicate = users.some(u => u.id !== newUser.id && (u.employeeId || '').trim() === empId);
+          const isEmpIdDuplicate = users.some(u => u.id !== newUser.id && (u.employeeId || '').trim().toLowerCase() === empId);
           if (isEmpIdDuplicate) {
-              alert(`บันทึกไม่สำเร็จ: รหัสพนักงาน "${empId}" มีการใช้งานแล้วในระบบ กรุณาตรวจสอบและเปลี่ยนรหัสใหม่`);
+              alert(`บันทึกไม่สำเร็จ: รหัสพนักงาน "${newUser.employeeId}" มีการใช้งานแล้วในระบบ กรุณาตรวจสอบและเปลี่ยนรหัสใหม่`);
               return; // หยุดการทำงาน
           }
       }
       
       if (uName) {
-          const isUnameDuplicate = users.some(u => u.id !== newUser.id && (u.username || '').trim().toLowerCase() === uName.toLowerCase());
+          const isUnameDuplicate = users.some(u => u.id !== newUser.id && (u.username || '').trim().toLowerCase() === uName);
           if (isUnameDuplicate) {
-              alert(`บันทึกไม่สำเร็จ: ชื่อผู้ใช้สำหรับล็อกอิน (Username) "${uName}" มีคนใช้แล้ว กรุณาเปลี่ยนใหม่`);
+              alert(`บันทึกไม่สำเร็จ: ชื่อผู้ใช้ (Username) "${newUser.username}" มีคนใช้แล้ว กรุณาเปลี่ยนใหม่`);
               return; // หยุดการทำงาน
           }
       }
@@ -8430,67 +8429,53 @@ export default function App() {
 };
 
   const UserManagement = () => {
+      const [searchTerm, setSearchTerm] = useState('');
+
       // Logic สำหรับการกรองและการเรียงลำดับ
       const safeUsers = Array.isArray(users) ? users.filter(Boolean) : [];
       const filteredUsers = safeUsers
           .filter(u => {
-              if (!userSearchFilter) return true;
-              const term = userSearchFilter.toLowerCase();
-              return (
-                  (u.employeeId || '').toLowerCase().includes(term) ||
-                  (u.firstName || '').toLowerCase().includes(term) ||
-                  (u.lastName || '').toLowerCase().includes(term) ||
-                  (u.username || '').toLowerCase().includes(term)
-              );
-          })
-          .filter(u => {
-              if (!userDeptFilter) return true;
-              // ค้นหาจากสังกัดหลัก
-              if (u.department === userDeptFilter) return true;
-              // ค้นหาจากหน่วยงานที่เข้าถึงได้ด้วย (เพื่อให้ Area Manager ที่ดูแลหลายที่แสดงขึ้นมาด้วย)
-              const depts = u.accessibleDepts;
-              const deptsArray = Array.isArray(depts) ? depts : (typeof depts === 'string' ? depts.split(', ').filter(Boolean) : []);
-              if (deptsArray.includes('All') || deptsArray.includes(userDeptFilter)) return true;
-              return false;
-          })
-          .filter(u => {
-              if (!userRoleFilter) return true;
-              // ค้นหาตำแหน่ง
-              return u.position === userRoleFilter;
+              const searchLower = searchTerm.toLowerCase();
+              const matchSearch = searchTerm === '' || 
+                  (u.firstName || '').toLowerCase().includes(searchLower) ||
+                  (u.lastName || '').toLowerCase().includes(searchLower) ||
+                  (u.employeeId || '').toLowerCase().includes(searchLower) ||
+                  (u.username || '').toLowerCase().includes(searchLower);
+
+              // FIX 3: กรองด้วยหน่วยงาน (Department) ให้แม่นยำ
+              const matchDept = !userDeptFilter || userDeptFilter === 'all' || 
+                  u.department === userDeptFilter ||
+                  (u.accessibleDepts && u.accessibleDepts.includes(userDeptFilter));
+
+              // FIX 3: กรองด้วยตำแหน่ง (Position) ให้แม่นยำ
+              const matchRole = !userRoleFilter || userRoleFilter === 'all' || u.position === userRoleFilter;
+
+              return matchSearch && matchDept && matchRole;
           })
           .sort((a, b) => {
-              const idA = String(a.employeeId || '');
-              const idB = String(b.employeeId || '');
-              if (userSortOrder === 'desc') return idB.localeCompare(idA, undefined, { numeric: true, sensitivity: 'base' }); // มากไปน้อย
-              return idA.localeCompare(idB, undefined, { numeric: true, sensitivity: 'base' }); // น้อยไปมาก
+              const idA = String(a.employeeId || a.firstName || '');
+              const idB = String(b.employeeId || b.firstName || '');
+              if (userSortOrder === 'desc') return idB.localeCompare(idA, undefined, { numeric: true, sensitivity: 'base' });
+              return idA.localeCompare(idB, undefined, { numeric: true, sensitivity: 'base' });
           });
 
-      // --- NEW: ฟังก์ชันสำหรับนำเข้าไฟล์ CSV ข้อมูลพนักงาน (รองรับภาษาไทยจาก Excel) ---
+      // --- FIX 2: ปรับปรุงการนำเข้าข้อมูล (Import CSV) ให้เช็คข้อมูลซ้ำซ้อนอย่างเข้มงวด ---
       const handleImportUsersCSV = (event) => {
           const file = event.target.files[0];
           if (!file) return;
           const reader = new FileReader();
           
-          // อ่านเป็น ArrayBuffer เพื่อมาถอดรหัส (Decode) เอง แก้ปัญหาภาษาไทยเป็น ????
           reader.readAsArrayBuffer(file);
-          
           reader.onload = (e) => {
               try {
                   const buffer = e.target.result;
                   let text = '';
-                  
-                  try {
-                      // พยายามถอดรหัสเป็นแบบ UTF-8 (มาตรฐาน) ก่อน โดยตั้ง fatal: true เพื่อให้เกิด Error ทันทีหากอ่านภาษาไทยไม่ออก
-                      text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
-                  } catch (err) {
-                      // หากเกิด Error (มักจะเกิดจากไฟล์ CSV ที่เซฟจาก Excel ภาษาไทย) ให้สลับไปใช้ windows-874 / tis-620 อัตโนมัติ
-                      text = new TextDecoder('windows-874').decode(buffer);
-                  }
+                  try { text = new TextDecoder('utf-8', { fatal: true }).decode(buffer); } 
+                  catch (err) { text = new TextDecoder('windows-874').decode(buffer); }
 
                   const lines = text.split(/\r?\n/);
                   if (lines.length < 2) return alert('ไฟล์ CSV ไม่มีข้อมูล หรือมีแค่หัวตาราง');
                   
-                  // แยกคอลัมน์โดยไม่แยกคอมม่าที่อยู่ในเครื่องหมายคำพูด ("")
                   const parseCSVLine = (line) => {
                       const regex = /,(?=(?:(?:[^"]*"){2})*[^"]*$)/;
                       return line.split(regex).map(v => v.trim().replace(/^"|"$/g, ''));
@@ -8498,239 +8483,244 @@ export default function App() {
 
                   const headers = parseCSVLine(lines[0]);
                   const newUsers = [];
+                  const existingUsers = [...safeUsers]; // สำเนาผู้ใช้ปัจจุบัน
                   
                   for (let i = 1; i < lines.length; i++) {
                       if (!lines[i].trim()) continue;
                       
                       const values = parseCSVLine(lines[i]);
                       const userObj = {};
-                      headers.forEach((header, index) => {
-                          userObj[header] = values[index];
-                      });
+                      headers.forEach((header, index) => { userObj[header] = values[index]; });
                       
-                      // เช็คเฉพาะฟิลด์บังคับ คือ username และ firstName
                       if (userObj.username && userObj.firstName) {
-                          const finalUsername = userObj.username;
-                          newUsers.push({
-                              id: generateId(),
-                              employeeId: finalUsername, // บังคับให้รหัสพนักงานเป็นค่าเดียวกับชื่อผู้ใช้งาน
-                              firstName: userObj.firstName || '',
-                              lastName: userObj.lastName || '',
-                              position: userObj.position || EMPLOYEE_POSITIONS[0], // ค่าเริ่มต้น
-                              department: userObj.department || 'Head Office',
-                              phone: userObj.phone || '',
-                              username: finalUsername, // บังคับให้ชื่อผู้ใช้งานเป็นค่าเดียวกับรหัสพนักงาน
-                              password: userObj.password || '1234', // รหัสผ่านตั้งต้นถ้าไม่ได้ใส่มา
-                              status: 'Active',
-                              created_at: new Date().toISOString(),
-                              accessibleDepts: [],
-                              permissions: getDefaultPermissions(),
-                              photo: null
-                          });
+                          const empId = (userObj.employeeId || userObj.username).trim();
+                          const uName = userObj.username.trim();
+                          
+                          // เช็คข้อมูลซ้ำจากรหัสพนักงาน หรือ Username
+                          const isDuplicate = existingUsers.some(u => 
+                              (u.employeeId || '').toLowerCase() === empId.toLowerCase() || 
+                              (u.username || '').toLowerCase() === uName.toLowerCase()
+                          );
+
+                          if (!isDuplicate) {
+                              const newUserObj = {
+                                  id: generateId(),
+                                  employeeId: empId,
+                                  firstName: userObj.firstName || '',
+                                  lastName: userObj.lastName || '',
+                                  position: userObj.position || EMPLOYEE_POSITIONS[0],
+                                  department: userObj.department || 'Head Office',
+                                  phone: userObj.phone || '',
+                                  username: uName,
+                                  password: userObj.password || '1234',
+                                  status: 'Active',
+                                  created_at: new Date().toISOString(),
+                                  accessibleDepts: [],
+                                  permissions: getMergedPermissions(rolePermissions[userObj.position || EMPLOYEE_POSITIONS[0]]),
+                                  photo: null
+                              };
+                              newUsers.push(newUserObj);
+                              existingUsers.push(newUserObj); // เพิ่มเข้า existing เพื่อเช็คซ้ำบรรทัดต่อไป
+                          }
                       }
                   }
                   
                   if (newUsers.length > 0) {
-                      showConfirm('ยืนยันการนำเข้า', `พบข้อมูลพนักงานใหม่ที่ถูกต้อง ${newUsers.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
+                      showConfirm('ยืนยันการนำเข้า', `พบข้อมูลพนักงานใหม่ที่ถูกต้องและไม่ซ้ำซ้อน ${newUsers.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
                           setUsers(prev => [...prev, ...newUsers]);
                           alert('นำเข้าข้อมูลพนักงานสำเร็จแล้ว!');
                       }, 'ยืนยันการนำเข้า', 'info');
                   } else {
-                      alert('ไม่พบข้อมูลพนักงานที่ถูกต้องในไฟล์ (กรุณาตรวจสอบว่ามีคอลัมน์ username และ firstName)');
+                      alert('ไม่พบข้อมูลพนักงานที่ถูกต้อง หรือ ข้อมูลพนักงานทั้งหมดในไฟล์มีอยู่ในระบบแล้ว (รหัสพนักงาน/Username ซ้ำ)');
                   }
               } catch (error) {
                   alert('เกิดข้อผิดพลาดในการอ่านไฟล์ CSV โปรดตรวจสอบรูปแบบไฟล์');
                   console.error(error);
               }
           };
-          event.target.value = ''; // รีเซ็ต input เพื่อให้เลือกไฟล์เดิมซ้ำได้
+          event.target.value = '';
       };
 
       return (
-          <div className="space-y-6">
+          <div className="space-y-6 animate-fade-in h-full flex flex-col">
               <ReportHeader />
-              <header className="flex justify-between items-center">
-                  <h1 className="text-2xl font-bold text-gray-800">{t('userMgmt')}</h1>
-                  <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
+              <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-2 shrink-0 gap-4">
+                  <div>
+                      <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                          <User className="text-blue-600" size={28}/> 
+                          จัดการผู้ใช้งาน (User Management)
+                      </h1>
+                      <p className="text-gray-500">จัดการข้อมูลพนักงาน สิทธิ์การเข้าถึง และหน่วยงาน</p>
+                  </div>
+                  <div className={`flex gap-2 w-full md:w-auto overflow-x-auto pb-2 md:pb-0 ${isExporting ? 'hidden' : ''}`}>
                       {hasPerm('users', 'save') && (
                           <>
-                              <Button variant="outline" className="border-orange-500 text-orange-600 hover:bg-orange-50 font-bold hidden md:flex" icon={Shield} onClick={() => {
+                              <Button variant="outline" className="border-orange-500 text-orange-600 hover:bg-orange-50 font-bold hidden md:flex whitespace-nowrap" icon={Shield} onClick={() => {
                                   setEditingRole(EMPLOYEE_POSITIONS[0]);
-                                  // แก้ไข: ใช้ getMergedPermissions เพื่อให้ได้โครงสร้างสิทธิ์ที่สมบูรณ์เสมอ
                                   setEditingRolePerms(getMergedPermissions(rolePermissions[EMPLOYEE_POSITIONS[0]]));
                                   setShowRolePermModal(true);
-                              }}>ตั้งค่าสิทธิ์ตามตำแหน่ง</Button>
-                              <label className="cursor-pointer flex items-center justify-center gap-2 px-4 py-2 text-sm rounded-md font-medium transition-colors bg-green-600 text-white hover:bg-green-700 shadow-sm" title="นำเข้าข้อมูลจากไฟล์ .csv">
-                                  <Upload size={16} /> นำเข้า CSV
+                              }}>ตั้งค่าสิทธิ์แม่แบบ</Button>
+                              <label className="cursor-pointer flex items-center justify-center gap-2 px-4 py-2 text-sm rounded-md font-medium transition-colors bg-green-600 text-white hover:bg-green-700 shadow-sm whitespace-nowrap" title="นำเข้าข้อมูลจากไฟล์ .csv">
+                                  <UploadCloud size={16} /> นำเข้า CSV
                                   <input type="file" accept=".csv" className="hidden" onChange={handleImportUsersCSV} />
                               </label>
-                              <Button icon={Plus} onClick={() => { 
+                              <Button icon={Plus} className="whitespace-nowrap" onClick={() => { 
                                   setIsEditingUser(false); 
-                                  // แก้ไข: ล้างข้อมูล State ให้เป็นค่าเริ่มต้นทุกครั้งที่กดเพิ่มผู้ใช้ใหม่ ป้องกันข้อมูลคนเก่าค้าง
                                   setNewUser({ 
-                                      employeeId: '', 
-                                      firstName: '', 
-                                      lastName: '', 
-                                      position: EMPLOYEE_POSITIONS[0], 
-                                      otherPosition: '', 
-                                      department: '', 
-                                      accessibleDepts: [], 
-                                      phone: '', 
-                                      username: '', 
-                                      password: '', 
-                                      photo: null, 
-                                      permissions: getMergedPermissions(rolePermissions[EMPLOYEE_POSITIONS[0]]) 
+                                      employeeId: '', firstName: '', lastName: '', position: EMPLOYEE_POSITIONS[0], otherPosition: '', department: '', accessibleDepts: [], phone: '', username: '', password: '', photo: null, permissions: getMergedPermissions(rolePermissions[EMPLOYEE_POSITIONS[0]]) 
                                   });
                                   setShowAddUserModal(true); 
                               }}>{t('addUser')}</Button>
                           </>
                       )}
                       <Button variant="outline" icon={Download} onClick={() => exportToCSV(filteredUsers, 'users_list')}>CSV</Button>
-                      <Button variant="outline" icon={isExporting ? Loader2 : Printer} onClick={() => handleExportPDF('print-area', 'User_List.pdf', 'landscape')} disabled={isExporting}>{isExporting ? t('downloading') : t('printPDF')}</Button>
+                      <Button variant="outline" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-user-area', 'User_List.pdf', 'landscape')} disabled={isExporting}>{isExporting ? t('downloading') : t('printPDF')}</Button>
                   </div>
               </header>
 
-              {/* ส่วนของตัวกรอง (Filters) */}
-              <Card className={`grid grid-cols-1 md:grid-cols-4 gap-4 bg-white p-4 ${isExporting ? 'hidden' : ''}`}>
-                  <div>
-                      <label className="block text-xs font-bold text-gray-500 mb-2">ค้นหาพนักงาน</label>
-                      <div className="relative">
-                          <Search size={16} className="absolute left-3 top-2.5 text-gray-400" />
-                          <input 
-                              type="text" 
-                              placeholder="รหัส, ชื่อ, Username..."
-                              className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-orange-200 outline-none transition-colors bg-white"
-                              value={userSearchFilter}
-                              onChange={e => setUserSearchFilter(e.target.value)}
-                          />
+              <Card className="flex-1 flex flex-col min-h-[500px] overflow-hidden" id="print-user-area">
+                  <div className={`bg-gray-50 p-4 border-b border-gray-200 flex flex-wrap gap-4 shadow-inner ${isExporting ? 'hidden' : ''}`}>
+                      <div className="flex-1 min-w-[200px]">
+                          <div className="relative">
+                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                              <input 
+                                  type="text" 
+                                  placeholder="ค้นหา ชื่อ, รหัสพนักงาน, Username..." 
+                                  className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-200 outline-none text-sm transition-shadow"
+                                  value={searchTerm}
+                                  onChange={(e) => setSearchTerm(e.target.value)}
+                              />
+                          </div>
                       </div>
-                  </div>
-                  <div>
-                      <label className="block text-xs font-bold text-gray-500 mb-2">เรียงลำดับ (รหัสพนักงาน)</label>
                       <select 
-                          className="w-full border border-gray-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-200 outline-none transition-colors cursor-pointer bg-white"
-                          value={userSortOrder}
-                          onChange={e => setUserSortOrder(e.target.value)}
-                      >
-                          <option value="asc">น้อยไปมาก (A-Z, 1-9)</option>
-                          <option value="desc">มากไปน้อย (Z-A, 9-1)</option>
-                      </select>
-                  </div>
-                  <div>
-                      <label className="block text-xs font-bold text-gray-500 mb-2">แยกตามหน่วยงาน (Department)</label>
-                      <select 
-                          className="w-full border border-gray-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-200 outline-none transition-colors cursor-pointer bg-white"
+                          className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-blue-200 cursor-pointer min-w-[150px]"
                           value={userDeptFilter}
-                          onChange={e => setUserDeptFilter(e.target.value)}
+                          onChange={(e) => setUserDeptFilter(e.target.value)}
                       >
-                          <option value="">-- ทั้งหมด (All) --</option>
+                          <option value="all">ทุกหน่วยงาน / โครงการ</option>
                           <option value="Head Office">Head Office</option>
-                          {projects.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                          {projects.map(p => (
+                              <option key={p.id} value={p.name}>{p.name}</option>
+                          ))}
                       </select>
-                  </div>
-                  <div>
-                      <label className="block text-xs font-bold text-gray-500 mb-2">แยกตามตำแหน่ง (Position)</label>
                       <select 
-                          className="w-full border border-gray-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-200 outline-none transition-colors cursor-pointer bg-white"
+                          className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-blue-200 cursor-pointer min-w-[150px]"
                           value={userRoleFilter}
-                          onChange={e => setUserRoleFilter(e.target.value)}
+                          onChange={(e) => setUserRoleFilter(e.target.value)}
                       >
-                          <option value="">-- ทั้งหมด (All) --</option>
+                          <option value="all">ทุกตำแหน่ง (All Roles)</option>
                           {EMPLOYEE_POSITIONS.map(pos => <option key={pos} value={pos}>{pos}</option>)}
                       </select>
+                      <button 
+                          onClick={() => setUserSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                          className="px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-600 transition-colors shrink-0"
+                          title="สลับการเรียงลำดับ"
+                      >
+                          <span>เรียง: {userSortOrder === 'asc' ? 'ก-ฮ / A-Z' : 'ฮ-ก / Z-A'}</span>
+                      </button>
                   </div>
-              </Card>
 
-              <Card className="overflow-hidden">
-                  <div className="overflow-x-auto">
-                      <table className="w-full text-left text-sm">
-                          <thead className="bg-gray-50 text-gray-600 uppercase">
-                              <tr>
-                                  <th className="p-4 w-16 text-center">{t('col_seq')}</th>
-                                  <th className="p-4 w-32">{t('col_empId')}</th>
-                                  <th className="p-4">{t('col_name')}</th>
-                                  <th className="p-4">{t('col_role')}</th>
-                                  <th className="p-4">{t('col_dept')}</th>
-                                  <th className="p-4">{t('accessibleDepts')}</th>
-                                  <th className="p-4">{t('username')}</th>
-                                  <th className="p-4">{t('col_status')}</th>
-                                  <th className="p-4 w-36">{t('col_lastLogin')}</th>
-                                  <th className={`p-4 text-center ${isExporting ? 'hidden' : ''}`}>{t('col_actions')}</th>
-                              </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100 bg-white">
-                              {filteredUsers.length > 0 ? filteredUsers.map((user, index) => (
-                                  <tr key={user.id} className="hover:bg-gray-50 cursor-pointer group transition-colors" onClick={() => { if(hasPerm('users', 'edit')) handleEditUser(user); }}>
-                                      <td className="p-4 text-center text-gray-500">{index + 1}</td>
-                                      <td className="p-4 font-mono font-medium text-orange-600">{user.employeeId || '-'}</td>
-                                      <td className="p-4 font-medium flex items-center gap-3">
-                                          <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden text-xs shrink-0">
-                                              {user.photo ? <img src={user.photo} alt="" className="w-full h-full object-cover" /> : <User size={16} className="text-gray-400" />}
-                                          </div>
-                                          <div className="group-hover:text-orange-600 transition-colors flex items-center gap-2">
-                                              {user.firstName} {user.lastName} 
-                                              {hasPerm('users', 'edit') && <Edit size={14} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />}
-                                          </div>
-                                      </td>
-                                      <td className="p-4"><span className="bg-gray-100 px-2 py-1 rounded text-xs text-gray-700">{user.position}</span></td>
-                                      <td className="p-4 text-gray-800">{user.department || '-'}</td>
-                                      <td className="p-4">
-                                          {(() => {
-                                              // FIX: ตรวจสอบและจัดการชนิดข้อมูล ป้องกัน Array .split() Error
-                                              const depts = user.accessibleDepts;
-                                              if (!depts || depts === '' || (Array.isArray(depts) && depts.length === 0)) {
-                                                  return <span className="text-gray-400 text-xs">-</span>;
-                                              }
-                                              
-                                              const deptsArray = Array.isArray(depts) ? depts : (typeof depts === 'string' ? depts.split(', ').filter(Boolean) : []);
-                                              
-                                              if (deptsArray.includes('All')) {
-                                                  return <span className="bg-blue-100 text-blue-700 border border-blue-200 px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap">All (ทุกหน่วยงาน)</span>;
-                                              }
-                                              
-                                              return (
-                                                  <div className="flex flex-wrap gap-1">
-                                                      {deptsArray.map((d, i) => d ? <span key={i} className="bg-orange-50 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded text-[10px] whitespace-nowrap">{d}</span> : null)}
-                                                  </div>
-                                              );
-                                          })()}
-                                      </td>
-                                      <td className="p-4 text-gray-600">{user.username}</td>
-                                      <td className="p-4"><Badge status={user.status} /></td>
-                                      <td className="p-4 text-xs text-gray-500">
-                                          {user.lastLogin ? (() => {
-                                              const lastDate = new Date(user.lastLogin);
-                                              const now = new Date();
-                                              const diffMins = Math.floor((now - lastDate) / 60000);
-                                              // หากมีคนเข้าสู่ระบบภายใน 15 นาที ให้แสดงเป็นสถานะออนไลน์ (จุดเขียว)
-                                              const isOnline = diffMins <= 15; 
-                                              return (
-                                                  <div className="flex flex-col gap-1">
-                                                      <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md border w-fit shadow-sm ${isOnline ? 'bg-green-50 border-green-200 text-green-700' : 'bg-gray-50 border-gray-200 text-gray-600'}`} title={lastDate.toLocaleString('th-TH')}>
-                                                          {isOnline ? <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> : <Clock size={12} className="text-gray-400 shrink-0"/>}
-                                                          <span className="font-bold">{isOnline ? 'ออนไลน์' : 'ออฟไลน์'}</span>
-                                                      </div>
-                                                      <div className="text-[10px] text-gray-400 pl-1">
-                                                          {lastDate.toLocaleDateString('th-TH', { year: '2-digit', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} น.
-                                                      </div>
-                                                  </div>
-                                              );
-                                          })() : (
-                                              <span className="text-gray-300">-</span>
-                                          )}
-                                      </td>
-                                      <td className={`p-4 text-center space-x-1 ${isExporting ? 'hidden' : ''}`}>
-                                          {hasPerm('users', 'edit') && <button className="text-gray-400 hover:text-blue-600 transition-colors p-1.5 rounded-md hover:bg-blue-50" onClick={(e) => { e.stopPropagation(); handleEditUser(user); }} title="แก้ไขข้อมูล"><Edit size={16} /></button>}
-                                          {hasPerm('users', 'delete') && <button className="text-gray-400 hover:text-red-600 transition-colors p-1.5 rounded-md hover:bg-red-50" onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบผู้ใช้งาน ${user.firstName} ${user.lastName} ใช่หรือไม่?`, () => setUsers(prev => prev.filter(u => u.id !== user.id))); }} title="ลบข้อมูล"><Trash2 size={16} /></button>}
-                                      </td>
-                                  </tr>
-                              )) : (
-                                  <tr>
-                                      <td colSpan="8" className="p-8 text-center text-gray-400 bg-gray-50 border-b border-dashed">ไม่พบข้อมูลพนักงานที่ตรงกับเงื่อนไขการค้นหา</td>
-                                  </tr>
+                  <div className={`p-4 md:p-6 flex-1 bg-gray-50/50 ${isExporting ? 'overflow-visible bg-white p-0' : 'overflow-y-auto'}`}>
+                      <div className={`bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm ${isExporting ? 'border-none shadow-none' : ''}`}>
+                          <div className={isExporting ? "w-[277mm] min-w-[277mm] max-w-[277mm] mx-auto box-border" : "overflow-x-auto"}>
+                              {isExporting && (
+                                  <div className="text-center mb-6 pt-4">
+                                      <h2 className="text-xl font-bold uppercase">รายชื่อพนักงานและผู้ใช้งานระบบ</h2>
+                                      <p className="text-sm text-gray-500 mt-1">อัปเดตข้อมูล ณ วันที่ {new Date().toLocaleDateString('th-TH')}</p>
+                                  </div>
                               )}
-                          </tbody>
-                      </table>
+                              <table className="w-full text-sm text-left">
+                                  <thead className="bg-gray-50 text-gray-600 border-b border-gray-200">
+                                      <tr>
+                                          <th className="p-3 font-semibold text-center w-12">#</th>
+                                          <th className="p-3 font-semibold w-20 text-center">รูปภาพ</th>
+                                          <th className="p-3 font-semibold">รหัส / ชื่อ-นามสกุล</th>
+                                          <th className="p-3 font-semibold">Username</th>
+                                          <th className="p-3 font-semibold">ตำแหน่ง</th>
+                                          <th className="p-3 font-semibold w-48">สังกัดหลัก / การเข้าถึง</th>
+                                          <th className="p-3 font-semibold text-center w-28">สถานะเข้าใช้งาน</th>
+                                          <th className={`p-3 font-semibold text-center w-24 ${isExporting ? 'hidden' : ''}`}>จัดการ</th>
+                                      </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-100">
+                                      {filteredUsers.length > 0 ? filteredUsers.map((user, idx) => (
+                                          <tr key={user.id || idx} className="hover:bg-gray-50 transition-colors group cursor-pointer" onClick={() => { if(hasPerm('users', 'edit') && !isExporting) handleEditUser(user); }}>
+                                              <td className="p-3 text-center text-gray-500">{idx + 1}</td>
+                                              <td className="p-3 text-center">
+                                                  <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center mx-auto overflow-hidden border border-gray-300 shadow-sm">
+                                                      {user.photo ? <img src={user.photo} className="w-full h-full object-cover" /> : <User size={20} className="text-gray-400"/>}
+                                                  </div>
+                                              </td>
+                                              <td className="p-3">
+                                                  <div className="font-bold text-gray-800 flex items-center gap-1.5 group-hover:text-blue-600 transition-colors">
+                                                      {user.firstName} {user.lastName}
+                                                      {!isExporting && hasPerm('users', 'edit') && <Edit size={12} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />}
+                                                  </div>
+                                                  <div className="text-xs text-orange-600 font-mono font-medium mt-0.5">{user.employeeId || '-'}</div>
+                                              </td>
+                                              <td className="p-3 text-gray-600 font-medium">{user.username}</td>
+                                              <td className="p-3">
+                                                  <span className="px-2 py-1 bg-gray-100 text-gray-700 border border-gray-200 rounded-lg text-xs font-medium inline-block">
+                                                      {user.position || 'Staff'}
+                                                  </span>
+                                                  {user.role === 'admin' && (
+                                                      <span className="ml-1 px-2 py-1 bg-red-100 text-red-700 border border-red-200 rounded-lg text-xs font-bold inline-block">
+                                                          Admin
+                                                      </span>
+                                                  )}
+                                              </td>
+                                              <td className="p-3">
+                                                  <div className="text-gray-800 font-medium">{user.department || '-'}</div>
+                                                  {user.accessibleDepts && user.accessibleDepts.length > 0 && user.department !== 'Head Office' && (
+                                                      <div className="text-[10px] text-gray-500 mt-1 max-w-[180px] truncate bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200 w-fit" title={user.accessibleDepts.join(', ')}>
+                                                          +{user.accessibleDepts.length} สิทธิ์การเข้าถึง
+                                                      </div>
+                                                  )}
+                                              </td>
+                                              <td className="p-3 text-center">
+                                                  <div className="flex flex-col gap-1 items-center">
+                                                      <Badge status={user.status} />
+                                                      {!isExporting && user.lastLogin && (() => {
+                                                          const lastDate = new Date(user.lastLogin);
+                                                          const diffMins = Math.floor((new Date() - lastDate) / 60000);
+                                                          const isOnline = diffMins <= 15; 
+                                                          return (
+                                                              <div className="flex items-center gap-1 text-[10px] text-gray-500 mt-1" title={lastDate.toLocaleString('th-TH')}>
+                                                                  {isOnline ? <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span> : <Clock size={10}/>}
+                                                                  {isOnline ? 'Online' : lastDate.toLocaleDateString('th-TH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                                              </div>
+                                                          );
+                                                      })()}
+                                                  </div>
+                                              </td>
+                                              <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`} onClick={e => e.stopPropagation()}>
+                                                  <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                      {hasPerm('users', 'edit') && (
+                                                          <button onClick={() => handleEditUser(user)} className="p-1.5 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors border border-transparent hover:border-blue-200" title="แก้ไข">
+                                                              <Edit size={16}/>
+                                                          </button>
+                                                      )}
+                                                      {hasPerm('users', 'delete') && (
+                                                          <button onClick={() => showConfirm('ยืนยันการลบ', `คุณต้องการลบผู้ใช้งาน ${user.firstName} ${user.lastName} ใช่หรือไม่?`, () => setUsers(prev => prev.filter(u => u.id !== user.id)))} className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition-colors border border-transparent hover:border-red-200" title="ลบ">
+                                                              <Trash2 size={16}/>
+                                                          </button>
+                                                      )}
+                                                  </div>
+                                              </td>
+                                          </tr>
+                                      )) : (
+                                          <tr>
+                                              <td colSpan="8" className="p-10 text-center text-gray-400 border-b border-dashed">
+                                                  <User size={48} className="mx-auto mb-3 text-gray-300" />
+                                                  <p className="text-lg font-medium text-gray-500">ไม่พบผู้ใช้งานที่ตรงกับเงื่อนไข</p>
+                                                  <p className="text-sm mt-1">ลองเปลี่ยนคำค้นหา หรือเคลียร์ตัวกรองด้านบน</p>
+                                              </td>
+                                          </tr>
+                                      )}
+                                  </tbody>
+                              </table>
+                          </div>
+                      </div>
                   </div>
               </Card>
           </div>
