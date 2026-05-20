@@ -3111,7 +3111,8 @@ export default function App() {
   // NEW: State สำหรับตัวกรองหน้าจัดการผู้ใช้งาน
   const [userDeptFilter, setUserDeptFilter] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState('');
-  const [userSortOrder, setUserSortOrder] = useState('desc');
+  const [userSortOrder, setUserSortOrder] = useState('asc'); // แก้ไขให้เริ่มต้นด้วยเรียงจากน้อยไปมาก
+  const [userSearchTerm, setUserSearchTerm] = useState(''); // NEW: ค้นหาด้วยข้อความ
 
   // NEW: State สำหรับตัวกรองหน้าโครงการ
   const [projectTypeFilter, setProjectTypeFilter] = useState('');
@@ -8432,14 +8433,38 @@ export default function App() {
       // Logic สำหรับการกรองและการเรียงลำดับ
       const safeUsers = Array.isArray(users) ? users.filter(Boolean) : [];
       const filteredUsers = safeUsers
-          .filter(u => userDeptFilter ? u.department === userDeptFilter : true)
+          .filter(u => {
+              // 1. กรองตามคำค้นหา (Search)
+              if (userSearchTerm) {
+                  const term = userSearchTerm.toLowerCase();
+                  const matchName = `${u.firstName || ''} ${u.lastName || ''}`.toLowerCase().includes(term);
+                  const matchId = String(u.employeeId || '').toLowerCase().includes(term);
+                  const matchUsername = String(u.username || '').toLowerCase().includes(term);
+                  if (!matchName && !matchId && !matchUsername) return false;
+              }
+              return true;
+          })
+          .filter(u => {
+              // 2. กรองตามหน่วยงาน (สังกัดหลัก + สิทธิ์เข้าถึงโครงการ)
+              if (!userDeptFilter) return true;
+              
+              if (u.department === userDeptFilter) return true;
+              if (userDeptFilter === 'Head Office' && !u.department) return true;
+
+              const depts = u.accessibleDepts;
+              const deptsArray = Array.isArray(depts) ? depts : (typeof depts === 'string' ? depts.split(', ').filter(Boolean) : []);
+              // ถ้าพนักงานมีสิทธิ์ "All" (เห็นทุกหน่วยงาน) ก็ควรจะแสดงเวลาผู้บริหารกรองดูรายชื่อของหน่วยงานนั้นๆ ด้วย
+              if (deptsArray.includes('All') || deptsArray.includes(userDeptFilter)) return true;
+
+              return false;
+          })
           .filter(u => userRoleFilter ? u.position === userRoleFilter : true)
           .sort((a, b) => {
-              // FIX: แปลงเป็น String ก่อนเปรียบเทียบ ป้องกัน Error กรณีมีข้อมูลเป็นตัวเลข (Number)
-              const idA = String(a.employeeId || '');
-              const idB = String(b.employeeId || '');
-              if (userSortOrder === 'desc') return idB.localeCompare(idA); // มากไปน้อย
-              return idA.localeCompare(idB); // น้อยไปมาก
+              // 3. เรียงลำดับแบบธรรมชาติ (Natural Sort) ช่วยให้เลข 10 อยู่หลังเลข 2
+              const idA = String(a.employeeId || a.firstName || '');
+              const idB = String(b.employeeId || b.firstName || '');
+              if (userSortOrder === 'desc') return idB.localeCompare(idA, undefined, { numeric: true, sensitivity: 'base' });
+              return idA.localeCompare(idB, undefined, { numeric: true, sensitivity: 'base' });
           });
 
       // --- NEW: ฟังก์ชันสำหรับนำเข้าไฟล์ CSV ข้อมูลพนักงาน (รองรับภาษาไทยจาก Excel) ---
@@ -8568,22 +8593,35 @@ export default function App() {
               </header>
 
               {/* ส่วนของตัวกรอง (Filters) */}
-              <Card className={`grid grid-cols-1 md:grid-cols-3 gap-4 bg-white p-4 ${isExporting ? 'hidden' : ''}`}>
+              <Card className={`grid grid-cols-1 md:grid-cols-4 gap-4 bg-white p-4 ${isExporting ? 'hidden' : ''}`}>
+                  <div>
+                      <label className="block text-xs font-bold text-gray-500 mb-2">ค้นหาพนักงาน</label>
+                      <div className="relative">
+                          <Search size={14} className="absolute left-3 top-2.5 text-gray-400" />
+                          <input 
+                              type="text" 
+                              placeholder="รหัส, ชื่อ, Username..."
+                              className="w-full pl-8 pr-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-orange-200 outline-none h-[34px]"
+                              value={userSearchTerm}
+                              onChange={(e) => setUserSearchTerm(e.target.value)}
+                          />
+                      </div>
+                  </div>
                   <div>
                       <label className="block text-xs font-bold text-gray-500 mb-2">เรียงลำดับ (รหัสพนักงาน)</label>
                       <select 
-                          className="w-full border border-gray-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-200 outline-none transition-colors cursor-pointer"
+                          className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-orange-200 outline-none transition-colors cursor-pointer h-[34px]"
                           value={userSortOrder}
                           onChange={e => setUserSortOrder(e.target.value)}
                       >
-                          <option value="desc">มากไปน้อย (9-1, Z-A)</option>
-                          <option value="asc">น้อยไปมาก (1-9, A-Z)</option>
+                          <option value="asc">น้อยไปมาก (A-Z, 1-9)</option>
+                          <option value="desc">มากไปน้อย (Z-A, 9-1)</option>
                       </select>
                   </div>
                   <div>
                       <label className="block text-xs font-bold text-gray-500 mb-2">แยกตามหน่วยงาน (Department)</label>
                       <select 
-                          className="w-full border border-gray-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-200 outline-none transition-colors cursor-pointer"
+                          className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-orange-200 outline-none transition-colors cursor-pointer h-[34px]"
                           value={userDeptFilter}
                           onChange={e => setUserDeptFilter(e.target.value)}
                       >
@@ -8595,7 +8633,7 @@ export default function App() {
                   <div>
                       <label className="block text-xs font-bold text-gray-500 mb-2">แยกตามตำแหน่ง (Position)</label>
                       <select 
-                          className="w-full border border-gray-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-200 outline-none transition-colors cursor-pointer"
+                          className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-orange-200 outline-none transition-colors cursor-pointer h-[34px]"
                           value={userRoleFilter}
                           onChange={e => setUserRoleFilter(e.target.value)}
                       >
