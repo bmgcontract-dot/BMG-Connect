@@ -1473,7 +1473,7 @@ function usePersistentState(key, initialValue, fbUser) {
     
     let currentFetchId = 0;
 
-    const unsubscribe = onSnapshot(docRef, async (docSnap) => {
+        const unsubscribe = onSnapshot(docRef, async (docSnap) => {
       if (docSnap.exists()) {
         currentFetchId++;
         const thisFetchId = currentFetchId;
@@ -1507,17 +1507,25 @@ function usePersistentState(key, initialValue, fbUser) {
           };
 
           if (data.totalChunks !== undefined) {
-              let fullJson = '';
-              let hasChunkError = false;
+              // --- OPTIMIZED CHUNK FETCHING (Parallel) ---
+              // ดึงข้อมูล Chunk ทั้งหมดพร้อมกันเพื่อลดเวลาการโหลด (จากเดิมที่ดึงทีละไฟล์)
+              const chunkPromises = [];
               for (let i = 0; i < data.totalChunks; i++) {
                   const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
-                  const chunkSnap = await getDoc(chunkRef);
+                  chunkPromises.push(getDoc(chunkRef));
+              }
+              
+              const chunkSnaps = await Promise.all(chunkPromises);
+              let fullJson = '';
+              let hasChunkError = false;
+              
+              chunkSnaps.forEach(chunkSnap => {
                   if (chunkSnap.exists()) {
                       fullJson += chunkSnap.data().chunk;
                   } else {
                       hasChunkError = true;
                   }
-              }
+              });
               
               if (thisFetchId !== currentFetchId || hasChunkError) return;
 
@@ -1730,25 +1738,33 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
         const data = docSnap.data();
         // รองรับระบบ Chunking
         if (data.totalChunks !== undefined) {
-            let fullJson = '';
-            let hasChunkError = false;
+            // OPTIMIZED CHUNK FETCHING
+            const chunkPromises = [];
             for (let i = 0; i < data.totalChunks; i++) {
                 const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `central_fee_raw_${selectedProject.id}_${i}`);
-                const chunkSnap = await getDoc(chunkRef);
-                if (chunkSnap.exists()) {
-                    fullJson += chunkSnap.data().chunk;
-                } else {
-                    hasChunkError = true;
-                }
+                chunkPromises.push(getDoc(chunkRef));
             }
-            if (!hasChunkError && fullJson) {
-                try {
+            
+            try {
+                const chunkSnaps = await Promise.all(chunkPromises);
+                let fullJson = '';
+                let hasChunkError = false;
+                
+                chunkSnaps.forEach(chunkSnap => {
+                    if (chunkSnap.exists()) {
+                        fullJson += chunkSnap.data().chunk;
+                    } else {
+                        hasChunkError = true;
+                    }
+                });
+
+                if (!hasChunkError && fullJson) {
                     const parsed = JSON.parse(fullJson);
                     setRawData(parsed.payload || []);
                     if (parsed.projectTitle) setProjectTitle(parsed.projectTitle);
                     if (parsed.reportDate) setReportDate(parsed.reportDate);
-                } catch(e) { console.error("Error parsing chunks", e); }
-            }
+                }
+            } catch(e) { console.error("Error parsing chunks", e); }
         } else if (data.payload) {
             // Backward compatibility
             try {
@@ -3546,20 +3562,27 @@ export default function App() {
           if (docSnap.exists()) {
               const data = docSnap.data();
               if (data.totalChunks !== undefined) {
-                  let fullJson = '';
-                  let hasChunkError = false;
+                  // OPTIMIZED CHUNK FETCHING
+                  const chunkPromises = [];
                   for (let i = 0; i < data.totalChunks; i++) {
                       const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `bmg_schedules_v2_${i}`);
-                      const chunkSnap = await getDoc(chunkRef);
-                      if (chunkSnap.exists()) {
-                          fullJson += chunkSnap.data().chunk;
-                      } else {
-                          hasChunkError = true;
-                      }
+                      chunkPromises.push(getDoc(chunkRef));
                   }
                   
-                  if (!hasChunkError && fullJson) {
-                      try {
+                  try {
+                      const chunkSnaps = await Promise.all(chunkPromises);
+                      let fullJson = '';
+                      let hasChunkError = false;
+                      
+                      chunkSnaps.forEach(chunkSnap => {
+                          if (chunkSnap.exists()) {
+                              fullJson += chunkSnap.data().chunk;
+                          } else {
+                              hasChunkError = true;
+                          }
+                      });
+                      
+                      if (!hasChunkError && fullJson) {
                           const parsedData = JSON.parse(fullJson);
                           if (JSON.stringify(schedulesRef.current) !== JSON.stringify(parsedData)) {
                               setSchedules(parsedData);
@@ -3568,9 +3591,9 @@ export default function App() {
                                   localStorage.setItem('bmg_schedules_v2', JSON.stringify(parsedData));
                               }
                           }
-                      } catch (e) {
-                          console.error("Parse error for schedules v2", e);
                       }
+                  } catch (e) {
+                      console.error("Parse error for schedules v2", e);
                   }
               }
           }
@@ -13013,7 +13036,7 @@ export default function App() {
                                   {(() => {
                                       const filteredRepairs = repairs
                                           .filter(r => r.projectId === selectedProject.id && (repairFilter === 'All' || r.inspectionResult === repairFilter))
-                                          .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0)); // เรียงลำดับจากวันล่าสุดจากบนลงล่าง
+                                          .sort((a, b) => (b.date || '').localeCompare(a.date || '')); // ใช้ localeCompare แทนการสร้าง Date ใหม่เพื่อความเร็ว
 
                                       if (filteredRepairs.length === 0) {
                                           return <tr><td colSpan="6" className="p-8 text-center text-gray-400 border-2 border-dashed border-gray-200 m-4 rounded-lg bg-gray-50">ไม่มีข้อมูลการแจ้งซ่อม</td></tr>;
@@ -13448,7 +13471,9 @@ export default function App() {
                    {dailyReports.filter(r => r.projectId === selectedProject.id).length === 0 ? (
                        <div className="text-center p-8 text-gray-500 bg-white rounded border border-dashed">{t('noData')}</div>
                    ) : (
-                       dailyReports.filter(r => r.projectId === selectedProject.id).sort((a,b) => new Date(b.date) - new Date(a.date)).map(report => (
+                       dailyReports.filter(r => r.projectId === selectedProject.id)
+                       .sort((a,b) => (b.date || '').localeCompare(a.date || '')) // เพิ่มความเร็วในการจัดเรียงข้อมูล
+                       .map(report => (
                            <Card key={report.id} className="p-4 hover:shadow-md cursor-pointer relative group">
                                <div className="flex justify-between" onClick={() => setSelectedDailyReport(report)}>
                                    <span className="font-bold text-blue-700">
@@ -14134,7 +14159,7 @@ export default function App() {
                               <tbody className="divide-y divide-gray-100 bg-white">
                                   {meetingsList.filter(m => m.projectId === selectedProject.id).length > 0 ? (
                                       meetingsList.filter(m => m.projectId === selectedProject.id)
-                                      .sort((a,b) => new Date(b.date) - new Date(a.date))
+                                      .sort((a,b) => (b.date || '').localeCompare(a.date || '')) // เพิ่มความเร็วในการจัดเรียงข้อมูล
                                       .map((meet, index) => (
                                           <tr key={meet.id} className="hover:bg-gray-50 transition-colors cursor-pointer group" onClick={() => setSelectedMeetingView(meet)}>
                                               <td className="p-3 text-center text-gray-500">{index + 1}</td>
@@ -14258,7 +14283,7 @@ export default function App() {
                               <tbody className="divide-y divide-gray-100 bg-white">
                                   {meetingInvitations.filter(m => m.projectId === selectedProject.id).length > 0 ? (
                                       meetingInvitations.filter(m => m.projectId === selectedProject.id)
-                                      .sort((a,b) => new Date(b.issueDate) - new Date(a.issueDate))
+                                      .sort((a,b) => (b.issueDate || '').localeCompare(a.issueDate || '')) // เพิ่มความเร็วในการจัดเรียงข้อมูล
                                       .map((inv, index) => {
                                           const relatedMeeting = meetingsList.find(m => m.id === inv.meetingId);
                                           return (
@@ -14353,7 +14378,7 @@ export default function App() {
                               <tbody className="divide-y divide-gray-100 bg-white">
                                   {meetingProxies.filter(m => m.projectId === selectedProject.id).length > 0 ? (
                                       meetingProxies.filter(m => m.projectId === selectedProject.id)
-                                      .sort((a,b) => new Date(b.date) - new Date(a.date))
+                                      .sort((a,b) => (b.date || '').localeCompare(a.date || '')) // เพิ่มความเร็วในการจัดเรียงข้อมูล
                                       .map((proxy, index) => {
                                           return (
                                           <tr key={proxy.id} className="hover:bg-gray-50 transition-colors cursor-pointer group" onClick={() => setSelectedProxyView(proxy)}>
@@ -14453,7 +14478,7 @@ export default function App() {
                               <tbody className="divide-y divide-gray-100 bg-white">
                                   {meetingBallots.filter(m => m.projectId === selectedProject.id).length > 0 ? (
                                       meetingBallots.filter(m => m.projectId === selectedProject.id)
-                                      .sort((a,b) => new Date(b.date) - new Date(a.date))
+                                      .sort((a,b) => (b.date || '').localeCompare(a.date || '')) // เพิ่มความเร็วในการจัดเรียงข้อมูล
                                       .map((ballot, index) => {
                                           const relatedMeeting = meetingsList.find(m => m.id === ballot.meetingId);
                                           return (
@@ -14630,7 +14655,9 @@ export default function App() {
                                           </thead>
                                           <tbody className="divide-y divide-gray-100">
                                               {meetingAttendances.filter(a => a.meetingId === selectedMeetingManageId).length > 0 ? (
-                                                  meetingAttendances.filter(a => a.meetingId === selectedMeetingManageId).sort((a,b) => new Date(b.checkInTime) - new Date(a.checkInTime)).map((att, idx) => (
+                                                  meetingAttendances.filter(a => a.meetingId === selectedMeetingManageId)
+                                                  .sort((a,b) => (b.checkInTime || '').localeCompare(a.checkInTime || '')) // เพิ่มความเร็วในการจัดเรียงข้อมูล
+                                                  .map((att, idx) => (
                                                       <tr key={att.id} className="hover:bg-gray-50 transition-colors">
                                                           <td className="p-3 text-center text-gray-500">{idx+1}</td>
                                                           <td className="p-3 text-center text-xs text-gray-500 font-mono">
