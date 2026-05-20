@@ -1427,7 +1427,7 @@ function usePersistentState(key, initialValue, fbUser) {
                   // 🛡️ FIX: บังคับให้เป็น Array เสมอ หากค่าเริ่มต้นเป็น Array ป้องกันแอปพังหน้าขาว (Crash)
                   if (Array.isArray(initialValue)) {
                       if (!Array.isArray(parsed)) {
-                          return (parsed && typeof parsed === 'object') ? Object.values(parsed) : [...initialValue];
+                          return (parsed !== null && typeof parsed === 'object') ? Object.values(parsed) : [...initialValue];
                       }
                   }
                   return parsed; 
@@ -1485,7 +1485,7 @@ function usePersistentState(key, initialValue, fbUser) {
               
               // 🛡️ FIX: บังคับการแปลงชนิดข้อมูล กรณีข้อมูลถูกเซฟจาก Firebase กลับมาเป็น Object แทน Array
               if (Array.isArray(initialValue) && !Array.isArray(parsedData)) {
-                  finalData = (parsedData && typeof parsedData === 'object') ? Object.values(parsedData) : [];
+                  finalData = (parsedData !== null && typeof parsedData === 'object') ? Object.values(parsedData) : [];
               }
 
               // --- FIX: Data Loss Prevention ---
@@ -8560,7 +8560,7 @@ export default function App() {
                           <>
                               <Button variant="outline" className="border-orange-500 text-orange-600 hover:bg-orange-50 font-bold hidden md:flex whitespace-nowrap" icon={Shield} onClick={() => {
                                   setEditingRole(EMPLOYEE_POSITIONS[0]);
-                                  setEditingRolePerms(getMergedPermissions(rolePermissions[EMPLOYEE_POSITIONS[0]]));
+                                  setEditingRolePerms(getMergedPermissions((rolePermissions || {})[EMPLOYEE_POSITIONS[0]]));
                                   setShowRolePermModal(true);
                               }}>ตั้งค่าสิทธิ์แม่แบบ</Button>
                               <label className="cursor-pointer flex items-center justify-center gap-2 px-4 py-2 text-sm rounded-md font-medium transition-colors bg-green-600 text-white hover:bg-green-700 shadow-sm whitespace-nowrap" title="นำเข้าข้อมูลจากไฟล์ .csv">
@@ -8570,7 +8570,7 @@ export default function App() {
                               <Button icon={Plus} className="whitespace-nowrap" onClick={() => { 
                                   setIsEditingUser(false); 
                                   setNewUser({ 
-                                      employeeId: '', firstName: '', lastName: '', position: EMPLOYEE_POSITIONS[0], otherPosition: '', department: '', accessibleDepts: [], phone: '', username: '', password: '', photo: null, permissions: getMergedPermissions(rolePermissions[EMPLOYEE_POSITIONS[0]]) 
+                                      employeeId: '', firstName: '', lastName: '', position: EMPLOYEE_POSITIONS[0], otherPosition: '', department: '', accessibleDepts: [], phone: '', username: '', password: '', photo: null, permissions: getMergedPermissions((rolePermissions || {})[EMPLOYEE_POSITIONS[0]]) 
                                   });
                                   setShowAddUserModal(true); 
                               }}>{t('addUser')}</Button>
@@ -8602,7 +8602,7 @@ export default function App() {
                       >
                           <option value="all">ทุกหน่วยงาน / โครงการ</option>
                           <option value="Head Office">Head Office</option>
-                          {projects.map(p => (
+                          {(Array.isArray(projects) ? projects : []).map(p => (
                               <option key={p.id} value={p.name}>{p.name}</option>
                           ))}
                       </select>
@@ -8691,6 +8691,7 @@ export default function App() {
                                                       <Badge status={user.status} />
                                                       {!isExporting && user.lastLogin && (() => {
                                                           const lastDate = new Date(user.lastLogin);
+                                                          if (isNaN(lastDate.getTime())) return null; // ป้องกันแอปค้างจาก Invalid Date
                                                           const diffMins = Math.floor((new Date() - lastDate) / 60000);
                                                           const isOnline = diffMins <= 15; 
                                                           return (
