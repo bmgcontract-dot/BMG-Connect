@@ -3109,9 +3109,9 @@ export default function App() {
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null, confirmText: 'ยืนยันการลบ', type: 'danger' });
 
   // NEW: State สำหรับตัวกรองหน้าจัดการผู้ใช้งาน
-  const [userDeptFilter, setUserDeptFilter] = useState('all');
-  const [userRoleFilter, setUserRoleFilter] = useState('all');
-  const [userSortOrder, setUserSortOrder] = useState('asc');
+  const [userDeptFilter, setUserDeptFilter] = useState('');
+  const [userRoleFilter, setUserRoleFilter] = useState('');
+  const [userSortOrder, setUserSortOrder] = useState('desc');
 
   // NEW: State สำหรับตัวกรองหน้าโครงการ
   const [projectTypeFilter, setProjectTypeFilter] = useState('');
@@ -8442,13 +8442,16 @@ export default function App() {
                   (u.employeeId || '').toLowerCase().includes(searchLower) ||
                   (u.username || '').toLowerCase().includes(searchLower);
 
+              // FIX: ป้องกันบัคจอขาวกรณี accessibleDepts ถูกบันทึกเป็น String ในข้อมูลเก่า
+              const accDepts = Array.isArray(u.accessibleDepts) ? u.accessibleDepts : (typeof u.accessibleDepts === 'string' ? u.accessibleDepts.split(', ').filter(Boolean) : []);
+
               // FIX 3: กรองด้วยหน่วยงาน (Department) ให้แม่นยำ
-              const matchDept = userDeptFilter === 'all' || 
+              const matchDept = !userDeptFilter || userDeptFilter === 'all' || 
                   u.department === userDeptFilter ||
-                  (u.accessibleDepts && u.accessibleDepts.includes(userDeptFilter));
+                  accDepts.includes(userDeptFilter);
 
               // FIX 3: กรองด้วยตำแหน่ง (Position) ให้แม่นยำ
-              const matchRole = userRoleFilter === 'all' || u.position === userRoleFilter;
+              const matchRole = !userRoleFilter || userRoleFilter === 'all' || u.position === userRoleFilter;
 
               return matchSearch && matchDept && matchRole;
           })
@@ -8671,11 +8674,17 @@ export default function App() {
                                               </td>
                                               <td className="p-3">
                                                   <div className="text-gray-800 font-medium">{user.department || '-'}</div>
-                                                  {user.accessibleDepts && user.accessibleDepts.length > 0 && user.department !== 'Head Office' && (
-                                                      <div className="text-[10px] text-gray-500 mt-1 max-w-[180px] truncate bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200 w-fit" title={user.accessibleDepts.join(', ')}>
-                                                          +{user.accessibleDepts.length} สิทธิ์การเข้าถึง
-                                                      </div>
-                                                  )}
+                                                  {(() => {
+                                                      const accDepts = Array.isArray(user.accessibleDepts) ? user.accessibleDepts : (typeof user.accessibleDepts === 'string' ? user.accessibleDepts.split(', ').filter(Boolean) : []);
+                                                      if (accDepts.length > 0 && user.department !== 'Head Office') {
+                                                          return (
+                                                              <div className="text-[10px] text-gray-500 mt-1 max-w-[180px] truncate bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200 w-fit" title={accDepts.join(', ')}>
+                                                                  +{accDepts.length} สิทธิ์การเข้าถึง
+                                                              </div>
+                                                          );
+                                                      }
+                                                      return null;
+                                                  })()}
                                               </td>
                                               <td className="p-3 text-center">
                                                   <div className="flex flex-col gap-1 items-center">
