@@ -8651,7 +8651,7 @@ export default function App() {
                                               <td className="p-3 text-center text-gray-500">{idx + 1}</td>
                                               <td className="p-3 text-center">
                                                   <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center mx-auto overflow-hidden border border-gray-300 shadow-sm">
-                                                      {user.photo ? <img src={user.photo} className="w-full h-full object-cover" /> : <User size={20} className="text-gray-400"/>}
+                                                      {user.photo && typeof user.photo === 'string' ? <img src={user.photo} className="w-full h-full object-cover" /> : <User size={20} className="text-gray-400"/>}
                                                   </div>
                                               </td>
                                               <td className="p-3">
@@ -8697,7 +8697,7 @@ export default function App() {
                                                           return (
                                                               <div className="flex items-center gap-1 text-[10px] text-gray-500 mt-1" title={lastDate.toLocaleString('th-TH')}>
                                                                   {isOnline ? <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span> : <Clock size={10}/>}
-                                                                  {isOnline ? 'Online' : lastDate.toLocaleDateString('th-TH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                                                  {isOnline ? 'Online' : lastDate.toLocaleString('th-TH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                                               </div>
                                                           );
                                                       })()}
