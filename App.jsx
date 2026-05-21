@@ -1418,11 +1418,13 @@ const getAllFilesLocally = async () => {
 // --- Custom Hook for Persistent Storage (Firebase or LocalStorage Fallback) ---
 function usePersistentState(key, initialValue, fbUser) {
   const [state, setState] = useState(() => {
+      // FIX: โหลดข้อมูลจาก Cache (Local Storage) ขึ้นมาแสดงผลทันทีก่อนเสมอ (Optimistic Load) เพื่อแก้ปัญหาโหลดหน้าเว็บช้า
       if (typeof window !== 'undefined') {
           const local = localStorage.getItem(key);
           if (local) {
               try { 
                   const parsed = JSON.parse(local); 
+                  // 🛡️ FIX: บังคับให้เป็น Array เสมอ หากค่าเริ่มต้นเป็น Array ป้องกันแอปพังหน้าขาว (Crash)
                   if (Array.isArray(initialValue)) {
                       if (!Array.isArray(parsed)) {
                           return (parsed && typeof parsed === 'object') ? Object.values(parsed) : [...initialValue];
@@ -1437,16 +1439,12 @@ function usePersistentState(key, initialValue, fbUser) {
   
   const stateRef = useRef(state);
   const syncTimeoutRef = useRef(null); 
-  const isUploadingRef = useRef(false);
-  const lastLocalUpdateRef = useRef(0);
-  const pendingServerDataRef = useRef(null);
+  const isUploadingRef = useRef(false); // NEW: Track upload status
+  const lastLocalUpdateRef = useRef(0); // NEW: Track last local edit time
+  const pendingServerDataRef = useRef(null); // NEW: คิวพักข้อมูลหากมีการแก้ไขชนกัน
   const checkPendingDataInterval = useRef(null);
-  
-  // FIX: เพิ่ม flag ควบคุมว่าโหลดข้อมูลเริ่มต้นจาก Firebase เสร็จหรือยัง
-  // ป้องกันไม่ให้แอปเอาค่าเริ่มต้น (ค่าว่าง) กลับไปทับข้อมูลบนเซิร์ฟเวอร์
-  const [isInitialLoadDone, setIsInitialLoadDone] = useState(false);
   const [isSynced, setIsSynced] = useState(false);
-  
+  // OPTIMIZE: ถ้ามีข้อมูลใน Cache ให้ถือว่าโหลดเสร็จแล้วทันที ไม่ต้องรอหน้าจอหมุน
   const [isLoaded, setIsLoaded] = useState(() => {
       if (typeof window !== 'undefined' && localStorage.getItem(key)) return true;
       return false;
@@ -1459,13 +1457,12 @@ function usePersistentState(key, initialValue, fbUser) {
   useEffect(() => {
     if (!db) {
         setIsLoaded(true);
-        setIsInitialLoadDone(true);
         return; 
     }
     
+    // OPTIMIZE: ขยายเวลาบังคับข้าม (Timeout) เป็น 4 วินาที เพื่อรองรับอินเทอร์เน็ตมือถือ
     const fallbackTimer = setTimeout(() => {
         setIsLoaded(true);
-        setIsInitialLoadDone(true);
     }, 4000);
 
     if (!fbUser || !appId) {
@@ -1473,54 +1470,40 @@ function usePersistentState(key, initialValue, fbUser) {
     }
     
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
+    
     let currentFetchId = 0;
 
     const unsubscribe = onSnapshot(docRef, async (docSnap) => {
       if (docSnap.exists()) {
         currentFetchId++;
         const thisFetchId = currentFetchId;
-        const data = docSnap.data();
 
+        const data = docSnap.data();
         try {
           const applyData = (parsedData) => {
-              // --- NEW: Offline First - ตรวจสอบว่ามีข้อมูลค้างส่ง (Unsynced) หรือไม่ เพื่อป้องกัน Data Loss ตอน Refresh ---
-              const isUnsynced = typeof window !== 'undefined' && localStorage.getItem(`${key}_unsynced`) === 'true';
-              if (isUnsynced) {
-                  console.warn(`[BMG Sync] พบข้อมูลที่ยังไม่ถูกซิงค์ของ ${key} ในเครื่องนี้ กำลังดันข้อมูลขึ้นคลาวด์แทน...`);
-                  if (db && fbUser && appId && stateRef.current) {
-                      setPersistentValue(stateRef.current, true);
-                  }
-                  setIsLoaded(true);
-                  setIsSynced(true);
-                  setIsInitialLoadDone(true);
-                  return;
-              }
-
               let finalData = parsedData;
               
+              // 🛡️ FIX: บังคับการแปลงชนิดข้อมูล กรณีข้อมูลถูกเซฟจาก Firebase กลับมาเป็น Object แทน Array
               if (Array.isArray(initialValue) && !Array.isArray(parsedData)) {
                   finalData = (parsedData && typeof parsedData === 'object') ? Object.values(parsedData) : [];
               }
 
-              // --- FIX: เพิ่มเงื่อนไขตรวจสอบความถูกต้องก่อนรับข้อมูลจาก Server มาทับเครื่อง ---
+              // --- FIX: Data Loss Prevention ---
               const isFinalEmpty = Array.isArray(finalData) ? finalData.length === 0 : (!finalData || (typeof finalData === 'object' && Object.keys(finalData || {}).length === 0));
               const isCurrentNotEmpty = Array.isArray(stateRef.current) ? stateRef.current.length > 0 : (stateRef.current && typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length > 0);
 
-              // 1. ถ้า Server ส่งค่าว่างมา แต่เครื่องเรามีข้อมูล (และเพิ่งแก้ข้อมูลไป) ให้ปฏิเสธค่าจาก Server
-              if (isFinalEmpty && isCurrentNotEmpty && (Date.now() - lastLocalUpdateRef.current < 10000)) {
-                  console.warn(`[BMG Sync] ป้องกันการทับข้อมูล ${key} ด้วยค่าว่างจาก Server`);
+              if (isFinalEmpty && isCurrentNotEmpty) {
+                  console.warn(`[BMG Sync] ป้องกันการทับข้อมูล ${key} ด้วยค่าว่าง`);
                   return;
               }
-              
+              // ---------------------------------
               if (JSON.stringify(stateRef.current) !== JSON.stringify(finalData)) {
                   setState(finalData);
                   stateRef.current = finalData;
                   if (typeof window !== 'undefined') localStorage.setItem(key, JSON.stringify(finalData));
               }
-              
               setIsLoaded(true);
               setIsSynced(true);
-              setIsInitialLoadDone(true); // ยืนยันว่าดึงข้อมูลจาก Server สำเร็จแล้ว
           };
 
           if (data.totalChunks !== undefined) {
@@ -1536,14 +1519,12 @@ function usePersistentState(key, initialValue, fbUser) {
                   }
               }
               
-              if (thisFetchId !== currentFetchId || hasChunkError) {
-                  // ถ้าโหลด Chunk ไม่สมบูรณ์ ก็ถือว่าโหลดเสร็จแล้ว แต่ใช้ค่าที่มีในเครื่องไปก่อน
-                  setIsInitialLoadDone(true); 
-                  return;
-              }
+              if (thisFetchId !== currentFetchId || hasChunkError) return;
 
               if (fullJson) {
                   const parsedData = JSON.parse(fullJson);
+                  
+                  // 🛡️ 100% Data Loss Prevention: นำข้อมูลเข้าคิวหากผู้ใช้กำลังพิมพ์
                   if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
                       pendingServerDataRef.current = parsedData;
                       if (!checkPendingDataInterval.current) {
@@ -1584,112 +1565,62 @@ function usePersistentState(key, initialValue, fbUser) {
                   applyData(parsedData);
               }
           }
-        } catch(e) { 
-            console.error("Parse error", key, e); 
-            setIsInitialLoadDone(true);
-        }
-      } else {
-         // กรณีไม่มีเอกสารบน Server เลย
+        } catch(e) { console.error("Parse error", key, e); }
+      } else if (!isSynced) {
+         setPersistentValue(stateRef.current);
          setIsLoaded(true);
-         setIsInitialLoadDone(true);
-         
-         // ถ้ายังไม่เคย Sync ขึ้นไปเลย ให้เซฟค่าปัจจุบันขึ้นไปครั้งแรก
-         if (!isSynced && stateRef.current) {
-             const isCurrentEmpty = Array.isArray(stateRef.current) ? stateRef.current.length === 0 : (!stateRef.current || (typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length === 0));
-             
-             // ป้องกันการเซฟค่าว่างขึ้นไปเป็นครั้งแรกโดยไม่จำเป็น
-             if (!isCurrentEmpty) {
-                 setPersistentValue(stateRef.current, true);
-             }
-             setIsSynced(true);
-         }
+         setIsSynced(true);
       }
     }, (err) => {
       console.error("Sync error", key, err);
       setIsLoaded(true);
-      setIsInitialLoadDone(true);
     });
 
     return () => {
         clearTimeout(fallbackTimer);
         unsubscribe();
-        if (checkPendingDataInterval.current) clearInterval(checkPendingDataInterval.current);
     };
   }, [fbUser, key]);
 
-  const setPersistentValue = async (newValue, isForceSave = false) => {
-    // FIX: ป้องกันไม่ให้การบันทึกข้อมูล (Save) ทับค่าบน Server หากยังโหลดข้อมูลเริ่มต้นจาก Server ไม่เสร็จ
-    if (!isInitialLoadDone && !isForceSave) {
-        console.warn(`[BMG Sync] ระงับการบันทึก ${key} ชั่วคราว เนื่องจากยังโหลดข้อมูลตั้งต้นไม่เสร็จ`);
-        // เก็บค่าไว้ที่ Local ไปก่อน
-        if (typeof window !== 'undefined') {
-            try { 
-                localStorage.setItem(key, JSON.stringify(newValue)); 
-                localStorage.setItem(`${key}_unsynced`, 'true'); // NEW: ปักธงรอซิงค์
-            } catch (e) {}
-        }
-        return;
-    }
-
-    lastLocalUpdateRef.current = Date.now(); 
+  const setPersistentValue = async (newValue, isRestore = false) => {
+    lastLocalUpdateRef.current = Date.now(); // บันทึกเวลาที่แก้ล่าสุด เพื่อกัน Firebase มาทับ
 
     const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
-    
-    // ถ้าข้อมูลไม่เปลี่ยนก็ไม่ต้องเซฟ (ยกเว้นบังคับเซฟ)
-    if (!isForceSave && JSON.stringify(valueToStore) === JSON.stringify(stateRef.current)) return;
+    if (!isRestore && valueToStore === stateRef.current) return;
 
     setState(valueToStore);
     stateRef.current = valueToStore;
     
     if (typeof window !== 'undefined') {
-        // อัปเดตลงเครื่องให้เร็วที่สุด ป้องกันการ Refresh ทันที
-        try { 
-            localStorage.setItem(key, JSON.stringify(valueToStore)); 
-            localStorage.setItem(`${key}_unsynced`, 'true'); // ปักธงเพื่อความชัวร์ว่ายังไม่ลงคลาวด์ 100%
-        } catch (e) {}
+        // ผลักการทำงานของ LocalStorage ไปไว้คิวหลังสุด เพื่อไม่ให้หน้าจอค้าง
+        setTimeout(() => {
+            try { localStorage.setItem(key, JSON.stringify(valueToStore)); } catch (e) {}
+        }, 0);
     }
 
     if (db && fbUser && appId) {
+       // NEW: ป้องกัน Data Corruption ด้วยการเคลียร์คำสั่งเซฟเดิมที่ยังไม่เสร็จทิ้ง
        if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
 
        return new Promise((resolve) => {
-           const doFirebaseSync = async () => {
-               // ป้องกันการทับซ้อน (Race condition) เมื่อรัวปุ่ม Save
-               while (isUploadingRef.current) {
-                   await new Promise(r => setTimeout(r, 100));
-               }
-               
+           // NEW: หน่วงเวลา 1 วินาที หลังจากหยุดพิมพ์/คลิก ค่อยเซฟขึ้น Database
+           syncTimeoutRef.current = setTimeout(async () => {
                isUploadingRef.current = true;
                try {
-                   // FIX: ดึงค่า stateRef.current มาแปลงเป็น String ตรงนี้ เพื่อให้ได้ข้อมูลล่าสุดเสมอ
-                   const jsonStr = JSON.stringify(stateRef.current); 
-                   const CHUNK_SIZE = 250000; 
+                   const jsonStr = JSON.stringify(stateRef.current); // ใช้ state ล่าสุดเสมอ
+                   const CHUNK_SIZE = 250000; // FIX: ลดขนาด Chunk ลงจาก 900000 เป็น 250000 เพื่อป้องกัน 1MB Limit สำหรับภาษาไทย
                    const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
                    
-                   const writePromises = [];
                    for (let i = 0; i < totalChunks; i++) {
                        const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
                        const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                       
-                       if (isForceSave) {
-                           writePromises.push(setDoc(chunkRef, { chunk: chunkData }));
-                       } else {
-                           await setDoc(chunkRef, { chunk: chunkData });
-                           await new Promise(r => setTimeout(r, 10)); // พัก UI
-                       }
-                   }
-                   
-                   if (isForceSave && writePromises.length > 0) {
-                       await Promise.all(writePromises); 
+                       await setDoc(chunkRef, { chunk: chunkData });
+                       // พัก UI เล็กน้อยให้เบราว์เซอร์ไม่ค้าง
+                       await new Promise(r => setTimeout(r, 10));
                    }
                    
                    const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
                    await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
-                   
-                   // ลบธงการค้างซิงค์ เมื่ออัปโหลดขึ้น Firebase เสร็จสมบูรณ์
-                   if (typeof window !== 'undefined') {
-                       localStorage.removeItem(`${key}_unsynced`);
-                   }
                } catch (err) {
                    console.error(`Firestore Single Save Error [${key}]:`, err);
                } finally {
@@ -1697,13 +1628,7 @@ function usePersistentState(key, initialValue, fbUser) {
                    isUploadingRef.current = false;
                    resolve();
                }
-           };
-
-           if (isForceSave) {
-               doFirebaseSync();
-           } else {
-               syncTimeoutRef.current = setTimeout(doFirebaseSync, 1000);
-           }
+           }, 1000);
        });
     }
   };
@@ -3774,7 +3699,40 @@ export default function App() {
       }
   }, [users]);
 
-  // (ยกเลิกระบบ Auto Update Presence ทุก 5 นาที เพื่อป้องกันปัญหา Data Race Condition ที่ทำให้รายชื่อพนักงานหายไปเมื่อเปิดหลายเครื่องพร้อมกัน)
+  // --- NEW: ตรวจจับและบันทึกเวลาล่าสุดเมื่อเปิดระบบ (Refresh/Auto-login) เพื่อให้ซิงค์ข้ามเครื่อง ---
+  useEffect(() => {
+      // 🛡️ ป้องกันการใช้ข้อมูลเก่าจาก LocalStorage ไปทับข้อมูลบน Server โดยการรอให้ Sync ข้อมูลจาก Server ให้เสร็จก่อนเสมอ!
+      if (!currentUser || !isUsersSynced) return; 
+
+      // ฟังก์ชันสำหรับอัปเดตเวลาล่าสุด
+      const updatePresence = () => {
+          setUsers(prevUsers => {
+              if (!Array.isArray(prevUsers)) return prevUsers;
+              const foundUser = prevUsers.find(u => u.id === currentUser.id);
+              if (!foundUser) return prevUsers;
+              
+              const lastLoginTime = new Date(foundUser.lastLogin || 0).getTime();
+              const nowTime = new Date().getTime();
+              
+              // อัปเดตเวลาลงฐานข้อมูลทุกๆ 5 นาที (300,000 ms) เพื่อให้สถานะไม่หมดอายุ (15 นาที)
+              if (nowTime - lastLoginTime > 5 * 60 * 1000) { 
+                  return prevUsers.map(u => 
+                      u.id === currentUser.id ? { ...u, lastLogin: new Date().toISOString() } : u
+                  );
+              }
+              return prevUsers; // ถ้าสียังไม่ถึง 5 นาที ไม่ต้องสั่งอัปเดต State (ลดการดึงเครือข่าย)
+          });
+      };
+
+      // รันเช็คครั้งแรกเมื่อระบบโหลดเสร็จ
+      updatePresence();
+
+      // ตั้งเวลาเช็คซ้ำทุกๆ 1 นาทีตราบใดที่เปิดหน้าเว็บอยู่
+      const intervalId = setInterval(updatePresence, 60 * 1000);
+
+      // ยกเลิกการตั้งเวลาเมื่อผู้ใช้ออกจากระบบหรือปิดหน้าต่าง
+      return () => clearInterval(intervalId);
+  }, [currentUser?.id, isUsersSynced]); // ผูกกับ Dependency 2 ตัวนี้
 
   // --- NEW: Auto-Sync State (สถานะการซิงค์อัตโนมัติ) ---
   const [autoSyncMessage, setAutoSyncMessage] = useState('');
@@ -4928,7 +4886,7 @@ export default function App() {
           const userExists = userList.some(u => u.id === updatedUser.id);
           if (userExists) {
               const updatedUsers = userList.map(u => u.id === updatedUser.id ? updatedUser : u);
-              setUsers(updatedUsers, true); // FIX: บังคับเซฟขึ้นคลาวด์ทันที เพื่อให้อัปเดตเวลาเข้าใช้งาน
+              setUsers(updatedUsers);
           }
           
           // ตรวจสอบหน่วยงานประจำของผู้ใช้
@@ -7282,53 +7240,15 @@ export default function App() {
   };
 
   const handleSaveUser = (e) => {
-      if (e && e.preventDefault) e.preventDefault();
-
-      const empId = (newUser.employeeId || '').trim();
-      const uName = (newUser.username || '').trim();
-      
-      // --- FIX: ใช้ functional update เพื่อเข้าถึงข้อมูลล่าสุด ตัดปัญหา Stale State (Closure) ---
-      setUsers(prevUsers => {
-          const safeUsers = Array.isArray(prevUsers) ? prevUsers : [];
-          
-          // --- FIX 1: ป้องกัน รหัสพนักงาน (employeeId) ซ้ำซ้อน ---
-          if (empId) {
-              const isEmpIdDuplicate = safeUsers.some(u => u.id !== newUser.id && (u.employeeId || '').trim() === empId);
-              if (isEmpIdDuplicate) {
-                  alert(`บันทึกไม่สำเร็จ: รหัสพนักงาน "${empId}" มีการใช้งานแล้วในระบบ กรุณาตรวจสอบและเปลี่ยนรหัสใหม่`);
-                  return safeUsers; // คืนค่าเดิม ไม่ทำการบันทึก
-              }
-          }
-          
-          // --- FIX 2: ป้องกัน ชื่อผู้ใช้ (username) ซ้ำซ้อน ---
-          if (uName) {
-              const isUnameDuplicate = safeUsers.some(u => u.id !== newUser.id && (u.username || '').trim().toLowerCase() === uName.toLowerCase());
-              if (isUnameDuplicate) {
-                  alert(`บันทึกไม่สำเร็จ: ชื่อผู้ใช้สำหรับล็อกอิน (Username) "${uName}" มีคนใช้แล้ว กรุณาเปลี่ยนใหม่`);
-                  return safeUsers; // คืนค่าเดิม ไม่ทำการบันทึก
-              }
-          }
-
-          // --- FIX 3: Deep copy สิทธิ์การใช้งาน เพื่อตัดขาด Object Reference ป้องกันบัคสิทธิ์เด้งกลับไปเป็นค่าเดิม ---
-          const permissionsToSave = JSON.parse(JSON.stringify(newUser.permissions || {}));
-          const finalUserData = { ...newUser, permissions: permissionsToSave };
-
-          let updatedList;
-          if (isEditingUser) {
-              updatedList = safeUsers.map(u => u.id === finalUserData.id ? finalUserData : u);
-          } else {
-              // ดันผู้ใช้งานที่เพิ่งเพิ่มใหม่ไว้บนสุด เพื่อให้หาเจอง่าย
-              updatedList = [{ ...finalUserData, id: generateId(), status: 'Active', created_at: new Date().toISOString() }, ...safeUsers];
-          }
-          
-          // ปิด Modal และแสดงข้อความสำเร็จหลังอัปเดต State (ใช้ setTimeout หลบการทำงานซ้อนทับ)
-          setTimeout(() => {
-              setShowAddUserModal(false);
-              alert(t('saveSuccess'));
-          }, 50);
-
-          return updatedList;
-      }, true); // <--- เพิ่ม true ตรงนี้เพื่อบังคับซิงค์คลาวด์แบบเร่งด่วน (Force Save) ไม่รอ 1 วินาที
+      e.preventDefault();
+      if (isEditingUser) {
+          setUsers(users.map(u => u.id === newUser.id ? { ...newUser } : u));
+      } else {
+          // แก้ไข: สลับตำแหน่ง ...newUser ไว้ด้านหน้า เพื่อไม่ให้เอา id เดิมมาทับ id ใหม่ (ป้องกันบัค ID ซ้ำในระบบ)
+          setUsers([...users, { ...newUser, id: generateId(), status: 'Active', created_at: new Date().toISOString() }]);
+      }
+      setShowAddUserModal(false);
+      alert(t('saveSuccess'));
   };
 
   const handleEditUser = (user) => {
@@ -7337,9 +7257,6 @@ export default function App() {
       if (typeof depts === 'string') {
           depts = depts.split(', ').filter(Boolean);
       }
-
-      // --- FIX 2: ป้องกันสิทธิ์หาย โดยผสานสิทธิ์เดิมของผู้ใช้เข้ากับโครงสร้างสิทธิ์หลักล่าสุดเสมอ ---
-      const safePermissions = getMergedPermissions(user.permissions || {});
 
       setNewUser({ 
           // กำหนดค่าเริ่มต้นป้องกัน undefined
@@ -7356,7 +7273,7 @@ export default function App() {
           // ใช้ค่าจาก user หรือถ้าไม่มีให้ใช้ค่าเริ่มต้น
           position: user.position || EMPLOYEE_POSITIONS[0],
           accessibleDepts: depts,
-          permissions: safePermissions, // ใช้สิทธิ์ที่ผ่านการตรวจสอบและผสานโครงสร้างแล้ว
+          permissions: user.permissions || getDefaultPermissions(),
       });
       setIsEditingUser(true);
       setShowAddUserModal(true);
@@ -8468,17 +8385,8 @@ export default function App() {
           .filter(u => userRoleFilter ? u.position === userRoleFilter : true)
           .sort((a, b) => {
               // FIX: แปลงเป็น String ก่อนเปรียบเทียบ ป้องกัน Error กรณีมีข้อมูลเป็นตัวเลข (Number)
-              const idA = String(a.employeeId || '').trim();
-              const idB = String(b.employeeId || '').trim();
-              
-              // --- FIX: กรณีที่ไม่ได้ใส่รหัสพนักงาน (พนักงานใหม่ที่รหัสว่าง) ให้เรียงตามเวลาที่สร้างใหม่สุดขึ้นก่อน เพื่อป้องกันผู้ใช้หาข้อมูลไม่เจอ ---
-              if (!idA && !idB) {
-                  return new Date(b.created_at || 0) - new Date(a.created_at || 0);
-              }
-              // ถ้าคนใดคนหนึ่งไม่มีรหัสพนักงาน ให้คนที่ไม่มีไปอยู่ท้ายสุดเสมอ (จะได้ไม่รบกวนการเรียงรหัส)
-              if (!idA) return 1;
-              if (!idB) return -1;
-
+              const idA = String(a.employeeId || '');
+              const idB = String(b.employeeId || '');
               if (userSortOrder === 'desc') return idB.localeCompare(idA); // มากไปน้อย
               return idA.localeCompare(idB); // น้อยไปมาก
           });
@@ -8707,8 +8615,8 @@ export default function App() {
                                               const lastDate = new Date(user.lastLogin);
                                               const now = new Date();
                                               const diffMins = Math.floor((now - lastDate) / 60000);
-                                              // ปรับเป็น 60 นาที เนื่องจากยกเลิกการอัปเดตอัตโนมัติ
-                                              const isOnline = diffMins <= 60; 
+                                              // หากมีคนเข้าสู่ระบบภายใน 15 นาที ให้แสดงเป็นสถานะออนไลน์ (จุดเขียว)
+                                              const isOnline = diffMins <= 15; 
                                               return (
                                                   <div className="flex flex-col gap-1">
                                                       <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md border w-fit shadow-sm ${isOnline ? 'bg-green-50 border-green-200 text-green-700' : 'bg-gray-50 border-gray-200 text-gray-600'}`} title={lastDate.toLocaleString('th-TH')}>
