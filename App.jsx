@@ -1439,9 +1439,6 @@ function usePersistentState(key, initialValue, fbUser) {
   const syncTimeoutRef = useRef(null); 
   const isUploadingRef = useRef(false);
   const lastLocalUpdateRef = useRef(0);
-  const pendingServerDataRef = useRef(null);
-  const checkPendingDataInterval = useRef(null);
-  const isUnsyncedRef = useRef(false); // NEW: เกราะป้องกันข้อมูลสูญหาย (ใช้ Memory จำสถานะแทน LocalStorage ที่อาจจะเต็ม)
   
   const [isInitialLoadDone, setIsInitialLoadDone] = useState(false);
   const [isSynced, setIsSynced] = useState(false);
@@ -1482,17 +1479,12 @@ function usePersistentState(key, initialValue, fbUser) {
 
         try {
           const applyData = (parsedData) => {
-              // --- FIX: ใช้ isUnsyncedRef.current ที่อยู่ใน RAM เพื่อป้องกันปัญหา LocalStorage เต็มแล้วอ่านธงไม่ได้ ---
-              const isUnsynced = isUnsyncedRef.current || (typeof window !== 'undefined' && localStorage.getItem(`${key}_unsynced`) === 'true');
-              
-              if (isUnsynced) {
-                  console.warn(`[BMG Sync Protection] พบข้อมูล ${key} ที่คุณเพิ่งเพิ่มแต่ยังไม่ขึ้นคลาวด์ ระบบกำลังดันข้อมูลของคุณขึ้นไปทับคลาวด์ เพื่อป้องกันข้อมูลของคุณหาย...`);
-                  if (db && fbUser && appId && stateRef.current) {
-                      setPersistentValue(stateRef.current, true);
-                  }
-                  setIsLoaded(true);
-                  setIsSynced(true);
-                  setIsInitialLoadDone(true);
+              // --- FIX: เกราะป้องกันขั้นสูงสุด (Strict Time-based Protection) ---
+              // หากมีการแก้ไขในเครื่อง หรือ กำลังอัปโหลด หรือเพิ่งอัปโหลดเสร็จไม่เกิน 4 วินาที
+              // ห้ามนำข้อมูลจากคลาวด์มาทับเด็ดขาด เพื่อป้องกันข้อมูลเก่า (Stale Data) ตีกลับมาลบข้อมูลใหม่
+              const timeSinceUpdate = Date.now() - lastLocalUpdateRef.current;
+              if (isUploadingRef.current || syncTimeoutRef.current || timeSinceUpdate < 4000) {
+                  console.warn(`[BMG Sync] 🛡️ ป้องกันข้อมูลทับซ้อน: ข้ามการอัปเดตจากคลาวด์สำหรับ ${key} (ข้อมูลในเครื่องใหม่กว่า)`);
                   return;
               }
 
@@ -1505,7 +1497,8 @@ function usePersistentState(key, initialValue, fbUser) {
               const isFinalEmpty = Array.isArray(finalData) ? finalData.length === 0 : (!finalData || (typeof finalData === 'object' && Object.keys(finalData || {}).length === 0));
               const isCurrentNotEmpty = Array.isArray(stateRef.current) ? stateRef.current.length > 0 : (stateRef.current && typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length > 0);
 
-              if (isFinalEmpty && isCurrentNotEmpty && (Date.now() - lastLocalUpdateRef.current < 10000)) {
+              // ป้องกันคลาวด์ส่งค่าว่างมาลบข้อมูลตอนเน็ตหลุด
+              if (isFinalEmpty && isCurrentNotEmpty) {
                   console.warn(`[BMG Sync] ป้องกันการทับข้อมูล ${key} ด้วยค่าว่างจาก Server`);
                   return;
               }
@@ -1514,7 +1507,9 @@ function usePersistentState(key, initialValue, fbUser) {
                   setState(finalData);
                   stateRef.current = finalData;
                   if (typeof window !== 'undefined') {
-                      try { localStorage.setItem(key, JSON.stringify(finalData)); } catch(e) {}
+                      setTimeout(() => {
+                          try { localStorage.setItem(key, JSON.stringify(finalData)); } catch(e) {}
+                      }, 0);
                   }
               }
               
@@ -1543,45 +1538,13 @@ function usePersistentState(key, initialValue, fbUser) {
 
               if (fullJson) {
                   const parsedData = JSON.parse(fullJson);
-                  if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
-                      pendingServerDataRef.current = parsedData;
-                      if (!checkPendingDataInterval.current) {
-                          checkPendingDataInterval.current = setInterval(() => {
-                              if (Date.now() - lastLocalUpdateRef.current > 5000 && !isUploadingRef.current && !syncTimeoutRef.current) {
-                                  if (pendingServerDataRef.current) {
-                                      applyData(pendingServerDataRef.current);
-                                      pendingServerDataRef.current = null;
-                                  }
-                                  clearInterval(checkPendingDataInterval.current);
-                                  checkPendingDataInterval.current = null;
-                              }
-                          }, 1000);
-                      }
-                  } else {
-                      applyData(parsedData);
-                  }
+                  // เรียกใช้ฟังก์ชันเซ็ตค่าโดยมีเกราะป้องกันตรวจสอบอยู่ด้านใน
+                  applyData(parsedData);
               }
           } else if (data.value) {
               if (thisFetchId !== currentFetchId) return;
               const parsedData = JSON.parse(data.value);
-              
-              if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
-                  pendingServerDataRef.current = parsedData;
-                  if (!checkPendingDataInterval.current) {
-                      checkPendingDataInterval.current = setInterval(() => {
-                          if (Date.now() - lastLocalUpdateRef.current > 5000 && !isUploadingRef.current && !syncTimeoutRef.current) {
-                              if (pendingServerDataRef.current) {
-                                  applyData(pendingServerDataRef.current);
-                                  pendingServerDataRef.current = null;
-                              }
-                              clearInterval(checkPendingDataInterval.current);
-                              checkPendingDataInterval.current = null;
-                          }
-                      }, 1000);
-                  }
-              } else {
-                  applyData(parsedData);
-              }
+              applyData(parsedData);
           }
         } catch(e) { 
             console.error("Parse error", key, e); 
@@ -1607,19 +1570,14 @@ function usePersistentState(key, initialValue, fbUser) {
     return () => {
         clearTimeout(fallbackTimer);
         unsubscribe();
-        if (checkPendingDataInterval.current) clearInterval(checkPendingDataInterval.current);
     };
   }, [fbUser, key]);
 
   const setPersistentValue = async (newValue, isForceSave = false) => {
     if (!isInitialLoadDone && !isForceSave) {
         console.warn(`[BMG Sync] ระงับการบันทึก ${key} ชั่วคราว เนื่องจากยังโหลดข้อมูลตั้งต้นไม่เสร็จ`);
-        isUnsyncedRef.current = true; // ปักธงใน RAM ไว้ก่อน
         if (typeof window !== 'undefined') {
-            try { 
-                localStorage.setItem(key, JSON.stringify(newValue)); 
-                localStorage.setItem(`${key}_unsynced`, 'true'); 
-            } catch (e) {}
+            try { localStorage.setItem(key, JSON.stringify(newValue)); } catch (e) {}
         }
         return;
     }
@@ -1632,15 +1590,11 @@ function usePersistentState(key, initialValue, fbUser) {
 
     setState(valueToStore);
     stateRef.current = valueToStore;
-    isUnsyncedRef.current = true; // NEW: ปักธงทันทีที่ข้อมูลถูกเปลี่ยน
     
     if (typeof window !== 'undefined') {
-        try { 
-            localStorage.setItem(key, JSON.stringify(valueToStore)); 
-            localStorage.setItem(`${key}_unsynced`, 'true'); 
-        } catch (e) {
-            console.warn("[BMG Storage] LocalStorage เต็ม! แต่ระบบจำข้อมูลไว้ใน RAM แล้ว จะพยายามส่งขึ้น Cloud");
-        }
+        setTimeout(() => {
+            try { localStorage.setItem(key, JSON.stringify(valueToStore)); } catch (e) {}
+        }, 0);
     }
 
     if (db && fbUser && appId) {
@@ -1648,40 +1602,28 @@ function usePersistentState(key, initialValue, fbUser) {
 
        return new Promise((resolve) => {
            const doFirebaseSync = async () => {
-               while (isUploadingRef.current) {
-                   await new Promise(r => setTimeout(r, 100));
-               }
-               
                isUploadingRef.current = true;
                try {
                    const jsonStr = JSON.stringify(stateRef.current); 
                    const CHUNK_SIZE = 250000; 
                    const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
                    
-                   // --- FIX: ใช้ writeBatch เพื่อรับประกันว่าข้อมูลจะบันทึกพร้อมกันทั้งหมด 100% ไม่มีพังกลางคัน ---
-                   const batch = writeBatch(db);
-                   
                    for (let i = 0; i < totalChunks; i++) {
                        const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
                        const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                       batch.set(chunkRef, { chunk: chunkData });
+                       await setDoc(chunkRef, { chunk: chunkData });
+                       await new Promise(r => setTimeout(r, 10)); // พัก UI ไม่ให้ค้าง
                    }
                    
                    const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
-                   batch.set(metaRef, { totalChunks, timestamp: Date.now() });
-                   
-                   await batch.commit(); // สั่งยิงคำสั่งทั้งหมดขึ้นฐานข้อมูลพร้อมกัน
-                   
-                   // เมื่อสำเร็จ ค่อยปลดธง
-                   isUnsyncedRef.current = false;
-                   if (typeof window !== 'undefined') {
-                       localStorage.removeItem(`${key}_unsynced`);
-                   }
+                   await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
                } catch (err) {
-                   console.error(`Firestore Batch Save Error [${key}]:`, err);
+                   console.error(`Firestore Single Save Error [${key}]:`, err);
                } finally {
                    syncTimeoutRef.current = null;
                    isUploadingRef.current = false;
+                   // ปรับอัปเดตเวลาหลังบันทึกเสร็จ เพื่อยืดเวลาเปิดเกราะป้องกันออกไปอีก 4 วินาที
+                   lastLocalUpdateRef.current = Date.now(); 
                    resolve();
                }
            };
