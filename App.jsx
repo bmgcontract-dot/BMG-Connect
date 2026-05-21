@@ -3774,40 +3774,7 @@ export default function App() {
       }
   }, [users]);
 
-  // --- NEW: ตรวจจับและบันทึกเวลาล่าสุดเมื่อเปิดระบบ (Refresh/Auto-login) เพื่อให้ซิงค์ข้ามเครื่อง ---
-  useEffect(() => {
-      // 🛡️ ป้องกันการใช้ข้อมูลเก่าจาก LocalStorage ไปทับข้อมูลบน Server โดยการรอให้ Sync ข้อมูลจาก Server ให้เสร็จก่อนเสมอ!
-      if (!currentUser || !isUsersSynced) return; 
-
-      // ฟังก์ชันสำหรับอัปเดตเวลาล่าสุด
-      const updatePresence = () => {
-          setUsers(prevUsers => {
-              if (!Array.isArray(prevUsers)) return prevUsers;
-              const foundUser = prevUsers.find(u => u.id === currentUser.id);
-              if (!foundUser) return prevUsers;
-              
-              const lastLoginTime = new Date(foundUser.lastLogin || 0).getTime();
-              const nowTime = new Date().getTime();
-              
-              // อัปเดตเวลาลงฐานข้อมูลทุกๆ 5 นาที (300,000 ms) เพื่อให้สถานะไม่หมดอายุ (15 นาที)
-              if (nowTime - lastLoginTime > 5 * 60 * 1000) { 
-                  return prevUsers.map(u => 
-                      u.id === currentUser.id ? { ...u, lastLogin: new Date().toISOString() } : u
-                  );
-              }
-              return prevUsers; // ถ้าสียังไม่ถึง 5 นาที ไม่ต้องสั่งอัปเดต State (ลดการดึงเครือข่าย)
-          });
-      };
-
-      // รันเช็คครั้งแรกเมื่อระบบโหลดเสร็จ
-      updatePresence();
-
-      // ตั้งเวลาเช็คซ้ำทุกๆ 1 นาทีตราบใดที่เปิดหน้าเว็บอยู่
-      const intervalId = setInterval(updatePresence, 60 * 1000);
-
-      // ยกเลิกการตั้งเวลาเมื่อผู้ใช้ออกจากระบบหรือปิดหน้าต่าง
-      return () => clearInterval(intervalId);
-  }, [currentUser?.id, isUsersSynced]); // ผูกกับ Dependency 2 ตัวนี้
+  // (ยกเลิกระบบ Auto Update Presence ทุก 5 นาที เพื่อป้องกันปัญหา Data Race Condition ที่ทำให้รายชื่อพนักงานหายไปเมื่อเปิดหลายเครื่องพร้อมกัน)
 
   // --- NEW: Auto-Sync State (สถานะการซิงค์อัตโนมัติ) ---
   const [autoSyncMessage, setAutoSyncMessage] = useState('');
@@ -4961,7 +4928,7 @@ export default function App() {
           const userExists = userList.some(u => u.id === updatedUser.id);
           if (userExists) {
               const updatedUsers = userList.map(u => u.id === updatedUser.id ? updatedUser : u);
-              setUsers(updatedUsers);
+              setUsers(updatedUsers, true); // FIX: บังคับเซฟขึ้นคลาวด์ทันที เพื่อให้อัปเดตเวลาเข้าใช้งาน
           }
           
           // ตรวจสอบหน่วยงานประจำของผู้ใช้
@@ -8740,8 +8707,8 @@ export default function App() {
                                               const lastDate = new Date(user.lastLogin);
                                               const now = new Date();
                                               const diffMins = Math.floor((now - lastDate) / 60000);
-                                              // หากมีคนเข้าสู่ระบบภายใน 15 นาที ให้แสดงเป็นสถานะออนไลน์ (จุดเขียว)
-                                              const isOnline = diffMins <= 15; 
+                                              // ปรับเป็น 60 นาที เนื่องจากยกเลิกการอัปเดตอัตโนมัติ
+                                              const isOnline = diffMins <= 60; 
                                               return (
                                                   <div className="flex flex-col gap-1">
                                                       <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md border w-fit shadow-sm ${isOnline ? 'bg-green-50 border-green-200 text-green-700' : 'bg-gray-50 border-gray-200 text-gray-600'}`} title={lastDate.toLocaleString('th-TH')}>
