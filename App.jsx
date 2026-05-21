@@ -1418,13 +1418,11 @@ const getAllFilesLocally = async () => {
 // --- Custom Hook for Persistent Storage (Firebase or LocalStorage Fallback) ---
 function usePersistentState(key, initialValue, fbUser) {
   const [state, setState] = useState(() => {
-      // FIX: โหลดข้อมูลจาก Cache (Local Storage) ขึ้นมาแสดงผลทันทีก่อนเสมอ (Optimistic Load) เพื่อแก้ปัญหาโหลดหน้าเว็บช้า
       if (typeof window !== 'undefined') {
           const local = localStorage.getItem(key);
           if (local) {
               try { 
                   const parsed = JSON.parse(local); 
-                  // 🛡️ FIX: บังคับให้เป็น Array เสมอ หากค่าเริ่มต้นเป็น Array ป้องกันแอปพังหน้าขาว (Crash)
                   if (Array.isArray(initialValue)) {
                       if (!Array.isArray(parsed)) {
                           return (parsed && typeof parsed === 'object') ? Object.values(parsed) : [...initialValue];
@@ -1439,12 +1437,16 @@ function usePersistentState(key, initialValue, fbUser) {
   
   const stateRef = useRef(state);
   const syncTimeoutRef = useRef(null); 
-  const isUploadingRef = useRef(false); // NEW: Track upload status
-  const lastLocalUpdateRef = useRef(0); // NEW: Track last local edit time
-  const pendingServerDataRef = useRef(null); // NEW: คิวพักข้อมูลหากมีการแก้ไขชนกัน
+  const isUploadingRef = useRef(false);
+  const lastLocalUpdateRef = useRef(0);
+  const pendingServerDataRef = useRef(null);
   const checkPendingDataInterval = useRef(null);
+  
+  // FIX: เพิ่ม flag ควบคุมว่าโหลดข้อมูลเริ่มต้นจาก Firebase เสร็จหรือยัง
+  // ป้องกันไม่ให้แอปเอาค่าเริ่มต้น (ค่าว่าง) กลับไปทับข้อมูลบนเซิร์ฟเวอร์
+  const [isInitialLoadDone, setIsInitialLoadDone] = useState(false);
   const [isSynced, setIsSynced] = useState(false);
-  // OPTIMIZE: ถ้ามีข้อมูลใน Cache ให้ถือว่าโหลดเสร็จแล้วทันที ไม่ต้องรอหน้าจอหมุน
+  
   const [isLoaded, setIsLoaded] = useState(() => {
       if (typeof window !== 'undefined' && localStorage.getItem(key)) return true;
       return false;
@@ -1457,12 +1459,13 @@ function usePersistentState(key, initialValue, fbUser) {
   useEffect(() => {
     if (!db) {
         setIsLoaded(true);
+        setIsInitialLoadDone(true);
         return; 
     }
     
-    // OPTIMIZE: ขยายเวลาบังคับข้าม (Timeout) เป็น 4 วินาที เพื่อรองรับอินเทอร์เน็ตมือถือ
     const fallbackTimer = setTimeout(() => {
         setIsLoaded(true);
+        setIsInitialLoadDone(true);
     }, 4000);
 
     if (!fbUser || !appId) {
@@ -1470,40 +1473,41 @@ function usePersistentState(key, initialValue, fbUser) {
     }
     
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
-    
     let currentFetchId = 0;
 
     const unsubscribe = onSnapshot(docRef, async (docSnap) => {
       if (docSnap.exists()) {
         currentFetchId++;
         const thisFetchId = currentFetchId;
-
         const data = docSnap.data();
+
         try {
           const applyData = (parsedData) => {
               let finalData = parsedData;
               
-              // 🛡️ FIX: บังคับการแปลงชนิดข้อมูล กรณีข้อมูลถูกเซฟจาก Firebase กลับมาเป็น Object แทน Array
               if (Array.isArray(initialValue) && !Array.isArray(parsedData)) {
                   finalData = (parsedData && typeof parsedData === 'object') ? Object.values(parsedData) : [];
               }
 
-              // --- FIX: Data Loss Prevention ---
+              // --- FIX: เพิ่มเงื่อนไขตรวจสอบความถูกต้องก่อนรับข้อมูลจาก Server มาทับเครื่อง ---
               const isFinalEmpty = Array.isArray(finalData) ? finalData.length === 0 : (!finalData || (typeof finalData === 'object' && Object.keys(finalData || {}).length === 0));
               const isCurrentNotEmpty = Array.isArray(stateRef.current) ? stateRef.current.length > 0 : (stateRef.current && typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length > 0);
 
-              if (isFinalEmpty && isCurrentNotEmpty) {
-                  console.warn(`[BMG Sync] ป้องกันการทับข้อมูล ${key} ด้วยค่าว่าง`);
+              // 1. ถ้า Server ส่งค่าว่างมา แต่เครื่องเรามีข้อมูล (และเพิ่งแก้ข้อมูลไป) ให้ปฏิเสธค่าจาก Server
+              if (isFinalEmpty && isCurrentNotEmpty && (Date.now() - lastLocalUpdateRef.current < 10000)) {
+                  console.warn(`[BMG Sync] ป้องกันการทับข้อมูล ${key} ด้วยค่าว่างจาก Server`);
                   return;
               }
-              // ---------------------------------
+              
               if (JSON.stringify(stateRef.current) !== JSON.stringify(finalData)) {
                   setState(finalData);
                   stateRef.current = finalData;
                   if (typeof window !== 'undefined') localStorage.setItem(key, JSON.stringify(finalData));
               }
+              
               setIsLoaded(true);
               setIsSynced(true);
+              setIsInitialLoadDone(true); // ยืนยันว่าดึงข้อมูลจาก Server สำเร็จแล้ว
           };
 
           if (data.totalChunks !== undefined) {
@@ -1519,12 +1523,14 @@ function usePersistentState(key, initialValue, fbUser) {
                   }
               }
               
-              if (thisFetchId !== currentFetchId || hasChunkError) return;
+              if (thisFetchId !== currentFetchId || hasChunkError) {
+                  // ถ้าโหลด Chunk ไม่สมบูรณ์ ก็ถือว่าโหลดเสร็จแล้ว แต่ใช้ค่าที่มีในเครื่องไปก่อน
+                  setIsInitialLoadDone(true); 
+                  return;
+              }
 
               if (fullJson) {
                   const parsedData = JSON.parse(fullJson);
-                  
-                  // 🛡️ 100% Data Loss Prevention: นำข้อมูลเข้าคิวหากผู้ใช้กำลังพิมพ์
                   if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
                       pendingServerDataRef.current = parsedData;
                       if (!checkPendingDataInterval.current) {
@@ -1565,49 +1571,76 @@ function usePersistentState(key, initialValue, fbUser) {
                   applyData(parsedData);
               }
           }
-        } catch(e) { console.error("Parse error", key, e); }
-      } else if (!isSynced) {
-         setPersistentValue(stateRef.current);
+        } catch(e) { 
+            console.error("Parse error", key, e); 
+            setIsInitialLoadDone(true);
+        }
+      } else {
+         // กรณีไม่มีเอกสารบน Server เลย
          setIsLoaded(true);
-         setIsSynced(true);
+         setIsInitialLoadDone(true);
+         
+         // ถ้ายังไม่เคย Sync ขึ้นไปเลย ให้เซฟค่าปัจจุบันขึ้นไปครั้งแรก
+         if (!isSynced && stateRef.current) {
+             const isCurrentEmpty = Array.isArray(stateRef.current) ? stateRef.current.length === 0 : (!stateRef.current || (typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length === 0));
+             
+             // ป้องกันการเซฟค่าว่างขึ้นไปเป็นครั้งแรกโดยไม่จำเป็น
+             if (!isCurrentEmpty) {
+                 setPersistentValue(stateRef.current, true);
+             }
+             setIsSynced(true);
+         }
       }
     }, (err) => {
       console.error("Sync error", key, err);
       setIsLoaded(true);
+      setIsInitialLoadDone(true);
     });
 
     return () => {
         clearTimeout(fallbackTimer);
         unsubscribe();
+        if (checkPendingDataInterval.current) clearInterval(checkPendingDataInterval.current);
     };
   }, [fbUser, key]);
 
-  const setPersistentValue = async (newValue, isRestore = false) => {
-    lastLocalUpdateRef.current = Date.now(); // บันทึกเวลาที่แก้ล่าสุด เพื่อกัน Firebase มาทับ
+  const setPersistentValue = async (newValue, isForceSave = false) => {
+    // FIX: ป้องกันไม่ให้การบันทึกข้อมูล (Save) ทับค่าบน Server หากยังโหลดข้อมูลเริ่มต้นจาก Server ไม่เสร็จ
+    if (!isInitialLoadDone && !isForceSave) {
+        console.warn(`[BMG Sync] ระงับการบันทึก ${key} ชั่วคราว เนื่องจากยังโหลดข้อมูลตั้งต้นไม่เสร็จ`);
+        // เก็บค่าไว้ที่ Local ไปก่อน
+        if (typeof window !== 'undefined') {
+            try { localStorage.setItem(key, JSON.stringify(newValue)); } catch (e) {}
+        }
+        return;
+    }
+
+    lastLocalUpdateRef.current = Date.now(); 
 
     const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
-    if (!isRestore && valueToStore === stateRef.current) return;
+    
+    // ถ้าข้อมูลไม่เปลี่ยนก็ไม่ต้องเซฟ (ยกเว้นบังคับเซฟ)
+    if (!isForceSave && JSON.stringify(valueToStore) === JSON.stringify(stateRef.current)) return;
 
     setState(valueToStore);
     stateRef.current = valueToStore;
     
     if (typeof window !== 'undefined') {
-        // ผลักการทำงานของ LocalStorage ไปไว้คิวหลังสุด เพื่อไม่ให้หน้าจอค้าง
         setTimeout(() => {
             try { localStorage.setItem(key, JSON.stringify(valueToStore)); } catch (e) {}
         }, 0);
     }
 
     if (db && fbUser && appId) {
-       // NEW: ป้องกัน Data Corruption ด้วยการเคลียร์คำสั่งเซฟเดิมที่ยังไม่เสร็จทิ้ง
        if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
 
        return new Promise((resolve) => {
            const doFirebaseSync = async () => {
                isUploadingRef.current = true;
                try {
-                   const jsonStr = JSON.stringify(stateRef.current); // ใช้ state ล่าสุดเสมอ
-                   const CHUNK_SIZE = 250000; // FIX: ลดขนาด Chunk ลงจาก 900000 เป็น 250000 เพื่อป้องกัน 1MB Limit สำหรับภาษาไทย
+                   // FIX: ดึงค่า stateRef.current มาแปลงเป็น String ตรงนี้ เพื่อให้ได้ข้อมูลล่าสุดเสมอ
+                   const jsonStr = JSON.stringify(stateRef.current); 
+                   const CHUNK_SIZE = 250000; 
                    const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
                    
                    const writePromises = [];
@@ -1615,18 +1648,16 @@ function usePersistentState(key, initialValue, fbUser) {
                        const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
                        const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
                        
-                       if (isRestore) {
-                           // โหมดกู้คืน: ซิงค์แบบคู่ขนานไม่ต้องพัก UI ให้เสร็จเร็วที่สุด
+                       if (isForceSave) {
                            writePromises.push(setDoc(chunkRef, { chunk: chunkData }));
                        } else {
                            await setDoc(chunkRef, { chunk: chunkData });
-                           // พัก UI เล็กน้อยให้เบราว์เซอร์ไม่ค้างในโหมดปกติ
                            await new Promise(r => setTimeout(r, 10));
                        }
                    }
                    
-                   if (isRestore && writePromises.length > 0) {
-                       await Promise.all(writePromises); // รอให้อัปโหลด Chunk ทั้งหมดเสร็จพร้อมกัน
+                   if (isForceSave && writePromises.length > 0) {
+                       await Promise.all(writePromises); 
                    }
                    
                    const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
@@ -1640,11 +1671,9 @@ function usePersistentState(key, initialValue, fbUser) {
                }
            };
 
-           // FIX: สำหรับการกู้คืนข้อมูล (Restore) ให้ทำงานทันทีไม่ต้องหน่วงเวลา 1 วินาที
-           if (isRestore) {
+           if (isForceSave) {
                doFirebaseSync();
            } else {
-               // NEW: หน่วงเวลา 1 วินาที หลังจากหยุดพิมพ์/คลิก ค่อยเซฟขึ้น Database
                syncTimeoutRef.current = setTimeout(doFirebaseSync, 1000);
            }
        });
