@@ -1479,9 +1479,15 @@ function usePersistentState(key, initialValue, fbUser) {
 
         try {
           const applyData = (parsedData) => {
+              // ป้องกันการทำงานซ้ำซ้อนถ้าข้อมูลเหมือนกันแล้ว
+              if (JSON.stringify(stateRef.current) === JSON.stringify(parsedData)) {
+                  setIsLoaded(true);
+                  setIsSynced(true);
+                  setIsInitialLoadDone(true);
+                  return;
+              }
+
               // --- FIX: เกราะป้องกันขั้นสูงสุด (Strict Time-based Protection) ---
-              // หากมีการแก้ไขในเครื่อง หรือ กำลังอัปโหลด หรือเพิ่งอัปโหลดเสร็จไม่เกิน 4 วินาที
-              // ห้ามนำข้อมูลจากคลาวด์มาทับเด็ดขาด เพื่อป้องกันข้อมูลเก่า (Stale Data) ตีกลับมาลบข้อมูลใหม่
               const timeSinceUpdate = Date.now() - lastLocalUpdateRef.current;
               if (isUploadingRef.current || syncTimeoutRef.current || timeSinceUpdate < 4000) {
                   console.warn(`[BMG Sync] 🛡️ ป้องกันข้อมูลทับซ้อน: ข้ามการอัปเดตจากคลาวด์สำหรับ ${key} (ข้อมูลในเครื่องใหม่กว่า)`);
@@ -1503,14 +1509,12 @@ function usePersistentState(key, initialValue, fbUser) {
                   return;
               }
               
-              if (JSON.stringify(stateRef.current) !== JSON.stringify(finalData)) {
-                  setState(finalData);
-                  stateRef.current = finalData;
-                  if (typeof window !== 'undefined') {
-                      setTimeout(() => {
-                          try { localStorage.setItem(key, JSON.stringify(finalData)); } catch(e) {}
-                      }, 0);
-                  }
+              setState(finalData);
+              stateRef.current = finalData;
+              if (typeof window !== 'undefined') {
+                  setTimeout(() => {
+                      try { localStorage.setItem(key, JSON.stringify(finalData)); } catch(e) {}
+                  }, 0);
               }
               
               setIsLoaded(true);
@@ -1521,13 +1525,24 @@ function usePersistentState(key, initialValue, fbUser) {
           if (data.totalChunks !== undefined) {
               let fullJson = '';
               let hasChunkError = false;
+              const expectedTimestamp = data.timestamp;
+
+              // อ่านข้อมูลเป็นก้อน (Chunks)
               for (let i = 0; i < data.totalChunks; i++) {
                   const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
                   const chunkSnap = await getDoc(chunkRef);
                   if (chunkSnap.exists()) {
-                      fullJson += chunkSnap.data().chunk;
+                      const chunkData = chunkSnap.data();
+                      // ตรวจสอบความสอดคล้องของเวลา (Timestamp Verification) ป้องกันการอ่านข้อมูลข้ามเวอร์ชัน (Torn read)
+                      if (chunkData.timestamp && expectedTimestamp && chunkData.timestamp !== expectedTimestamp) {
+                          hasChunkError = true;
+                          console.warn(`[BMG Sync] ตรวจพบข้อมูลข้ามเวอร์ชัน (Torn read) ใน ${key} chunk ${i}. รอโหลดใหม่...`);
+                          break;
+                      }
+                      fullJson += chunkData.chunk;
                   } else {
                       hasChunkError = true;
+                      break;
                   }
               }
               
@@ -1607,22 +1622,26 @@ function usePersistentState(key, initialValue, fbUser) {
                    const jsonStr = JSON.stringify(stateRef.current); 
                    const CHUNK_SIZE = 250000; 
                    const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
+                   const syncTimestamp = Date.now();
+                   
+                   // --- FIX: ใช้ writeBatch เพื่อให้การเขียนข้อมูล (Chunks + Meta) เกิดขึ้นพร้อมกัน ป้องกันข้อมูลแหว่ง (Atomic Write) ---
+                   const batch = writeBatch(db);
                    
                    for (let i = 0; i < totalChunks; i++) {
                        const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
                        const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                       await setDoc(chunkRef, { chunk: chunkData });
-                       await new Promise(r => setTimeout(r, 10)); // พัก UI ไม่ให้ค้าง
+                       batch.set(chunkRef, { chunk: chunkData, timestamp: syncTimestamp });
                    }
                    
                    const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
-                   await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
+                   batch.set(metaRef, { totalChunks, timestamp: syncTimestamp });
+                   
+                   await batch.commit();
                } catch (err) {
-                   console.error(`Firestore Single Save Error [${key}]:`, err);
+                   console.error(`Firestore Batch Save Error [${key}]:`, err);
                } finally {
                    syncTimeoutRef.current = null;
                    isUploadingRef.current = false;
-                   // ปรับอัปเดตเวลาหลังบันทึกเสร็จ เพื่อยืดเวลาเปิดเกราะป้องกันออกไปอีก 4 วินาที
                    lastLocalUpdateRef.current = Date.now(); 
                    resolve();
                }
