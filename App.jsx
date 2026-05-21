@@ -1483,6 +1483,19 @@ function usePersistentState(key, initialValue, fbUser) {
 
         try {
           const applyData = (parsedData) => {
+              // --- NEW: Offline First - ตรวจสอบว่ามีข้อมูลค้างส่ง (Unsynced) หรือไม่ เพื่อป้องกัน Data Loss ตอน Refresh ---
+              const isUnsynced = typeof window !== 'undefined' && localStorage.getItem(`${key}_unsynced`) === 'true';
+              if (isUnsynced) {
+                  console.warn(`[BMG Sync] พบข้อมูลที่ยังไม่ถูกซิงค์ของ ${key} ในเครื่องนี้ กำลังดันข้อมูลขึ้นคลาวด์แทน...`);
+                  if (db && fbUser && appId && stateRef.current) {
+                      setPersistentValue(stateRef.current, true);
+                  }
+                  setIsLoaded(true);
+                  setIsSynced(true);
+                  setIsInitialLoadDone(true);
+                  return;
+              }
+
               let finalData = parsedData;
               
               if (Array.isArray(initialValue) && !Array.isArray(parsedData)) {
@@ -1610,7 +1623,10 @@ function usePersistentState(key, initialValue, fbUser) {
         console.warn(`[BMG Sync] ระงับการบันทึก ${key} ชั่วคราว เนื่องจากยังโหลดข้อมูลตั้งต้นไม่เสร็จ`);
         // เก็บค่าไว้ที่ Local ไปก่อน
         if (typeof window !== 'undefined') {
-            try { localStorage.setItem(key, JSON.stringify(newValue)); } catch (e) {}
+            try { 
+                localStorage.setItem(key, JSON.stringify(newValue)); 
+                localStorage.setItem(`${key}_unsynced`, 'true'); // NEW: ปักธงรอซิงค์
+            } catch (e) {}
         }
         return;
     }
@@ -1626,9 +1642,11 @@ function usePersistentState(key, initialValue, fbUser) {
     stateRef.current = valueToStore;
     
     if (typeof window !== 'undefined') {
-        setTimeout(() => {
-            try { localStorage.setItem(key, JSON.stringify(valueToStore)); } catch (e) {}
-        }, 0);
+        // อัปเดตลงเครื่องให้เร็วที่สุด ป้องกันการ Refresh ทันที
+        try { 
+            localStorage.setItem(key, JSON.stringify(valueToStore)); 
+            localStorage.setItem(`${key}_unsynced`, 'true'); // ปักธงเพื่อความชัวร์ว่ายังไม่ลงคลาวด์ 100%
+        } catch (e) {}
     }
 
     if (db && fbUser && appId) {
@@ -1636,6 +1654,11 @@ function usePersistentState(key, initialValue, fbUser) {
 
        return new Promise((resolve) => {
            const doFirebaseSync = async () => {
+               // ป้องกันการทับซ้อน (Race condition) เมื่อรัวปุ่ม Save
+               while (isUploadingRef.current) {
+                   await new Promise(r => setTimeout(r, 100));
+               }
+               
                isUploadingRef.current = true;
                try {
                    // FIX: ดึงค่า stateRef.current มาแปลงเป็น String ตรงนี้ เพื่อให้ได้ข้อมูลล่าสุดเสมอ
@@ -1652,7 +1675,7 @@ function usePersistentState(key, initialValue, fbUser) {
                            writePromises.push(setDoc(chunkRef, { chunk: chunkData }));
                        } else {
                            await setDoc(chunkRef, { chunk: chunkData });
-                           await new Promise(r => setTimeout(r, 10));
+                           await new Promise(r => setTimeout(r, 10)); // พัก UI
                        }
                    }
                    
@@ -1662,6 +1685,11 @@ function usePersistentState(key, initialValue, fbUser) {
                    
                    const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
                    await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
+                   
+                   // ลบธงการค้างซิงค์ เมื่ออัปโหลดขึ้น Firebase เสร็จสมบูรณ์
+                   if (typeof window !== 'undefined') {
+                       localStorage.removeItem(`${key}_unsynced`);
+                   }
                } catch (err) {
                    console.error(`Firestore Single Save Error [${key}]:`, err);
                } finally {
@@ -7333,7 +7361,7 @@ export default function App() {
           }, 50);
 
           return updatedList;
-      });
+      }, true); // <--- เพิ่ม true ตรงนี้เพื่อบังคับซิงค์คลาวด์แบบเร่งด่วน (Force Save) ไม่รอ 1 วินาที
   };
 
   const handleEditUser = (user) => {
