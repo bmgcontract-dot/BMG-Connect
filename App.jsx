@@ -1441,9 +1441,8 @@ function usePersistentState(key, initialValue, fbUser) {
   const lastLocalUpdateRef = useRef(0);
   const pendingServerDataRef = useRef(null);
   const checkPendingDataInterval = useRef(null);
+  const isUnsyncedRef = useRef(false); // NEW: เกราะป้องกันข้อมูลสูญหาย (ใช้ Memory จำสถานะแทน LocalStorage ที่อาจจะเต็ม)
   
-  // FIX: เพิ่ม flag ควบคุมว่าโหลดข้อมูลเริ่มต้นจาก Firebase เสร็จหรือยัง
-  // ป้องกันไม่ให้แอปเอาค่าเริ่มต้น (ค่าว่าง) กลับไปทับข้อมูลบนเซิร์ฟเวอร์
   const [isInitialLoadDone, setIsInitialLoadDone] = useState(false);
   const [isSynced, setIsSynced] = useState(false);
   
@@ -1483,10 +1482,11 @@ function usePersistentState(key, initialValue, fbUser) {
 
         try {
           const applyData = (parsedData) => {
-              // --- NEW: Offline First - ตรวจสอบว่ามีข้อมูลค้างส่ง (Unsynced) หรือไม่ เพื่อป้องกัน Data Loss ตอน Refresh ---
-              const isUnsynced = typeof window !== 'undefined' && localStorage.getItem(`${key}_unsynced`) === 'true';
+              // --- FIX: ใช้ isUnsyncedRef.current ที่อยู่ใน RAM เพื่อป้องกันปัญหา LocalStorage เต็มแล้วอ่านธงไม่ได้ ---
+              const isUnsynced = isUnsyncedRef.current || (typeof window !== 'undefined' && localStorage.getItem(`${key}_unsynced`) === 'true');
+              
               if (isUnsynced) {
-                  console.warn(`[BMG Sync] พบข้อมูลที่ยังไม่ถูกซิงค์ของ ${key} ในเครื่องนี้ กำลังดันข้อมูลขึ้นคลาวด์แทน...`);
+                  console.warn(`[BMG Sync Protection] พบข้อมูล ${key} ที่คุณเพิ่งเพิ่มแต่ยังไม่ขึ้นคลาวด์ ระบบกำลังดันข้อมูลของคุณขึ้นไปทับคลาวด์ เพื่อป้องกันข้อมูลของคุณหาย...`);
                   if (db && fbUser && appId && stateRef.current) {
                       setPersistentValue(stateRef.current, true);
                   }
@@ -1502,11 +1502,9 @@ function usePersistentState(key, initialValue, fbUser) {
                   finalData = (parsedData && typeof parsedData === 'object') ? Object.values(parsedData) : [];
               }
 
-              // --- FIX: เพิ่มเงื่อนไขตรวจสอบความถูกต้องก่อนรับข้อมูลจาก Server มาทับเครื่อง ---
               const isFinalEmpty = Array.isArray(finalData) ? finalData.length === 0 : (!finalData || (typeof finalData === 'object' && Object.keys(finalData || {}).length === 0));
               const isCurrentNotEmpty = Array.isArray(stateRef.current) ? stateRef.current.length > 0 : (stateRef.current && typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length > 0);
 
-              // 1. ถ้า Server ส่งค่าว่างมา แต่เครื่องเรามีข้อมูล (และเพิ่งแก้ข้อมูลไป) ให้ปฏิเสธค่าจาก Server
               if (isFinalEmpty && isCurrentNotEmpty && (Date.now() - lastLocalUpdateRef.current < 10000)) {
                   console.warn(`[BMG Sync] ป้องกันการทับข้อมูล ${key} ด้วยค่าว่างจาก Server`);
                   return;
@@ -1515,12 +1513,14 @@ function usePersistentState(key, initialValue, fbUser) {
               if (JSON.stringify(stateRef.current) !== JSON.stringify(finalData)) {
                   setState(finalData);
                   stateRef.current = finalData;
-                  if (typeof window !== 'undefined') localStorage.setItem(key, JSON.stringify(finalData));
+                  if (typeof window !== 'undefined') {
+                      try { localStorage.setItem(key, JSON.stringify(finalData)); } catch(e) {}
+                  }
               }
               
               setIsLoaded(true);
               setIsSynced(true);
-              setIsInitialLoadDone(true); // ยืนยันว่าดึงข้อมูลจาก Server สำเร็จแล้ว
+              setIsInitialLoadDone(true);
           };
 
           if (data.totalChunks !== undefined) {
@@ -1537,7 +1537,6 @@ function usePersistentState(key, initialValue, fbUser) {
               }
               
               if (thisFetchId !== currentFetchId || hasChunkError) {
-                  // ถ้าโหลด Chunk ไม่สมบูรณ์ ก็ถือว่าโหลดเสร็จแล้ว แต่ใช้ค่าที่มีในเครื่องไปก่อน
                   setIsInitialLoadDone(true); 
                   return;
               }
@@ -1589,15 +1588,10 @@ function usePersistentState(key, initialValue, fbUser) {
             setIsInitialLoadDone(true);
         }
       } else {
-         // กรณีไม่มีเอกสารบน Server เลย
          setIsLoaded(true);
          setIsInitialLoadDone(true);
-         
-         // ถ้ายังไม่เคย Sync ขึ้นไปเลย ให้เซฟค่าปัจจุบันขึ้นไปครั้งแรก
          if (!isSynced && stateRef.current) {
              const isCurrentEmpty = Array.isArray(stateRef.current) ? stateRef.current.length === 0 : (!stateRef.current || (typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length === 0));
-             
-             // ป้องกันการเซฟค่าว่างขึ้นไปเป็นครั้งแรกโดยไม่จำเป็น
              if (!isCurrentEmpty) {
                  setPersistentValue(stateRef.current, true);
              }
@@ -1618,14 +1612,13 @@ function usePersistentState(key, initialValue, fbUser) {
   }, [fbUser, key]);
 
   const setPersistentValue = async (newValue, isForceSave = false) => {
-    // FIX: ป้องกันไม่ให้การบันทึกข้อมูล (Save) ทับค่าบน Server หากยังโหลดข้อมูลเริ่มต้นจาก Server ไม่เสร็จ
     if (!isInitialLoadDone && !isForceSave) {
         console.warn(`[BMG Sync] ระงับการบันทึก ${key} ชั่วคราว เนื่องจากยังโหลดข้อมูลตั้งต้นไม่เสร็จ`);
-        // เก็บค่าไว้ที่ Local ไปก่อน
+        isUnsyncedRef.current = true; // ปักธงใน RAM ไว้ก่อน
         if (typeof window !== 'undefined') {
             try { 
                 localStorage.setItem(key, JSON.stringify(newValue)); 
-                localStorage.setItem(`${key}_unsynced`, 'true'); // NEW: ปักธงรอซิงค์
+                localStorage.setItem(`${key}_unsynced`, 'true'); 
             } catch (e) {}
         }
         return;
@@ -1635,18 +1628,19 @@ function usePersistentState(key, initialValue, fbUser) {
 
     const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
     
-    // ถ้าข้อมูลไม่เปลี่ยนก็ไม่ต้องเซฟ (ยกเว้นบังคับเซฟ)
     if (!isForceSave && JSON.stringify(valueToStore) === JSON.stringify(stateRef.current)) return;
 
     setState(valueToStore);
     stateRef.current = valueToStore;
+    isUnsyncedRef.current = true; // NEW: ปักธงทันทีที่ข้อมูลถูกเปลี่ยน
     
     if (typeof window !== 'undefined') {
-        // อัปเดตลงเครื่องให้เร็วที่สุด ป้องกันการ Refresh ทันที
         try { 
             localStorage.setItem(key, JSON.stringify(valueToStore)); 
-            localStorage.setItem(`${key}_unsynced`, 'true'); // ปักธงเพื่อความชัวร์ว่ายังไม่ลงคลาวด์ 100%
-        } catch (e) {}
+            localStorage.setItem(`${key}_unsynced`, 'true'); 
+        } catch (e) {
+            console.warn("[BMG Storage] LocalStorage เต็ม! แต่ระบบจำข้อมูลไว้ใน RAM แล้ว จะพยายามส่งขึ้น Cloud");
+        }
     }
 
     if (db && fbUser && appId) {
@@ -1654,44 +1648,37 @@ function usePersistentState(key, initialValue, fbUser) {
 
        return new Promise((resolve) => {
            const doFirebaseSync = async () => {
-               // ป้องกันการทับซ้อน (Race condition) เมื่อรัวปุ่ม Save
                while (isUploadingRef.current) {
                    await new Promise(r => setTimeout(r, 100));
                }
                
                isUploadingRef.current = true;
                try {
-                   // FIX: ดึงค่า stateRef.current มาแปลงเป็น String ตรงนี้ เพื่อให้ได้ข้อมูลล่าสุดเสมอ
                    const jsonStr = JSON.stringify(stateRef.current); 
                    const CHUNK_SIZE = 250000; 
                    const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
                    
-                   const writePromises = [];
+                   // --- FIX: ใช้ writeBatch เพื่อรับประกันว่าข้อมูลจะบันทึกพร้อมกันทั้งหมด 100% ไม่มีพังกลางคัน ---
+                   const batch = writeBatch(db);
+                   
                    for (let i = 0; i < totalChunks; i++) {
                        const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
                        const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                       
-                       if (isForceSave) {
-                           writePromises.push(setDoc(chunkRef, { chunk: chunkData }));
-                       } else {
-                           await setDoc(chunkRef, { chunk: chunkData });
-                           await new Promise(r => setTimeout(r, 10)); // พัก UI
-                       }
-                   }
-                   
-                   if (isForceSave && writePromises.length > 0) {
-                       await Promise.all(writePromises); 
+                       batch.set(chunkRef, { chunk: chunkData });
                    }
                    
                    const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
-                   await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
+                   batch.set(metaRef, { totalChunks, timestamp: Date.now() });
                    
-                   // ลบธงการค้างซิงค์ เมื่ออัปโหลดขึ้น Firebase เสร็จสมบูรณ์
+                   await batch.commit(); // สั่งยิงคำสั่งทั้งหมดขึ้นฐานข้อมูลพร้อมกัน
+                   
+                   // เมื่อสำเร็จ ค่อยปลดธง
+                   isUnsyncedRef.current = false;
                    if (typeof window !== 'undefined') {
                        localStorage.removeItem(`${key}_unsynced`);
                    }
                } catch (err) {
-                   console.error(`Firestore Single Save Error [${key}]:`, err);
+                   console.error(`Firestore Batch Save Error [${key}]:`, err);
                } finally {
                    syncTimeoutRef.current = null;
                    isUploadingRef.current = false;
@@ -4924,12 +4911,14 @@ export default function App() {
           setNewDailyReport(prev => ({...prev, reporter: `${updatedUser.firstName} ${updatedUser.lastName}`})); 
           setLoginError(''); 
 
-          // อัปเดตข้อมูลใน State เพื่อให้เวลาแสดงผลในตารางเป็นปัจจุบัน
-          const userExists = userList.some(u => u.id === updatedUser.id);
-          if (userExists) {
-              const updatedUsers = userList.map(u => u.id === updatedUser.id ? updatedUser : u);
-              setUsers(updatedUsers, true); // FIX: บังคับเซฟขึ้นคลาวด์ทันที เพื่อให้อัปเดตเวลาเข้าใช้งาน
-          }
+          // --- FIX 3: ป้องกันการนำข้อมูลเก่าไปบันทึกทับข้อมูลใหม่ตอน Login ---
+          setUsers(prevUsers => {
+              const safeUsers = Array.isArray(prevUsers) ? prevUsers : [];
+              if (safeUsers.some(u => u.id === updatedUser.id)) {
+                  return safeUsers.map(u => u.id === updatedUser.id ? { ...u, lastLogin: new Date().toISOString() } : u);
+              }
+              return safeUsers;
+          }, true);
           
           // ตรวจสอบหน่วยงานประจำของผู้ใช้
           if (updatedUser.department && updatedUser.department !== 'Head Office') {
