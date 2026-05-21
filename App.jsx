@@ -1603,20 +1603,30 @@ function usePersistentState(key, initialValue, fbUser) {
        if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
 
        return new Promise((resolve) => {
-           // NEW: หน่วงเวลา 1 วินาที หลังจากหยุดพิมพ์/คลิก ค่อยเซฟขึ้น Database
-           syncTimeoutRef.current = setTimeout(async () => {
+           const doFirebaseSync = async () => {
                isUploadingRef.current = true;
                try {
                    const jsonStr = JSON.stringify(stateRef.current); // ใช้ state ล่าสุดเสมอ
                    const CHUNK_SIZE = 250000; // FIX: ลดขนาด Chunk ลงจาก 900000 เป็น 250000 เพื่อป้องกัน 1MB Limit สำหรับภาษาไทย
                    const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
                    
+                   const writePromises = [];
                    for (let i = 0; i < totalChunks; i++) {
                        const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
                        const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                       await setDoc(chunkRef, { chunk: chunkData });
-                       // พัก UI เล็กน้อยให้เบราว์เซอร์ไม่ค้าง
-                       await new Promise(r => setTimeout(r, 10));
+                       
+                       if (isRestore) {
+                           // โหมดกู้คืน: ซิงค์แบบคู่ขนานไม่ต้องพัก UI ให้เสร็จเร็วที่สุด
+                           writePromises.push(setDoc(chunkRef, { chunk: chunkData }));
+                       } else {
+                           await setDoc(chunkRef, { chunk: chunkData });
+                           // พัก UI เล็กน้อยให้เบราว์เซอร์ไม่ค้างในโหมดปกติ
+                           await new Promise(r => setTimeout(r, 10));
+                       }
+                   }
+                   
+                   if (isRestore && writePromises.length > 0) {
+                       await Promise.all(writePromises); // รอให้อัปโหลด Chunk ทั้งหมดเสร็จพร้อมกัน
                    }
                    
                    const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
@@ -1628,7 +1638,15 @@ function usePersistentState(key, initialValue, fbUser) {
                    isUploadingRef.current = false;
                    resolve();
                }
-           }, 1000);
+           };
+
+           // FIX: สำหรับการกู้คืนข้อมูล (Restore) ให้ทำงานทันทีไม่ต้องหน่วงเวลา 1 วินาที
+           if (isRestore) {
+               doFirebaseSync();
+           } else {
+               // NEW: หน่วงเวลา 1 วินาที หลังจากหยุดพิมพ์/คลิก ค่อยเซฟขึ้น Database
+               syncTimeoutRef.current = setTimeout(doFirebaseSync, 1000);
+           }
        });
     }
   };
@@ -7240,40 +7258,53 @@ export default function App() {
   };
 
   const handleSaveUser = (e) => {
-      e.preventDefault();
+      if (e && e.preventDefault) e.preventDefault();
 
-      // --- FIX 1: ป้องกัน รหัสพนักงาน (employeeId) และ ชื่อผู้ใช้ (username) ซ้ำซ้อน ---
       const empId = (newUser.employeeId || '').trim();
       const uName = (newUser.username || '').trim();
       
-      if (empId) {
-          const isEmpIdDuplicate = users.some(u => u.id !== newUser.id && (u.employeeId || '').trim() === empId);
-          if (isEmpIdDuplicate) {
-              alert(`บันทึกไม่สำเร็จ: รหัสพนักงาน "${empId}" มีการใช้งานแล้วในระบบ กรุณาตรวจสอบและเปลี่ยนรหัสใหม่`);
-              return; // หยุดการทำงาน
+      // --- FIX: ใช้ functional update เพื่อเข้าถึงข้อมูลล่าสุด ตัดปัญหา Stale State (Closure) ---
+      setUsers(prevUsers => {
+          const safeUsers = Array.isArray(prevUsers) ? prevUsers : [];
+          
+          // --- FIX 1: ป้องกัน รหัสพนักงาน (employeeId) ซ้ำซ้อน ---
+          if (empId) {
+              const isEmpIdDuplicate = safeUsers.some(u => u.id !== newUser.id && (u.employeeId || '').trim() === empId);
+              if (isEmpIdDuplicate) {
+                  alert(`บันทึกไม่สำเร็จ: รหัสพนักงาน "${empId}" มีการใช้งานแล้วในระบบ กรุณาตรวจสอบและเปลี่ยนรหัสใหม่`);
+                  return safeUsers; // คืนค่าเดิม ไม่ทำการบันทึก
+              }
           }
-      }
-      
-      if (uName) {
-          const isUnameDuplicate = users.some(u => u.id !== newUser.id && (u.username || '').trim().toLowerCase() === uName.toLowerCase());
-          if (isUnameDuplicate) {
-              alert(`บันทึกไม่สำเร็จ: ชื่อผู้ใช้สำหรับล็อกอิน (Username) "${uName}" มีคนใช้แล้ว กรุณาเปลี่ยนใหม่`);
-              return; // หยุดการทำงาน
+          
+          // --- FIX 2: ป้องกัน ชื่อผู้ใช้ (username) ซ้ำซ้อน ---
+          if (uName) {
+              const isUnameDuplicate = safeUsers.some(u => u.id !== newUser.id && (u.username || '').trim().toLowerCase() === uName.toLowerCase());
+              if (isUnameDuplicate) {
+                  alert(`บันทึกไม่สำเร็จ: ชื่อผู้ใช้สำหรับล็อกอิน (Username) "${uName}" มีคนใช้แล้ว กรุณาเปลี่ยนใหม่`);
+                  return safeUsers; // คืนค่าเดิม ไม่ทำการบันทึก
+              }
           }
-      }
-      // ----------------------------------------------------------------------
 
-      // --- FIX 2: Deep copy สิทธิ์การใช้งาน เพื่อตัดขาด Object Reference ป้องกันบัคสิทธิ์เด้งกลับไปเป็นค่าเดิม ---
-      const permissionsToSave = JSON.parse(JSON.stringify(newUser.permissions));
-      const finalUserData = { ...newUser, permissions: permissionsToSave };
+          // --- FIX 3: Deep copy สิทธิ์การใช้งาน เพื่อตัดขาด Object Reference ป้องกันบัคสิทธิ์เด้งกลับไปเป็นค่าเดิม ---
+          const permissionsToSave = JSON.parse(JSON.stringify(newUser.permissions || {}));
+          const finalUserData = { ...newUser, permissions: permissionsToSave };
 
-      if (isEditingUser) {
-          setUsers(users.map(u => u.id === finalUserData.id ? finalUserData : u));
-      } else {
-          setUsers([...users, { ...finalUserData, id: generateId(), status: 'Active', created_at: new Date().toISOString() }]);
-      }
-      setShowAddUserModal(false);
-      alert(t('saveSuccess'));
+          let updatedList;
+          if (isEditingUser) {
+              updatedList = safeUsers.map(u => u.id === finalUserData.id ? finalUserData : u);
+          } else {
+              // ดันผู้ใช้งานที่เพิ่งเพิ่มใหม่ไว้บนสุด เพื่อให้หาเจอง่าย
+              updatedList = [{ ...finalUserData, id: generateId(), status: 'Active', created_at: new Date().toISOString() }, ...safeUsers];
+          }
+          
+          // ปิด Modal และแสดงข้อความสำเร็จหลังอัปเดต State (ใช้ setTimeout หลบการทำงานซ้อนทับ)
+          setTimeout(() => {
+              setShowAddUserModal(false);
+              alert(t('saveSuccess'));
+          }, 50);
+
+          return updatedList;
+      });
   };
 
   const handleEditUser = (user) => {
@@ -8413,8 +8444,17 @@ export default function App() {
           .filter(u => userRoleFilter ? u.position === userRoleFilter : true)
           .sort((a, b) => {
               // FIX: แปลงเป็น String ก่อนเปรียบเทียบ ป้องกัน Error กรณีมีข้อมูลเป็นตัวเลข (Number)
-              const idA = String(a.employeeId || '');
-              const idB = String(b.employeeId || '');
+              const idA = String(a.employeeId || '').trim();
+              const idB = String(b.employeeId || '').trim();
+              
+              // --- FIX: กรณีที่ไม่ได้ใส่รหัสพนักงาน (พนักงานใหม่ที่รหัสว่าง) ให้เรียงตามเวลาที่สร้างใหม่สุดขึ้นก่อน เพื่อป้องกันผู้ใช้หาข้อมูลไม่เจอ ---
+              if (!idA && !idB) {
+                  return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+              }
+              // ถ้าคนใดคนหนึ่งไม่มีรหัสพนักงาน ให้คนที่ไม่มีไปอยู่ท้ายสุดเสมอ (จะได้ไม่รบกวนการเรียงรหัส)
+              if (!idA) return 1;
+              if (!idB) return -1;
+
               if (userSortOrder === 'desc') return idB.localeCompare(idA); // มากไปน้อย
               return idA.localeCompare(idB); // น้อยไปมาก
           });
