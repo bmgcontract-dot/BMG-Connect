@@ -1438,7 +1438,9 @@ function usePersistentState(key, initialValue, fbUser) {
   const stateRef = useRef(state);
   const syncTimeoutRef = useRef(null); 
   const isUploadingRef = useRef(false);
-  const localVersionRef = useRef(Date.now()); // NEW: ระบบควบคุมเวอร์ชันข้อมูลแบบเด็ดขาด (Strict Versioning)
+  
+  // FIX: เริ่มต้นระบบควบคุมเวอร์ชันที่ 0 เพื่อให้การโหลดครั้งแรกยอมรับข้อมูลจาก Server เสมอ
+  const localVersionRef = useRef(0); 
   
   const [isInitialLoadDone, setIsInitialLoadDone] = useState(false);
   const [isSynced, setIsSynced] = useState(false);
@@ -1473,7 +1475,17 @@ function usePersistentState(key, initialValue, fbUser) {
         const thisFetchId = currentFetchId;
         const data = docSnap.data();
         
-        const serverTimestamp = data.timestamp || 0;
+        // กำหนด timestamp ขั้นต่ำกรณีข้อมูลเก่าไม่มีการประทับเวลา
+        const serverTimestamp = data.timestamp || 1;
+
+        // --- FIX: Block Echoes and Stale Data ปราบอาการข้อมูลเด้งไปมา ---
+        // หากข้อมูลจากคลาวด์ เก่ากว่า หรือ "เท่ากับ" เวลาที่เครื่องเราพึ่งเซฟไปล่าสุด ให้เตะทิ้งทันที!
+        // เพราะนั่นคือเสียงสะท้อน (Echo) ของเราเอง การประกอบร่างข้อมูลซ้ำจะทำให้ดึง Cache เก่ามาปน
+        if (serverTimestamp <= localVersionRef.current) {
+            setIsLoaded(true);
+            setIsInitialLoadDone(true);
+            return;
+        }
 
         try {
           const applyData = (parsedData) => {
@@ -1481,17 +1493,11 @@ function usePersistentState(key, initialValue, fbUser) {
                   setIsLoaded(true);
                   setIsSynced(true);
                   setIsInitialLoadDone(true);
+                  localVersionRef.current = serverTimestamp; // อัปเดตเวอร์ชันให้ตรงกัน
                   return;
               }
 
-              // --- FIX: Strict Timestamp Version Control ---
-              // บล็อคข้อมูลจากคลาวด์ ถ้าพบว่าข้อมูลเก่ากว่าที่เราเพิ่งแก้ไขไป (ขจัดปัญหาข้อมูลสลับไปสลับมา 100%)
-              if (serverTimestamp < localVersionRef.current) {
-                  console.warn(`[BMG Sync] 🛡️ บล็อคข้อมูลเก่าจาก Server (${key}): ป้องกันข้อมูลเด้งสลับไปมา`);
-                  return;
-              }
-              
-              // อัปเดตเวอร์ชันในเครื่องให้ตรงกับคลาวด์เสมอ
+              // อัปเดตเวอร์ชันในเครื่องให้ตรงกับคลาวด์
               localVersionRef.current = serverTimestamp;
 
               let finalData = parsedData;
@@ -1526,8 +1532,7 @@ function usePersistentState(key, initialValue, fbUser) {
               let hasChunkError = false;
               let retryCount = 0;
 
-              // --- FIX: Retry Mechanism for Chunks ---
-              // ประกอบข้อมูลหลายรอบ หากคลาวด์ส่งชิ้นส่วนมาไม่ครบในรอบแรก ป้องกันการตกหล่นของข้อมูล
+              // Retry Mechanism for Chunks: พยายามประกอบร่างใหม่หากชิ้นส่วนมาไม่ครบ
               while (retryCount < 3) {
                   fullJson = '';
                   hasChunkError = false;
@@ -1537,7 +1542,6 @@ function usePersistentState(key, initialValue, fbUser) {
                       const chunkSnap = await getDoc(chunkRef);
                       if (chunkSnap.exists()) {
                           const chunkData = chunkSnap.data();
-                          // ตรวจสอบความสมบูรณ์ของชิ้นส่วน
                           if (chunkData.timestamp && expectedTimestamp && chunkData.timestamp !== expectedTimestamp) {
                               hasChunkError = true;
                               break;
@@ -1549,10 +1553,10 @@ function usePersistentState(key, initialValue, fbUser) {
                       }
                   }
                   
-                  if (!hasChunkError) break; // ข้อมูลสมบูรณ์แล้ว เลิกวนลูป
+                  if (!hasChunkError) break; 
                   
                   retryCount++;
-                  await new Promise(r => setTimeout(r, 600 * retryCount)); // รอและพยายามประกอบร่างใหม่
+                  await new Promise(r => setTimeout(r, 600 * retryCount));
               }
               
               if (thisFetchId !== currentFetchId || hasChunkError) {
@@ -1607,7 +1611,7 @@ function usePersistentState(key, initialValue, fbUser) {
     
     if (!isForceSave && JSON.stringify(valueToStore) === JSON.stringify(stateRef.current)) return;
 
-    // --- FIX: อัปเดต Version Control ทันทีที่เครื่องมีการแก้ไข เพื่อปักหมุดความสดใหม่ ---
+    // --- FIX: อัปเดต Version Control ทันทีที่เครื่องมีการแก้ไข เพื่อปักหมุดความสดใหม่ และป้องกันเสียงสะท้อน ---
     const newVersionTimestamp = Date.now();
     localVersionRef.current = newVersionTimestamp; 
 
