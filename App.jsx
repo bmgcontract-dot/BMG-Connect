@@ -1958,16 +1958,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
     let result = summaryData.filter(item => {
       const matchSearch = item.houseNo.includes(searchTerm) || item.name.includes(searchTerm);
       const finalStatus = item.customStatus ? item.customStatus : (item.isFreeze ? "เตรียมอายัด" : "ปกติ");
-      
-      let matchStatus = false;
-      if (filterStatus === 'ทั้งหมด') {
-          matchStatus = true;
-      } else if (filterStatus === 'อื่นๆ (ให้ระบุ)') {
-          const standardStatuses = ['ปกติ', 'เตรียมอายัด', ...FEE_STATUS_OPTIONS.filter(o => o !== 'อื่นๆ (ให้ระบุ)')];
-          matchStatus = !standardStatuses.includes(finalStatus);
-      } else {
-          matchStatus = finalStatus === filterStatus;
-      }
+      const matchStatus = filterStatus === 'ทั้งหมด' ? true : finalStatus === filterStatus;
       
       let matchAmount = true;
       const min = filterMinAmount === '' ? 0 : parseFloat(filterMinAmount);
