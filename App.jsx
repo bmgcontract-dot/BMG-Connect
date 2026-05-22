@@ -1224,9 +1224,9 @@ const compressImage = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                // กำหนดขนาดสูงสุด 600px เพื่อลดขนาดไฟล์และแก้ปัญหาข้อมูลล้น Memory / LocalStorage
-                const MAX_WIDTH = 600;
-                const MAX_HEIGHT = 600;
+                // กำหนดขนาดสูงสุด 800px เพื่อคงความชัดเจน แต่ลดขนาดไฟล์ป้องกันปัญหา 1MB Limit ของฐานข้อมูล
+                const MAX_WIDTH = 800;
+                const MAX_HEIGHT = 800;
                 let width = img.width;
                 let height = img.height;
 
@@ -1246,8 +1246,8 @@ const compressImage = (file) => {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
                 
-                // บีบอัดเป็น JPEG Quality 50%
-                resolve(canvas.toDataURL('image/jpeg', 0.5));
+                // บีบอัดเป็น JPEG Quality 60%
+                resolve(canvas.toDataURL('image/jpeg', 0.6));
             };
             img.onerror = () => {
                 // กรณีเกิดข้อผิดพลาดในการโหลดรูป ให้ส่งค่าต้นฉบับกลับไป
@@ -1646,7 +1646,7 @@ function usePersistentState(key, initialValue, fbUser) {
                    }
                    
                    const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
-               
+                   
                    // 🌟 ฝังรหัสประทับของหน้าจอเราลงไป (Instance ID)
                    batch.set(metaRef, { 
                        totalChunks, 
@@ -1660,15 +1660,14 @@ function usePersistentState(key, initialValue, fbUser) {
                    console.error(`Firestore Batch Save Error [${key}]:`, err);
                } finally {
                    syncTimeoutRef.current = null;
+                   resolve();
                }
            };
 
            if (isForceSave) {
-               doFirebaseSync().then(resolve).catch(resolve);
+               doFirebaseSync();
            } else {
-               syncTimeoutRef.current = setTimeout(() => {
-                   doFirebaseSync().catch(e => console.error("Auto sync failed", e)).finally(resolve);
-               }, 1000);
+               syncTimeoutRef.current = setTimeout(doFirebaseSync, 1000);
            }
        });
     }
@@ -5245,18 +5244,17 @@ export default function App() {
   };
   const calculateTotalDailyIncome = () => {
       const { commonFee, lateFee, water, parking, violation, other } = newDailyReport.income;
-      return Number(commonFee || 0) + Number(lateFee || 0) + Number(water || 0) + Number(parking || 0) + Number(violation || 0) + Number(other || 0);
+      return Number(commonFee) + Number(lateFee) + Number(water) + Number(parking) + Number(violation) + Number(other);
   };
   
-  const handleSaveDailyReport = async (e) => {
+  const handleSaveDailyReport = (e) => {
       e.preventDefault();
-      setIsExporting(true); // ใช้ State เพื่อแสดง Loading คร่าวๆ
+      let savedReport;
       
-      try {
-          let savedReport;
-          
-          // FIX: บังคับให้เป็น Array เสมอ และกรองข้อมูล Null หรือ Undefined ทิ้งป้องกันการพัง
-          const safeList = Array.isArray(dailyReports) ? dailyReports.filter(Boolean) : [];
+      // FIX: บังคับให้เป็น Array เสมอ และกรองข้อมูล Null หรือ Undefined ทิ้งป้องกันการพัง
+      // ใช้ callback ภายใน setDailyReports แทนการอ่านค่าตรงๆ ป้องกันปัญหา Stale State (Closure)
+      setDailyReports(prevList => {
+          const safeList = Array.isArray(prevList) ? prevList.filter(Boolean) : [];
           let nextList; 
           
           // ป้องกันการสร้างรายงานซ้ำซ้อนในวันเดียวกัน (Enforce 1 report per day)
@@ -5268,58 +5266,35 @@ export default function App() {
               }
           }
 
-          // อัปเดตข้อมูลผู้บันทึกให้เป็นคนล่าสุด
-          const finalReporter = currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : newDailyReport.reporter;
-
-          // Clone Object เพื่อแยก Reference ขาดจากกัน ป้องกัน State พัง
-          const finalDataToSave = JSON.parse(JSON.stringify({ 
-              ...newDailyReport, 
-              reporter: finalReporter,
-              projectId: selectedProject.id
-          }));
-
+          // FIX: ไม่นำ Side Effect ไปใส่ใน setState และคำนวณ State ด้วยตนเองก่อนเซฟ
           if (finalId) {
               // Update existing report
-              finalDataToSave.id = finalId;
-              savedReport = finalDataToSave;
+              savedReport = { ...newDailyReport, id: finalId, projectId: selectedProject.id };
               nextList = safeList.map(r => r.id === finalId ? savedReport : r);
           } else {
               // Create new report
               const id = generateId();
-              finalDataToSave.id = id;
-              savedReport = finalDataToSave;
+              savedReport = { ...newDailyReport, id, projectId: selectedProject.id };
               nextList = [savedReport, ...safeList]; // เพิ่มไว้ด้านบนสุด
           }
 
-          // สั่ง Update State แบบชัดเจน (รอให้เสร็จก่อนค่อยแจ้งเตือน)
-          const savePromise = setDailyReports(nextList, true); // สั่งบังคับ Force Sync ขึ้น Cloud
-          if (savePromise instanceof Promise) {
-              await savePromise;
-          }
-
-          // --- AUTO SYNC TRIGGER ---
+          // --- AUTO SYNC TRIGGER (นำมาใส่ไว้ใน Callback นี้เพื่อให้มั่นใจว่าได้ข้อมูลล่าสุด) ---
           let filesToUpload = [];
           ['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].forEach(dept => {
               const images = savedReport.performance[dept]?.images || [];
-              images.forEach((img, idx) => { 
-                  if(img && typeof img === 'string') {
-                      filesToUpload.push({ name: `DailyReport_${savedReport.id}_${dept}_${idx}.jpg`, data: img }); 
-                  }
-              });
+              images.forEach((img, idx) => { filesToUpload.push({ name: `DailyReport_${savedReport.id}_${dept}_${idx}.jpg`, data: img }); });
           });
           
-          // ซิงค์ชีทไม่รอ Await เพื่อให้ User ไม่ต้องรอนาน
-          triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, filesToUpload);
+          // เรียกใช้งาน Trigger ภายนอก โดยหน่วงเวลาเล็กน้อยเพื่อป้องกัน State Collision
+          setTimeout(() => {
+              triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, filesToUpload);
+              setShowAddDailyReportModal(false);
+              setSelectedDailyReport(savedReport); // Open view modal immediately
+              alert('บันทึกรายงานประจำวันเสร็จสมบูรณ์'); // แจ้งเตือนเพื่อให้มั่นใจว่าบันทึกแล้ว
+          }, 50);
 
-          setShowAddDailyReportModal(false);
-          setSelectedDailyReport(savedReport); // Open view modal immediately
-          alert('บันทึกรายงานประจำวันเสร็จสมบูรณ์ ระบบกำลังซิงค์ขึ้นออนไลน์'); 
-      } catch (error) {
-          console.error("Save Daily Report Error:", error);
-          alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาลองอีกครั้ง: ' + error.message);
-      } finally {
-          setIsExporting(false); // ปลด Loading
-      }
+          return nextList;
+      }, true); // ใช้ true บังคับ Save ลง Firebase โดยไม่รอ 1 วินาที
   };
 
   const handleEditDailyReport = (report) => {
@@ -18311,9 +18286,7 @@ export default function App() {
                     </div>
                     <div className="flex gap-2">
                         <Button variant="secondary" onClick={() => setShowAddDailyReportModal(false)}>{t('cancel')}</Button>
-                        <Button type="submit" icon={isExporting ? Loader2 : Save} disabled={isExporting}>
-                            {isExporting ? 'กำลังบันทึก...' : t('save')}
-                        </Button>
+                        <Button type="submit" icon={Save}>{t('save')}</Button>
                     </div>
                 </div>
             </form>
