@@ -1417,6 +1417,10 @@ const getAllFilesLocally = async () => {
 
 // --- Custom Hook for Persistent Storage (Firebase or LocalStorage Fallback) ---
 function usePersistentState(key, initialValue, fbUser) {
+  // 🌟 FIX 100%: สร้างรหัสประจำตัวของแท็บ (Instance ID) 
+  // เพื่อใช้แยกแยะว่าการอัปเดตมาจากหน้าจอของเรา หรือมาจากเครื่องอื่น
+  const instanceIdRef = useRef(Math.random().toString(36).substring(2, 15));
+
   const [state, setState] = useState(() => {
       if (typeof window !== 'undefined') {
           const local = localStorage.getItem(key);
@@ -1437,10 +1441,6 @@ function usePersistentState(key, initialValue, fbUser) {
   
   const stateRef = useRef(state);
   const syncTimeoutRef = useRef(null); 
-  const isUploadingRef = useRef(false);
-  
-  // FIX: เริ่มต้นระบบควบคุมเวอร์ชันที่ 0 เพื่อให้การโหลดครั้งแรกยอมรับข้อมูลจาก Server เสมอ
-  const localVersionRef = useRef(0); 
   
   const [isInitialLoadDone, setIsInitialLoadDone] = useState(false);
   const [isSynced, setIsSynced] = useState(false);
@@ -1471,50 +1471,44 @@ function usePersistentState(key, initialValue, fbUser) {
 
     const unsubscribe = onSnapshot(docRef, async (docSnap) => {
       if (docSnap.exists()) {
-        currentFetchId++;
-        const thisFetchId = currentFetchId;
         const data = docSnap.data();
         
-        // กำหนด timestamp ขั้นต่ำกรณีข้อมูลเก่าไม่มีการประทับเวลา
-        const serverTimestamp = data.timestamp || 1;
-
-        // --- FIX: Block Echoes and Stale Data ปราบอาการข้อมูลเด้งไปมา ---
-        // หากข้อมูลจากคลาวด์ เก่ากว่า หรือ "เท่ากับ" เวลาที่เครื่องเราพึ่งเซฟไปล่าสุด ให้เตะทิ้งทันที!
-        // เพราะนั่นคือเสียงสะท้อน (Echo) ของเราเอง การประกอบร่างข้อมูลซ้ำจะทำให้ดึง Cache เก่ามาปน
-        if (serverTimestamp <= localVersionRef.current) {
+        // 🌟 THE BULLETPROOF FIX: การป้องกันระดับสูงสุด 🌟
+        // หากข้อมูลอัปเดตถูกสร้างมาจาก "แท็บเบราว์เซอร์นี้" ให้ระบบปฏิเสธการโหลดซ้ำทันที!
+        // สิ่งนี้จะปิดตายโอกาสที่ข้อมูลเก่าจะสะท้อน (Echo) กลับมาทับข้อมูลใหม่ที่คุณพึ่งเพิ่มไปได้ 100%
+        if (data.updaterInstance === instanceIdRef.current) {
             setIsLoaded(true);
             setIsInitialLoadDone(true);
             return;
         }
 
+        // ป้องกันการดึงข้อมูลขณะที่คลาวด์กำลังเขียนข้อมูลอยู่ (ป้องกันการได้ข้อมูลแหว่งๆ)
+        if (docSnap.metadata.hasPendingWrites) {
+            return;
+        }
+
+        currentFetchId++;
+        const thisFetchId = currentFetchId;
+
         try {
           const applyData = (parsedData) => {
-              if (JSON.stringify(stateRef.current) === JSON.stringify(parsedData)) {
-                  setIsLoaded(true);
-                  setIsSynced(true);
-                  setIsInitialLoadDone(true);
-                  localVersionRef.current = serverTimestamp; // อัปเดตเวอร์ชันให้ตรงกัน
-                  return;
-              }
-
-              // อัปเดตเวอร์ชันในเครื่องให้ตรงกับคลาวด์
-              localVersionRef.current = serverTimestamp;
-
               let finalData = parsedData;
               
               if (Array.isArray(initialValue) && !Array.isArray(parsedData)) {
                   finalData = (parsedData && typeof parsedData === 'object') ? Object.values(parsedData) : [];
               }
 
-              const isFinalEmpty = Array.isArray(finalData) ? finalData.length === 0 : (!finalData || (typeof finalData === 'object' && Object.keys(finalData || {}).length === 0));
-              const isCurrentNotEmpty = Array.isArray(stateRef.current) ? stateRef.current.length > 0 : (stateRef.current && typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length > 0);
+              // ป้องกันคลาวด์ว่างเปล่าลบข้อมูลที่มีอยู่ในเครื่อง
+              const isFinalEmpty = Array.isArray(finalData) ? finalData.length === 0 : (!finalData || Object.keys(finalData || {}).length === 0);
+              const isCurrentNotEmpty = Array.isArray(stateRef.current) ? stateRef.current.length > 0 : (stateRef.current && Object.keys(stateRef.current || {}).length > 0);
 
               if (isFinalEmpty && isCurrentNotEmpty) {
-                  return; // ป้องกันคลาวด์ล้างบางข้อมูล
+                  return; 
               }
               
               setState(finalData);
-              stateRef.current = finalData; // ซิงค์ State ทันที
+              stateRef.current = finalData; 
+              
               if (typeof window !== 'undefined') {
                   setTimeout(() => {
                       try { localStorage.setItem(key, JSON.stringify(finalData)); } catch(e) {}
@@ -1532,7 +1526,7 @@ function usePersistentState(key, initialValue, fbUser) {
               let hasChunkError = false;
               let retryCount = 0;
 
-              // Retry Mechanism for Chunks: พยายามประกอบร่างใหม่หากชิ้นส่วนมาไม่ครบ
+              // ระบบซ่อมแซมและประกอบร่างข้อมูล (Retry Mechanism)
               while (retryCount < 3) {
                   fullJson = '';
                   hasChunkError = false;
@@ -1540,8 +1534,10 @@ function usePersistentState(key, initialValue, fbUser) {
                   for (let i = 0; i < data.totalChunks; i++) {
                       const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
                       const chunkSnap = await getDoc(chunkRef);
+                      
                       if (chunkSnap.exists()) {
                           const chunkData = chunkSnap.data();
+                          // ตรวจสอบขั้นเด็ดขาด: ชิ้นส่วนต้องตรงกับเวลาที่อัปเดต ไม่เช่นนั้นถือว่าไฟล์เสีย
                           if (chunkData.timestamp && expectedTimestamp && chunkData.timestamp !== expectedTimestamp) {
                               hasChunkError = true;
                               break;
@@ -1556,12 +1552,12 @@ function usePersistentState(key, initialValue, fbUser) {
                   if (!hasChunkError) break; 
                   
                   retryCount++;
-                  await new Promise(r => setTimeout(r, 600 * retryCount));
+                  await new Promise(r => setTimeout(r, 800)); // หน่วงเวลาให้คลาวด์บันทึกเสร็จ
               }
               
               if (thisFetchId !== currentFetchId || hasChunkError) {
                   setIsInitialLoadDone(true); 
-                  return;
+                  return; // ยกเลิกการอัปเดตหากข้อมูลมาไม่ครบ (ป้องกันข้อมูลหาย)
               }
 
               if (fullJson) {
@@ -1581,7 +1577,7 @@ function usePersistentState(key, initialValue, fbUser) {
          setIsLoaded(true);
          setIsInitialLoadDone(true);
          if (!isSynced && stateRef.current) {
-             const isCurrentEmpty = Array.isArray(stateRef.current) ? stateRef.current.length === 0 : (!stateRef.current || (typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length === 0));
+             const isCurrentEmpty = Array.isArray(stateRef.current) ? stateRef.current.length === 0 : (!stateRef.current || Object.keys(stateRef.current || {}).length === 0);
              if (!isCurrentEmpty) {
                  setPersistentValue(stateRef.current, true);
              }
@@ -1611,10 +1607,6 @@ function usePersistentState(key, initialValue, fbUser) {
     
     if (!isForceSave && JSON.stringify(valueToStore) === JSON.stringify(stateRef.current)) return;
 
-    // --- FIX: อัปเดต Version Control ทันทีที่เครื่องมีการแก้ไข เพื่อปักหมุดความสดใหม่ และป้องกันเสียงสะท้อน ---
-    const newVersionTimestamp = Date.now();
-    localVersionRef.current = newVersionTimestamp; 
-
     setState(valueToStore);
     stateRef.current = valueToStore; 
     
@@ -1629,13 +1621,13 @@ function usePersistentState(key, initialValue, fbUser) {
 
        return new Promise((resolve) => {
            const doFirebaseSync = async () => {
-               isUploadingRef.current = true;
                try {
+                   const newVersionTimestamp = Date.now();
                    const jsonStr = JSON.stringify(stateRef.current); 
                    const CHUNK_SIZE = 250000; 
                    const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
                    
-                   // แพ็คเกจข้อมูลและส่งไปคลาวด์ในเวลาเดียวกัน (Atomic Write)
+                   // แพ็คเกจข้อมูลและส่งไปคลาวด์ในเวลาเดียวกันทั้งหมดแบบ Atomic
                    const batch = writeBatch(db);
                    
                    for (let i = 0; i < totalChunks; i++) {
@@ -1645,14 +1637,20 @@ function usePersistentState(key, initialValue, fbUser) {
                    }
                    
                    const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
-                   batch.set(metaRef, { totalChunks, timestamp: newVersionTimestamp, updaterUid: fbUser.uid });
+                   
+                   // 🌟 ฝังรหัสประทับของหน้าจอเราลงไป (Instance ID)
+                   batch.set(metaRef, { 
+                       totalChunks, 
+                       timestamp: newVersionTimestamp, 
+                       updaterUid: fbUser.uid,
+                       updaterInstance: instanceIdRef.current 
+                   });
                    
                    await batch.commit();
                } catch (err) {
                    console.error(`Firestore Batch Save Error [${key}]:`, err);
                } finally {
                    syncTimeoutRef.current = null;
-                   isUploadingRef.current = false;
                    resolve();
                }
            };
