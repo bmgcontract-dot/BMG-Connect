@@ -1224,9 +1224,9 @@ const compressImage = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                // กำหนดขนาดสูงสุด 800px เพื่อคงความชัดเจน แต่ลดขนาดไฟล์ป้องกันปัญหา 1MB Limit ของฐานข้อมูล
-                const MAX_WIDTH = 800;
-                const MAX_HEIGHT = 800;
+                // กำหนดขนาดสูงสุด 600px เพื่อลดขนาดไฟล์และแก้ปัญหาข้อมูลล้น Memory / LocalStorage
+                const MAX_WIDTH = 600;
+                const MAX_HEIGHT = 600;
                 let width = img.width;
                 let height = img.height;
 
@@ -1246,8 +1246,8 @@ const compressImage = (file) => {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
                 
-                // บีบอัดเป็น JPEG Quality 60%
-                resolve(canvas.toDataURL('image/jpeg', 0.6));
+                // บีบอัดเป็น JPEG Quality 50%
+                resolve(canvas.toDataURL('image/jpeg', 0.5));
             };
             img.onerror = () => {
                 // กรณีเกิดข้อผิดพลาดในการโหลดรูป ให้ส่งค่าต้นฉบับกลับไป
@@ -1646,7 +1646,7 @@ function usePersistentState(key, initialValue, fbUser) {
                    }
                    
                    const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
-                   
+               
                    // 🌟 ฝังรหัสประทับของหน้าจอเราลงไป (Instance ID)
                    batch.set(metaRef, { 
                        totalChunks, 
@@ -1660,14 +1660,15 @@ function usePersistentState(key, initialValue, fbUser) {
                    console.error(`Firestore Batch Save Error [${key}]:`, err);
                } finally {
                    syncTimeoutRef.current = null;
-                   resolve();
                }
            };
 
            if (isForceSave) {
-               doFirebaseSync();
+               doFirebaseSync().then(resolve).catch(resolve);
            } else {
-               syncTimeoutRef.current = setTimeout(doFirebaseSync, 1000);
+               syncTimeoutRef.current = setTimeout(() => {
+                   doFirebaseSync().catch(e => console.error("Auto sync failed", e)).finally(resolve);
+               }, 1000);
            }
        });
     }
@@ -5291,10 +5292,10 @@ export default function App() {
           }
 
           // สั่ง Update State แบบชัดเจน (รอให้เสร็จก่อนค่อยแจ้งเตือน)
-          await new Promise(resolve => {
-              setDailyReports(nextList, true); // สั่งบังคับ Force Sync ขึ้น Cloud
-              resolve();
-          });
+          const savePromise = setDailyReports(nextList, true); // สั่งบังคับ Force Sync ขึ้น Cloud
+          if (savePromise instanceof Promise) {
+              await savePromise;
+          }
 
           // --- AUTO SYNC TRIGGER ---
           let filesToUpload = [];
@@ -18310,7 +18311,9 @@ export default function App() {
                     </div>
                     <div className="flex gap-2">
                         <Button variant="secondary" onClick={() => setShowAddDailyReportModal(false)}>{t('cancel')}</Button>
-                        <Button type="submit" icon={Save}>{t('save')}</Button>
+                        <Button type="submit" icon={isExporting ? Loader2 : Save} disabled={isExporting}>
+                            {isExporting ? 'กำลังบันทึก...' : t('save')}
+                        </Button>
                     </div>
                 </div>
             </form>
