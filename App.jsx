@@ -1129,11 +1129,32 @@ const ThreeDMedal = ({ rank }) => {
                 <div className="absolute top-0 w-full h-1/2 bg-gradient-to-b from-white/50 to-transparent rounded-t-full pointer-events-none"></div>
                 
                 <span className={`relative z-20 font-black text-[15px] ${style.textColor} tracking-tighter`} style={{ textShadow: '0px 1px 1px rgba(255,255,255,0.7)' }}>
-                    {rank}
-                </span>
-            </div>
+                {rank}
+            </span>
         </div>
-    );
+    </div>
+  );
+};
+
+// --- NEW: Async Image Component for displaying IDB stored images ---
+const AsyncImage = ({ fileId, className, alt }) => {
+    const [src, setSrc] = useState(null);
+
+    useEffect(() => {
+        let isMounted = true;
+        if (!fileId) return;
+        if (fileId.startsWith('data:image')) {
+            setSrc(fileId);
+        } else {
+            getFileLocally(fileId).then(data => {
+                if (isMounted && data) setSrc(data);
+            });
+        }
+        return () => { isMounted = false; };
+    }, [fileId]);
+
+    if (!src) return <div className={`bg-gray-100 flex items-center justify-center text-gray-300 ${className}`}><ImageIcon size={24}/></div>;
+    return <img src={src} alt={alt || 'Image'} className={className} />;
 };
 
 const ChartGradients = () => (
@@ -3665,6 +3686,45 @@ export default function App() {
   const [isDraggingBell, setIsDraggingBell] = useState(false);
   const dragRef = useRef({ startX: 0, startY: 0, startRight: 0, startBottom: 0, isDragging: false });
 
+  // --- FIX: MIGRATION SCRIPT FOR OVERSIZED STATE ---
+  // นำรูปภาพ Base64 ขนาดใหญ่ออกจาก State แล้วย้ายไปเก็บบน IndexedDB เพื่อแก้ปัญหาพื้นที่ 10MB เต็ม ทำให้บันทึกรายงานประจำวันแล้วไม่แสดง
+  const hasMigratedDRRef = useRef(false);
+  useEffect(() => {
+      if (hasMigratedDRRef.current || !Array.isArray(dailyReports) || dailyReports.length === 0) return;
+      hasMigratedDRRef.current = true;
+      
+      const migrateData = async () => {
+          let needsUpdateDaily = false;
+          const migratedDR = JSON.parse(JSON.stringify(dailyReports));
+          
+          for (let i = 0; i < migratedDR.length; i++) {
+              const r = migratedDR[i];
+              if (!r || !r.performance) continue;
+              
+              for (const dept of ['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other']) {
+                  if (r.performance[dept] && Array.isArray(r.performance[dept].images)) {
+                      const newImages = [];
+                      for (let j = 0; j < r.performance[dept].images.length; j++) {
+                          const imgData = r.performance[dept].images[j];
+                          if (imgData && typeof imgData === 'string' && imgData.length > 2000 && imgData.startsWith('data:image')) {
+                              const fileId = `migrated_dr_${r.id}_${dept}_${j}_${Date.now()}`;
+                              await saveFileLocally(fileId, imgData);
+                              newImages.push(fileId);
+                              needsUpdateDaily = true;
+                          } else {
+                              newImages.push(imgData);
+                          }
+                      }
+                      r.performance[dept].images = newImages;
+                  }
+              }
+          }
+          if (needsUpdateDaily) setDailyReports(migratedDR);
+      };
+      
+      setTimeout(migrateData, 4000);
+  }, [dailyReports]);
+
   // --- NEW: Global Custom Dropdown Outside Click Handler ---
   useEffect(() => {
       const handleClickOutside = (event) => {
@@ -5277,12 +5337,24 @@ export default function App() {
       setDailyReports(nextList);
 
       // --- AUTO SYNC TRIGGER ---
-      let filesToUpload = [];
-      ['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].forEach(dept => {
-          const images = savedReport.performance[dept]?.images || [];
-          images.forEach((img, idx) => { filesToUpload.push({ name: `DailyReport_${savedReport.id}_${dept}_${idx}.jpg`, data: img }); });
-      });
-      triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, filesToUpload);
+      const prepareAndSync = async () => {
+          let filesToUpload = [];
+          for (const dept of ['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other']) {
+              const images = savedReport.performance[dept]?.images || [];
+              for (let idx = 0; idx < images.length; idx++) {
+                  const imgRef = images[idx];
+                  let base64Data = imgRef;
+                  if (imgRef && typeof imgRef === 'string' && !imgRef.startsWith('data:image')) {
+                      base64Data = await getFileLocally(imgRef);
+                  }
+                  if (base64Data) {
+                      filesToUpload.push({ name: `DailyReport_${savedReport.id}_${dept}_${idx}.jpg`, data: base64Data });
+                  }
+              }
+          }
+          triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, filesToUpload);
+      };
+      prepareAndSync();
 
       setShowAddDailyReportModal(false);
       setSelectedDailyReport(savedReport); // Open view modal immediately
@@ -5313,13 +5385,19 @@ export default function App() {
     if (file) {
         // ผ่านกระบวนการบีบอัดแล้ว เพื่อป้องกันระบบค้างและข้อมูลสูญหาย
         const compressedBase64 = await compressImage(file);
+        
+        // FIX: บันทึกลง IndexedDB ทันที แทนที่จะเก็บ String Base64 ใหญ่ๆ ไว้ใน State 
+        // ป้องกันปัญหาการบันทึกรายงานแล้วไม่ขึ้น (เกิดจาก Limit ข้อมูล Firestore เต็ม 10MB)
+        const fileId = `dr_img_${generateId()}`;
+        await saveFileLocally(fileId, compressedBase64);
+
         setNewDailyReport(prev => ({
             ...prev,
             performance: {
                 ...prev.performance,
                 [dept]: {
                     ...(prev.performance[dept] || { details: '' }),
-                    images: [compressedBase64] // บังคับให้เป็น 1 รูปเสมอ (แทนที่รูปเดิมทันที)
+                    images: [fileId] // บังคับให้เป็น 1 รูปเสมอ (เก็บแค่ ID เล็กๆ แทนรูปใหญ่ๆ)
                 }
             }
         }));
@@ -18211,7 +18289,7 @@ export default function App() {
                                 {newDailyReport.performance[dept]?.images?.length > 0 && (
                                     <div className="mt-auto pt-2 border-t border-dashed">
                                         <div className="relative w-full h-32 rounded-lg overflow-hidden border border-gray-200 shadow-sm group">
-                                            <img src={newDailyReport.performance[dept].images[0]} alt="Work" className="w-full h-full object-cover" />
+                                            <AsyncImage fileId={newDailyReport.performance[dept].images[0]} className="w-full h-full object-cover" />
                                             <button 
                                                 type="button"
                                                 onClick={() => removeDailyPerformanceImage(dept, 0)}
@@ -18372,7 +18450,7 @@ export default function App() {
                                         {deptData.images && deptData.images.length > 0 && (
                                             <div className="mt-2">
                                                 <div className="w-full h-40 rounded-lg overflow-hidden border border-gray-200 shadow-sm">
-                                                    <img src={deptData.images[0]} className="w-full h-full object-cover" />
+                                                    <AsyncImage fileId={deptData.images[0]} className="w-full h-full object-cover" />
                                                 </div>
                                             </div>
                                         )}
