@@ -1334,12 +1334,6 @@ const KPICard = ({ title, value, icon: Icon, color, onClick }) => (
 const DB_NAME = 'BMG_Files_DB';
 const STORE_NAME = 'files';
 
-// --- NEW: Helper Function เพื่อหาวันที่ปัจจุบันตาม Local Timezone (แก้ปัญหา Timezone เพี้ยน) ---
-const getTodayStr = () => {
-    const tzOffset = (new Date()).getTimezoneOffset() * 60000;
-    return (new Date(Date.now() - tzOffset)).toISOString().split('T')[0];
-};
-
 const initDB = () => {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(DB_NAME, 1);
@@ -1487,8 +1481,10 @@ function usePersistentState(key, initialValue, fbUser) {
         const data = docSnap.data();
         
         // --- FIX: Prevent Old Data Overwrite (ป้องกันข้อมูลเก่าจากเซิร์ฟเวอร์มาทับของใหม่ที่เพิ่งบันทึก) ---
-        if (data.timestamp && data.timestamp < lastLocalUpdateRef.current) {
-            console.warn(`[BMG Sync] Discarded older server snapshot for ${key}`);
+        // เพิ่มเวลาหน่วงให้มากขึ้น เพื่อป้องกันเวลาเซิร์ฟเวอร์กับ Local ห่างกันเกินไปแล้วเกิดการทับกัน
+        const timeDiff = Date.now() - lastLocalUpdateRef.current;
+        if (timeDiff < 5000) { 
+            console.warn(`[BMG Sync] กำลังบันทึกข้อมูล ${key} ระงับการดึงข้อมูลจาก Server ชั่วคราว (${timeDiff}ms)`);
             return;
         }
 
@@ -1510,14 +1506,31 @@ function usePersistentState(key, initialValue, fbUser) {
                   return;
               }
               
-              // --- FIX: Data Loss Prevention (ป้องกันการทับข้อมูล หากเซิร์ฟเวอร์มีข้อมูลน้อยกว่า และเราเพิ่งบันทึกไปไม่นาน) ---
+              // --- FIX: Data Loss Prevention (ป้องกันการทับข้อมูล หากเซิร์ฟเวอร์มีข้อมูลน้อยกว่า) ---
               if (Array.isArray(stateRef.current) && Array.isArray(finalData)) {
-                  if (finalData.length < stateRef.current.length && (Date.now() - lastLocalUpdateRef.current < 60000)) {
-                      console.warn(`[BMG Sync] ข้ามการอัปเดต ${key} ป้องกันข้อมูลหายจากการ Sync ล่าช้า`);
+                  if (finalData.length < stateRef.current.length) {
+                      console.warn(`[BMG Sync] ข้ามการอัปเดต ${key} เซิร์ฟเวอร์มีจำนวนน้อยกว่า (${finalData.length} < ${stateRef.current.length})`);
+                      
+                      // ทำการเซฟข้อมูลจาก Local ขึ้นไปทับ Server ทันที
+                      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+                      syncTimeoutRef.current = setTimeout(async () => {
+                          const jsonStr = JSON.stringify(stateRef.current); 
+                          const CHUNK_SIZE = 250000; 
+                          const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
+                          for (let i = 0; i < totalChunks; i++) {
+                              const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
+                              const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+                              await setDoc(chunkRef, { chunk: chunkData });
+                          }
+                          const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
+                          await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
+                      }, 2000);
+                      
                       return;
                   }
               }
               // ---------------------------------
+              
               if (JSON.stringify(stateRef.current) !== JSON.stringify(finalData)) {
                   setState(finalData);
                   stateRef.current = finalData;
@@ -1546,11 +1559,11 @@ function usePersistentState(key, initialValue, fbUser) {
                   const parsedData = JSON.parse(fullJson);
                   
                   // 🛡️ 100% Data Loss Prevention: นำข้อมูลเข้าคิวหากผู้ใช้กำลังพิมพ์
-                  if (isUploadingRef.current || syncTimeoutRef.current) {
+                  if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
                       pendingServerDataRef.current = parsedData;
                       if (!checkPendingDataInterval.current) {
                           checkPendingDataInterval.current = setInterval(() => {
-                              if (!isUploadingRef.current && !syncTimeoutRef.current) {
+                              if (Date.now() - lastLocalUpdateRef.current > 5000 && !isUploadingRef.current && !syncTimeoutRef.current) {
                                   if (pendingServerDataRef.current) {
                                       applyData(pendingServerDataRef.current);
                                       pendingServerDataRef.current = null;
@@ -1568,11 +1581,11 @@ function usePersistentState(key, initialValue, fbUser) {
               if (thisFetchId !== currentFetchId) return;
               const parsedData = JSON.parse(data.value);
               
-              if (isUploadingRef.current || syncTimeoutRef.current) {
+              if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
                   pendingServerDataRef.current = parsedData;
                   if (!checkPendingDataInterval.current) {
                       checkPendingDataInterval.current = setInterval(() => {
-                          if (!isUploadingRef.current && !syncTimeoutRef.current) {
+                          if (Date.now() - lastLocalUpdateRef.current > 5000 && !isUploadingRef.current && !syncTimeoutRef.current) {
                               if (pendingServerDataRef.current) {
                                   applyData(pendingServerDataRef.current);
                                   pendingServerDataRef.current = null;
@@ -1706,11 +1719,11 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
   const [tempNote, setTempNote] = useState(""); 
   
   const [tempHistory, setTempHistory] = useState([]); 
-  const getTodayStrLocal = () => {
+  const getTodayStr = () => {
     const tzOffset = (new Date()).getTimezoneOffset() * 60000;
     return (new Date(Date.now() - tzOffset)).toISOString().split('T')[0];
   };
-  const [newHistoryDate, setNewHistoryDate] = useState(getTodayStrLocal());
+  const [newHistoryDate, setNewHistoryDate] = useState(getTodayStr());
   const [newHistoryAction, setNewHistoryAction] = useState("โทรติดตาม");
   const [newHistoryDetail, setNewHistoryDetail] = useState("");
 
@@ -2087,7 +2100,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
 
     setTempNote(house.note || "");
     setTempHistory(house.historyLogs || []);
-    setNewHistoryDate(getTodayStrLocal());
+    setNewHistoryDate(getTodayStr());
     setNewHistoryAction("โทรติดตาม");
     setNewHistoryDetail("");
     setIsModalOpen(true);
@@ -3137,7 +3150,7 @@ export default function App() {
   const [showDailyStats, setShowDailyStats] = useState(false); // NEW: State สำหรับแสดงสถิติรายงานย้อนหลัง
   const [showAuditStats, setShowAuditStats] = useState(false); // NEW: State สำหรับแสดงสถิติ Audit ย้อนหลัง
   const [newDailyReport, setNewDailyReport] = useState({
-      date: getTodayStr(),
+      date: new Date().toISOString().split('T')[0],
       manpower: { juristic: 0, security: 0, cleaning: 0, gardening: 0, sweeper: 0, other: 0, otherLabel: '' },
       performance: { 
           juristic: { details: '', images: [] }, security: { details: '', images: [] }, cleaning: { details: '', images: [] },
@@ -3260,7 +3273,7 @@ export default function App() {
   const [utilityForm, setUtilityForm] = useState({
       id: null, // NEW: เพิ่ม ID สำหรับเก็บสถานะโหมดแก้ไข
       meterId: '',
-      date: getTodayStr(),
+      date: new Date().toISOString().split('T')[0],
       currentValue: ''
   });
   const currentValueRef = useRef(null); // NEW: สำหรับ focus ช่องกรอกเลขมิเตอร์
@@ -3305,7 +3318,7 @@ export default function App() {
       details: '',
       responsible: '',
       otherResponsible: '',
-      startDate: getTodayStr(),
+      startDate: new Date().toISOString().split('T')[0],
       deadline: '',
       status: 'Pending',
       updates: [] // NEW: Array to store history
@@ -3335,7 +3348,7 @@ export default function App() {
       id: null,
       title: '',
       content: '',
-      date: getTodayStr(),
+      date: new Date().toISOString().split('T')[0],
       hasEndDate: false,
       endDate: '',
       priority: 'Normal', // Normal, High
@@ -3355,7 +3368,7 @@ export default function App() {
       id: null,
       title: '',
       type: 'AGM', // AGM, EGM, Committee
-      date: getTodayStr(),
+      date: new Date().toISOString().split('T')[0],
       time: '09:00',
       location: '',
       agenda: '',
@@ -3476,7 +3489,7 @@ export default function App() {
       id: null,
       meetingId: '',
       title: 'ขอเชิญเข้าร่วมประชุม',
-      issueDate: getTodayStr(),
+      issueDate: new Date().toISOString().split('T')[0],
       recipient: 'เจ้าของร่วม / สมาชิก / คณะกรรมการ',
       content: '',
       signatory: ''
@@ -3489,7 +3502,7 @@ export default function App() {
   const [newProxy, setNewProxy] = useState({
       id: null,
       meetingId: '',
-      date: getTodayStr(),
+      date: new Date().toISOString().split('T')[0],
       ownerName: '',
       unitNo: '',
       proxyName: '',
@@ -3504,7 +3517,7 @@ export default function App() {
   const [newBallot, setNewBallot] = useState({
       id: null,
       meetingId: '',
-      date: getTodayStr(),
+      date: new Date().toISOString().split('T')[0],
       unitNo: '',
       ownerName: '',
       voterName: '',
@@ -3524,11 +3537,11 @@ export default function App() {
   const [projectEvents, setProjectEvents] = usePersistentCollection('bmg_project_events', [], fbUser);
   const [showAddEventModal, setShowAddEventModal] = useState(false);
   const [currentEventMonth, setCurrentEventMonth] = useState(() => new Date().toISOString().slice(0, 7));
-  const [selectedEventDate, setSelectedEventDate] = useState(() => getTodayStr());
+  const [selectedEventDate, setSelectedEventDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [newEvent, setNewEvent] = useState({
       id: null,
       title: '',
-      date: getTodayStr(),
+      date: new Date().toISOString().split('T')[0],
       time: '09:00',
       description: '',
       color: 'bg-blue-500',
@@ -6697,18 +6710,17 @@ export default function App() {
           activeItems: newAudit.activeItems // บันทึกสถานะเปิดปิดไปด้วย
       };
       
-  const [showAddAuditModal, setShowAddAuditModal] = useState(false);
-  const [selectedAuditReport, setSelectedAuditReport] = useState(null); // NEW: State สำหรับเก็บข้อมูล Audit ที่ถูกคลิกดูรายละเอียด
-  const [showAuditRankingModal, setShowAuditRankingModal] = useState(false); // NEW: State สำหรับเปิด/ปิด Modal จัดอันดับคะแนน Audit
-  const [auditRankingMonth, setAuditRankingMonth] = useState(() => new Date().toISOString().slice(0, 7)); // NEW: State สำหรับเก็บเดือนที่ดูใน Modal จัดอันดับ Audit
-  const [showReportRankingModal, setShowReportRankingModal] = useState(false); // NEW: State สำหรับเปิด/ปิด Modal จัดอันดับรายงานประจำวัน
-  const [reportRankingMonth, setReportRankingMonth] = useState(() => new Date().toISOString().slice(0, 7)); // NEW: State สำหรับเก็บเดือนที่ดูใน Modal จัดอันดับรายงาน
-  const [newAudit, setNewAudit] = useState({
-      projectId: '',
-      date: getTodayStr(),
-      inspector: '',
-      type: 'Internal Audit',
-      scores: {},
+      const nextList = [auditToSave, ...(Array.isArray(audits) ? audits : [])];
+      setAudits(nextList);
+      triggerAutoSync('Audits_ประเมินคุณภาพ', nextList, []);
+
+      setShowAddAuditModal(false);
+      setNewAudit({
+          projectId: '',
+          date: new Date().toISOString().split('T')[0],
+          inspector: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : '',
+          type: 'Internal Audit',
+          scores: {},
           remarks: {},
           activeItems: {},
           additionalComments: ''
@@ -6725,10 +6737,10 @@ export default function App() {
   const handleSaveFormItem = (e) => {
       e.preventDefault();
       if (newFormItem.id) {
-          setFormsList(formsList.map(f => f.id === newFormItem.id ? { ...newFormItem, lastUpdated: getTodayStr() } : f));
+          setFormsList(formsList.map(f => f.id === newFormItem.id ? { ...newFormItem, lastUpdated: new Date().toISOString().split('T')[0] } : f));
       } else {
           const id = 'f_custom_' + generateId();
-          setFormsList([...formsList, { ...newFormItem, id, lastUpdated: getTodayStr() }]);
+          setFormsList([...formsList, { ...newFormItem, id, lastUpdated: new Date().toISOString().split('T')[0] }]);
       }
       setShowAddFormModal(false);
       alert(t('saveSuccess'));
@@ -13255,11 +13267,11 @@ export default function App() {
                                   </label>
                               )}
                               <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(actionPlans.filter(a => a.projectId === selectedProject.id && (actionPlanFilter === 'All' || a.status === actionPlanFilter)), 'action_plans')}>{t('exportCSV')}</Button>
-                              <Button variant="outline" size="sm" icon={PrinterIcon} onClick={() => handleExportPDF('print-action-plan-area', `Action_Plan_${selectedProject?.code || 'List'}.pdf`, 'landscape')} disabled={isExporting}>
+                              <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-action-plan-area', `Action_Plan_${selectedProject?.code || 'List'}.pdf`, 'landscape')} disabled={isExporting}>
                                   {isExporting ? t('downloading') : t('downloadPDF')}
                               </Button>
                               {hasPerm('proj_action', 'save') && <Button size="sm" icon={Plus} onClick={() => {
-                                  setNewActionPlan({ id: null, issue: '', details: '', responsible: '', otherResponsible: '', startDate: getTodayStr(), deadline: '', status: 'Pending', updates: [] });
+                                  setNewActionPlan({ id: null, issue: '', details: '', responsible: '', otherResponsible: '', startDate: new Date().toISOString().split('T')[0], deadline: '', status: 'Pending', updates: [] });
                                   setNewActionPlanUpdateText('');
                                   setShowAddActionPlanModal(true);
                               }}>เพิ่มรายการ</Button>}
@@ -13370,7 +13382,7 @@ export default function App() {
                             {showDailyStats ? 'ซ่อนสถิติ' : 'สถิติย้อนหลัง'}
                         </Button>
                         {hasPerm('proj_daily', 'save') && <Button icon={Plus} onClick={() => {
-                            const todayStr = getTodayStr();
+                            const todayStr = new Date().toISOString().split('T')[0];
                             const existingTodayReport = dailyReports.find(r => r.projectId === selectedProject.id && r.date === todayStr);
 
                             if (existingTodayReport) {
@@ -14105,7 +14117,7 @@ export default function App() {
                                   {isExporting ? t('downloading') : t('downloadPDF')}
                               </Button>
                               {hasPerm('proj_meeting', 'save') && <Button size="sm" icon={Plus} onClick={() => {
-                                  setNewMeeting({ id: null, title: '', type: 'AGM', date: getTodayStr(), time: '09:00', location: '', agenda: '', status: 'Scheduled', minutesFile: null });
+                                  setNewMeeting({ id: null, title: '', type: 'AGM', date: new Date().toISOString().split('T')[0], time: '09:00', location: '', agenda: '', status: 'Scheduled', minutesFile: null });
                                   setIsEditingMeeting(false);
                                   setShowAddMeetingModal(true);
                               }}>{t('addMeeting')}</Button>}
@@ -14228,7 +14240,7 @@ export default function App() {
                               {hasPerm('proj_meeting', 'save') && <Button size="sm" icon={Plus} className="bg-teal-600 hover:bg-teal-700" onClick={() => {
                                   setNewInvitation({ 
                                       id: null, meetingId: '', title: 'ขอเชิญเข้าร่วมประชุม', 
-                                      issueDate: getTodayStr(), 
+                                      issueDate: new Date().toISOString().split('T')[0], 
                                       recipient: 'เจ้าของร่วม / สมาชิก / คณะกรรมการ', 
                                       content: '', signatory: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : '' 
                                   });
@@ -14323,7 +14335,7 @@ export default function App() {
                               <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(meetingProxies.filter(m => m.projectId === selectedProject.id), 'proxies_list')}>{t('exportCSV')}</Button>
                               {hasPerm('proj_meeting', 'save') && <Button size="sm" icon={Plus} className="bg-teal-600 hover:bg-teal-700" onClick={() => {
                                   setNewProxy({ 
-                                      id: null, meetingId: '', date: getTodayStr(), 
+                                      id: null, meetingId: '', date: new Date().toISOString().split('T')[0], 
                                       ownerName: '', unitNo: '', proxyName: '', proxyRelation: 'บุคคลภายนอก', status: 'Pending' 
                                   });
                                   setShowAddProxyModal(true);
@@ -14423,7 +14435,7 @@ export default function App() {
                               <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(meetingBallots.filter(m => m.projectId === selectedProject.id), 'ballots_list')}>{t('exportCSV')}</Button>
                               {hasPerm('proj_meeting', 'save') && <Button size="sm" icon={Plus} className="bg-teal-600 hover:bg-teal-700" onClick={() => {
                                   setNewBallot({ 
-                                      id: null, meetingId: '', date: getTodayStr(), 
+                                      id: null, meetingId: '', date: new Date().toISOString().split('T')[0], 
                                       unitNo: '', ownerName: '', voterName: '', voterType: 'เจ้าของร่วม', status: 'Valid' 
                                   });
                                   setShowAddBallotModal(true);
@@ -15461,10 +15473,10 @@ export default function App() {
   const SettingsView = () => {
       if (currentUser?.username !== 'admin') {
           return (
-              <div className="flex flex-col items-center justify-center py-20 text-gray-500 animate-fade-in bg-white rounded-xl border border-gray-200">
-                  <Shield size={48} className="text-gray-300 mb-4" />
-                  <p className="text-lg font-bold">สงวนสิทธิ์การเข้าถึง</p>
-                  <p className="text-sm">เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถเข้าถึงส่วนการตั้งค่านี้ได้</p>
+              <div className="flex flex-col items-center justify-center h-96 text-gray-400 animate-fade-in">
+                  <Lock size={48} className="mb-4 opacity-50"/>
+                  <h2 className="text-xl font-bold mb-2">ไม่มีสิทธิ์เข้าถึง</h2>
+                  <p>เมนูตั้งค่าระบบสงวนไว้สำหรับผู้ดูแลระบบ (Admin) เท่านั้น</p>
               </div>
           );
       }
@@ -15474,11 +15486,8 @@ export default function App() {
               <ReportHeader />
               <header className="flex justify-between items-center mb-6">
                   <div>
-                      <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                          <Settings className="text-gray-500" size={28} />
-                          {t('menu_settings')}
-                      </h1>
-                      <p className="text-gray-500">ตั้งค่าระบบส่วนกลาง และสำรองข้อมูล (Backup)</p>
+                      <h1 className="text-2xl font-bold text-gray-800">ตั้งค่าระบบ (System Settings)</h1>
+                      <p className="text-gray-500">จัดการระบบ สำรองข้อมูล และกู้คืนข้อมูล</p>
                   </div>
               </header>
 
