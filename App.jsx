@@ -21394,7 +21394,7 @@ export default function App() {
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col border border-gray-200 transform transition-all scale-100">
                   <div className={`h-2 w-full ${activePopupAnnouncement.priority === 'High' ? 'bg-red-500' : 'bg-blue-500'}`}></div>
                   
-                  <div className="p-6 md:p-8 flex flex-col max-h-[80vh] overflow-y-auto custom-scrollbar">
+                  <div id="popup-announcement-content" className="p-6 md:p-8 flex flex-col max-h-[80vh] overflow-y-auto custom-scrollbar">
                       <div className="flex items-center justify-between mb-4">
                           <div className="flex items-center gap-2">
                               {activePopupAnnouncement.priority === 'High' && (
@@ -21439,6 +21439,78 @@ export default function App() {
                               </a>
                           </div>
                       )}
+
+                      {/* NEW: History of Other Announcements for Popup */}
+                      {(() => {
+                          const accessibleDeptsStr = currentUser?.accessibleDepts;
+                          const accessibleArray = Array.isArray(accessibleDeptsStr) ? accessibleDeptsStr : (typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : []);
+                          const canAccessAll = accessibleArray.includes('All') || currentUser?.username === 'admin';
+
+                          const tzOffsetOther = (new Date()).getTimezoneOffset() * 60000;
+                          const todayStrOther = (new Date(Date.now() - tzOffsetOther)).toISOString().split('T')[0];
+
+                          const otherAnnouncements = announcements.filter(a => {
+                              // ไม่นำประกาศที่กำลังเปิดดูอยู่มาแสดงซ้ำ
+                              if (a.id === activePopupAnnouncement.id) return false;
+                              
+                              if (a.status !== 'Published') return false;
+                              
+                              // ตรวจสอบวันที่ (แสดงเฉพาะประกาศที่ถึงกำหนดวันเริ่มแล้ว)
+                              if (a.date > todayStrOther) return false;
+
+                              // ตรวจสอบสิทธิ์การเข้าถึงว่าประกาศนี้ส่งถึงหน่วยงานของผู้ใช้งานหรือไม่
+                              if (a.projectId === 'All' || canAccessAll) return true;
+                              const project = projects.find(p => p.id === a.projectId);
+                              if (!project) return false;
+                              return project.name === currentUser.department || accessibleArray.includes(project.name);
+                          }).sort((a,b) => {
+                              if (a.date > b.date) return -1;
+                              if (a.date < b.date) return 1;
+                              return 0;
+                          }).slice(0, 3); // ใน Popup โชว์แค่ 3 รายการล่าสุดพอ
+
+                          if (otherAnnouncements.length === 0) return null;
+
+                          return (
+                              <div className="mt-8 pt-6 border-t border-gray-200">
+                                  <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2 text-sm">
+                                      <History size={16} className="text-blue-500"/> ข่าวสารและประกาศอื่นๆ
+                                  </h3>
+                                  <div className="space-y-3">
+                                      {otherAnnouncements.map(ann => (
+                                          <div 
+                                              key={ann.id} 
+                                              className="bg-white hover:bg-blue-50 border border-gray-200 hover:border-blue-300 p-2.5 rounded-xl cursor-pointer transition-all flex gap-3 group shadow-sm"
+                                              onClick={() => {
+                                                  // เปลี่ยนเรื่องที่กำลังแสดงบน Popup
+                                                  setActivePopupAnnouncement(ann);
+                                                  // รีเซ็ตการ scroll
+                                                  const modal = document.getElementById('popup-announcement-content');
+                                                  if (modal) modal.scrollTop = 0;
+                                              }}
+                                          >
+                                              {ann.image ? (
+                                                  <div className="w-12 h-12 rounded-lg bg-gray-100 shrink-0 overflow-hidden border border-gray-200">
+                                                      <img src={ann.image} className="w-full h-full object-cover" alt="" />
+                                                  </div>
+                                              ) : (
+                                                  <div className="w-12 h-12 rounded-lg bg-gray-50 border border-gray-200 text-gray-400 flex items-center justify-center shrink-0 group-hover:text-blue-500 group-hover:bg-white transition-colors">
+                                                      <Radio size={16} />
+                                                  </div>
+                                              )}
+                                              <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                                  <h4 className="font-bold text-xs text-gray-800 truncate group-hover:text-blue-700 transition-colors">{ann.title}</h4>
+                                                  <div className="text-[10px] text-gray-500 mt-1 flex items-center gap-2">
+                                                      <span className="flex items-center gap-1"><Calendar size={10}/> {new Date(ann.date).toLocaleDateString('th-TH', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                                                      {ann.priority === 'High' && <span className="text-red-600 font-bold flex items-center gap-0.5"><AlertTriangle size={10}/> ด่วน</span>}
+                                                  </div>
+                                              </div>
+                                          </div>
+                                      ))}
+                                  </div>
+                              </div>
+                          );
+                      })()}
                   </div>
 
                   <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center shrink-0">
