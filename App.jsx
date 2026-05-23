@@ -4009,8 +4009,9 @@ export default function App() {
   useEffect(() => {
       if (!currentUser || announcements.length === 0) return;
 
-      const todayLocal = new Date();
-      todayLocal.setHours(0,0,0,0);
+      // แก้ไขบัค: ใช้การเปรียบเทียบวันที่แบบ String (YYYY-MM-DD) เพื่อหลีกเลี่ยงปัญหา Timezone เพี้ยน
+      const tzOffset = (new Date()).getTimezoneOffset() * 60000;
+      const todayStr = (new Date(Date.now() - tzOffset)).toISOString().split('T')[0];
 
       const accessibleDeptsStr = currentUser?.accessibleDepts || '';
       const accessibleArray = typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : accessibleDeptsStr;
@@ -4020,15 +4021,9 @@ export default function App() {
           if (a.status !== 'Published') return false;
           if (dismissedAnnouncements.includes(a.id)) return false;
 
-          const startD = new Date(a.date);
-          startD.setHours(0,0,0,0);
-          if (todayLocal < startD) return false;
-
-          if (a.endDate) {
-              const endD = new Date(a.endDate);
-              endD.setHours(0,0,0,0);
-              if (todayLocal > endD) return false;
-          }
+          // เปรียบเทียบวันที่ตรงๆ ด้วย String (เสถียรที่สุด)
+          if (a.date > todayStr) return false; // ยังไม่ถึงวันที่กำหนด
+          if (a.hasEndDate && a.endDate && a.endDate < todayStr) return false; // หมดอายุแล้ว
 
           if (a.projectId === 'All' || canAccessAll) return true;
           const project = projects.find(p => p.id === a.projectId);
@@ -4039,7 +4034,10 @@ export default function App() {
       validAnnouncements.sort((a, b) => {
           if (a.priority === 'High' && b.priority !== 'High') return -1;
           if (b.priority === 'High' && a.priority !== 'High') return 1;
-          return new Date(b.date) - new Date(a.date);
+          // เรียงวันที่จากใหม่ไปเก่า
+          if (a.date > b.date) return -1;
+          if (a.date < b.date) return 1;
+          return 0;
       });
 
       if (validAnnouncements.length > 0) {
