@@ -10001,6 +10001,7 @@ export default function App() {
                       const todayLocalForAnn = new Date();
                       todayLocalForAnn.setHours(0,0,0,0);
                       const projectAnnouncements = announcements.filter(a => {
+                          if (a.status !== 'Published') return false;
                           const startD = new Date(a.date);
                           startD.setHours(0,0,0,0);
                           if (todayLocalForAnn < startD) return false;
@@ -10010,7 +10011,11 @@ export default function App() {
                               if (todayLocalForAnn > endD) return false;
                           }
                           return a.projectId === 'All' || a.projectId === selectedProject.id;
-                      }).sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0, 3);
+                      }).sort((a,b) => {
+                          if (a.date > b.date) return -1;
+                          if (a.date < b.date) return 1;
+                          return 0;
+                      }).slice(0, 5); // เพิ่มให้แสดงย้อนหลัง 5 รายการ
 
                       return (
                           <>
@@ -10064,10 +10069,19 @@ export default function App() {
                                   <Card className="p-0 overflow-hidden relative group border-blue-200 mb-6">
                                       <div className="bg-blue-50 border-b border-blue-100 p-4 flex justify-between items-center">
                                           <h3 className="font-bold text-blue-800 flex items-center gap-2">
-                                              <Radio size={20} className="text-blue-600" /> ประกาศและข่าวสาร (Announcements)
+                                              <History size={20} className="text-blue-600" /> ประวัติประกาศและข่าวสาร (Announcements)
                                           </h3>
+                                          <button 
+                                              className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                                              onClick={() => {
+                                                  setSelectedProject(null);
+                                                  setActiveMenu('announcements');
+                                              }}
+                                          >
+                                              ดูทั้งหมด <ArrowRight size={14} />
+                                          </button>
                                       </div>
-                                      <div className="divide-y divide-gray-100">
+                                      <div className="divide-y divide-gray-100 max-h-[300px] overflow-y-auto custom-scrollbar">
                                           {projectAnnouncements.map(ann => (
                                               <div 
                                                   key={ann.id} 
@@ -10093,7 +10107,7 @@ export default function App() {
                                                       </div>
                                                   </div>
                                                   <div className="hidden md:flex flex-col items-end shrink-0 ml-4">
-                                                      <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded">{new Date(ann.date).toLocaleDateString('th-TH', { month: 'short', day: 'numeric' })}</span>
+                                                      <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded">{new Date(ann.date).toLocaleDateString('th-TH', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                                                   </div>
                                               </div>
                                           ))}
