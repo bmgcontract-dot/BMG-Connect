@@ -16660,158 +16660,176 @@ export default function App() {
                             ))}
                         </div>
                     </div>
-                    <div className="flex justify-end gap-2 pt-4 mt-6 border-t border-gray-100">
-                        <Button variant="secondary" type="button" onClick={() => setShowAddEventModal(false)}>ยกเลิก</Button>
-                        <Button type="submit" icon={Save} className="bg-indigo-600 hover:bg-indigo-700">บันทึกนัดหมาย</Button>
-                    </div>
                 </form>
+            </div>
+            
+            <div className="flex justify-end gap-2 p-4 border-t border-gray-100 bg-gray-50 shrink-0">
+                <Button variant="secondary" onClick={() => setShowAddEventModal(false)}>{t('cancel')}</Button>
+                <Button type="button" icon={Save} onClick={(e) => {
+                    const form = document.getElementById('eventForm');
+                    if (form && form.reportValidity()) {
+                        handleSaveEvent(e);
+                    }
+                }}>{t('save')}</Button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Add Deposit Modal */}
-      {showAddDepositModal && (
+      {/* Add Project Modal */}
+      {showAddProjectModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 m-4 relative animate-fade-in">
-            <div className="flex justify-between items-center mb-6 border-b pb-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl p-6 m-4 relative animate-fade-in max-h-[95vh] flex flex-col">
+            <div className="flex justify-between items-center mb-6 border-b pb-4 shrink-0">
               <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                <Landmark className="text-emerald-500" />
-                {isEditingDeposit ? 'แก้ไขข้อมูลเงินฝาก' : 'เพิ่มรายการเงินฝาก / สลากออมทรัพย์'}
+                <Building2 className="text-orange-500"/>
+                {isEditingProject ? 'แก้ไขข้อมูลโครงการ' : t('newProjectTitle')}
               </h2>
-              <button onClick={() => setShowAddDepositModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
+              <button onClick={() => setShowAddProjectModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
             </div>
             
-            <form onSubmit={handleSaveDeposit} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">ประเภทเงินฝาก (Type)</label>
-                        <select 
-                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200"
-                            value={newDeposit.type}
-                            onChange={e => setNewDeposit({...newDeposit, type: e.target.value})}
-                            required
-                        >
-                            {DEPOSIT_TYPES.map(type => (
-                                <option key={type} value={type}>{type}</option>
-                            ))}
-                        </select>
-                        {newDeposit.type === 'อื่นๆ (ให้ระบุ)' && (
-                            <input 
-                                type="text" 
-                                className="mt-2 w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200 bg-gray-50"
-                                placeholder="ระบุประเภทเงินฝาก..."
-                                value={newDeposit.customType}
-                                onChange={e => setNewDeposit({...newDeposit, customType: e.target.value})}
-                                required
-                            />
-                        )}
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">ธนาคาร (Bank)</label>
-                        <select 
-                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200 bg-white"
-                            value={newDeposit.bank}
-                            onChange={e => setNewDeposit({...newDeposit, bank: e.target.value})}
-                            required
-                        >
-                            <option value="" disabled>-- เลือกธนาคาร --</option>
-                            {BANK_LIST.map(bank => (
-                                <option key={bank} value={bank}>{bank}</option>
-                            ))}
-                        </select>
-                        {newDeposit.bank === 'อื่นๆ (ให้ระบุ)' && (
-                            <input 
-                                type="text" 
-                                className="mt-2 w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200 bg-gray-50"
-                                placeholder="ระบุชื่อธนาคาร..."
-                                value={newDeposit.customBank}
-                                onChange={e => setNewDeposit({...newDeposit, customBank: e.target.value})}
-                                required
-                            />
-                        )}
-                    </div>
-                </div>
+            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar pb-4">
+                <form id="projectForm" onSubmit={handleSaveProject} className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        {/* Logo Upload */}
+                        <div className="col-span-1 flex flex-col items-center gap-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
+                            <label className="block text-sm font-bold text-gray-700 text-center">{t('projLogo')}</label>
+                            <div className="w-32 h-32 rounded-xl bg-white border-4 border-white shadow-md flex items-center justify-center overflow-hidden relative group">
+                                {newProject.logo ? (
+                                    <img src={newProject.logo} alt="Project Logo" className="w-full h-full object-contain" />
+                                ) : (
+                                    <Building2 size={48} className="text-gray-300" />
+                                )}
+                                <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                                    <Camera className="text-white" size={24} />
+                                </div>
+                                <input type="file" accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleLogoUpload} />
+                            </div>
+                            <div className="text-xs text-gray-500 text-center">แนะนำรูปสี่เหลี่ยมจัตุรัส<br/>(ไม่เกิน 2MB)</div>
+                        </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">มูลค่า (บาท)</label>
-                        <div className="relative">
-                            <span className="absolute left-3 top-2.5 text-gray-500 text-sm">฿</span>
-                            <input 
-                                type="number" 
-                                required 
-                                className="w-full border rounded-md pl-7 p-2 outline-none focus:ring-2 focus:ring-emerald-200"
-                                value={newDeposit.amount}
-                                onChange={e => setNewDeposit({...newDeposit, amount: e.target.value})}
-                                placeholder="0.00"
-                            />
+                        {/* General Info */}
+                        <div className="col-span-1 md:col-span-2 space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">{t('projCode')}</label>
+                                    <input type="text" readOnly className="w-full border border-gray-300 rounded-md p-2 bg-gray-100 text-gray-600 font-mono text-center" value={newProject.code} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">{t('projType')}</label>
+                                    <select 
+                                        className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 bg-white"
+                                        value={newProject.type}
+                                        onChange={e => setNewProject({...newProject, type: e.target.value})}
+                                    >
+                                        {PROJECT_TYPES.map(type => <option key={type} value={type}>{t(type === 'Condo' ? 'tab_condo' : type === 'Village' ? 'tab_village' : 'tab_office')}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">{t('projName')} <span className="text-red-500">*</span></label>
+                                <input type="text" required className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200" value={newProject.name} onChange={e => setNewProject({...newProject, name: e.target.value})} />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">{t('projAddress')}</label>
+                                <textarea className="w-full border border-gray-300 rounded-md p-2 h-20 outline-none focus:ring-2 focus:ring-orange-200 resize-none" value={newProject.address} onChange={e => setNewProject({...newProject, address: e.target.value})}></textarea>
+                            </div>
                         </div>
                     </div>
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">อัตราดอกเบี้ย (%)</label>
-                        <div className="relative">
-                            <input 
-                                type="number" 
-                                step="0.01"
-                                className="w-full border rounded-md p-2 pr-8 outline-none focus:ring-2 focus:ring-emerald-200"
-                                value={newDeposit.interestRate}
-                                onChange={e => setNewDeposit({...newDeposit, interestRate: e.target.value})}
-                                placeholder="0.00"
-                            />
-                            <span className="absolute right-3 top-2.5 text-gray-500 text-sm">%</span>
+
+                    <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 space-y-4">
+                        <h3 className="font-bold text-orange-800 border-b border-orange-200 pb-2 flex items-center gap-2"><Briefcase size={16}/> ข้อมูลการติดต่อและสัญญา (Contact & Contract)</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">{t('officePhone')}</label>
+                                <input type="tel" className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200" value={newProject.phone} onChange={e => setNewProject({...newProject, phone: e.target.value})} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">{t('taxId')}</label>
+                                <input type="text" className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 font-mono" value={newProject.taxId} onChange={e => setNewProject({...newProject, taxId: e.target.value})} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">{t('contractStartDate')} <span className="text-red-500">*</span></label>
+                                <input type="date" required className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 bg-white" value={newProject.contractStartDate} onChange={e => setNewProject({...newProject, contractStartDate: e.target.value})} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">{t('contractEndDate')} <span className="text-red-500">*</span></label>
+                                <input type="date" required className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 bg-white" value={newProject.contractEndDate} onChange={e => setNewProject({...newProject, contractEndDate: e.target.value})} />
+                            </div>
+                            <div className="md:col-span-2">
+                                <label className="block text-sm font-bold text-gray-700 mb-1">มูลค่าสัญญา / ค่าบริหาร (บาท/เดือน)</label>
+                                <div className="relative">
+                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                        <span className="text-gray-500 font-bold">฿</span>
+                                    </div>
+                                    <input 
+                                        type="number" 
+                                        className="w-full border border-gray-300 rounded-md pl-8 p-2 outline-none focus:ring-2 focus:ring-orange-200" 
+                                        value={newProject.contractValue || ''} 
+                                        onChange={e => setNewProject({...newProject, contractValue: e.target.value})}
+                                        placeholder="0.00"
+                                    />
+                                </div>
+                            </div>
                         </div>
                     </div>
+
                     <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">ระยะเวลา (Duration)</label>
-                        <select 
-                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200"
-                            value={newDeposit.duration}
-                            onChange={e => setNewDeposit({...newDeposit, duration: e.target.value})}
-                            required
-                        >
-                            {DEPOSIT_DURATIONS.map(dur => (
-                                <option key={dur} value={dur}>{dur}</option>
+                        <h3 className="font-bold text-gray-800 border-b pb-2 mb-4 flex items-center gap-2"><Folder size={16}/> {t('uploadDocs')}</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {[
+                                { key: 'orchor', label: t('doc_orchor') },
+                                { key: 'committee', label: t('doc_committee') },
+                                { key: 'regulations', label: t('doc_regulations') },
+                                { key: 'resident_rules', label: t('doc_resident_rules') }
+                            ].map(doc => (
+                                <div key={doc.key} className="border border-gray-200 rounded-lg p-3 bg-gray-50 hover:bg-white transition-colors relative group">
+                                    <label className="block text-sm font-bold text-gray-700 mb-2 truncate">{doc.label}</label>
+                                    <input type="file" accept=".pdf" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={(e) => handleProjectFileUpload(e, doc.key)} title={`อัปโหลดไฟล์ ${doc.label}`} />
+                                    {newProject.files?.[doc.key] ? (
+                                        <div className="text-green-600 flex items-center gap-2 text-xs font-bold bg-green-50 p-2 rounded border border-green-200">
+                                            <FileCheck size={16} className="shrink-0"/>
+                                            <span className="truncate">{newProject.files[doc.key].name}</span>
+                                        </div>
+                                    ) : (
+                                        <div className="text-gray-400 flex items-center gap-2 text-xs border border-dashed border-gray-300 p-2 rounded bg-white group-hover:border-blue-300 group-hover:text-blue-500 transition-colors">
+                                            <Upload size={16} /> คลิกเพื่อเลือกไฟล์ PDF
+                                        </div>
+                                    )}
+                                </div>
                             ))}
-                        </select>
+                        </div>
                     </div>
-                </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">วันที่เริ่ม (Start Date)</label>
-                        <input 
-                            type="date" 
-                            required 
-                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200"
-                            value={newDeposit.startDate}
-                            onChange={e => setNewDeposit({...newDeposit, startDate: e.target.value})}
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">วันครบกำหนด (End Date)</label>
-                        <input 
-                            type="date" 
-                            required 
-                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200"
-                            value={newDeposit.endDate}
-                            onChange={e => setNewDeposit({...newDeposit, endDate: e.target.value})}
-                        />
-                    </div>
-                </div>
-
-                {/* Remaining Days calculation in form */}
-                {newDeposit.endDate && (
-                    <div className="text-right text-xs font-medium text-emerald-600 mt-1">
-                        ระบบจะแจ้งเตือนล่วงหน้า 30 วันก่อนครบกำหนด
-                    </div>
-                )}
-
-                <div className="flex justify-end gap-2 pt-4 border-t border-gray-200 mt-6">
-                    <Button variant="secondary" onClick={() => setShowAddDepositModal(false)}>{t('cancel')}</Button>
-                    <Button type="submit" icon={Save} className="bg-emerald-600 hover:bg-emerald-700">บันทึกข้อมูล</Button>
-                </div>
-            </form>
+                    {isEditingProject && (
+                        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 flex items-center justify-between">
+                            <label className="font-bold text-gray-700">สถานะโครงการ (Status)</label>
+                            <select 
+                                className="border border-gray-300 rounded-md p-2 outline-none focus:border-orange-500 bg-white font-bold"
+                                value={newProject.status}
+                                onChange={e => setNewProject({...newProject, status: e.target.value})}
+                            >
+                                <option value="Active" className="text-green-600">Active (ยังบริหารอยู่)</option>
+                                <option value="Inactive" className="text-red-600">Inactive (หมดสัญญา/ยกเลิก)</option>
+                            </select>
+                        </div>
+                    )}
+                </form>
+            </div>
+            
+            <div className="flex justify-end gap-2 pt-4 border-t shrink-0">
+                <Button variant="secondary" onClick={() => setShowAddProjectModal(false)}>{t('cancel')}</Button>
+                <Button type="button" disabled={isSavingProject} icon={Save} onClick={(e) => {
+                    const form = document.getElementById('projectForm');
+                    if (form && form.reportValidity()) {
+                        handleSaveProject(e);
+                    }
+                }}>
+                    {isSavingProject ? <><Loader2 size={16} className="animate-spin" /> กำลังบันทึก...</> : t('save')}
+                </Button>
+            </div>
           </div>
         </div>
       )}
