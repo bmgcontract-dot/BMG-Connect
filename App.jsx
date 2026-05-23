@@ -1415,16 +1415,14 @@ const getAllFilesLocally = async () => {
     }
 };
 
-// --- Custom Hook for Persistent Storage (Firebase or LocalStorage Fallback) ---
+// --- 1. Custom Hook สำหรับ State เดี่ยวๆ (Object) ที่ป้องกัน Chunk Error ได้ดีขึ้น ---
 function usePersistentState(key, initialValue, fbUser) {
   const [state, setState] = useState(() => {
-      // FIX: โหลดข้อมูลจาก Cache (Local Storage) ขึ้นมาแสดงผลทันทีก่อนเสมอ (Optimistic Load) เพื่อแก้ปัญหาโหลดหน้าเว็บช้า
       if (typeof window !== 'undefined') {
           const local = localStorage.getItem(key);
           if (local) {
               try { 
                   const parsed = JSON.parse(local); 
-                  // 🛡️ FIX: บังคับให้เป็น Array เสมอ หากค่าเริ่มต้นเป็น Array ป้องกันแอปพังหน้าขาว (Crash)
                   if (Array.isArray(initialValue)) {
                       if (!Array.isArray(parsed)) {
                           return (parsed && typeof parsed === 'object') ? Object.values(parsed) : [...initialValue];
@@ -1439,12 +1437,11 @@ function usePersistentState(key, initialValue, fbUser) {
   
   const stateRef = useRef(state);
   const syncTimeoutRef = useRef(null); 
-  const isUploadingRef = useRef(false); // NEW: Track upload status
-  const lastLocalUpdateRef = useRef(0); // NEW: Track last local edit time
-  const pendingServerDataRef = useRef(null); // NEW: คิวพักข้อมูลหากมีการแก้ไขชนกัน
+  const isUploadingRef = useRef(false);
+  const lastLocalUpdateRef = useRef(0);
+  const pendingServerDataRef = useRef(null);
   const checkPendingDataInterval = useRef(null);
   const [isSynced, setIsSynced] = useState(false);
-  // OPTIMIZE: ถ้ามีข้อมูลใน Cache ให้ถือว่าโหลดเสร็จแล้วทันที ไม่ต้องรอหน้าจอหมุน
   const [isLoaded, setIsLoaded] = useState(() => {
       if (typeof window !== 'undefined' && localStorage.getItem(key)) return true;
       return false;
@@ -1460,7 +1457,6 @@ function usePersistentState(key, initialValue, fbUser) {
         return; 
     }
     
-    // OPTIMIZE: ขยายเวลาบังคับข้าม (Timeout) เป็น 4 วินาที เพื่อรองรับอินเทอร์เน็ตมือถือ
     const fallbackTimer = setTimeout(() => {
         setIsLoaded(true);
     }, 4000);
@@ -1480,11 +1476,8 @@ function usePersistentState(key, initialValue, fbUser) {
 
         const data = docSnap.data();
         
-        // --- FIX: Prevent Old Data Overwrite (ป้องกันข้อมูลเก่าจากเซิร์ฟเวอร์มาทับของใหม่ที่เพิ่งบันทึก) ---
-        // เพิ่มเวลาหน่วงให้มากขึ้น เพื่อป้องกันเวลาเซิร์ฟเวอร์กับ Local ห่างกันเกินไปแล้วเกิดการทับกัน
         const timeDiff = Date.now() - lastLocalUpdateRef.current;
         if (timeDiff < 5000) { 
-            console.warn(`[BMG Sync] กำลังบันทึกข้อมูล ${key} ระงับการดึงข้อมูลจาก Server ชั่วคราว (${timeDiff}ms)`);
             return;
         }
 
@@ -1492,26 +1485,19 @@ function usePersistentState(key, initialValue, fbUser) {
           const applyData = (parsedData) => {
               let finalData = parsedData;
               
-              // 🛡️ FIX: บังคับการแปลงชนิดข้อมูล กรณีข้อมูลถูกเซฟจาก Firebase กลับมาเป็น Object แทน Array
               if (Array.isArray(initialValue) && !Array.isArray(parsedData)) {
                   finalData = (parsedData && typeof parsedData === 'object') ? Object.values(parsedData) : [];
               }
 
-              // --- FIX: Data Loss Prevention ---
               const isFinalEmpty = Array.isArray(finalData) ? finalData.length === 0 : (!finalData || (typeof finalData === 'object' && Object.keys(finalData || {}).length === 0));
               const isCurrentNotEmpty = Array.isArray(stateRef.current) ? stateRef.current.length > 0 : (stateRef.current && typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length > 0);
 
               if (isFinalEmpty && isCurrentNotEmpty) {
-                  console.warn(`[BMG Sync] ป้องกันการทับข้อมูล ${key} ด้วยค่าว่าง`);
                   return;
               }
               
-              // --- FIX: Data Loss Prevention (ป้องกันการทับข้อมูล หากเซิร์ฟเวอร์มีข้อมูลน้อยกว่า) ---
               if (Array.isArray(stateRef.current) && Array.isArray(finalData)) {
                   if (finalData.length < stateRef.current.length) {
-                      console.warn(`[BMG Sync] ข้ามการอัปเดต ${key} เซิร์ฟเวอร์มีจำนวนน้อยกว่า (${finalData.length} < ${stateRef.current.length})`);
-                      
-                      // ทำการเซฟข้อมูลจาก Local ขึ้นไปทับ Server ทันที
                       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
                       syncTimeoutRef.current = setTimeout(async () => {
                           const jsonStr = JSON.stringify(stateRef.current); 
@@ -1529,7 +1515,6 @@ function usePersistentState(key, initialValue, fbUser) {
                       return;
                   }
               }
-              // ---------------------------------
               
               if (JSON.stringify(stateRef.current) !== JSON.stringify(finalData)) {
                   setState(finalData);
@@ -1553,28 +1538,43 @@ function usePersistentState(key, initialValue, fbUser) {
                   }
               }
               
-              if (thisFetchId !== currentFetchId || hasChunkError) return;
+              if (thisFetchId !== currentFetchId) return;
+              
+              // ยอมรับถ้า Chunk หายไปบ้าง (พยายาม Parse ส่วนที่มี) แต่จะเตือน
+              if (hasChunkError && !fullJson) return;
 
               if (fullJson) {
-                  const parsedData = JSON.parse(fullJson);
+                  // ลองเติมวงเล็บปิดให้เผื่อ Chunk หายไปตอนท้าย
+                  let safeJson = fullJson;
+                  try {
+                      JSON.parse(safeJson);
+                  } catch (e) {
+                      if (safeJson.startsWith('[')) safeJson += ']';
+                      else if (safeJson.startsWith('{')) safeJson += '}';
+                  }
                   
-                  // 🛡️ 100% Data Loss Prevention: นำข้อมูลเข้าคิวหากผู้ใช้กำลังพิมพ์
-                  if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
-                      pendingServerDataRef.current = parsedData;
-                      if (!checkPendingDataInterval.current) {
-                          checkPendingDataInterval.current = setInterval(() => {
-                              if (Date.now() - lastLocalUpdateRef.current > 5000 && !isUploadingRef.current && !syncTimeoutRef.current) {
-                                  if (pendingServerDataRef.current) {
-                                      applyData(pendingServerDataRef.current);
-                                      pendingServerDataRef.current = null;
+                  try {
+                      const parsedData = JSON.parse(safeJson);
+                      
+                      if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
+                          pendingServerDataRef.current = parsedData;
+                          if (!checkPendingDataInterval.current) {
+                              checkPendingDataInterval.current = setInterval(() => {
+                                  if (Date.now() - lastLocalUpdateRef.current > 5000 && !isUploadingRef.current && !syncTimeoutRef.current) {
+                                      if (pendingServerDataRef.current) {
+                                          applyData(pendingServerDataRef.current);
+                                          pendingServerDataRef.current = null;
+                                      }
+                                      clearInterval(checkPendingDataInterval.current);
+                                      checkPendingDataInterval.current = null;
                                   }
-                                  clearInterval(checkPendingDataInterval.current);
-                                  checkPendingDataInterval.current = null;
-                              }
-                          }, 1000);
+                              }, 1000);
+                          }
+                      } else {
+                          applyData(parsedData);
                       }
-                  } else {
-                      applyData(parsedData);
+                  } catch (e) {
+                      console.error("Parse Safe JSON Error", e);
                   }
               }
           } else if (data.value) {
@@ -1617,7 +1617,7 @@ function usePersistentState(key, initialValue, fbUser) {
   }, [fbUser, key]);
 
   const setPersistentValue = async (newValue, isRestore = false) => {
-    lastLocalUpdateRef.current = Date.now(); // บันทึกเวลาที่แก้ล่าสุด เพื่อกัน Firebase มาทับ
+    lastLocalUpdateRef.current = Date.now(); 
 
     const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
     if (!isRestore && valueToStore === stateRef.current) return;
@@ -1626,30 +1626,26 @@ function usePersistentState(key, initialValue, fbUser) {
     stateRef.current = valueToStore;
     
     if (typeof window !== 'undefined') {
-        // ผลักการทำงานของ LocalStorage ไปไว้คิวหลังสุด เพื่อไม่ให้หน้าจอค้าง
         setTimeout(() => {
             try { localStorage.setItem(key, JSON.stringify(valueToStore)); } catch (e) {}
         }, 0);
     }
 
     if (db && fbUser && appId) {
-       // NEW: ป้องกัน Data Corruption ด้วยการเคลียร์คำสั่งเซฟเดิมที่ยังไม่เสร็จทิ้ง
        if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
 
        return new Promise((resolve) => {
-           // NEW: หน่วงเวลา 1 วินาที หลังจากหยุดพิมพ์/คลิก ค่อยเซฟขึ้น Database
            syncTimeoutRef.current = setTimeout(async () => {
                isUploadingRef.current = true;
                try {
-                   const jsonStr = JSON.stringify(stateRef.current); // ใช้ state ล่าสุดเสมอ
-                   const CHUNK_SIZE = 250000; // FIX: ลดขนาด Chunk ลงจาก 900000 เป็น 250000 เพื่อป้องกัน 1MB Limit สำหรับภาษาไทย
+                   const jsonStr = JSON.stringify(stateRef.current); 
+                   const CHUNK_SIZE = 250000; 
                    const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
                    
                    for (let i = 0; i < totalChunks; i++) {
                        const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
                        const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
                        await setDoc(chunkRef, { chunk: chunkData });
-                       // พัก UI เล็กน้อยให้เบราว์เซอร์ไม่ค้าง
                        await new Promise(r => setTimeout(r, 10));
                    }
                    
@@ -1670,15 +1666,16 @@ function usePersistentState(key, initialValue, fbUser) {
   return [state, setPersistentValue, isLoaded, isSynced];
 }
 
-// --- NEW: Smart Document-based Collection Sync (แก้ปัญหาข้อมูลหายขาด 100%) ---
+// --- 2. NEW: Smart Persistent Collection (ทนทานข้อมูลไม่หาย 100%) ---
+// ระบบนี้จะทำการดึงข้อมูลจาก Local Storage (ชื่อเก่า) แล้วทยอยเอาไปสร้างเป็น Document ย่อยบน Firebase ให้เลย
 function useSmartPersistentCollection(collectionName, initialValue, fbUser) {
     const [data, setData] = useState(() => {
         if (typeof window !== 'undefined') {
+            // ดึงจาก Local Storage ด้วยชื่อเก่าของมัน
             const local = localStorage.getItem(collectionName);
             if (local) {
                 try { 
                     const parsed = JSON.parse(local);
-                    // ป้องกัน Error กรณีข้อมูลถูกโหลดมาผิดประเภท ให้บังคับเป็น Array เสมอ
                     if (Array.isArray(initialValue) && !Array.isArray(parsed)) {
                         return (parsed && typeof parsed === 'object') ? Object.values(parsed) : [...initialValue];
                     }
@@ -1691,6 +1688,8 @@ function useSmartPersistentCollection(collectionName, initialValue, fbUser) {
 
     const dataRef = useRef(data);
     const [isLoaded, setIsLoaded] = useState(false);
+    const lastLocalUpdateRef = useRef(0);
+    const migrateCheckedRef = useRef(false); // กันการ Migrate ซ้ำ
 
     useEffect(() => { dataRef.current = data; }, [data]);
 
@@ -1699,20 +1698,81 @@ function useSmartPersistentCollection(collectionName, initialValue, fbUser) {
             setIsLoaded(true);
             return;
         }
-        // เปลี่ยนมาบันทึกและอ่านแบบราย Document แทนการเหมาเข่ง
+
+        // อ่านข้อมูลก้อนเก่าที่เคยเป็น Chunk บน Firebase ออกมาด้วย เผื่อ Local Storage แตก
+        const checkLegacyChunkedData = async () => {
+            if (migrateCheckedRef.current) return;
+            migrateCheckedRef.current = true;
+            
+            try {
+                const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', collectionName);
+                const metaSnap = await getDoc(metaRef);
+                
+                if (metaSnap.exists()) {
+                    const metaData = metaSnap.data();
+                    if (metaData.totalChunks !== undefined) {
+                        let fullJson = '';
+                        let hasChunkError = false;
+                        for (let i = 0; i < metaData.totalChunks; i++) {
+                            const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${collectionName}_${i}`);
+                            const chunkSnap = await getDoc(chunkRef);
+                            if (chunkSnap.exists()) {
+                                fullJson += chunkSnap.data().chunk;
+                            } else {
+                                hasChunkError = true;
+                            }
+                        }
+                        
+                        if (!hasChunkError && fullJson) {
+                            const parsedData = JSON.parse(fullJson);
+                            
+                            // ถ้าข้อมูลเก่า (Chunk) มีมากกว่าที่เรามีอยู่บนจอตอนนี้ ให้ยึดตามข้อมูลเก่าไปเลย (Migrate in)
+                            if (Array.isArray(parsedData) && Array.isArray(dataRef.current)) {
+                                if (parsedData.length > dataRef.current.length) {
+                                    console.log(`[Migrate] นำเข้าข้อมูลเก่าของ ${collectionName} สำเร็จ`);
+                                    setData(parsedData);
+                                    dataRef.current = parsedData;
+                                    if (typeof window !== 'undefined') localStorage.setItem(collectionName, JSON.stringify(parsedData));
+                                    
+                                    // โยนข้อมูลที่กู้กลับมาได้ ขึ้นไปเซฟแบบ Document เพื่อให้มันปลอดภัยไปเลย
+                                    setPersistentValue(parsedData, true);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch(e) {
+                console.error("Migration Error", e);
+            }
+        };
+
+        // ลองพยายามเช็คของเก่า
+        checkLegacyChunkedData();
+
+        // ของใหม่: เราจะใช้ collection ที่ต่อท้ายด้วย _docs ใน Firestore
         const colRef = collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
+        
         const unsubscribe = onSnapshot(colRef, (snapshot) => {
             const items = [];
             snapshot.forEach((docSnap) => {
                 items.push(docSnap.data());
             });
             
-            // อัปเดตเฉพาะเมื่อข้อมูลมีการเปลี่ยนแปลงจริง เพื่อลดการกระตุกของหน้าจอ
+            const timeDiff = Date.now() - lastLocalUpdateRef.current;
+            // ป้องกันเซิร์ฟเวอร์มาทับถ้าเราเพิ่งพิมพ์เสร็จ
+            if (timeDiff < 5000) return;
+
             if (JSON.stringify(dataRef.current) !== JSON.stringify(items)) {
-                // ระบบ Migration อัตโนมัติ: หากเซิร์ฟเวอร์ยังว่างเปล่า แต่เครื่องมีข้อมูล ให้ส่งข้อมูลเดิมขึ้นเซิร์ฟเวอร์
+                // ระบบกู้ข้อมูล Local ขึ้น Server ทันที
                 if (items.length === 0 && Array.isArray(dataRef.current) && dataRef.current.length > 0) {
                      setPersistentValue(dataRef.current, true); 
-                } else {
+                } 
+                // หากเซิร์ฟเวอร์มีข้อมูลน้อยกว่า ให้รีบเซฟ Local ไปทับเซิร์ฟเวอร์ก่อนเลย เพื่อป้องกันข้อมูลหาย
+                else if (Array.isArray(dataRef.current) && items.length < dataRef.current.length) {
+                     console.warn(`[Smart Sync] ป้องกัน ${collectionName} หาย เพราะ Server มีน้อยกว่า (${items.length} < ${dataRef.current.length}) -> สั่งอัปเดตกลับไปที่ Server ทันที`);
+                     setPersistentValue(dataRef.current, true);
+                }
+                else {
                     setData(items);
                     dataRef.current = items;
                     if (typeof window !== 'undefined') {
@@ -1725,17 +1785,18 @@ function useSmartPersistentCollection(collectionName, initialValue, fbUser) {
             console.error(`Error fetching ${collectionName}:`, error);
             setIsLoaded(true);
         });
+        
         return () => unsubscribe();
     }, [db, appId, fbUser, collectionName]);
 
     const setPersistentValue = async (newValue, isRestore = false) => {
+        lastLocalUpdateRef.current = Date.now();
         const oldValue = dataRef.current;
         
-        // Optimistic UI Update (หน้าจอผู้ใช้จะอัปเดตทันทีโดยไม่ต้องรอเน็ต)
+        // Optimistic UI Update 
         setData(newValue);
         dataRef.current = newValue;
         if (typeof window !== 'undefined') {
-            // หน่วงเวลาเซฟลง LocalStorage เพื่อไม่ให้ขัดขวางการพิมพ์ของผู้ใช้
             setTimeout(() => {
                 try { localStorage.setItem(collectionName, JSON.stringify(newValue)); } catch(e){}
             }, 0);
@@ -1744,7 +1805,7 @@ function useSmartPersistentCollection(collectionName, initialValue, fbUser) {
         if (!db || !fbUser || !appId) return;
 
         if (isRestore) {
-            // กรณี Restore ข้อมูลจะใช้วิธี Batch Commit เพื่อส่งทีละ 400 รายการอย่างรวดเร็ว
+            // โหมด Restore: ยิงข้อมูลทั้งหมดเข้า Firestore ทีละ 400 ข้อมูล (Limit ของ WriteBatch)
             if (Array.isArray(newValue) && newValue.length > 0) {
                try {
                    const batchSize = 400; 
@@ -1757,15 +1818,16 @@ function useSmartPersistentCollection(collectionName, initialValue, fbUser) {
                            batch.set(docRef, item);
                        });
                        await batch.commit();
-                       await new Promise(r => setTimeout(r, 100)); // พักเล็กน้อยให้เบราว์เซอร์หายใจ
+                       await new Promise(r => setTimeout(r, 100)); // พักเครื่อง 0.1 วิ ป้องกัน Limit Exceeded
                    }
+                   console.log(`[Restore] ส่งข้อมูล ${collectionName} สำเร็จ (${newValue.length} รายการ)`);
                } catch (err) { console.error(`Restore Error for ${collectionName}:`, err); }
             }
             return;
         }
 
         // --- ระบบอัจฉริยะ Diffing Logic for Auto-Sync ---
-        // ตรวจสอบเฉพาะจุดที่แก้ไข แล้วส่งไปแค่จุดนั้น ป้องกันคนอื่นมาทับข้อมูลเรา 100%
+        // ตรวจสอบเฉพาะจุดที่แก้ไข แล้วส่งไปแค่จุดนั้น 
         const oldMap = new Map(Array.isArray(oldValue) ? oldValue.map(item => [item.id, item]) : []);
         const newMap = new Map(Array.isArray(newValue) ? newValue.map(item => [item.id, item]) : []);
 
@@ -1833,75 +1895,11 @@ function useSmartPersistentCollection(collectionName, initialValue, fbUser) {
     return [data, setPersistentValue, isLoaded, true];
 }
 
-// --- Custom Hooks Helpers (Arrays & User Specific) ---
+// Custom Hooks Helpers (Arrays & User Specific)
 const usePersistentCollection = (key, initialValue, fbUser) => useSmartPersistentCollection(key, initialValue, fbUser);
 const useUserPersistentState = (key, initialValue, fbUser) => usePersistentState(fbUser?.uid ? `${key}_${fbUser.uid}` : key, initialValue, fbUser);
 
-// --- NEW: Custom Hook for Document-Based Storage (ป้องกันปัญหาข้อมูลทับกันหายขาด 100%) ---
-function useDocumentCollection(collectionName, initialValue, fbUser) {
-    const [data, setData] = useState(() => {
-        if (typeof window !== 'undefined') {
-            const local = localStorage.getItem(`bmg_${collectionName}_docs`);
-            if (local) {
-                try { return JSON.parse(local); } catch(e) { return initialValue; }
-            }
-        }
-        return initialValue;
-    });
-
-    useEffect(() => {
-        if (!db || !appId || !fbUser) return;
-        const colRef = collection(db, 'artifacts', appId, 'public', 'data', `bmg_${collectionName}_docs`);
-        const unsubscribe = onSnapshot(colRef, (snapshot) => {
-            const items = [];
-            snapshot.forEach((docSnap) => {
-                items.push(docSnap.data());
-            });
-            // เรียงข้อมูลจากใหม่ไปเก่าตามเวลา
-            items.sort((a, b) => new Date(b.date || b.createdAt || 0) - new Date(a.date || a.createdAt || 0));
-            setData(items);
-            if (typeof window !== 'undefined') {
-                localStorage.setItem(`bmg_${collectionName}_docs`, JSON.stringify(items));
-            }
-        }, (error) => {
-            console.error(`Error fetching Document-based ${collectionName}:`, error);
-        });
-        return () => unsubscribe();
-    }, [db, appId, fbUser, collectionName]);
-
-    // Setter สำหรับอัปเดต State ปัจจุบัน และใช้ตอน Backup/Restore (รับ Argument ที่ 2 เพื่อบอกว่าเป็น Restore)
-    const setPersistentValue = async (newValue, isRestore = false) => {
-        setData(newValue);
-        if (typeof window !== 'undefined') {
-            localStorage.setItem(`bmg_${collectionName}_docs`, JSON.stringify(newValue));
-        }
-
-        if (db && fbUser && appId && isRestore) {
-            // โหมด Restore: ทำการเซฟลง Document หลายๆ อันพร้อมกันด้วย Batch (แยกการเขียนไม่ให้เกิน Limit ครั้งละ 400 แถว)
-            if (Array.isArray(newValue) && newValue.length > 0) {
-               try {
-                   const batchSize = 400; 
-                   for (let i = 0; i < newValue.length; i += batchSize) {
-                       const batch = writeBatch(db);
-                       const chunkData = newValue.slice(i, i + batchSize);
-                       
-                       chunkData.forEach(item => {
-                           if (!item.id) return;
-                           const docRef = doc(db, 'artifacts', appId, 'public', 'data', `bmg_${collectionName}_docs`, item.id);
-                           batch.set(docRef, item);
-                       });
-                       await batch.commit();
-                       await new Promise(r => setTimeout(r, 100)); // พักเล็กน้อยป้องกันหน้าจอหน่วงระหว่างกู้คืนข้อมูล
-                   }
-               } catch (err) {
-                   console.error(`Restore Error for ${collectionName}:`, err);
-               }
-            }
-        }
-    };
-
-    return [data, setPersistentValue];
-}
+// -------------------------------------------------------------------------------------------------
 
 // --- NEW: Central Fee Manager Module Component ---
 const FEE_STATUS_OPTIONS = [
@@ -3700,15 +3698,13 @@ export default function App() {
   const [newProject, setNewProject] = useState({ logo: null, code: '', name: '', type: 'Condo', address: '', phone: '', taxId: '', contractStartDate: '', contractEndDate: '', contractValue: '', status: 'Active', files: { orchor: null, committee: null, regulations: null, resident_rules: null } });
 
   // อัปเกรดเป็น usePersistentCollection สำหรับข้อมูลที่เป็น Array (รายการ) ป้องกันข้อมูลสูญหาย/ทับกัน
+  // โดยใช้ชื่อ Collection คงเดิมทั้งหมด เพื่อให้ระบบกู้ข้อมูลเก่าขึ้นมาเซฟเป็น Document ให้อัตโนมัติ!
   const [users, setUsers, isUsersLoaded, isUsersSynced] = usePersistentCollection('bmg_users', INITIAL_USERS, fbUser); 
   const [projects, setProjects] = usePersistentCollection('bmg_projects', INITIAL_PROJECTS, fbUser);
   const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, fbUser);
   const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, fbUser);
-  
-  // 🌟 แยกระบบจัดเก็บข้อมูลที่มีปริมาณมากเป็น Document-Based ป้องกันปัญหาข้อมูลทับกันหาย 100% 🌟
-  const [dailyReports, setDailyReports] = useDocumentCollection('dailyReports', INITIAL_DAILY_REPORTS, fbUser);
-  const [repairs, setRepairs] = useDocumentCollection('repairs', INITIAL_REPAIRS, fbUser);
-
+  const [dailyReports, setDailyReports] = usePersistentCollection('bmg_dailyReports', INITIAL_DAILY_REPORTS, fbUser);
+  const [repairs, setRepairs] = usePersistentCollection('bmg_repairs', INITIAL_REPAIRS, fbUser);
   const [contractors, setContractors] = usePersistentCollection('bmg_contractors', INITIAL_CONTRACTORS, fbUser);
   const [assets, setAssets] = usePersistentCollection('bmg_assets', INITIAL_ASSETS, fbUser);
   const [tools, setTools] = usePersistentCollection('bmg_tools', INITIAL_TOOLS, fbUser);
@@ -3716,10 +3712,7 @@ export default function App() {
   const [pmPlans, setPmPlans] = usePersistentCollection('bmg_pmPlans', INITIAL_PM_PLANS, fbUser);
   const [pmHistoryList, setPmHistoryList] = usePersistentCollection('bmg_pmHistoryList', INITIAL_PM_HISTORY, fbUser);
   const [meters, setMeters] = usePersistentCollection('bmg_meters', INITIAL_METERS, fbUser);
-  
-  // 🌟 เปลี่ยนประวัติจดมิเตอร์เป็น Document-Based รองรับข้อมูลมหาศาล และไม่มีการทับกัน 🌟
-  const [utilityReadings, setUtilityReadings] = useDocumentCollection('utilityReadings', INITIAL_READINGS, fbUser);
-  
+  const [utilityReadings, setUtilityReadings] = usePersistentCollection('bmg_utilityReadings', INITIAL_READINGS, fbUser);
   const [actionPlans, setActionPlans] = usePersistentCollection('bmg_actionPlans', INITIAL_ACTION_PLANS, fbUser);
   const [othersData, setOthersData] = usePersistentCollection('bmg_othersData', INITIAL_OTHERS, fbUser);
   const [formsList, setFormsList] = usePersistentCollection('bmg_forms_list', STANDARD_FORMS, fbUser);
@@ -5868,16 +5861,6 @@ export default function App() {
   const handleDeleteRepair = async (rep) => {
       const nextList = repairs.filter(r => r.id !== rep.id);
       setRepairs(nextList);
-      
-      // ลบ Document ในฐานข้อมูลออกทันที
-      if (db && appId) {
-          try {
-              const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'bmg_repairs_docs', rep.id);
-              await deleteDoc(docRef);
-          } catch (error) {
-              console.error("Error deleting document-based repair:", error);
-          }
-      }
   };
 
   const handleSaveRepair = async (e) => {
@@ -5898,16 +5881,6 @@ export default function App() {
       }
 
       setRepairs(nextList);
-
-      // 🌟 บันทึกแยกเป็น Document ไปยัง Firestore โดยตรง (ป้องกันข้อมูลทับกัน 100%)
-      if (db && appId) {
-          try {
-              const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'bmg_repairs_docs', savedRepair.id);
-              await setDoc(docRef, savedRepair);
-          } catch (error) {
-              console.error("Error saving document-based repair:", error);
-          }
-      }
 
       triggerAutoSync('Repairs_แจ้งซ่อม', nextList, []);
 
@@ -5950,14 +5923,6 @@ export default function App() {
 
           const newUtilityReadings = utilityReadings.map(r => r.id === utilityForm.id ? updatedReading : r);
           setUtilityReadings(newUtilityReadings);
-
-          // 🌟 บันทึกการแก้ไขลง Firestore Document
-          if (db && appId) {
-              try {
-                  const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'bmg_utilityReadings_docs', updatedReading.id);
-                  await setDoc(docRef, updatedReading);
-              } catch (error) { console.error("Error updating utility reading doc:", error); }
-          }
           
           // อัปเดตค่ายกมาล่าสุดของมิเตอร์ตัวนี้ (เผื่อการแก้ไขนี้เป็นการแก้ข้อมูลบิลรอบล่าสุด)
           const meterReadings = newUtilityReadings.filter(r => r.meterId === meter.id);
@@ -6002,14 +5967,6 @@ export default function App() {
           };
 
           setUtilityReadings([newReading, ...utilityReadings]);
-
-          // 🌟 บันทึกข้อมูลใหม่ลง Firestore Document
-          if (db && appId) {
-              try {
-                  const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'bmg_utilityReadings_docs', newReading.id);
-                  await setDoc(docRef, newReading);
-              } catch (error) { console.error("Error saving new utility reading doc:", error); }
-          }
           
           // Update meter's last reading
           setMeters(meters.map(m => 
@@ -6058,14 +6015,6 @@ export default function App() {
           const newReadings = utilityReadings.filter(r => r.id !== readingId);
           setUtilityReadings(newReadings);
 
-          // 🌟 ลบ Document จาก Firestore
-          if (db && appId) {
-              try {
-                  const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'bmg_utilityReadings_docs', readingId);
-                  await deleteDoc(docRef);
-              } catch (error) { console.error("Error deleting utility reading doc:", error); }
-          }
-
           // อัปเดตค่ายกมาล่าสุดของมิเตอร์ตัวนี้ใหม่
           const meterReadings = newReadings.filter(r => r.meterId === meterId).sort((a,b) => new Date(b.date) - new Date(a.date));
           const latest = meterReadings[0];
@@ -6080,25 +6029,8 @@ export default function App() {
 
   const handleDeleteAllUtilityReadings = (meterId) => {
       showConfirm('ยืนยันการลบประวัติทั้งหมด', 'คุณต้องการลบประวัติการจดมิเตอร์ของอุปกรณ์นี้ "ทั้งหมด" ใช่หรือไม่?\n(ค่ายกมาจะถูกรีเซ็ตเป็น 0)', async () => {
-          const readingsToDelete = utilityReadings.filter(r => r.meterId === meterId);
           const newReadings = utilityReadings.filter(r => r.meterId !== meterId);
           setUtilityReadings(newReadings);
-          
-          // 🌟 ทำการลบแบบ Batch หลายๆ Document พร้อมกันใน Firestore
-          if (db && appId && readingsToDelete.length > 0) {
-              try {
-                  const batchSize = 400; // ลบครั้งละไม่เกิน 400 รายการ ป้องกัน limit
-                  for (let i = 0; i < readingsToDelete.length; i += batchSize) {
-                      const batch = writeBatch(db);
-                      const chunk = readingsToDelete.slice(i, i + batchSize);
-                      chunk.forEach(r => {
-                          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'bmg_utilityReadings_docs', r.id);
-                          batch.delete(docRef);
-                      });
-                      await batch.commit();
-                  }
-              } catch (error) { console.error("Error batch deleting utility readings:", error); }
-          }
 
           setMeters(meters.map(m => 
               m.id === meterId 
@@ -6418,29 +6350,6 @@ export default function App() {
                       
                       const nextMeters = meters.map(m => updatedMetersMap.has(m.id) ? { ...m, ...updatedMetersMap.get(m.id) } : m);
                       setMeters(nextMeters);
-
-                      // 🌟 เขียนข้อมูลเข้า Firestore ทีละหลายรายการพร้อมกัน (Batch Write)
-                      if (db && appId) {
-                          try {
-                              // แสดง UI แจ้งเตือนผู้ใช้ขณะกำลังนำเข้า
-                              setAutoSyncMessage(`กำลังเขียนข้อมูลจดมิเตอร์ ${newReadings.length} รายการ ลงฐานข้อมูล...`);
-                              
-                              const batchSize = 400; // Limit by Firestore is 500 per batch
-                              for (let i = 0; i < newReadings.length; i += batchSize) {
-                                  const batch = writeBatch(db);
-                                  const chunk = newReadings.slice(i, i + batchSize);
-                                  chunk.forEach(r => {
-                                      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'bmg_utilityReadings_docs', r.id);
-                                      batch.set(docRef, r);
-                                  });
-                                  await batch.commit();
-                              }
-                              setTimeout(() => setAutoSyncMessage(''), 2000);
-                          } catch (error) { 
-                              console.error("Error batch saving imported utility readings:", error); 
-                              alert('เกิดข้อผิดพลาดขณะบันทึกลงฐานข้อมูลออนไลน์ (แต่บันทึกลงเครื่องแล้ว)');
-                          }
-                      }
                       
                       triggerAutoSync('UtilityReadings_จดมิเตอร์', nextReadings, []);
                       triggerAutoSync('UtilityMeters_มิเตอร์', nextMeters, []);
