@@ -5252,49 +5252,43 @@ export default function App() {
       let savedReport;
       
       // FIX: บังคับให้เป็น Array เสมอ และกรองข้อมูล Null หรือ Undefined ทิ้งป้องกันการพัง
-      // ใช้ callback ภายใน setDailyReports แทนการอ่านค่าตรงๆ ป้องกันปัญหา Stale State (Closure)
-      setDailyReports(prevList => {
-          const safeList = Array.isArray(prevList) ? prevList.filter(Boolean) : [];
-          let nextList; 
-          
-          // ป้องกันการสร้างรายงานซ้ำซ้อนในวันเดียวกัน (Enforce 1 report per day)
-          let finalId = newDailyReport.id;
-          if (!finalId) {
-              const existing = safeList.find(r => r.projectId === selectedProject.id && r.date === newDailyReport.date);
-              if (existing) {
-                  finalId = existing.id;
-              }
+      const safeList = Array.isArray(dailyReports) ? dailyReports.filter(Boolean) : [];
+      let nextList; 
+      
+      // ป้องกันการสร้างรายงานซ้ำซ้อนในวันเดียวกัน (Enforce 1 report per day)
+      let finalId = newDailyReport.id;
+      if (!finalId) {
+          const existing = safeList.find(r => r.projectId === selectedProject.id && r.date === newDailyReport.date);
+          if (existing) {
+              finalId = existing.id;
           }
+      }
 
-          // FIX: ไม่นำ Side Effect ไปใส่ใน setState และคำนวณ State ด้วยตนเองก่อนเซฟ
-          if (finalId) {
-              // Update existing report
-              savedReport = { ...newDailyReport, id: finalId, projectId: selectedProject.id };
-              nextList = safeList.map(r => r.id === finalId ? savedReport : r);
-          } else {
-              // Create new report
-              const id = generateId();
-              savedReport = { ...newDailyReport, id, projectId: selectedProject.id };
-              nextList = [savedReport, ...safeList]; // เพิ่มไว้ด้านบนสุด
-          }
+      if (finalId) {
+          // Update existing report
+          savedReport = { ...newDailyReport, id: finalId, projectId: selectedProject.id };
+          nextList = safeList.map(r => r.id === finalId ? savedReport : r);
+      } else {
+          // Create new report
+          const id = generateId();
+          savedReport = { ...newDailyReport, id, projectId: selectedProject.id };
+          nextList = [savedReport, ...safeList]; // เพิ่มไว้ด้านบนสุด
+      }
 
-          // --- AUTO SYNC TRIGGER (นำมาใส่ไว้ใน Callback นี้เพื่อให้มั่นใจว่าได้ข้อมูลล่าสุด) ---
-          let filesToUpload = [];
-          ['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].forEach(dept => {
-              const images = savedReport.performance[dept]?.images || [];
-              images.forEach((img, idx) => { filesToUpload.push({ name: `DailyReport_${savedReport.id}_${dept}_${idx}.jpg`, data: img }); });
-          });
-          
-          // เรียกใช้งาน Trigger ภายนอก โดยหน่วงเวลาเล็กน้อยเพื่อป้องกัน State Collision
-          setTimeout(() => {
-              triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, filesToUpload);
-              setShowAddDailyReportModal(false);
-              setSelectedDailyReport(savedReport); // Open view modal immediately
-              alert('บันทึกรายงานประจำวันเสร็จสมบูรณ์'); // แจ้งเตือนเพื่อให้มั่นใจว่าบันทึกแล้ว
-          }, 50);
+      // สั่ง Update State แบบชัดเจน
+      setDailyReports(nextList);
 
-          return nextList;
-      }, true); // ใช้ true บังคับ Save ลง Firebase โดยไม่รอ 1 วินาที
+      // --- AUTO SYNC TRIGGER ---
+      let filesToUpload = [];
+      ['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].forEach(dept => {
+          const images = savedReport.performance[dept]?.images || [];
+          images.forEach((img, idx) => { filesToUpload.push({ name: `DailyReport_${savedReport.id}_${dept}_${idx}.jpg`, data: img }); });
+      });
+      triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, filesToUpload);
+
+      setShowAddDailyReportModal(false);
+      setSelectedDailyReport(savedReport); // Open view modal immediately
+      alert('บันทึกรายงานประจำวันเสร็จสมบูรณ์'); // แจ้งเตือนเพื่อให้มั่นใจว่าบันทึกแล้ว
   };
 
   const handleEditDailyReport = (report) => {
