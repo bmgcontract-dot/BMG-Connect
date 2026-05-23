@@ -3537,18 +3537,7 @@ export default function App() {
   const [showAddEventModal, setShowAddEventModal] = useState(false);
   const [currentEventMonth, setCurrentEventMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [selectedEventDate, setSelectedEventDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [newEvent, setNewEvent] = useState({
-      id: null,
-      title: '',
-      date: new Date().toISOString().split('T')[0],
-      time: '09:00',
-      description: '',
-      color: 'bg-blue-500',
-      projectId: ''
-  });
-
-  // คงใช้ usePersistentState สำหรับข้อมูลที่เป็น Object เดี่ยวๆ
-  // --- FIX: เปลี่ยนวิธีเก็บ schedules ให้ฉลาดขึ้น ลดภาระการโหลด ---
+      // --- FIX: เปลี่ยนวิธีเก็บ schedules ให้ฉลาดขึ้น ลดภาระการโหลด ---
   const [schedules, setSchedules] = useState(() => {
       if (typeof window !== 'undefined') {
           try {
@@ -3564,6 +3553,7 @@ export default function App() {
 
   const schedulesRef = useRef(schedules);
   const syncScheduleTimeoutRef = useRef(null);
+  const isInitialLoadDoneRef = useRef(false);
   
   useEffect(() => {
       schedulesRef.current = schedules;
@@ -3571,11 +3561,18 @@ export default function App() {
 
   // Sync Schedule Data
   useEffect(() => {
-      if (!db || !fbUser || !appId) return;
+      if (!db || !fbUser || !appId) {
+          isInitialLoadDoneRef.current = true;
+          return;
+      }
 
       const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', 'bmg_schedules_v2');
+      let currentFetchId = 0;
       
       const unsubscribe = onSnapshot(docRef, async (docSnap) => {
+          currentFetchId++;
+          const thisFetchId = currentFetchId;
+
           if (docSnap.exists()) {
               const data = docSnap.data();
               if (data.totalChunks !== undefined) {
@@ -3592,6 +3589,7 @@ export default function App() {
                   }
                   
                   if (!hasChunkError && fullJson) {
+                      if (thisFetchId !== currentFetchId) return;
                       try {
                           const parsedData = JSON.parse(fullJson);
                           if (JSON.stringify(schedulesRef.current) !== JSON.stringify(parsedData)) {
@@ -3607,12 +3605,14 @@ export default function App() {
                   }
               }
           }
+          isInitialLoadDoneRef.current = true;
       }, (err) => {
           console.error("Sync error for schedules", err);
+          isInitialLoadDoneRef.current = true;
       });
 
       return () => unsubscribe();
-  }, [fbUser]);
+  }, [fbUser, appId]);
   
   const getLocalMonthStr = () => {
       const d = new Date();
@@ -6801,7 +6801,7 @@ export default function App() {
                   meetingsList,
                   audits,
                   dailyReports,
-                  schedules,
+                  schedules: schedulesRef.current, // ใช้ข้อมูลปัจจุบันล่าสุดจาก Ref
                   scheduleNotes,
                   scheduleApprovals,
                   projectStaffOrder,
@@ -6917,7 +6917,7 @@ export default function App() {
                               { key: 'บันทึกการประชุม', setter: setMeetingsList, data: d.meetingsList },
                               { key: 'ผลการประเมิน (Audit)', setter: setAudits, data: d.audits },
                               { key: 'รายงานประจำวัน', setter: setDailyReports, data: d.dailyReports },
-                              { key: 'ตารางงาน', setter: setSchedules, data: d.schedules },
+                              // { key: 'ตารางงาน', setter: setSchedules, data: d.schedules }, // เอาออกจากการใช้ Hook ปกติ
                               { key: 'หมายเหตุตารางงาน', setter: setScheduleNotes, data: d.scheduleNotes },
                               { key: 'สถานะอนุมัติตารางงาน', setter: setScheduleApprovals, data: d.scheduleApprovals },
                               { key: 'ลำดับพนักงาน', setter: setProjectStaffOrder, data: d.projectStaffOrder },
@@ -6926,7 +6926,7 @@ export default function App() {
                               { key: 'สิทธิ์การใช้งานระบบ', setter: setRolePermissions, data: d.rolePermissions }
                           ];
 
-                          const totalTables = stateSetters.length;
+                          const totalTables = stateSetters.length + 1; // +1 สำหรับ Schedules แบบพิเศษ
                           let currentTable = 0;
 
                           setRestoreProgress('เริ่มดำเนินการกู้คืนข้อมูล (โปรดอย่าปิดหน้าต่าง)...');
@@ -6953,6 +6953,43 @@ export default function App() {
                                   }
                               }
                           }
+
+                          // --- จัดการ Schedule (ตารางงาน) แยกพิเศษ เนื่องจากมีระบบ Chunking เฉพาะตัว ---
+                          if (d.schedules) {
+                              currentTable++;
+                              setRestoreProgress(`กำลังเขียนและซิงค์คลาวด์ตาราง: ตารางงาน (${currentTable}/${totalTables})`);
+                              await new Promise(resolve => setTimeout(resolve, 50));
+
+                              try {
+                                  setSchedules(d.schedules);
+                                  schedulesRef.current = d.schedules;
+                                  if (typeof window !== 'undefined') {
+                                      localStorage.setItem('bmg_schedules_v2', JSON.stringify(d.schedules));
+                                  }
+                                  
+                                  // Force save to Firebase immediately
+                                  if (db && fbUser && appId) {
+                                      const jsonStr = JSON.stringify(d.schedules);
+                                      const CHUNK_SIZE = 250000;
+                                      const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
+                                      const newVersionTimestamp = Date.now();
+                                      
+                                      const batch = writeBatch(db);
+                                      for (let i = 0; i < totalChunks; i++) {
+                                          const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `bmg_schedules_v2_${i}`);
+                                          const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+                                          batch.set(chunkRef, { chunk: chunkData, timestamp: newVersionTimestamp });
+                                      }
+                                      
+                                      const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', 'bmg_schedules_v2');
+                                      batch.set(metaRef, { totalChunks, timestamp: newVersionTimestamp, updaterUid: fbUser.uid });
+                                      
+                                      await batch.commit();
+                                  }
+                              } catch(e) {
+                                  console.error("Sync error for schedules", e);
+                              }
+                          }
                           
                           if (d.theme) setTheme(d.theme);
 
@@ -6960,31 +6997,30 @@ export default function App() {
                           
                           // ลบการบังคับ Reload หน้าต่างทิ้ง เพื่อป้องกันปัญหาข้อมูลบน Firebase ดึงกลับมาทับ
                           setTimeout(() => {
-                              showAlert("สำเร็จ", "ระบบนำเข้าและอัปเดตข้อมูลเสร็จสมบูรณ์ 100% ข้อมูลพร้อมใช้งานทันทีโดยไม่ต้องรีเฟรชหน้า");
+                              showAlert("สำเร็จ", "ระบบนำเข้าและอัปเดตข้อมูลเสร็จสมบูรณ์ 100% ข้อมูลพร้อมใช้งานทันที");
                               setIsRestoring(false);
                               setRestoreProgress('');
-                          }, 500);
-                          
-                      } catch (err) {
-                          console.error("Restore state error:", err);
-                          showAlert("เกิดข้อผิดพลาด", "เกิดข้อผิดพลาดระหว่างการกู้คืนข้อมูล: " + err.message);
+                              // บังคับให้โหลดข้อมูลใหม่จาก State เพื่อให้ UI แสดงผลทันทีโดยไม่ต้อง Refresh
+                              setUsers(users => [...users]);
+                              setProjects(projects => [...projects]);
+                          }, 1500);
+
+                      } catch (error) {
+                          alert('เกิดข้อผิดพลาดในการประมวลผลไฟล์ (Invalid File Format)');
+                          console.error("Parse error:", error);
                           setIsRestoring(false);
                           setRestoreProgress('');
                       }
                   };
                   reader.readAsText(file);
-              }, 500); // รอให้ Modal ยืนยันปิดลงก่อนเริ่มอ่านไฟล์
-          },
-          'ยืนยันการกู้คืน',
-          'warning'
+              }, 500);
+          }
       );
   };
 
-  // --- NEW: Google Sheets Sync Handler ---
   const handleSyncToGoogleSheets = async () => {
       const GOOGLE_SCRIPT_URL = GOOGLE_SCRIPT_CONFIG.SHEETS_URL;
       
-      // ปรับปรุงเงื่อนไขการตรวจสอบใหม่ ให้เช็คแค่ค่าว่างหรือค่า Placeholder เดิม
       if(!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes('YOUR_')) {
           alert("กรุณานำ Web App URL ของ Google Apps Script มาใส่ในโค้ดก่อนใช้งานฟังก์ชันนี้");
           return;
@@ -6992,11 +7028,16 @@ export default function App() {
 
       setIsSyncingSheets(true);
       try {
-          // เลือกเฉพาะข้อมูลที่เป็นตารางเพื่อส่งไป Google Sheets
+          // เตรียมข้อมูลส่งไปยัง Google Apps Script
           const payload = {
-              'Users_พนักงาน': users,
-              'Projects_โครงการ': projects,
-              'Contracts_สัญญา': contracts,
+              'Company_Info_ข้อมูลองค์กร': [companyInfo],
+              'Users_ผู้ใช้งาน': users.map(u => ({...u, photo: u.photo ? 'Base64 Image' : ''})),
+              'Projects_โครงการ': projects.map(p => {
+                  const safeProject = {...p, logo: p.logo ? 'Base64 Image' : ''};
+                  if (safeProject.files) safeProject.files = 'Files attached';
+                  return safeProject;
+              }),
+              'Contracts_สัญญา': contracts.map(c => ({...c, file: c.file ? 'File attached' : ''})),
               'Contractors_ผู้รับเหมา': contractors,
               'Assets_ทรัพย์สิน': assets.map(a => ({...a, photo: a.photo ? 'Base64 Image' : ''})), // ซ่อน Base64 เพื่อไม่ให้เซลล์เกินขีดจำกัด
               'Tools_เครื่องมือ': tools.map(t => ({...t, photo: t.photo ? 'Base64 Image' : ''})),
