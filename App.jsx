@@ -5264,6 +5264,7 @@ export default function App() {
           }
       }
 
+      // FIX: ไม่นำ Side Effect ไปใส่ใน setState และคำนวณ State ด้วยตนเองก่อนเซฟ
       if (finalId) {
           // Update existing report
           savedReport = { ...newDailyReport, id: finalId, projectId: selectedProject.id };
@@ -5275,8 +5276,8 @@ export default function App() {
           nextList = [savedReport, ...safeList]; // เพิ่มไว้ด้านบนสุด
       }
 
-      // สั่ง Update State แบบชัดเจน
-      setDailyReports(nextList);
+      // สั่ง Update State แบบชัดเจน (ใช้ true เพื่อบังคับให้บันทึกลง Cloud ทันที)
+      setDailyReports(nextList, true);
 
       // --- AUTO SYNC TRIGGER ---
       let filesToUpload = [];
