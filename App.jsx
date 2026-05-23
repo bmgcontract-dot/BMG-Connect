@@ -1224,9 +1224,9 @@ const compressImage = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                // กำหนดขนาดสูงสุด 800px เพื่อคงความชัดเจน แต่ลดขนาดไฟล์ป้องกันปัญหา 1MB Limit ของฐานข้อมูล
-                const MAX_WIDTH = 800;
-                const MAX_HEIGHT = 800;
+                // แก้ไข: ลดขนาดสูงสุดลงเหลือ 600px เพื่อป้องกันข้อจำกัด 1MB ของฐานข้อมูลออนไลน์อย่างเด็ดขาด
+                const MAX_WIDTH = 600;
+                const MAX_HEIGHT = 600;
                 let width = img.width;
                 let height = img.height;
 
@@ -1246,11 +1246,10 @@ const compressImage = (file) => {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
                 
-                // บีบอัดเป็น JPEG Quality 60%
-                resolve(canvas.toDataURL('image/jpeg', 0.6));
+                // บีบอัดเป็น JPEG Quality 50% (คุณภาพยังพอดูได้ชัดเจน แต่ไฟล์จะเล็กลงมาก)
+                resolve(canvas.toDataURL('image/jpeg', 0.5));
             };
             img.onerror = () => {
-                // กรณีเกิดข้อผิดพลาดในการโหลดรูป ให้ส่งค่าต้นฉบับกลับไป
                 resolve(event.target.result);
             };
         };
@@ -1501,7 +1500,7 @@ function usePersistentState(key, initialValue, fbUser) {
                       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
                       syncTimeoutRef.current = setTimeout(async () => {
                           const jsonStr = JSON.stringify(stateRef.current); 
-                          const CHUNK_SIZE = 250000; 
+                          const CHUNK_SIZE = 150000; 
                           const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
                           for (let i = 0; i < totalChunks; i++) {
                               const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
@@ -1526,25 +1525,23 @@ function usePersistentState(key, initialValue, fbUser) {
           };
 
           if (data.totalChunks !== undefined) {
-              let fullJson = '';
-              let hasChunkError = false;
+              // แก้ไข: ใช้ Promise.all ดึง Chunk ทุกก้อนพร้อมกัน เพื่อความเร็วและป้องกันการค้าง
+              const chunkPromises = [];
               for (let i = 0; i < data.totalChunks; i++) {
                   const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
-                  const chunkSnap = await getDoc(chunkRef);
-                  if (chunkSnap.exists()) {
-                      fullJson += chunkSnap.data().chunk;
-                  } else {
-                      hasChunkError = true;
-                  }
+                  chunkPromises.push(getDoc(chunkRef));
               }
               
-              if (thisFetchId !== currentFetchId) return;
+              const chunkSnaps = await Promise.all(chunkPromises);
+              let fullJson = '';
+              chunkSnaps.forEach(snap => {
+                  if (snap.exists()) fullJson += snap.data().chunk;
+              });
               
-              // ยอมรับถ้า Chunk หายไปบ้าง (พยายาม Parse ส่วนที่มี) แต่จะเตือน
-              if (hasChunkError && !fullJson) return;
+              if (thisFetchId !== currentFetchId) return;
 
               if (fullJson) {
-                  // ลองเติมวงเล็บปิดให้เผื่อ Chunk หายไปตอนท้าย
+                  // พยายามซ่อมแซม JSON ที่อาจจะขาดตอนไปบ้าง เพื่อไม่ให้ข้อมูลหาย
                   let safeJson = fullJson;
                   try {
                       JSON.parse(safeJson);
@@ -1639,7 +1636,7 @@ function usePersistentState(key, initialValue, fbUser) {
                isUploadingRef.current = true;
                try {
                    const jsonStr = JSON.stringify(stateRef.current); 
-                   const CHUNK_SIZE = 250000; 
+                   const CHUNK_SIZE = 150000; 
                    const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
                    
                    for (let i = 0; i < totalChunks; i++) {
@@ -1711,33 +1708,39 @@ function useSmartPersistentCollection(collectionName, initialValue, fbUser) {
                 if (metaSnap.exists()) {
                     const metaData = metaSnap.data();
                     if (metaData.totalChunks !== undefined) {
-                        let fullJson = '';
-                        let hasChunkError = false;
+                        const chunkPromises = [];
                         for (let i = 0; i < metaData.totalChunks; i++) {
                             const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${collectionName}_${i}`);
-                            const chunkSnap = await getDoc(chunkRef);
-                            if (chunkSnap.exists()) {
-                                fullJson += chunkSnap.data().chunk;
-                            } else {
-                                hasChunkError = true;
-                            }
+                            chunkPromises.push(getDoc(chunkRef));
                         }
                         
-                        if (!hasChunkError && fullJson) {
-                            const parsedData = JSON.parse(fullJson);
-                            
-                            // ถ้าข้อมูลเก่า (Chunk) มีมากกว่าที่เรามีอยู่บนจอตอนนี้ ให้ยึดตามข้อมูลเก่าไปเลย (Migrate in)
-                            if (Array.isArray(parsedData) && Array.isArray(dataRef.current)) {
-                                if (parsedData.length > dataRef.current.length) {
-                                    console.log(`[Migrate] นำเข้าข้อมูลเก่าของ ${collectionName} สำเร็จ`);
-                                    setData(parsedData);
-                                    dataRef.current = parsedData;
-                                    if (typeof window !== 'undefined') localStorage.setItem(collectionName, JSON.stringify(parsedData));
-                                    
-                                    // โยนข้อมูลที่กู้กลับมาได้ ขึ้นไปเซฟแบบ Document เพื่อให้มันปลอดภัยไปเลย
-                                    setPersistentValue(parsedData, true);
-                                }
+                        const chunkSnaps = await Promise.all(chunkPromises);
+                        let fullJson = '';
+                        chunkSnaps.forEach(snap => {
+                            if (snap.exists()) fullJson += snap.data().chunk;
+                        });
+                        
+                        if (fullJson) {
+                            let safeJson = fullJson;
+                            try { JSON.parse(safeJson); } catch (e) {
+                                if (safeJson.startsWith('[')) safeJson += ']';
                             }
+                            
+                            try {
+                                const parsedData = JSON.parse(safeJson);
+                                // ถ้าข้อมูลเก่า (Chunk) มีมากกว่าที่เรามีอยู่บนจอตอนนี้ ให้ยึดตามข้อมูลเก่าไปเลย (Migrate in)
+                                if (Array.isArray(parsedData) && Array.isArray(dataRef.current)) {
+                                    if (parsedData.length > dataRef.current.length || dataRef.current.length === 0) {
+                                        console.log(`[Migrate] นำเข้าข้อมูลเก่าของ ${collectionName} สำเร็จ`);
+                                        setData(parsedData);
+                                        dataRef.current = parsedData;
+                                        if (typeof window !== 'undefined') localStorage.setItem(collectionName, JSON.stringify(parsedData));
+                                        
+                                        // โยนข้อมูลที่กู้กลับมาได้ ขึ้นไปเซฟแบบ Document เพื่อให้มันปลอดภัยไปเลย
+                                        setPersistentValue(parsedData, true);
+                                    }
+                                }
+                            } catch (e) {}
                         }
                     }
                 }
@@ -1762,8 +1765,29 @@ function useSmartPersistentCollection(collectionName, initialValue, fbUser) {
             // ป้องกันเซิร์ฟเวอร์มาทับถ้าเราเพิ่งพิมพ์เสร็จ
             if (timeDiff < 5000) return;
 
-            if (JSON.stringify(dataRef.current) !== JSON.stringify(items)) {
-                // ระบบกู้ข้อมูล Local ขึ้น Server ทันที
+            // แก้ไขปัญหา UI รีเฟรชสลับตำแหน่งไปมา โดยคงลำดับเดิมของ Local เอาไว้
+            const serverMap = new Map(items.map(item => [item.id, item]));
+            const localItems = dataRef.current || [];
+            const mergedArray = [];
+            const seenIds = new Set();
+            
+            // 1. ดึงรายการเดิมที่ยังมีอยู่ในเซิร์ฟเวอร์ (อัปเดตข้อมูลให้เป็นของเซิร์ฟเวอร์)
+            for (const localItem of localItems) {
+                if (serverMap.has(localItem.id)) {
+                    mergedArray.push(serverMap.get(localItem.id));
+                    seenIds.add(localItem.id);
+                }
+            }
+            
+            // 2. เติมรายการใหม่จากเซิร์ฟเวอร์ที่ยังไม่เคยมีใน Local
+            for (const item of items) {
+                if (!seenIds.has(item.id)) {
+                    mergedArray.unshift(item); // ดันขึ้นด้านบนสุด
+                }
+            }
+
+            if (JSON.stringify(dataRef.current) !== JSON.stringify(mergedArray)) {
+                // ระบบกู้ข้อมูล Local ขึ้น Server ทันที หากเซิร์ฟเวอร์ว่างเปล่า
                 if (items.length === 0 && Array.isArray(dataRef.current) && dataRef.current.length > 0) {
                      setPersistentValue(dataRef.current, true); 
                 } 
@@ -1773,10 +1797,10 @@ function useSmartPersistentCollection(collectionName, initialValue, fbUser) {
                      setPersistentValue(dataRef.current, true);
                 }
                 else {
-                    setData(items);
-                    dataRef.current = items;
+                    setData(mergedArray);
+                    dataRef.current = mergedArray;
                     if (typeof window !== 'undefined') {
-                        localStorage.setItem(collectionName, JSON.stringify(items));
+                        localStorage.setItem(collectionName, JSON.stringify(mergedArray));
                     }
                 }
             }
@@ -1991,20 +2015,27 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
         const data = docSnap.data();
         // รองรับระบบ Chunking
         if (data.totalChunks !== undefined) {
-            let fullJson = '';
-            let hasChunkError = false;
+            // แก้ไข: ใช้ Promise.all สำหรับการดึงไฟล์ Chunk เพื่อลดปัญหาดึงช้าจนโหลดไม่ขึ้น
+            const chunkPromises = [];
             for (let i = 0; i < data.totalChunks; i++) {
                 const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `central_fee_raw_${selectedProject.id}_${i}`);
-                const chunkSnap = await getDoc(chunkRef);
-                if (chunkSnap.exists()) {
-                    fullJson += chunkSnap.data().chunk;
-                } else {
-                    hasChunkError = true;
-                }
+                chunkPromises.push(getDoc(chunkRef));
             }
-            if (!hasChunkError && fullJson) {
+            
+            const chunkSnaps = await Promise.all(chunkPromises);
+            let fullJson = '';
+            chunkSnaps.forEach(snap => {
+                if (snap.exists()) fullJson += snap.data().chunk;
+            });
+
+            if (fullJson) {
+                // ซ่อมแซม JSON กรณี Chunk หาย
+                let safeJson = fullJson;
+                try { JSON.parse(safeJson); } catch (e) {
+                    if (safeJson.startsWith('{')) safeJson += '}';
+                }
                 try {
-                    const parsed = JSON.parse(fullJson);
+                    const parsed = JSON.parse(safeJson);
                     setRawData(parsed.payload || []);
                     if (parsed.projectTitle) setProjectTitle(parsed.projectTitle);
                     if (parsed.reportDate) setReportDate(parsed.reportDate);
@@ -2128,7 +2159,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
                 });
                 
                 // ใช้เทคนิค Chunking ตัดข้อมูลเป็นส่วนๆ ป้องกันปัญหาไฟล์เกินข้อจำกัด 1MB ของฐานข้อมูล
-                const CHUNK_SIZE = 250000; // FIX: ลดขนาดลงเพื่อรองรับอักขระภาษาไทย
+                const CHUNK_SIZE = 150000; // FIX: ลดขนาดลงเพื่อรองรับอักขระภาษาไทยอย่างปลอดภัย
                 const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
 
                 for (let i = 0; i < totalChunks; i++) {
