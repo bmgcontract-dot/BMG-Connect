@@ -1674,6 +1674,72 @@ function usePersistentState(key, initialValue, fbUser) {
 const usePersistentCollection = (key, initialValue, fbUser) => usePersistentState(key, initialValue, fbUser);
 const useUserPersistentState = (key, initialValue, fbUser) => usePersistentState(fbUser?.uid ? `${key}_${fbUser.uid}` : key, initialValue, fbUser);
 
+// --- NEW: Custom Hook for Document-Based Storage (ป้องกันปัญหาข้อมูลทับกันหายขาด 100%) ---
+function useDocumentCollection(collectionName, initialValue, fbUser) {
+    const [data, setData] = useState(() => {
+        if (typeof window !== 'undefined') {
+            const local = localStorage.getItem(`bmg_${collectionName}_docs`);
+            if (local) {
+                try { return JSON.parse(local); } catch(e) { return initialValue; }
+            }
+        }
+        return initialValue;
+    });
+
+    useEffect(() => {
+        if (!db || !appId || !fbUser) return;
+        const colRef = collection(db, 'artifacts', appId, 'public', 'data', `bmg_${collectionName}_docs`);
+        const unsubscribe = onSnapshot(colRef, (snapshot) => {
+            const items = [];
+            snapshot.forEach((docSnap) => {
+                items.push(docSnap.data());
+            });
+            // เรียงข้อมูลจากใหม่ไปเก่าตามเวลา
+            items.sort((a, b) => new Date(b.date || b.createdAt || 0) - new Date(a.date || a.createdAt || 0));
+            setData(items);
+            if (typeof window !== 'undefined') {
+                localStorage.setItem(`bmg_${collectionName}_docs`, JSON.stringify(items));
+            }
+        }, (error) => {
+            console.error(`Error fetching Document-based ${collectionName}:`, error);
+        });
+        return () => unsubscribe();
+    }, [db, appId, fbUser, collectionName]);
+
+    // Setter สำหรับอัปเดต State ปัจจุบัน และใช้ตอน Backup/Restore (รับ Argument ที่ 2 เพื่อบอกว่าเป็น Restore)
+    const setPersistentValue = async (newValue, isRestore = false) => {
+        setData(newValue);
+        if (typeof window !== 'undefined') {
+            localStorage.setItem(`bmg_${collectionName}_docs`, JSON.stringify(newValue));
+        }
+
+        if (db && fbUser && appId && isRestore) {
+            // โหมด Restore: ทำการเซฟลง Document หลายๆ อันพร้อมกันด้วย Batch (แยกการเขียนไม่ให้เกิน Limit ครั้งละ 400 แถว)
+            if (Array.isArray(newValue) && newValue.length > 0) {
+               try {
+                   const batchSize = 400; 
+                   for (let i = 0; i < newValue.length; i += batchSize) {
+                       const batch = writeBatch(db);
+                       const chunkData = newValue.slice(i, i + batchSize);
+                       
+                       chunkData.forEach(item => {
+                           if (!item.id) return;
+                           const docRef = doc(db, 'artifacts', appId, 'public', 'data', `bmg_${collectionName}_docs`, item.id);
+                           batch.set(docRef, item);
+                       });
+                       await batch.commit();
+                       await new Promise(r => setTimeout(r, 100)); // พักเล็กน้อยป้องกันหน้าจอหน่วงระหว่างกู้คืนข้อมูล
+                   }
+               } catch (err) {
+                   console.error(`Restore Error for ${collectionName}:`, err);
+               }
+            }
+        }
+    };
+
+    return [data, setPersistentValue];
+}
+
 // --- NEW: Central Fee Manager Module Component ---
 const FEE_STATUS_OPTIONS = [
   "อายัดที่สำนักงานที่ดินแล้ว",
@@ -3462,7 +3528,11 @@ export default function App() {
   const [projects, setProjects] = usePersistentCollection('bmg_projects', INITIAL_PROJECTS, fbUser);
   const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, fbUser);
   const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, fbUser);
-  const [dailyReports, setDailyReports] = usePersistentCollection('bmg_dailyReports', INITIAL_DAILY_REPORTS, fbUser);
+  
+  // 🌟 แยกระบบจัดเก็บข้อมูลที่มีปริมาณมากเป็น Document-Based ป้องกันปัญหาข้อมูลทับกันหาย 100% 🌟
+  const [dailyReports, setDailyReports] = useDocumentCollection('dailyReports', INITIAL_DAILY_REPORTS, fbUser);
+  const [repairs, setRepairs] = useDocumentCollection('repairs', INITIAL_REPAIRS, fbUser);
+
   const [contractors, setContractors] = usePersistentCollection('bmg_contractors', INITIAL_CONTRACTORS, fbUser);
   const [assets, setAssets] = usePersistentCollection('bmg_assets', INITIAL_ASSETS, fbUser);
   const [tools, setTools] = usePersistentCollection('bmg_tools', INITIAL_TOOLS, fbUser);
@@ -3470,8 +3540,10 @@ export default function App() {
   const [pmPlans, setPmPlans] = usePersistentCollection('bmg_pmPlans', INITIAL_PM_PLANS, fbUser);
   const [pmHistoryList, setPmHistoryList] = usePersistentCollection('bmg_pmHistoryList', INITIAL_PM_HISTORY, fbUser);
   const [meters, setMeters] = usePersistentCollection('bmg_meters', INITIAL_METERS, fbUser);
-  const [utilityReadings, setUtilityReadings] = usePersistentCollection('bmg_utilityReadings', INITIAL_READINGS, fbUser);
-  const [repairs, setRepairs] = usePersistentCollection('bmg_repairs', INITIAL_REPAIRS, fbUser);
+  
+  // 🌟 เปลี่ยนประวัติจดมิเตอร์เป็น Document-Based รองรับข้อมูลมหาศาล และไม่มีการทับกัน 🌟
+  const [utilityReadings, setUtilityReadings] = useDocumentCollection('utilityReadings', INITIAL_READINGS, fbUser);
+  
   const [actionPlans, setActionPlans] = usePersistentCollection('bmg_actionPlans', INITIAL_ACTION_PLANS, fbUser);
   const [othersData, setOthersData] = usePersistentCollection('bmg_othersData', INITIAL_OTHERS, fbUser);
   const [formsList, setFormsList] = usePersistentCollection('bmg_forms_list', STANDARD_FORMS, fbUser);
@@ -5617,25 +5689,50 @@ export default function App() {
   };
 
   // Repair Handlers
-  const handleSaveRepair = (e) => {
+  const handleDeleteRepair = async (rep) => {
+      const nextList = repairs.filter(r => r.id !== rep.id);
+      setRepairs(nextList);
+      
+      // ลบ Document ในฐานข้อมูลออกทันที
+      if (db && appId) {
+          try {
+              const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'bmg_repairs_docs', rep.id);
+              await deleteDoc(docRef);
+          } catch (error) {
+              console.error("Error deleting document-based repair:", error);
+          }
+      }
+  };
+
+  const handleSaveRepair = async (e) => {
       e.preventDefault();
       let savedRepair;
       let nextList;
       const existingIndex = repairs.findIndex(r => r.code === newRepair.code);
       
-      // FIX: คำนวณ State แยกออกมาก่อน แล้วค่อยเรียก triggerAutoSync
       if (newRepair.id || existingIndex >= 0) {
           // Edit existing repair
-          savedRepair = { ...newRepair, id: newRepair.id || repairs[existingIndex].id };
+          savedRepair = { ...newRepair, id: newRepair.id || repairs[existingIndex].id, updatedAt: new Date().toISOString() };
           nextList = repairs.map(r => r.code === newRepair.code ? savedRepair : r);
       } else {
           // Add new repair
           const id = generateId();
-          savedRepair = { ...newRepair, id, projectId: selectedProject.id, date: new Date().toISOString().split('T')[0] };
-          nextList = [...repairs, savedRepair];
+          savedRepair = { ...newRepair, id, projectId: selectedProject.id, date: new Date().toISOString().split('T')[0], createdAt: new Date().toISOString() };
+          nextList = [savedRepair, ...repairs]; // แทรกข้อมูลใหม่ไว้บนสุด
       }
 
       setRepairs(nextList);
+
+      // 🌟 บันทึกแยกเป็น Document ไปยัง Firestore โดยตรง (ป้องกันข้อมูลทับกัน 100%)
+      if (db && appId) {
+          try {
+              const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'bmg_repairs_docs', savedRepair.id);
+              await setDoc(docRef, savedRepair);
+          } catch (error) {
+              console.error("Error saving document-based repair:", error);
+          }
+      }
+
       triggerAutoSync('Repairs_แจ้งซ่อม', nextList, []);
 
       setShowAddRepairModal(false);
@@ -5650,7 +5747,7 @@ export default function App() {
   };
 
   // Utilities Handlers
-  const handleSaveUtilityReading = (e) => {
+  const handleSaveUtilityReading = async (e) => {
       e.preventDefault();
       if (!utilityForm.meterId || !utilityForm.currentValue) return;
 
@@ -5671,11 +5768,20 @@ export default function App() {
               date: utilityForm.date,
               value: currentValNum,
               usage: updatedUsage,
-              recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
+              recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System',
+              updatedAt: new Date().toISOString()
           };
 
           const newUtilityReadings = utilityReadings.map(r => r.id === utilityForm.id ? updatedReading : r);
           setUtilityReadings(newUtilityReadings);
+
+          // 🌟 บันทึกการแก้ไขลง Firestore Document
+          if (db && appId) {
+              try {
+                  const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'bmg_utilityReadings_docs', updatedReading.id);
+                  await setDoc(docRef, updatedReading);
+              } catch (error) { console.error("Error updating utility reading doc:", error); }
+          }
           
           // อัปเดตค่ายกมาล่าสุดของมิเตอร์ตัวนี้ (เผื่อการแก้ไขนี้เป็นการแก้ข้อมูลบิลรอบล่าสุด)
           const meterReadings = newUtilityReadings.filter(r => r.meterId === meter.id);
@@ -5715,10 +5821,19 @@ export default function App() {
               value: currentValNum,
               prevValue: prevVal,
               usage: usage,
-              recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
+              recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System',
+              createdAt: new Date().toISOString()
           };
 
-          setUtilityReadings([...utilityReadings, newReading]);
+          setUtilityReadings([newReading, ...utilityReadings]);
+
+          // 🌟 บันทึกข้อมูลใหม่ลง Firestore Document
+          if (db && appId) {
+              try {
+                  const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'bmg_utilityReadings_docs', newReading.id);
+                  await setDoc(docRef, newReading);
+              } catch (error) { console.error("Error saving new utility reading doc:", error); }
+          }
           
           // Update meter's last reading
           setMeters(meters.map(m => 
@@ -5762,10 +5877,18 @@ export default function App() {
   };
 
   const handleDeleteUtilityReading = (readingId, meterId) => {
-      showConfirm('ยืนยันการลบข้อมูล', 'คุณต้องการลบประวัติการจดมิเตอร์นี้ใช่หรือไม่? (ระบบจะคำนวณค่ายกมาล่าสุดของมิเตอร์ให้ใหม่)', () => {
+      showConfirm('ยืนยันการลบข้อมูล', 'คุณต้องการลบประวัติการจดมิเตอร์นี้ใช่หรือไม่? (ระบบจะคำนวณค่ายกมาล่าสุดของมิเตอร์ให้ใหม่)', async () => {
           // ลบข้อมูลออกจาก State
           const newReadings = utilityReadings.filter(r => r.id !== readingId);
           setUtilityReadings(newReadings);
+
+          // 🌟 ลบ Document จาก Firestore
+          if (db && appId) {
+              try {
+                  const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'bmg_utilityReadings_docs', readingId);
+                  await deleteDoc(docRef);
+              } catch (error) { console.error("Error deleting utility reading doc:", error); }
+          }
 
           // อัปเดตค่ายกมาล่าสุดของมิเตอร์ตัวนี้ใหม่
           const meterReadings = newReadings.filter(r => r.meterId === meterId).sort((a,b) => new Date(b.date) - new Date(a.date));
@@ -5780,10 +5903,27 @@ export default function App() {
   };
 
   const handleDeleteAllUtilityReadings = (meterId) => {
-      showConfirm('ยืนยันการลบประวัติทั้งหมด', 'คุณต้องการลบประวัติการจดมิเตอร์ของอุปกรณ์นี้ "ทั้งหมด" ใช่หรือไม่?\n(ค่ายกมาจะถูกรีเซ็ตเป็น 0)', () => {
+      showConfirm('ยืนยันการลบประวัติทั้งหมด', 'คุณต้องการลบประวัติการจดมิเตอร์ของอุปกรณ์นี้ "ทั้งหมด" ใช่หรือไม่?\n(ค่ายกมาจะถูกรีเซ็ตเป็น 0)', async () => {
+          const readingsToDelete = utilityReadings.filter(r => r.meterId === meterId);
           const newReadings = utilityReadings.filter(r => r.meterId !== meterId);
           setUtilityReadings(newReadings);
           
+          // 🌟 ทำการลบแบบ Batch หลายๆ Document พร้อมกันใน Firestore
+          if (db && appId && readingsToDelete.length > 0) {
+              try {
+                  const batchSize = 400; // ลบครั้งละไม่เกิน 400 รายการ ป้องกัน limit
+                  for (let i = 0; i < readingsToDelete.length; i += batchSize) {
+                      const batch = writeBatch(db);
+                      const chunk = readingsToDelete.slice(i, i + batchSize);
+                      chunk.forEach(r => {
+                          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'bmg_utilityReadings_docs', r.id);
+                          batch.delete(docRef);
+                      });
+                      await batch.commit();
+                  }
+              } catch (error) { console.error("Error batch deleting utility readings:", error); }
+          }
+
           setMeters(meters.map(m => 
               m.id === meterId 
                   ? { ...m, lastReading: 0, lastDate: null }
@@ -6029,7 +6169,8 @@ export default function App() {
                                       value: currentValNum,
                                       prevValue: prevVal,
                                       usage: usage,
-                                      recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System Import'
+                                      recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System Import',
+                                      createdAt: new Date().toISOString()
                                   });
                                   
                                   updatedMetersMap.set(meter.id, {
@@ -6077,7 +6218,8 @@ export default function App() {
                                       value: currentValNum,
                                       prevValue: prevVal,
                                       usage: usage,
-                                      recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System Import'
+                                      recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System Import',
+                                      createdAt: new Date().toISOString()
                                   });
                                   
                                   updatedMetersMap.set(meter.id, {
@@ -6094,12 +6236,35 @@ export default function App() {
               }
               
               if (newReadings.length > 0) {
-                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูลการจดมิเตอร์ ${newReadings.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
-                      const nextReadings = [...utilityReadings, ...newReadings];
+                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูลการจดมิเตอร์ ${newReadings.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, async () => {
+                      const nextReadings = [...newReadings, ...utilityReadings];
                       setUtilityReadings(nextReadings);
                       
                       const nextMeters = meters.map(m => updatedMetersMap.has(m.id) ? { ...m, ...updatedMetersMap.get(m.id) } : m);
                       setMeters(nextMeters);
+
+                      // 🌟 เขียนข้อมูลเข้า Firestore ทีละหลายรายการพร้อมกัน (Batch Write)
+                      if (db && appId) {
+                          try {
+                              // แสดง UI แจ้งเตือนผู้ใช้ขณะกำลังนำเข้า
+                              setAutoSyncMessage(`กำลังเขียนข้อมูลจดมิเตอร์ ${newReadings.length} รายการ ลงฐานข้อมูล...`);
+                              
+                              const batchSize = 400; // Limit by Firestore is 500 per batch
+                              for (let i = 0; i < newReadings.length; i += batchSize) {
+                                  const batch = writeBatch(db);
+                                  const chunk = newReadings.slice(i, i + batchSize);
+                                  chunk.forEach(r => {
+                                      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'bmg_utilityReadings_docs', r.id);
+                                      batch.set(docRef, r);
+                                  });
+                                  await batch.commit();
+                              }
+                              setTimeout(() => setAutoSyncMessage(''), 2000);
+                          } catch (error) { 
+                              console.error("Error batch saving imported utility readings:", error); 
+                              alert('เกิดข้อผิดพลาดขณะบันทึกลงฐานข้อมูลออนไลน์ (แต่บันทึกลงเครื่องแล้ว)');
+                          }
+                      }
                       
                       triggerAutoSync('UtilityReadings_จดมิเตอร์', nextReadings, []);
                       triggerAutoSync('UtilityMeters_มิเตอร์', nextMeters, []);
@@ -13073,7 +13238,7 @@ export default function App() {
                                                       )}
                                                       {hasPerm('proj_repair', 'delete') && (
                                                           <button 
-                                                              onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบรายการแจ้งซ่อม ${rep.code} ใช่หรือไม่?`, () => setRepairs(prev => prev.filter(r => r.id !== rep.id))); }}
+                                                              onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบรายการแจ้งซ่อม ${rep.code} ใช่หรือไม่?`, () => handleDeleteRepair(rep)); }}
                                                               className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
                                                               title="ลบรายการ"
                                                           >
