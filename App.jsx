@@ -19,7 +19,7 @@ import {
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot, getDoc, collection, deleteDoc, writeBatch } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, onSnapshot, getDoc, getDocs, collection, deleteDoc, writeBatch } from 'firebase/firestore';
 
 // --- Firebase Initialization ---
 let app, auth, db, appId;
@@ -1438,8 +1438,6 @@ function usePersistentState(key, initialValue, fbUser) {
   const syncTimeoutRef = useRef(null); 
   const isUploadingRef = useRef(false);
   const lastLocalUpdateRef = useRef(0);
-  const pendingServerDataRef = useRef(null);
-  const checkPendingDataInterval = useRef(null);
   const [isSynced, setIsSynced] = useState(false);
   const [isLoaded, setIsLoaded] = useState(() => {
       if (typeof window !== 'undefined' && localStorage.getItem(key)) return true;
@@ -1481,203 +1479,164 @@ function usePersistentState(key, initialValue, fbUser) {
         }
 
         try {
-          const applyData = (parsedData) => {
-              let finalData = parsedData;
-              
-              if (Array.isArray(initialValue) && !Array.isArray(parsedData)) {
-                  finalData = (parsedData && typeof parsedData === 'object') ? Object.values(parsedData) : [];
-              }
-
-              const isFinalEmpty = Array.isArray(finalData) ? finalData.length === 0 : (!finalData || (typeof finalData === 'object' && Object.keys(finalData || {}).length === 0));
-              const isCurrentNotEmpty = Array.isArray(stateRef.current) ? stateRef.current.length > 0 : (stateRef.current && typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length > 0);
-
-              if (isFinalEmpty && isCurrentNotEmpty) {
-                  return;
-              }
-              
-              if (Array.isArray(stateRef.current) && Array.isArray(finalData)) {
-                  if (finalData.length < stateRef.current.length) {
-                      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-                      syncTimeoutRef.current = setTimeout(async () => {
-                          const jsonStr = JSON.stringify(stateRef.current); 
-                          const CHUNK_SIZE = 150000; 
-                          const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
-                          for (let i = 0; i < totalChunks; i++) {
-                              const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
-                              const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                              await setDoc(chunkRef, { chunk: chunkData });
-                          }
-                          const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
-                          await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
-                      }, 2000);
-                      
-                      return;
-                  }
-              }
-              
-              if (JSON.stringify(stateRef.current) !== JSON.stringify(finalData)) {
-                  setState(finalData);
-                  stateRef.current = finalData;
-                  if (typeof window !== 'undefined') localStorage.setItem(key, JSON.stringify(finalData));
-              }
-              setIsLoaded(true);
-              setIsSynced(true);
-          };
-
           if (data.totalChunks !== undefined) {
-              // แก้ไข: ใช้ Promise.all ดึง Chunk ทุกก้อนพร้อมกัน เพื่อความเร็วและป้องกันการค้าง
-              const chunkPromises = [];
-              for (let i = 0; i < data.totalChunks; i++) {
-                  const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
-                  chunkPromises.push(getDoc(chunkRef));
-              }
-              
-              const chunkSnaps = await Promise.all(chunkPromises);
-              let fullJson = '';
-              chunkSnaps.forEach(snap => {
-                  if (snap.exists()) fullJson += snap.data().chunk;
-              });
-              
-              if (thisFetchId !== currentFetchId) return;
+             const chunkPromises = [];
+             for (let i = 0; i < data.totalChunks; i++) {
+                 const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
+                 chunkPromises.push(getDoc(chunkRef));
+             }
+             
+             const chunkSnaps = await Promise.all(chunkPromises);
+             let fullJson = '';
+             let hasChunkError = false;
+             chunkSnaps.forEach(snap => {
+                 if (snap.exists()) {
+                     fullJson += snap.data().chunk;
+                 } else {
+                     hasChunkError = true;
+                 }
+             });
 
-              if (fullJson) {
-                  // พยายามซ่อมแซม JSON ที่อาจจะขาดตอนไปบ้าง เพื่อไม่ให้ข้อมูลหาย
-                  let safeJson = fullJson;
-                  try {
-                      JSON.parse(safeJson);
-                  } catch (e) {
-                      if (safeJson.startsWith('[')) safeJson += ']';
-                      else if (safeJson.startsWith('{')) safeJson += '}';
-                  }
-                  
-                  try {
-                      const parsedData = JSON.parse(safeJson);
-                      
-                      if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
-                          pendingServerDataRef.current = parsedData;
-                          if (!checkPendingDataInterval.current) {
-                              checkPendingDataInterval.current = setInterval(() => {
-                                  if (Date.now() - lastLocalUpdateRef.current > 5000 && !isUploadingRef.current && !syncTimeoutRef.current) {
-                                      if (pendingServerDataRef.current) {
-                                          applyData(pendingServerDataRef.current);
-                                          pendingServerDataRef.current = null;
-                                      }
-                                      clearInterval(checkPendingDataInterval.current);
-                                      checkPendingDataInterval.current = null;
-                                  }
-                              }, 1000);
-                          }
-                      } else {
-                          applyData(parsedData);
-                      }
-                  } catch (e) {
-                      console.error("Parse Safe JSON Error", e);
-                  }
-              }
-          } else if (data.value) {
-              if (thisFetchId !== currentFetchId) return;
-              const parsedData = JSON.parse(data.value);
-              
-              if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
-                  pendingServerDataRef.current = parsedData;
-                  if (!checkPendingDataInterval.current) {
-                      checkPendingDataInterval.current = setInterval(() => {
-                          if (Date.now() - lastLocalUpdateRef.current > 5000 && !isUploadingRef.current && !syncTimeoutRef.current) {
-                              if (pendingServerDataRef.current) {
-                                  applyData(pendingServerDataRef.current);
-                                  pendingServerDataRef.current = null;
-                              }
-                              clearInterval(checkPendingDataInterval.current);
-                              checkPendingDataInterval.current = null;
-                          }
-                      }, 1000);
-                  }
-              } else {
+             if (hasChunkError) return;
+
+             if (fullJson && thisFetchId === currentFetchId) {
+                 try {
+                     const parsedData = JSON.parse(fullJson);
+                     applyData(parsedData);
+                 } catch (e) {
+                     console.error("Parse chunks error", e);
+                 }
+             }
+          } else if (data.payload && thisFetchId === currentFetchId) {
+              try {
+                  const parsedData = JSON.parse(data.payload);
                   applyData(parsedData);
+              } catch (e) {
+                  console.error("Parse payload error", e);
               }
           }
-        } catch(e) { console.error("Parse error", key, e); }
-      } else if (!isSynced) {
-         setPersistentValue(stateRef.current);
-         setIsLoaded(true);
-         setIsSynced(true);
+        } catch (err) {
+            console.error("Download chunks error", err);
+        }
       }
-    }, (err) => {
-      console.error("Sync error", key, err);
       setIsLoaded(true);
+      clearTimeout(fallbackTimer);
+    }, (error) => {
+        console.error("Sync error:", error);
+        setIsLoaded(true);
+        clearTimeout(fallbackTimer);
     });
 
-    return () => {
-        clearTimeout(fallbackTimer);
-        unsubscribe();
+    const applyData = (parsedData) => {
+        let finalData = parsedData;
+        if (Array.isArray(initialValue) && !Array.isArray(parsedData)) {
+            finalData = (parsedData && typeof parsedData === 'object') ? Object.values(parsedData) : [];
+        }
+
+        const isFinalEmpty = Array.isArray(finalData) ? finalData.length === 0 : (!finalData || (typeof finalData === 'object' && Object.keys(finalData || {}).length === 0));
+        const isCurrentNotEmpty = Array.isArray(stateRef.current) ? stateRef.current.length > 0 : (stateRef.current && typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length > 0);
+
+        if (isFinalEmpty && isCurrentNotEmpty) {
+            return;
+        }
+        
+        if (JSON.stringify(stateRef.current) !== JSON.stringify(finalData)) {
+            setState(finalData);
+            if (typeof window !== 'undefined') {
+                localStorage.setItem(key, JSON.stringify(finalData));
+            }
+        }
+        setIsSynced(true);
     };
-  }, [fbUser, key]);
 
-  const setPersistentValue = async (newValue, isRestore = false) => {
-    lastLocalUpdateRef.current = Date.now(); 
+    return () => {
+        unsubscribe();
+        clearTimeout(fallbackTimer);
+    };
+  }, [db, fbUser, appId, key]);
 
-    const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
-    if (!isRestore && valueToStore === stateRef.current) return;
+  const setPersistentValue = (newValueOrUpdater) => {
+      const oldValue = stateRef.current;
+      const newValue = typeof newValueOrUpdater === 'function' ? newValueOrUpdater(oldValue) : newValueOrUpdater;
+      
+      setState(newValue);
+      lastLocalUpdateRef.current = Date.now();
+      
+      if (typeof window !== 'undefined') {
+          localStorage.setItem(key, JSON.stringify(newValue));
+      }
 
-    setState(valueToStore);
-    stateRef.current = valueToStore;
-    
-    if (typeof window !== 'undefined') {
-        setTimeout(() => {
-            try { localStorage.setItem(key, JSON.stringify(valueToStore)); } catch (e) {}
-        }, 0);
-    }
+      if (!db || !fbUser || !appId) return;
 
-    if (db && fbUser && appId) {
-       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
 
-       return new Promise((resolve) => {
-           syncTimeoutRef.current = setTimeout(async () => {
-               isUploadingRef.current = true;
-               try {
-                   const jsonStr = JSON.stringify(stateRef.current); 
-                   const CHUNK_SIZE = 150000; 
-                   const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
-                   
-                   for (let i = 0; i < totalChunks; i++) {
-                       const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
-                       const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                       await setDoc(chunkRef, { chunk: chunkData });
-                       await new Promise(r => setTimeout(r, 10));
-                   }
-                   
-                   const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
-                   await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
-               } catch (err) {
-                   console.error(`Firestore Single Save Error [${key}]:`, err);
-               } finally {
-                   syncTimeoutRef.current = null;
-                   isUploadingRef.current = false;
-                   resolve();
-               }
-           }, 1000);
-       });
-    }
+      syncTimeoutRef.current = setTimeout(async () => {
+          if (isUploadingRef.current) return;
+          isUploadingRef.current = true;
+          
+          try {
+              const jsonStr = JSON.stringify(stateRef.current); 
+              const CHUNK_SIZE = 150000; 
+              const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
+              
+              for (let i = 0; i < totalChunks; i++) {
+                  const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
+                  const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+                  await setDoc(chunkRef, { chunk: chunkData });
+              }
+              const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
+              await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
+          } catch (e) {
+              console.error("Upload chunks error", e);
+          } finally {
+              isUploadingRef.current = false;
+          }
+      }, 2000);
   };
 
   return [state, setPersistentValue, isLoaded, isSynced];
 }
 
-// --- 2. NEW: Smart Persistent Collection (ทนทานข้อมูลไม่หาย 100%) ---
-// ระบบนี้จะทำการดึงข้อมูลจาก Local Storage (ชื่อเก่า) แล้วทยอยเอาไปสร้างเป็น Document ย่อยบน Firebase ให้เลย
-function useSmartPersistentCollection(collectionName, initialValue, fbUser) {
+function useUserPersistentState(key, initialValue, fbUser) {
+    const userSpecificKey = fbUser ? `${key}_${fbUser.uid}` : key;
+    
+    const [state, setState] = useState(() => {
+        if (typeof window !== 'undefined') {
+            const local = localStorage.getItem(userSpecificKey);
+            if (local) {
+                try { return JSON.parse(local); } catch(e) { return initialValue; }
+            }
+        }
+        return initialValue;
+    });
+
+    const setPersistentValue = (newValue) => {
+        setState(newValue);
+        if (typeof window !== 'undefined') {
+            localStorage.setItem(userSpecificKey, JSON.stringify(newValue));
+        }
+    };
+
+    return [state, setPersistentValue];
+}
+
+// --- 2. Smart Persistent Collection (ทนทานข้อมูลไม่หาย 100%) ---
+function usePersistentCollection(collectionName, initialValue, fbUser) {
+    const localKey = collectionName.startsWith('bmg_') ? collectionName : `bmg_${collectionName}`;
+
     const [data, setData] = useState(() => {
         if (typeof window !== 'undefined') {
-            // ดึงจาก Local Storage ด้วยชื่อเก่าของมัน
-            const local = localStorage.getItem(collectionName);
+            const local = localStorage.getItem(localKey);
             if (local) {
                 try { 
                     const parsed = JSON.parse(local);
                     if (Array.isArray(initialValue) && !Array.isArray(parsed)) {
                         return (parsed && typeof parsed === 'object') ? Object.values(parsed) : [...initialValue];
                     }
-                    return parsed;
-                } catch(e) { return initialValue; }
+                    return Array.isArray(parsed) ? parsed : initialValue;
+                } catch(e) { 
+                    return initialValue; 
+                }
             }
         }
         return initialValue;
@@ -1685,8 +1644,6 @@ function useSmartPersistentCollection(collectionName, initialValue, fbUser) {
 
     const dataRef = useRef(data);
     const [isLoaded, setIsLoaded] = useState(false);
-    const lastLocalUpdateRef = useRef(0);
-    const migrateCheckedRef = useRef(false); // กันการ Migrate ซ้ำ
 
     useEffect(() => { dataRef.current = data; }, [data]);
 
@@ -1696,248 +1653,191 @@ function useSmartPersistentCollection(collectionName, initialValue, fbUser) {
             return;
         }
 
-        // อ่านข้อมูลก้อนเก่าที่เคยเป็น Chunk บน Firebase ออกมาด้วย เผื่อ Local Storage แตก
-        const checkLegacyChunkedData = async () => {
-            if (migrateCheckedRef.current) return;
-            migrateCheckedRef.current = true;
+        let unsubscribe = () => {};
+        let isMounted = true;
+        
+        const initData = async () => {
+            setIsLoaded(false);
             
             try {
-                const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', collectionName);
+                // 1. ตรวจสอบการ Migrate ข้อมูลเก่าจาก Chunks
+                const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', localKey);
                 const metaSnap = await getDoc(metaRef);
+                let legacyData = null;
                 
                 if (metaSnap.exists()) {
                     const metaData = metaSnap.data();
                     if (metaData.totalChunks !== undefined) {
                         const chunkPromises = [];
                         for (let i = 0; i < metaData.totalChunks; i++) {
-                            const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${collectionName}_${i}`);
-                            chunkPromises.push(getDoc(chunkRef));
+                            chunkPromises.push(getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${localKey}_${i}`)));
                         }
-                        
                         const chunkSnaps = await Promise.all(chunkPromises);
                         let fullJson = '';
-                        chunkSnaps.forEach(snap => {
-                            if (snap.exists()) fullJson += snap.data().chunk;
-                        });
-                        
+                        chunkSnaps.forEach(snap => { if (snap.exists()) fullJson += snap.data().chunk; });
                         if (fullJson) {
-                            let safeJson = fullJson;
-                            try { JSON.parse(safeJson); } catch (e) {
-                                if (safeJson.startsWith('[')) safeJson += ']';
-                            }
-                            
-                            try {
-                                const parsedData = JSON.parse(safeJson);
-                                // ถ้าข้อมูลเก่า (Chunk) มีมากกว่าที่เรามีอยู่บนจอตอนนี้ ให้ยึดตามข้อมูลเก่าไปเลย (Migrate in)
-                                if (Array.isArray(parsedData) && Array.isArray(dataRef.current)) {
-                                    if (parsedData.length > dataRef.current.length || dataRef.current.length === 0) {
-                                        console.log(`[Migrate] นำเข้าข้อมูลเก่าของ ${collectionName} สำเร็จ`);
-                                        setData(parsedData);
-                                        dataRef.current = parsedData;
-                                        if (typeof window !== 'undefined') localStorage.setItem(collectionName, JSON.stringify(parsedData));
-                                        
-                                        // โยนข้อมูลที่กู้กลับมาได้ ขึ้นไปเซฟแบบ Document เพื่อให้มันปลอดภัยไปเลย
-                                        setPersistentValue(parsedData, true);
-                                    }
-                                }
-                            } catch (e) {}
+                            try { legacyData = JSON.parse(fullJson); } catch(e) {}
                         }
                     }
                 }
-            } catch(e) {
-                console.error("Migration Error", e);
+                
+                // ถ้านำเข้าจาก chunk เก่าได้ ให้เขียนลง Local
+                if (legacyData && Array.isArray(legacyData) && legacyData.length > 0) {
+                    if (dataRef.current.length === 0 || legacyData.length > dataRef.current.length) {
+                        if (isMounted) {
+                            setData(legacyData);
+                            dataRef.current = legacyData;
+                        }
+                        if (typeof window !== 'undefined') localStorage.setItem(localKey, JSON.stringify(legacyData));
+                    }
+                }
+
+                // 2. นำข้อมูล Local ปัจจุบันอัปโหลดขึ้น Documents บน Firestore
+                if (Array.isArray(dataRef.current) && dataRef.current.length > 0) {
+                    const existingDocsSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`));
+                    const serverIds = new Set(existingDocsSnap.docs.map(d => d.id));
+                    
+                    const toUpload = dataRef.current.filter(item => item && item.id && !serverIds.has(item.id));
+                    
+                    if (toUpload.length > 0) {
+                        let batch = writeBatch(db);
+                        let opCount = 0;
+                        for (const item of toUpload) {
+                            const safeItem = { ...item };
+                            if (safeItem.files) {
+                                for (const k in safeItem.files) {
+                                    if (safeItem.files[k]?.data?.length > 100000) {
+                                        delete safeItem.files[k].data;
+                                        safeItem.files[k].isLocalOnly = true;
+                                    }
+                                }
+                            }
+                            batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id), safeItem);
+                            opCount++;
+                            if (opCount === 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
+                        }
+                        if (opCount > 0) await batch.commit();
+                    }
+                }
+
+                // 3. เริ่มฟังสัญญาณซิงค์ข้อมูล Real-time
+                const colRef = collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
+                unsubscribe = onSnapshot(colRef, (snapshot) => {
+                    if (!isMounted) return;
+                    const serverItems = [];
+                    snapshot.forEach(docSnap => serverItems.push(docSnap.data()));
+                    
+                    if (serverItems.length > 0 || snapshot.docChanges().length > 0) {
+                        setData(serverItems);
+                        dataRef.current = serverItems;
+                        if (typeof window !== 'undefined') localStorage.setItem(localKey, JSON.stringify(serverItems));
+                    }
+                    setIsLoaded(true);
+                }, (error) => {
+                    console.error(`Sync error for ${collectionName}:`, error);
+                    if (isMounted) setIsLoaded(true);
+                });
+
+            } catch (err) {
+                console.error(`Init error for ${collectionName}:`, err);
+                if (isMounted) setIsLoaded(true);
             }
         };
 
-        // ลองพยายามเช็คของเก่า
-        checkLegacyChunkedData();
+        initData();
 
-        // ของใหม่: เราจะใช้ collection ที่ต่อท้ายด้วย _docs ใน Firestore
-        const colRef = collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
-        
-        const unsubscribe = onSnapshot(colRef, (snapshot) => {
-            const items = [];
-            snapshot.forEach((docSnap) => {
-                items.push(docSnap.data());
-            });
-            
-            const timeDiff = Date.now() - lastLocalUpdateRef.current;
-            // ป้องกันเซิร์ฟเวอร์มาทับถ้าเราเพิ่งพิมพ์เสร็จ
-            if (timeDiff < 5000) return;
+        return () => {
+            isMounted = false;
+            unsubscribe();
+        };
+    }, [db, appId, fbUser, collectionName, localKey]);
 
-            // แก้ไขปัญหา UI รีเฟรชสลับตำแหน่งไปมา โดยคงลำดับเดิมของ Local เอาไว้
-            const serverMap = new Map(items.map(item => [item.id, item]));
-            const localItems = dataRef.current || [];
-            const mergedArray = [];
-            const seenIds = new Set();
-            
-            // 1. ดึงรายการเดิมที่ยังมีอยู่ในเซิร์ฟเวอร์ (อัปเดตข้อมูลให้เป็นของเซิร์ฟเวอร์)
-            for (const localItem of localItems) {
-                if (serverMap.has(localItem.id)) {
-                    mergedArray.push(serverMap.get(localItem.id));
-                    seenIds.add(localItem.id);
-                }
-            }
-            
-            // 2. เติมรายการใหม่จากเซิร์ฟเวอร์ที่ยังไม่เคยมีใน Local
-            for (const item of items) {
-                if (!seenIds.has(item.id)) {
-                    mergedArray.unshift(item); // ดันขึ้นด้านบนสุด
-                }
-            }
-
-            if (JSON.stringify(dataRef.current) !== JSON.stringify(mergedArray)) {
-                // ระบบกู้ข้อมูล Local ขึ้น Server ทันที หากเซิร์ฟเวอร์ว่างเปล่า
-                if (items.length === 0 && Array.isArray(dataRef.current) && dataRef.current.length > 0) {
-                     setPersistentValue(dataRef.current, true); 
-                } 
-                // หากเซิร์ฟเวอร์มีข้อมูลน้อยกว่า ให้รีบเซฟ Local ไปทับเซิร์ฟเวอร์ก่อนเลย เพื่อป้องกันข้อมูลหาย
-                else if (Array.isArray(dataRef.current) && items.length < dataRef.current.length) {
-                     console.warn(`[Smart Sync] ป้องกัน ${collectionName} หาย เพราะ Server มีน้อยกว่า (${items.length} < ${dataRef.current.length}) -> สั่งอัปเดตกลับไปที่ Server ทันที`);
-                     setPersistentValue(dataRef.current, true);
-                }
-                else {
-                    setData(mergedArray);
-                    dataRef.current = mergedArray;
-                    if (typeof window !== 'undefined') {
-                        localStorage.setItem(collectionName, JSON.stringify(mergedArray));
-                    }
-                }
-            }
-            setIsLoaded(true);
-        }, (error) => {
-            console.error(`Error fetching ${collectionName}:`, error);
-            setIsLoaded(true);
-        });
-        
-        return () => unsubscribe();
-    }, [db, appId, fbUser, collectionName]);
-
-    const setPersistentValue = async (newValue, isRestore = false) => {
-        lastLocalUpdateRef.current = Date.now();
+    // แก้ไขระบบอัปเดตสถานะให้รองรับฟังก์ชันการเปลี่ยนแปลงแบบ Functional Update (prev => prev + 1) ป้องกันข้อมูลหาย
+    const setPersistentValue = async (newValueOrUpdater, isRestore = false) => {
         const oldValue = dataRef.current;
+        const newValue = typeof newValueOrUpdater === 'function' ? newValueOrUpdater(oldValue) : newValueOrUpdater;
         
-        // Optimistic UI Update 
         setData(newValue);
         dataRef.current = newValue;
-        if (typeof window !== 'undefined') {
-            setTimeout(() => {
-                try { localStorage.setItem(collectionName, JSON.stringify(newValue)); } catch(e){}
-            }, 0);
-        }
+        if (typeof window !== 'undefined') localStorage.setItem(localKey, JSON.stringify(newValue));
 
         if (!db || !fbUser || !appId) return;
 
-        if (isRestore) {
-            // โหมด Restore: ยิงข้อมูลทั้งหมดเข้า Firestore ทีละ 400 ข้อมูล (Limit ของ WriteBatch)
-            if (Array.isArray(newValue) && newValue.length > 0) {
-               try {
-                   const batchSize = 400; 
-                   for (let i = 0; i < newValue.length; i += batchSize) {
-                       const batch = writeBatch(db);
-                       const chunkData = newValue.slice(i, i + batchSize);
-                       chunkData.forEach(item => {
-                           if (!item.id) return;
-                           const docRef = doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id);
-                           batch.set(docRef, item);
-                       });
-                       await batch.commit();
-                       await new Promise(r => setTimeout(r, 100)); // พักเครื่อง 0.1 วิ ป้องกัน Limit Exceeded
-                   }
-                   console.log(`[Restore] ส่งข้อมูล ${collectionName} สำเร็จ (${newValue.length} รายการ)`);
-               } catch (err) { console.error(`Restore Error for ${collectionName}:`, err); }
-            }
+        // โหมดกู้คืนข้อมูลแบบ Batch
+        if (isRestore && Array.isArray(newValue)) {
+            try {
+                let batch = writeBatch(db);
+                let opCount = 0;
+                for (const item of newValue) {
+                    if (!item.id) continue;
+                    batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id), item);
+                    opCount++;
+                    if (opCount >= 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
+                }
+                if (opCount > 0) await batch.commit();
+            } catch (e) { console.error("Restore error", e); }
             return;
         }
 
-        // --- ระบบอัจฉริยะ Diffing Logic for Auto-Sync ---
-        // ตรวจสอบเฉพาะจุดที่แก้ไข แล้วส่งไปแค่จุดนั้น 
-        const oldMap = new Map(Array.isArray(oldValue) ? oldValue.map(item => [item.id, item]) : []);
-        const newMap = new Map(Array.isArray(newValue) ? newValue.map(item => [item.id, item]) : []);
+        // โหมดบันทึกปกติ (เปรียบเทียบแค่ส่วนที่เปลี่ยน Diffing)
+        const oldMap = new Map(Array.isArray(oldValue) ? oldValue.map(i => [i.id, i]) : []);
+        const newMap = new Map(Array.isArray(newValue) ? newValue.map(i => [i.id, i]) : []);
 
-        const addedOrModified = [];
-        const deletedIds = [];
+        const toSet = [];
+        const toDelete = [];
 
-        if (Array.isArray(newValue)) {
-            newValue.forEach(newItem => {
-                const oldItem = oldMap.get(newItem.id);
-                if (!oldItem || JSON.stringify(oldItem) !== JSON.stringify(newItem)) {
-                    addedOrModified.push(newItem);
-                }
-            });
-        }
+        (Array.isArray(newValue) ? newValue : []).forEach(newItem => {
+            if (!newItem.id) return;
+            const oldItem = oldMap.get(newItem.id);
+            if (!oldItem || JSON.stringify(oldItem) !== JSON.stringify(newItem)) {
+                toSet.push(newItem);
+            }
+        });
 
-        if (Array.isArray(oldValue)) {
-            oldValue.forEach(oldItem => {
-                if (!newMap.has(oldItem.id)) {
-                    deletedIds.push(oldItem.id);
-                }
-            });
-        }
+        (Array.isArray(oldValue) ? oldValue : []).forEach(oldItem => {
+            if (oldItem.id && !newMap.has(oldItem.id)) {
+                toDelete.push(oldItem.id);
+            }
+        });
 
         try {
-            if (addedOrModified.length > 1 || deletedIds.length > 1 || (addedOrModified.length > 0 && deletedIds.length > 0)) {
+            if (toSet.length > 0 || toDelete.length > 0) {
                 let batch = writeBatch(db);
                 let opCount = 0;
                 
-                for (const item of addedOrModified) {
-                    if (!item.id) continue;
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id);
-                    batch.set(docRef, item);
-                    opCount++;
-                    if (opCount === 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
-                }
-                
-                for (const id of deletedIds) {
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, id);
-                    batch.delete(docRef);
-                    opCount++;
-                    if (opCount === 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
-                }
-                
-                if (opCount > 0) await batch.commit();
-            } else {
-                // หากแก้แค่รายการเดียว ให้ยิงแบบ Single Operation ทันที
-                if (addedOrModified.length === 1) {
-                    const item = addedOrModified[0];
-                    if (item.id) {
-                        const docRef = doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id);
-                        await setDoc(docRef, item);
+                for (const item of toSet) {
+                    const itemToSave = { ...item };
+                    if (itemToSave.files) {
+                        const safeFiles = {};
+                        for (const fileId in itemToSave.files) {
+                            safeFiles[fileId] = { ...itemToSave.files[fileId] };
+                            if (safeFiles[fileId].data && safeFiles[fileId].data.length > 100000) {
+                                delete safeFiles[fileId].data; 
+                                safeFiles[fileId].isLocalOnly = true;
+                            }
+                        }
+                        itemToSave.files = safeFiles;
                     }
+                    batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id), itemToSave);
+                    opCount++;
+                    if (opCount >= 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
                 }
-                if (deletedIds.length === 1) {
-                    const id = deletedIds[0];
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, id);
-                    await deleteDoc(docRef);
+
+                for (const id of toDelete) {
+                    batch.delete(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, id));
+                    opCount++;
+                    if (opCount >= 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
                 }
+
+                if (opCount > 0) await batch.commit();
             }
-        } catch (error) {
-            console.error(`Sync Error for ${collectionName}:`, error);
+        } catch (e) {
+            console.error(`Save error ${collectionName}:`, e);
         }
     };
 
     return [data, setPersistentValue, isLoaded, true];
 }
-
-// Custom Hooks Helpers (Arrays & User Specific)
-const usePersistentCollection = (key, initialValue, fbUser) => useSmartPersistentCollection(key, initialValue, fbUser);
-const useUserPersistentState = (key, initialValue, fbUser) => usePersistentState(fbUser?.uid ? `${key}_${fbUser.uid}` : key, initialValue, fbUser);
-
-// -------------------------------------------------------------------------------------------------
-
-// --- NEW: Central Fee Manager Module Component ---
-const FEE_STATUS_OPTIONS = [
-  "อายัดที่สำนักงานที่ดินแล้ว",
-  "ออกหนังสือเตือนจากทนาย ครั้งที่ 1",
-  "ออกหนังสือเตือนจากทนาย ครั้งที่ 2",
-  "ฟ้องดำเนินคดี",
-  "ศาลมีคำพิพากษาแล้ว",
-  "ทำเรื่องบังคับคดี",
-  "อายัดทรัพย์",
-  "อยู่ระหว่างขายทอดตลาด",
-  "ผ่อนชำระ",
-  "อื่นๆ (ให้ระบุ)"
-];
 
 const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
   const [rawData, setRawData] = useState([]);
