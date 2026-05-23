@@ -1224,9 +1224,9 @@ const compressImage = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                // กำหนดขนาดสูงสุด 800px เพื่อคงความชัดเจน แต่ลดขนาดไฟล์ป้องกันปัญหา 1MB Limit ของฐานข้อมูล
-                const MAX_WIDTH = 800;
-                const MAX_HEIGHT = 800;
+                // แก้ไข: ลดขนาดสูงสุดลงเหลือ 600px เพื่อป้องกันข้อจำกัด 1MB ของฐานข้อมูลออนไลน์อย่างเด็ดขาด
+                const MAX_WIDTH = 600;
+                const MAX_HEIGHT = 600;
                 let width = img.width;
                 let height = img.height;
 
@@ -1246,11 +1246,10 @@ const compressImage = (file) => {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
                 
-                // บีบอัดเป็น JPEG Quality 60%
-                resolve(canvas.toDataURL('image/jpeg', 0.6));
+                // บีบอัดเป็น JPEG Quality 50% (คุณภาพยังพอดูได้ชัดเจน แต่ไฟล์จะเล็กลงมาก)
+                resolve(canvas.toDataURL('image/jpeg', 0.5));
             };
             img.onerror = () => {
-                // กรณีเกิดข้อผิดพลาดในการโหลดรูป ให้ส่งค่าต้นฉบับกลับไป
                 resolve(event.target.result);
             };
         };
@@ -1415,16 +1414,14 @@ const getAllFilesLocally = async () => {
     }
 };
 
-// --- Custom Hook for Persistent Storage (Firebase or LocalStorage Fallback) ---
+// --- 1. Custom Hook สำหรับ State เดี่ยวๆ (Object) ที่ป้องกัน Chunk Error ได้ดีขึ้น ---
 function usePersistentState(key, initialValue, fbUser) {
   const [state, setState] = useState(() => {
-      // FIX: โหลดข้อมูลจาก Cache (Local Storage) ขึ้นมาแสดงผลทันทีก่อนเสมอ (Optimistic Load) เพื่อแก้ปัญหาโหลดหน้าเว็บช้า
       if (typeof window !== 'undefined') {
           const local = localStorage.getItem(key);
           if (local) {
               try { 
                   const parsed = JSON.parse(local); 
-                  // 🛡️ FIX: บังคับให้เป็น Array เสมอ หากค่าเริ่มต้นเป็น Array ป้องกันแอปพังหน้าขาว (Crash)
                   if (Array.isArray(initialValue)) {
                       if (!Array.isArray(parsed)) {
                           return (parsed && typeof parsed === 'object') ? Object.values(parsed) : [...initialValue];
@@ -1439,12 +1436,11 @@ function usePersistentState(key, initialValue, fbUser) {
   
   const stateRef = useRef(state);
   const syncTimeoutRef = useRef(null); 
-  const isUploadingRef = useRef(false); // NEW: Track upload status
-  const lastLocalUpdateRef = useRef(0); // NEW: Track last local edit time
-  const pendingServerDataRef = useRef(null); // NEW: คิวพักข้อมูลหากมีการแก้ไขชนกัน
+  const isUploadingRef = useRef(false);
+  const lastLocalUpdateRef = useRef(0);
+  const pendingServerDataRef = useRef(null);
   const checkPendingDataInterval = useRef(null);
   const [isSynced, setIsSynced] = useState(false);
-  // OPTIMIZE: ถ้ามีข้อมูลใน Cache ให้ถือว่าโหลดเสร็จแล้วทันที ไม่ต้องรอหน้าจอหมุน
   const [isLoaded, setIsLoaded] = useState(() => {
       if (typeof window !== 'undefined' && localStorage.getItem(key)) return true;
       return false;
@@ -1460,7 +1456,6 @@ function usePersistentState(key, initialValue, fbUser) {
         return; 
     }
     
-    // OPTIMIZE: ขยายเวลาบังคับข้าม (Timeout) เป็น 4 วินาที เพื่อรองรับอินเทอร์เน็ตมือถือ
     const fallbackTimer = setTimeout(() => {
         setIsLoaded(true);
     }, 4000);
@@ -1479,24 +1474,47 @@ function usePersistentState(key, initialValue, fbUser) {
         const thisFetchId = currentFetchId;
 
         const data = docSnap.data();
+        
+        const timeDiff = Date.now() - lastLocalUpdateRef.current;
+        if (timeDiff < 5000) { 
+            return;
+        }
+
         try {
           const applyData = (parsedData) => {
               let finalData = parsedData;
               
-              // 🛡️ FIX: บังคับการแปลงชนิดข้อมูล กรณีข้อมูลถูกเซฟจาก Firebase กลับมาเป็น Object แทน Array
               if (Array.isArray(initialValue) && !Array.isArray(parsedData)) {
                   finalData = (parsedData && typeof parsedData === 'object') ? Object.values(parsedData) : [];
               }
 
-              // --- FIX: Data Loss Prevention ---
               const isFinalEmpty = Array.isArray(finalData) ? finalData.length === 0 : (!finalData || (typeof finalData === 'object' && Object.keys(finalData || {}).length === 0));
               const isCurrentNotEmpty = Array.isArray(stateRef.current) ? stateRef.current.length > 0 : (stateRef.current && typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length > 0);
 
               if (isFinalEmpty && isCurrentNotEmpty) {
-                  console.warn(`[BMG Sync] ป้องกันการทับข้อมูล ${key} ด้วยค่าว่าง`);
                   return;
               }
-              // ---------------------------------
+              
+              if (Array.isArray(stateRef.current) && Array.isArray(finalData)) {
+                  if (finalData.length < stateRef.current.length) {
+                      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+                      syncTimeoutRef.current = setTimeout(async () => {
+                          const jsonStr = JSON.stringify(stateRef.current); 
+                          const CHUNK_SIZE = 150000; 
+                          const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
+                          for (let i = 0; i < totalChunks; i++) {
+                              const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
+                              const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+                              await setDoc(chunkRef, { chunk: chunkData });
+                          }
+                          const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
+                          await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
+                      }, 2000);
+                      
+                      return;
+                  }
+              }
+              
               if (JSON.stringify(stateRef.current) !== JSON.stringify(finalData)) {
                   setState(finalData);
                   stateRef.current = finalData;
@@ -1507,40 +1525,53 @@ function usePersistentState(key, initialValue, fbUser) {
           };
 
           if (data.totalChunks !== undefined) {
-              let fullJson = '';
-              let hasChunkError = false;
+              // แก้ไข: ใช้ Promise.all ดึง Chunk ทุกก้อนพร้อมกัน เพื่อความเร็วและป้องกันการค้าง
+              const chunkPromises = [];
               for (let i = 0; i < data.totalChunks; i++) {
                   const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
-                  const chunkSnap = await getDoc(chunkRef);
-                  if (chunkSnap.exists()) {
-                      fullJson += chunkSnap.data().chunk;
-                  } else {
-                      hasChunkError = true;
-                  }
+                  chunkPromises.push(getDoc(chunkRef));
               }
               
-              if (thisFetchId !== currentFetchId || hasChunkError) return;
+              const chunkSnaps = await Promise.all(chunkPromises);
+              let fullJson = '';
+              chunkSnaps.forEach(snap => {
+                  if (snap.exists()) fullJson += snap.data().chunk;
+              });
+              
+              if (thisFetchId !== currentFetchId) return;
 
               if (fullJson) {
-                  const parsedData = JSON.parse(fullJson);
+                  // พยายามซ่อมแซม JSON ที่อาจจะขาดตอนไปบ้าง เพื่อไม่ให้ข้อมูลหาย
+                  let safeJson = fullJson;
+                  try {
+                      JSON.parse(safeJson);
+                  } catch (e) {
+                      if (safeJson.startsWith('[')) safeJson += ']';
+                      else if (safeJson.startsWith('{')) safeJson += '}';
+                  }
                   
-                  // 🛡️ 100% Data Loss Prevention: นำข้อมูลเข้าคิวหากผู้ใช้กำลังพิมพ์
-                  if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
-                      pendingServerDataRef.current = parsedData;
-                      if (!checkPendingDataInterval.current) {
-                          checkPendingDataInterval.current = setInterval(() => {
-                              if (Date.now() - lastLocalUpdateRef.current > 5000 && !isUploadingRef.current && !syncTimeoutRef.current) {
-                                  if (pendingServerDataRef.current) {
-                                      applyData(pendingServerDataRef.current);
-                                      pendingServerDataRef.current = null;
+                  try {
+                      const parsedData = JSON.parse(safeJson);
+                      
+                      if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
+                          pendingServerDataRef.current = parsedData;
+                          if (!checkPendingDataInterval.current) {
+                              checkPendingDataInterval.current = setInterval(() => {
+                                  if (Date.now() - lastLocalUpdateRef.current > 5000 && !isUploadingRef.current && !syncTimeoutRef.current) {
+                                      if (pendingServerDataRef.current) {
+                                          applyData(pendingServerDataRef.current);
+                                          pendingServerDataRef.current = null;
+                                      }
+                                      clearInterval(checkPendingDataInterval.current);
+                                      checkPendingDataInterval.current = null;
                                   }
-                                  clearInterval(checkPendingDataInterval.current);
-                                  checkPendingDataInterval.current = null;
-                              }
-                          }, 1000);
+                              }, 1000);
+                          }
+                      } else {
+                          applyData(parsedData);
                       }
-                  } else {
-                      applyData(parsedData);
+                  } catch (e) {
+                      console.error("Parse Safe JSON Error", e);
                   }
               }
           } else if (data.value) {
@@ -1583,7 +1614,7 @@ function usePersistentState(key, initialValue, fbUser) {
   }, [fbUser, key]);
 
   const setPersistentValue = async (newValue, isRestore = false) => {
-    lastLocalUpdateRef.current = Date.now(); // บันทึกเวลาที่แก้ล่าสุด เพื่อกัน Firebase มาทับ
+    lastLocalUpdateRef.current = Date.now(); 
 
     const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
     if (!isRestore && valueToStore === stateRef.current) return;
@@ -1592,30 +1623,26 @@ function usePersistentState(key, initialValue, fbUser) {
     stateRef.current = valueToStore;
     
     if (typeof window !== 'undefined') {
-        // ผลักการทำงานของ LocalStorage ไปไว้คิวหลังสุด เพื่อไม่ให้หน้าจอค้าง
         setTimeout(() => {
             try { localStorage.setItem(key, JSON.stringify(valueToStore)); } catch (e) {}
         }, 0);
     }
 
     if (db && fbUser && appId) {
-       // NEW: ป้องกัน Data Corruption ด้วยการเคลียร์คำสั่งเซฟเดิมที่ยังไม่เสร็จทิ้ง
        if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
 
        return new Promise((resolve) => {
-           // NEW: หน่วงเวลา 1 วินาที หลังจากหยุดพิมพ์/คลิก ค่อยเซฟขึ้น Database
            syncTimeoutRef.current = setTimeout(async () => {
                isUploadingRef.current = true;
                try {
-                   const jsonStr = JSON.stringify(stateRef.current); // ใช้ state ล่าสุดเสมอ
-                   const CHUNK_SIZE = 250000; // FIX: ลดขนาด Chunk ลงจาก 900000 เป็น 250000 เพื่อป้องกัน 1MB Limit สำหรับภาษาไทย
+                   const jsonStr = JSON.stringify(stateRef.current); 
+                   const CHUNK_SIZE = 150000; 
                    const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
                    
                    for (let i = 0; i < totalChunks; i++) {
                        const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
                        const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
                        await setDoc(chunkRef, { chunk: chunkData });
-                       // พัก UI เล็กน้อยให้เบราว์เซอร์ไม่ค้าง
                        await new Promise(r => setTimeout(r, 10));
                    }
                    
@@ -1636,9 +1663,267 @@ function usePersistentState(key, initialValue, fbUser) {
   return [state, setPersistentValue, isLoaded, isSynced];
 }
 
-// --- Custom Hooks Helpers (Arrays & User Specific) ---
-const usePersistentCollection = (key, initialValue, fbUser) => usePersistentState(key, initialValue, fbUser);
+// --- 2. NEW: Smart Persistent Collection (ทนทานข้อมูลไม่หาย 100%) ---
+// ระบบนี้จะทำการดึงข้อมูลจาก Local Storage (ชื่อเก่า) แล้วทยอยเอาไปสร้างเป็น Document ย่อยบน Firebase ให้เลย
+function useSmartPersistentCollection(collectionName, initialValue, fbUser) {
+    const [data, setData] = useState(() => {
+        if (typeof window !== 'undefined') {
+            // ดึงจาก Local Storage ด้วยชื่อเก่าของมัน
+            const local = localStorage.getItem(collectionName);
+            if (local) {
+                try { 
+                    const parsed = JSON.parse(local);
+                    if (Array.isArray(initialValue) && !Array.isArray(parsed)) {
+                        return (parsed && typeof parsed === 'object') ? Object.values(parsed) : [...initialValue];
+                    }
+                    return parsed;
+                } catch(e) { return initialValue; }
+            }
+        }
+        return initialValue;
+    });
+
+    const dataRef = useRef(data);
+    const [isLoaded, setIsLoaded] = useState(false);
+    const lastLocalUpdateRef = useRef(0);
+    const migrateCheckedRef = useRef(false); // กันการ Migrate ซ้ำ
+
+    useEffect(() => { dataRef.current = data; }, [data]);
+
+    useEffect(() => {
+        if (!db || !appId || !fbUser) {
+            setIsLoaded(true);
+            return;
+        }
+
+        // อ่านข้อมูลก้อนเก่าที่เคยเป็น Chunk บน Firebase ออกมาด้วย เผื่อ Local Storage แตก
+        const checkLegacyChunkedData = async () => {
+            if (migrateCheckedRef.current) return;
+            migrateCheckedRef.current = true;
+            
+            try {
+                const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', collectionName);
+                const metaSnap = await getDoc(metaRef);
+                
+                if (metaSnap.exists()) {
+                    const metaData = metaSnap.data();
+                    if (metaData.totalChunks !== undefined) {
+                        const chunkPromises = [];
+                        for (let i = 0; i < metaData.totalChunks; i++) {
+                            const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${collectionName}_${i}`);
+                            chunkPromises.push(getDoc(chunkRef));
+                        }
+                        
+                        const chunkSnaps = await Promise.all(chunkPromises);
+                        let fullJson = '';
+                        chunkSnaps.forEach(snap => {
+                            if (snap.exists()) fullJson += snap.data().chunk;
+                        });
+                        
+                        if (fullJson) {
+                            let safeJson = fullJson;
+                            try { JSON.parse(safeJson); } catch (e) {
+                                if (safeJson.startsWith('[')) safeJson += ']';
+                            }
+                            
+                            try {
+                                const parsedData = JSON.parse(safeJson);
+                                // ถ้าข้อมูลเก่า (Chunk) มีมากกว่าที่เรามีอยู่บนจอตอนนี้ ให้ยึดตามข้อมูลเก่าไปเลย (Migrate in)
+                                if (Array.isArray(parsedData) && Array.isArray(dataRef.current)) {
+                                    if (parsedData.length > dataRef.current.length || dataRef.current.length === 0) {
+                                        console.log(`[Migrate] นำเข้าข้อมูลเก่าของ ${collectionName} สำเร็จ`);
+                                        setData(parsedData);
+                                        dataRef.current = parsedData;
+                                        if (typeof window !== 'undefined') localStorage.setItem(collectionName, JSON.stringify(parsedData));
+                                        
+                                        // โยนข้อมูลที่กู้กลับมาได้ ขึ้นไปเซฟแบบ Document เพื่อให้มันปลอดภัยไปเลย
+                                        setPersistentValue(parsedData, true);
+                                    }
+                                }
+                            } catch (e) {}
+                        }
+                    }
+                }
+            } catch(e) {
+                console.error("Migration Error", e);
+            }
+        };
+
+        // ลองพยายามเช็คของเก่า
+        checkLegacyChunkedData();
+
+        // ของใหม่: เราจะใช้ collection ที่ต่อท้ายด้วย _docs ใน Firestore
+        const colRef = collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
+        
+        const unsubscribe = onSnapshot(colRef, (snapshot) => {
+            const items = [];
+            snapshot.forEach((docSnap) => {
+                items.push(docSnap.data());
+            });
+            
+            const timeDiff = Date.now() - lastLocalUpdateRef.current;
+            // ป้องกันเซิร์ฟเวอร์มาทับถ้าเราเพิ่งพิมพ์เสร็จ
+            if (timeDiff < 5000) return;
+
+            // แก้ไขปัญหา UI รีเฟรชสลับตำแหน่งไปมา โดยคงลำดับเดิมของ Local เอาไว้
+            const serverMap = new Map(items.map(item => [item.id, item]));
+            const localItems = dataRef.current || [];
+            const mergedArray = [];
+            const seenIds = new Set();
+            
+            // 1. ดึงรายการเดิมที่ยังมีอยู่ในเซิร์ฟเวอร์ (อัปเดตข้อมูลให้เป็นของเซิร์ฟเวอร์)
+            for (const localItem of localItems) {
+                if (serverMap.has(localItem.id)) {
+                    mergedArray.push(serverMap.get(localItem.id));
+                    seenIds.add(localItem.id);
+                }
+            }
+            
+            // 2. เติมรายการใหม่จากเซิร์ฟเวอร์ที่ยังไม่เคยมีใน Local
+            for (const item of items) {
+                if (!seenIds.has(item.id)) {
+                    mergedArray.unshift(item); // ดันขึ้นด้านบนสุด
+                }
+            }
+
+            if (JSON.stringify(dataRef.current) !== JSON.stringify(mergedArray)) {
+                // ระบบกู้ข้อมูล Local ขึ้น Server ทันที หากเซิร์ฟเวอร์ว่างเปล่า
+                if (items.length === 0 && Array.isArray(dataRef.current) && dataRef.current.length > 0) {
+                     setPersistentValue(dataRef.current, true); 
+                } 
+                // หากเซิร์ฟเวอร์มีข้อมูลน้อยกว่า ให้รีบเซฟ Local ไปทับเซิร์ฟเวอร์ก่อนเลย เพื่อป้องกันข้อมูลหาย
+                else if (Array.isArray(dataRef.current) && items.length < dataRef.current.length) {
+                     console.warn(`[Smart Sync] ป้องกัน ${collectionName} หาย เพราะ Server มีน้อยกว่า (${items.length} < ${dataRef.current.length}) -> สั่งอัปเดตกลับไปที่ Server ทันที`);
+                     setPersistentValue(dataRef.current, true);
+                }
+                else {
+                    setData(mergedArray);
+                    dataRef.current = mergedArray;
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem(collectionName, JSON.stringify(mergedArray));
+                    }
+                }
+            }
+            setIsLoaded(true);
+        }, (error) => {
+            console.error(`Error fetching ${collectionName}:`, error);
+            setIsLoaded(true);
+        });
+        
+        return () => unsubscribe();
+    }, [db, appId, fbUser, collectionName]);
+
+    const setPersistentValue = async (newValue, isRestore = false) => {
+        lastLocalUpdateRef.current = Date.now();
+        const oldValue = dataRef.current;
+        
+        // Optimistic UI Update 
+        setData(newValue);
+        dataRef.current = newValue;
+        if (typeof window !== 'undefined') {
+            setTimeout(() => {
+                try { localStorage.setItem(collectionName, JSON.stringify(newValue)); } catch(e){}
+            }, 0);
+        }
+
+        if (!db || !fbUser || !appId) return;
+
+        if (isRestore) {
+            // โหมด Restore: ยิงข้อมูลทั้งหมดเข้า Firestore ทีละ 400 ข้อมูล (Limit ของ WriteBatch)
+            if (Array.isArray(newValue) && newValue.length > 0) {
+               try {
+                   const batchSize = 400; 
+                   for (let i = 0; i < newValue.length; i += batchSize) {
+                       const batch = writeBatch(db);
+                       const chunkData = newValue.slice(i, i + batchSize);
+                       chunkData.forEach(item => {
+                           if (!item.id) return;
+                           const docRef = doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id);
+                           batch.set(docRef, item);
+                       });
+                       await batch.commit();
+                       await new Promise(r => setTimeout(r, 100)); // พักเครื่อง 0.1 วิ ป้องกัน Limit Exceeded
+                   }
+                   console.log(`[Restore] ส่งข้อมูล ${collectionName} สำเร็จ (${newValue.length} รายการ)`);
+               } catch (err) { console.error(`Restore Error for ${collectionName}:`, err); }
+            }
+            return;
+        }
+
+        // --- ระบบอัจฉริยะ Diffing Logic for Auto-Sync ---
+        // ตรวจสอบเฉพาะจุดที่แก้ไข แล้วส่งไปแค่จุดนั้น 
+        const oldMap = new Map(Array.isArray(oldValue) ? oldValue.map(item => [item.id, item]) : []);
+        const newMap = new Map(Array.isArray(newValue) ? newValue.map(item => [item.id, item]) : []);
+
+        const addedOrModified = [];
+        const deletedIds = [];
+
+        if (Array.isArray(newValue)) {
+            newValue.forEach(newItem => {
+                const oldItem = oldMap.get(newItem.id);
+                if (!oldItem || JSON.stringify(oldItem) !== JSON.stringify(newItem)) {
+                    addedOrModified.push(newItem);
+                }
+            });
+        }
+
+        if (Array.isArray(oldValue)) {
+            oldValue.forEach(oldItem => {
+                if (!newMap.has(oldItem.id)) {
+                    deletedIds.push(oldItem.id);
+                }
+            });
+        }
+
+        try {
+            if (addedOrModified.length > 1 || deletedIds.length > 1 || (addedOrModified.length > 0 && deletedIds.length > 0)) {
+                let batch = writeBatch(db);
+                let opCount = 0;
+                
+                for (const item of addedOrModified) {
+                    if (!item.id) continue;
+                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id);
+                    batch.set(docRef, item);
+                    opCount++;
+                    if (opCount === 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
+                }
+                
+                for (const id of deletedIds) {
+                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, id);
+                    batch.delete(docRef);
+                    opCount++;
+                    if (opCount === 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
+                }
+                
+                if (opCount > 0) await batch.commit();
+            } else {
+                // หากแก้แค่รายการเดียว ให้ยิงแบบ Single Operation ทันที
+                if (addedOrModified.length === 1) {
+                    const item = addedOrModified[0];
+                    if (item.id) {
+                        const docRef = doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id);
+                        await setDoc(docRef, item);
+                    }
+                }
+                if (deletedIds.length === 1) {
+                    const id = deletedIds[0];
+                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, id);
+                    await deleteDoc(docRef);
+                }
+            }
+        } catch (error) {
+            console.error(`Sync Error for ${collectionName}:`, error);
+        }
+    };
+
+    return [data, setPersistentValue, isLoaded, true];
+}
+
+// Custom Hooks Helpers (Arrays & User Specific)
+const usePersistentCollection = (key, initialValue, fbUser) => useSmartPersistentCollection(key, initialValue, fbUser);
 const useUserPersistentState = (key, initialValue, fbUser) => usePersistentState(fbUser?.uid ? `${key}_${fbUser.uid}` : key, initialValue, fbUser);
+
+// -------------------------------------------------------------------------------------------------
 
 // --- NEW: Central Fee Manager Module Component ---
 const FEE_STATUS_OPTIONS = [
@@ -1730,20 +2015,27 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
         const data = docSnap.data();
         // รองรับระบบ Chunking
         if (data.totalChunks !== undefined) {
-            let fullJson = '';
-            let hasChunkError = false;
+            // แก้ไข: ใช้ Promise.all สำหรับการดึงไฟล์ Chunk เพื่อลดปัญหาดึงช้าจนโหลดไม่ขึ้น
+            const chunkPromises = [];
             for (let i = 0; i < data.totalChunks; i++) {
                 const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `central_fee_raw_${selectedProject.id}_${i}`);
-                const chunkSnap = await getDoc(chunkRef);
-                if (chunkSnap.exists()) {
-                    fullJson += chunkSnap.data().chunk;
-                } else {
-                    hasChunkError = true;
-                }
+                chunkPromises.push(getDoc(chunkRef));
             }
-            if (!hasChunkError && fullJson) {
+            
+            const chunkSnaps = await Promise.all(chunkPromises);
+            let fullJson = '';
+            chunkSnaps.forEach(snap => {
+                if (snap.exists()) fullJson += snap.data().chunk;
+            });
+
+            if (fullJson) {
+                // ซ่อมแซม JSON กรณี Chunk หาย
+                let safeJson = fullJson;
+                try { JSON.parse(safeJson); } catch (e) {
+                    if (safeJson.startsWith('{')) safeJson += '}';
+                }
                 try {
-                    const parsed = JSON.parse(fullJson);
+                    const parsed = JSON.parse(safeJson);
                     setRawData(parsed.payload || []);
                     if (parsed.projectTitle) setProjectTitle(parsed.projectTitle);
                     if (parsed.reportDate) setReportDate(parsed.reportDate);
@@ -1867,7 +2159,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
                 });
                 
                 // ใช้เทคนิค Chunking ตัดข้อมูลเป็นส่วนๆ ป้องกันปัญหาไฟล์เกินข้อจำกัด 1MB ของฐานข้อมูล
-                const CHUNK_SIZE = 250000; // FIX: ลดขนาดลงเพื่อรองรับอักขระภาษาไทย
+                const CHUNK_SIZE = 150000; // FIX: ลดขนาดลงเพื่อรองรับอักขระภาษาไทยอย่างปลอดภัย
                 const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
 
                 for (let i = 0; i < totalChunks; i++) {
@@ -3079,6 +3371,19 @@ export default function App() {
   const [isBackingUp, setIsBackingUp] = useState(false); // NEW: State สำหรับตอนกด Export Backup
   const [isRestoring, setIsRestoring] = useState(false); // NEW: State สำหรับตอนกำลัง Import Restore
   const [restoreProgress, setRestoreProgress] = useState(''); // NEW: State สำหรับแสดงความคืบหน้าตอน Import
+  // --- NEW: State for Selective Backup/Restore ---
+  const [showBackupOptions, setShowBackupOptions] = useState(false);
+  const [backupModules, setBackupModules] = useState({
+      companyInfo: true, users: true, projects: true, contracts: true, contractors: true,
+      assets: true, tools: true, machines: true, pmPlans: true, pmHistoryList: true,
+      meters: true, utilityReadings: true, repairs: true, actionPlans: true, formsList: true,
+      meetingsList: true, audits: true, dailyReports: true, schedules: true, othersData: true,
+      announcements: true, deposits: true, inventory: true
+  });
+  const [showRestoreOptions, setShowRestoreOptions] = useState(false);
+  const [importDataPreview, setImportDataPreview] = useState(null);
+  const [restoreModules, setRestoreModules] = useState({});
+  // ----------------------------------------------
   const [isEditingUser, setIsEditingUser] = useState(false);
   const [scheduleNote, setScheduleNote] = useState(''); // NEW: State สำหรับเก็บ Note ในตารางงาน
   const [scheduleNotes, setScheduleNotes] = usePersistentState('bmg_scheduleNotes', {}, fbUser); // NEW: Persistent state for schedule notes
@@ -3424,11 +3729,13 @@ export default function App() {
   const [newProject, setNewProject] = useState({ logo: null, code: '', name: '', type: 'Condo', address: '', phone: '', taxId: '', contractStartDate: '', contractEndDate: '', contractValue: '', status: 'Active', files: { orchor: null, committee: null, regulations: null, resident_rules: null } });
 
   // อัปเกรดเป็น usePersistentCollection สำหรับข้อมูลที่เป็น Array (รายการ) ป้องกันข้อมูลสูญหาย/ทับกัน
+  // โดยใช้ชื่อ Collection คงเดิมทั้งหมด เพื่อให้ระบบกู้ข้อมูลเก่าขึ้นมาเซฟเป็น Document ให้อัตโนมัติ!
   const [users, setUsers, isUsersLoaded, isUsersSynced] = usePersistentCollection('bmg_users', INITIAL_USERS, fbUser); 
   const [projects, setProjects] = usePersistentCollection('bmg_projects', INITIAL_PROJECTS, fbUser);
   const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, fbUser);
   const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, fbUser);
   const [dailyReports, setDailyReports] = usePersistentCollection('bmg_dailyReports', INITIAL_DAILY_REPORTS, fbUser);
+  const [repairs, setRepairs] = usePersistentCollection('bmg_repairs', INITIAL_REPAIRS, fbUser);
   const [contractors, setContractors] = usePersistentCollection('bmg_contractors', INITIAL_CONTRACTORS, fbUser);
   const [assets, setAssets] = usePersistentCollection('bmg_assets', INITIAL_ASSETS, fbUser);
   const [tools, setTools] = usePersistentCollection('bmg_tools', INITIAL_TOOLS, fbUser);
@@ -3437,7 +3744,6 @@ export default function App() {
   const [pmHistoryList, setPmHistoryList] = usePersistentCollection('bmg_pmHistoryList', INITIAL_PM_HISTORY, fbUser);
   const [meters, setMeters] = usePersistentCollection('bmg_meters', INITIAL_METERS, fbUser);
   const [utilityReadings, setUtilityReadings] = usePersistentCollection('bmg_utilityReadings', INITIAL_READINGS, fbUser);
-  const [repairs, setRepairs] = usePersistentCollection('bmg_repairs', INITIAL_REPAIRS, fbUser);
   const [actionPlans, setActionPlans] = usePersistentCollection('bmg_actionPlans', INITIAL_ACTION_PLANS, fbUser);
   const [othersData, setOthersData] = usePersistentCollection('bmg_othersData', INITIAL_OTHERS, fbUser);
   const [formsList, setFormsList] = usePersistentCollection('bmg_forms_list', STANDARD_FORMS, fbUser);
@@ -5583,25 +5889,30 @@ export default function App() {
   };
 
   // Repair Handlers
-  const handleSaveRepair = (e) => {
+  const handleDeleteRepair = async (rep) => {
+      const nextList = repairs.filter(r => r.id !== rep.id);
+      setRepairs(nextList);
+  };
+
+  const handleSaveRepair = async (e) => {
       e.preventDefault();
       let savedRepair;
       let nextList;
       const existingIndex = repairs.findIndex(r => r.code === newRepair.code);
       
-      // FIX: คำนวณ State แยกออกมาก่อน แล้วค่อยเรียก triggerAutoSync
       if (newRepair.id || existingIndex >= 0) {
           // Edit existing repair
-          savedRepair = { ...newRepair, id: newRepair.id || repairs[existingIndex].id };
+          savedRepair = { ...newRepair, id: newRepair.id || repairs[existingIndex].id, updatedAt: new Date().toISOString() };
           nextList = repairs.map(r => r.code === newRepair.code ? savedRepair : r);
       } else {
           // Add new repair
           const id = generateId();
-          savedRepair = { ...newRepair, id, projectId: selectedProject.id, date: new Date().toISOString().split('T')[0] };
-          nextList = [...repairs, savedRepair];
+          savedRepair = { ...newRepair, id, projectId: selectedProject.id, date: new Date().toISOString().split('T')[0], createdAt: new Date().toISOString() };
+          nextList = [savedRepair, ...repairs]; // แทรกข้อมูลใหม่ไว้บนสุด
       }
 
       setRepairs(nextList);
+
       triggerAutoSync('Repairs_แจ้งซ่อม', nextList, []);
 
       setShowAddRepairModal(false);
@@ -5616,7 +5927,7 @@ export default function App() {
   };
 
   // Utilities Handlers
-  const handleSaveUtilityReading = (e) => {
+  const handleSaveUtilityReading = async (e) => {
       e.preventDefault();
       if (!utilityForm.meterId || !utilityForm.currentValue) return;
 
@@ -5637,7 +5948,8 @@ export default function App() {
               date: utilityForm.date,
               value: currentValNum,
               usage: updatedUsage,
-              recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
+              recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System',
+              updatedAt: new Date().toISOString()
           };
 
           const newUtilityReadings = utilityReadings.map(r => r.id === utilityForm.id ? updatedReading : r);
@@ -5681,10 +5993,11 @@ export default function App() {
               value: currentValNum,
               prevValue: prevVal,
               usage: usage,
-              recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
+              recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System',
+              createdAt: new Date().toISOString()
           };
 
-          setUtilityReadings([...utilityReadings, newReading]);
+          setUtilityReadings([newReading, ...utilityReadings]);
           
           // Update meter's last reading
           setMeters(meters.map(m => 
@@ -5728,7 +6041,7 @@ export default function App() {
   };
 
   const handleDeleteUtilityReading = (readingId, meterId) => {
-      showConfirm('ยืนยันการลบข้อมูล', 'คุณต้องการลบประวัติการจดมิเตอร์นี้ใช่หรือไม่? (ระบบจะคำนวณค่ายกมาล่าสุดของมิเตอร์ให้ใหม่)', () => {
+      showConfirm('ยืนยันการลบข้อมูล', 'คุณต้องการลบประวัติการจดมิเตอร์นี้ใช่หรือไม่? (ระบบจะคำนวณค่ายกมาล่าสุดของมิเตอร์ให้ใหม่)', async () => {
           // ลบข้อมูลออกจาก State
           const newReadings = utilityReadings.filter(r => r.id !== readingId);
           setUtilityReadings(newReadings);
@@ -5746,10 +6059,10 @@ export default function App() {
   };
 
   const handleDeleteAllUtilityReadings = (meterId) => {
-      showConfirm('ยืนยันการลบประวัติทั้งหมด', 'คุณต้องการลบประวัติการจดมิเตอร์ของอุปกรณ์นี้ "ทั้งหมด" ใช่หรือไม่?\n(ค่ายกมาจะถูกรีเซ็ตเป็น 0)', () => {
+      showConfirm('ยืนยันการลบประวัติทั้งหมด', 'คุณต้องการลบประวัติการจดมิเตอร์ของอุปกรณ์นี้ "ทั้งหมด" ใช่หรือไม่?\n(ค่ายกมาจะถูกรีเซ็ตเป็น 0)', async () => {
           const newReadings = utilityReadings.filter(r => r.meterId !== meterId);
           setUtilityReadings(newReadings);
-          
+
           setMeters(meters.map(m => 
               m.id === meterId 
                   ? { ...m, lastReading: 0, lastDate: null }
@@ -5995,7 +6308,8 @@ export default function App() {
                                       value: currentValNum,
                                       prevValue: prevVal,
                                       usage: usage,
-                                      recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System Import'
+                                      recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System Import',
+                                      createdAt: new Date().toISOString()
                                   });
                                   
                                   updatedMetersMap.set(meter.id, {
@@ -6043,7 +6357,8 @@ export default function App() {
                                       value: currentValNum,
                                       prevValue: prevVal,
                                       usage: usage,
-                                      recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System Import'
+                                      recorder: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System Import',
+                                      createdAt: new Date().toISOString()
                                   });
                                   
                                   updatedMetersMap.set(meter.id, {
@@ -6060,8 +6375,8 @@ export default function App() {
               }
               
               if (newReadings.length > 0) {
-                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูลการจดมิเตอร์ ${newReadings.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
-                      const nextReadings = [...utilityReadings, ...newReadings];
+                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูลการจดมิเตอร์ ${newReadings.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, async () => {
+                      const nextReadings = [...newReadings, ...utilityReadings];
                       setUtilityReadings(nextReadings);
                       
                       const nextMeters = meters.map(m => updatedMetersMap.has(m.id) ? { ...m, ...updatedMetersMap.get(m.id) } : m);
@@ -6777,38 +7092,65 @@ export default function App() {
           // ดึงไฟล์แนบ PDF และเอกสารจาก IndexedDB ทั้งหมด
           const localFiles = await getAllFilesLocally();
           
+          // สร้าง Object ข้อมูลตามที่ผู้ใช้เลือก
+          const dataToBackup = {};
+          if (backupModules.companyInfo) dataToBackup.companyInfo = companyInfo;
+          if (backupModules.users) {
+              dataToBackup.users = users;
+              dataToBackup.rolePermissions = rolePermissions;
+          }
+          if (backupModules.projects) dataToBackup.projects = projects;
+          if (backupModules.contracts) dataToBackup.contracts = contracts;
+          if (backupModules.contractors) dataToBackup.contractors = contractors;
+          if (backupModules.assets) dataToBackup.assets = assets;
+          if (backupModules.tools) dataToBackup.tools = tools;
+          if (backupModules.machines) dataToBackup.machines = machines;
+          if (backupModules.pmPlans) dataToBackup.pmPlans = pmPlans;
+          if (backupModules.pmHistoryList) dataToBackup.pmHistoryList = pmHistoryList;
+          if (backupModules.meters) dataToBackup.meters = meters;
+          if (backupModules.utilityReadings) dataToBackup.utilityReadings = utilityReadings;
+          if (backupModules.repairs) dataToBackup.repairs = repairs;
+          if (backupModules.actionPlans) dataToBackup.actionPlans = actionPlans;
+          if (backupModules.formsList) dataToBackup.formsList = formsList;
+          if (backupModules.meetingsList) {
+              dataToBackup.meetingsList = meetingsList;
+              dataToBackup.meetingAgendas = meetingAgendas;
+              dataToBackup.meetingAttendances = meetingAttendances;
+              dataToBackup.meetingBallots = meetingBallots;
+              dataToBackup.meetingInvitations = meetingInvitations;
+              dataToBackup.meetingProxies = meetingProxies;
+              dataToBackup.meetingGanttPlans = meetingGanttPlans;
+          }
+          if (backupModules.audits) dataToBackup.audits = audits;
+          if (backupModules.dailyReports) dataToBackup.dailyReports = dailyReports;
+          if (backupModules.schedules) {
+              dataToBackup.schedules = schedules;
+              dataToBackup.scheduleNotes = scheduleNotes;
+              dataToBackup.scheduleApprovals = scheduleApprovals;
+              dataToBackup.projectStaffOrder = projectStaffOrder;
+          }
+          if (backupModules.othersData) dataToBackup.othersData = othersData;
+          if (backupModules.announcements) dataToBackup.announcements = announcements;
+          if (backupModules.deposits) dataToBackup.deposits = deposits;
+          if (backupModules.inventory) {
+              dataToBackup.inventoryList = inventoryList;
+              dataToBackup.inventoryTransactions = inventoryTransactions;
+          }
+          
+          dataToBackup.theme = theme; // แนบ Theme ไปด้วยเสมอถ้ามี
+          
+          // คัดกรอง localFiles เฉพาะที่เกี่ยวข้องกับโมดูลที่เลือก (ลดขนาดไฟล์ Backup)
+          let filteredLocalFiles = {};
+          if (backupModules.contracts || backupModules.projects || backupModules.formsList || backupModules.meetingsList) {
+              // แบบง่ายสุด: เอาไปทั้งหมดถ้ามีการเลือกโมดูลที่อาจมีไฟล์แนบ
+              filteredLocalFiles = localFiles;
+          }
+          dataToBackup.localFiles = filteredLocalFiles;
+
           const backupData = {
               timestamp: new Date().toISOString(),
-              version: '1.4', // Updated Version for 100% Full Detail Backup
-              data: {
-                  companyInfo,
-                  users,
-                  projects,
-                  contracts,
-                  assets,
-                  tools,
-                  machines,
-                  pmPlans,
-                  pmHistoryList,
-                  meters,
-                  utilityReadings,
-                  repairs,
-                  actionPlans,
-                  contractors,
-                  formsList,
-                  meetingsList,
-                  audits,
-                  dailyReports,
-                  schedules,
-                  scheduleNotes,
-                  scheduleApprovals,
-                  projectStaffOrder,
-                  othersData,
-                  announcements,
-                  theme,
-                  rolePermissions, 
-                  localFiles // แนบไฟล์เอกสารจากฐานข้อมูลจำลอง (IndexedDB) เข้าไปด้วย
-              }
+              version: '1.5', // Updated Version for Selective Backup
+              data: dataToBackup
           };
           
           const dataStr = JSON.stringify(backupData);
@@ -6816,23 +7158,24 @@ export default function App() {
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          a.download = `BMG_System_Full_Backup_${new Date().toISOString().split('T')[0]}.json`;
+          a.download = `BMG_Selective_Backup_${new Date().toISOString().split('T')[0]}.json`;
           document.body.appendChild(a);
           a.click();
           document.body.removeChild(a);
           URL.revokeObjectURL(url);
 
-          // แสดงข้อความสรุปเพื่อให้ผู้ใช้งานมั่นใจว่าข้อมูลเชิงลึกมาครบถ้วน 100%
+          // แสดงข้อความสรุป
           setTimeout(() => {
-              const fileCount = Object.keys(localFiles).length;
-              alert(`✅ สำรองข้อมูลเสร็จสมบูรณ์ 100%\n\nระบบได้ทำการดึงข้อมูลรายละเอียดเชิงลึกทั้งหมด ดังนี้:\n- ข้อมูลพนักงานและผู้ใช้งาน: ${users.length} คน\n- ข้อมูลโครงการและหน่วยงาน: ${projects.length} แห่ง\n- ทรัพย์สิน/เครื่องมือ/เครื่องจักร: ${assets.length + tools.length + machines.length} รายการ\n- รายงานและประวัติทั้งหมด (แจ้งซ่อม, PM, ตารางงาน, รายงานประจำวัน, สถิติค่าน้ำไฟ): ครบถ้วน\n- ไฟล์ PDF และรูปภาพแนบในระบบ: ${fileCount} ไฟล์ (ถูกฝังอยู่ในตัวไฟล์ JSON เรียบร้อยแล้ว)`);
+              const fileCount = Object.keys(filteredLocalFiles).length;
+              const selectedCount = Object.values(backupModules).filter(Boolean).length;
+              alert(`✅ สำรองข้อมูลเสร็จสมบูรณ์\n\nระบบได้ทำการสำรองข้อมูล ${selectedCount} หมวดหมู่ที่คุณเลือก พร้อมไฟล์แนบ ${fileCount} ไฟล์`);
+              setShowBackupOptions(false);
           }, 500);
 
       } catch (error) {
           console.error("Backup error:", error);
-          // ดักจับ Error กรณีข้อมูลใหญ่เกินที่ Browser จะรับไหว (ป้องกันไฟล์พัง)
           if (error.message && error.message.toLowerCase().includes('string length')) {
-              alert("❌ เกิดข้อผิดพลาด: ข้อมูลและรูปภาพภาพหน้างานในระบบมีขนาดใหญ่เกินกว่าที่เบราว์เซอร์จะแปลงเป็นไฟล์เดียวได้ (Out of Memory) แนะนำให้ใช้ฟังก์ชันสำรองขึ้น Google Drive แทน");
+              alert("❌ เกิดข้อผิดพลาด: ข้อมูลมีขนาดใหญ่เกินกว่าที่เบราว์เซอร์จะแปลงเป็นไฟล์เดียวได้ (Out of Memory) แนะนำให้เลือกสำรองข้อมูลทีละน้อย หรือใช้ฟังก์ชันสำรองขึ้น Google Drive");
           } else {
               alert("❌ เกิดข้อผิดพลาดในการสำรองข้อมูล: " + error.message);
           }
@@ -6841,137 +7184,185 @@ export default function App() {
       }
   };
 
-  const handleImportBackup = (event) => {
+  const handleImportFileSelect = (event) => {
       const file = event.target.files[0];
       if (!file) return;
 
+      const reader = new FileReader();
+      reader.onload = (e) => {
+          try {
+              const importedData = JSON.parse(e.target.result);
+              
+              if (!importedData.data || !importedData.timestamp) {
+                  alert("ไฟล์ข้อมูลไม่ถูกต้อง (Invalid backup file format)");
+                  return;
+              }
+
+              setImportDataPreview(importedData);
+              
+              // กำหนดค่าเริ่มต้นให้เลือกเฉพาะโมดูลที่มีข้อมูลอยู่ในไฟล์
+              const initialRestoreSelection = {
+                  companyInfo: !!importedData.data.companyInfo,
+                  users: !!importedData.data.users,
+                  projects: !!importedData.data.projects,
+                  contracts: !!importedData.data.contracts,
+                  contractors: !!importedData.data.contractors,
+                  assets: !!importedData.data.assets,
+                  tools: !!importedData.data.tools,
+                  machines: !!importedData.data.machines,
+                  pmPlans: !!importedData.data.pmPlans,
+                  pmHistoryList: !!importedData.data.pmHistoryList,
+                  meters: !!importedData.data.meters,
+                  utilityReadings: !!importedData.data.utilityReadings,
+                  repairs: !!importedData.data.repairs,
+                  actionPlans: !!importedData.data.actionPlans,
+                  formsList: !!importedData.data.formsList,
+                  meetingsList: !!importedData.data.meetingsList,
+                  audits: !!importedData.data.audits,
+                  dailyReports: !!importedData.data.dailyReports,
+                  schedules: !!importedData.data.schedules,
+                  othersData: !!importedData.data.othersData,
+                  announcements: !!importedData.data.announcements,
+                  deposits: !!importedData.data.deposits,
+                  inventory: !!importedData.data.inventoryList
+              };
+              
+              setRestoreModules(initialRestoreSelection);
+              setShowRestoreOptions(true);
+
+          } catch (err) {
+              console.error("Parse backup file error:", err);
+              alert("เกิดข้อผิดพลาดในการอ่านไฟล์: " + err.message);
+          }
+      };
+      reader.readAsText(file);
+      event.target.value = null; // Reset
+  };
+
+  const processRestore = async () => {
+      if (!importDataPreview) return;
+
       showConfirm(
-          'ยืนยันการนำเข้าและกู้คืนข้อมูล (Restore)',
-          'คำเตือนอย่างร้ายแรง: การนำเข้าข้อมูลจะ เขียนทับ (Overwrite) ข้อมูลปัจจุบันในระบบทั้งหมดด้วยข้อมูลจากไฟล์ Backup นี้ คุณแน่ใจหรือไม่ที่จะดำเนินการต่อ? (กระบวนการนี้อาจใช้เวลา 1-3 นาที กรุณาอย่าปิดหน้าต่าง)',
-          () => {
+          'ยืนยันการนำเข้าและกู้คืนข้อมูลเฉพาะส่วน',
+          'คำเตือนอย่างร้ายแรง: การนำเข้าข้อมูลจะ เขียนทับ (Overwrite) ข้อมูลหมวดหมู่ที่คุณเลือกด้วยข้อมูลจากไฟล์ Backup นี้ (หมวดหมู่อื่นๆ ที่ไม่ถูกเลือกจะไม่ได้รับผลกระทบ) คุณแน่ใจหรือไม่ที่จะดำเนินการต่อ?',
+          async () => {
               setIsRestoring(true);
-              setRestoreProgress('กำลังเตรียมการอ่านไฟล์...');
+              setShowRestoreOptions(false);
+              setRestoreProgress('เริ่มดำเนินการกู้คืนข้อมูล (โปรดอย่าปิดหน้าต่าง)...');
 
-              // หน่วงเวลาให้ UI เรนเดอร์การโหลดก่อนทำงานหนัก
-              setTimeout(() => {
-                  const reader = new FileReader();
-                  reader.onload = async (e) => {
-                      try {
-                          setRestoreProgress('กำลังประมวลผลข้อมูล (Parsing)... อาจใช้เวลาสักครู่');
-                          await new Promise(resolve => setTimeout(resolve, 100)); // ยอมให้ UI อัปเดตข้อความ
+              try {
+                  await new Promise(resolve => setTimeout(resolve, 500)); // พัก UI ให้เตรียมตัว
 
-                          const importedData = JSON.parse(e.target.result);
-                          
-                          if (!importedData.data || !importedData.timestamp) {
-                              alert("ไฟล์ข้อมูลไม่ถูกต้อง (Invalid backup file format)");
-                              setIsRestoring(false);
-                              setRestoreProgress('');
-                              return;
-                          }
-
-                          const d = importedData.data;
-                          
-                          // --- Clean up large base64 data to prevent Firestore 1MB limit error during Restore ---
-                          if (Array.isArray(d.projects)) {
-                              d.projects.forEach(p => {
-                                  if (p.files) {
-                                      Object.keys(p.files).forEach(k => {
-                                          if (p.files[k] && p.files[k].data) delete p.files[k].data;
-                                      });
-                                  }
+                  const d = importDataPreview.data;
+                  
+                  // --- Clean up large base64 data to prevent Firestore 1MB limit error during Restore ---
+                  if (d.projects && Array.isArray(d.projects)) {
+                      d.projects.forEach(p => {
+                          if (p.files) {
+                              Object.keys(p.files).forEach(k => {
+                                  if (p.files[k] && p.files[k].data) delete p.files[k].data;
                               });
                           }
-                          if (Array.isArray(d.contracts)) {
-                              d.contracts.forEach(c => {
-                                  if (c.file && c.file.data) delete c.file.data;
-                              });
-                          }
+                      });
+                  }
+                  if (d.contracts && Array.isArray(d.contracts)) {
+                      d.contracts.forEach(c => {
+                          if (c.file && c.file.data) delete c.file.data;
+                      });
+                  }
 
-                          // 1. กู้คืนไฟล์ PDF ต่างๆ ลง IndexedDB (รวบยอดแบบ Batch เพื่อความรวดเร็ว)
-                          if (d.localFiles && Object.keys(d.localFiles).length > 0) {
-                              const totalFiles = Object.keys(d.localFiles).length;
-                              setRestoreProgress(`กำลังกู้คืนไฟล์เอกสารแนบทั้งหมด (${totalFiles} ไฟล์)...`);
-                              await saveMultipleFilesLocally(d.localFiles);
-                              await new Promise(resolve => setTimeout(resolve, 50)); // ยอมให้ UI อัปเดต
-                          }
-
-                          // 2. เตรียมรายการข้อมูลที่จะกู้คืน
-                          const stateSetters = [
-                              { key: 'ข้อมูลองค์กร', setter: setCompanyInfo, data: d.companyInfo },
-                              { key: 'รายชื่อผู้ใช้งาน', setter: setUsers, data: d.users },
-                              { key: 'ข้อมูลโครงการ', setter: setProjects, data: d.projects },
-                              { key: 'ข้อมูลสัญญา', setter: setContracts, data: d.contracts },
-                              { key: 'ทะเบียนทรัพย์สิน', setter: setAssets, data: d.assets },
-                              { key: 'ทะเบียนเครื่องมือช่าง', setter: setTools, data: d.tools },
-                              { key: 'ทะเบียนเครื่องจักร', setter: setMachines, data: d.machines },
-                              { key: 'แผน PM', setter: setPmPlans, data: d.pmPlans },
-                              { key: 'ประวัติทำ PM', setter: setPmHistoryList, data: d.pmHistoryList },
-                              { key: 'ทะเบียนมิเตอร์', setter: setMeters, data: d.meters },
-                              { key: 'ประวัติจดมิเตอร์', setter: setUtilityReadings, data: d.utilityReadings },
-                              { key: 'งานแจ้งซ่อม', setter: setRepairs, data: d.repairs },
-                              { key: 'แผนปฏิบัติการ (Action Plan)', setter: setActionPlans, data: d.actionPlans },
-                              { key: 'รายชื่อผู้รับเหมา', setter: setContractors, data: d.contractors },
-                              { key: 'แบบฟอร์มมาตรฐาน', setter: setFormsList, data: d.formsList },
-                              { key: 'บันทึกการประชุม', setter: setMeetingsList, data: d.meetingsList },
-                              { key: 'ผลการประเมิน (Audit)', setter: setAudits, data: d.audits },
-                              { key: 'รายงานประจำวัน', setter: setDailyReports, data: d.dailyReports },
-                              { key: 'ตารางงาน', setter: setSchedules, data: d.schedules },
-                              { key: 'หมายเหตุตารางงาน', setter: setScheduleNotes, data: d.scheduleNotes },
-                              { key: 'สถานะอนุมัติตารางงาน', setter: setScheduleApprovals, data: d.scheduleApprovals },
-                              { key: 'ลำดับพนักงาน', setter: setProjectStaffOrder, data: d.projectStaffOrder },
-                              { key: 'ข้อมูลอื่นๆ', setter: setOthersData, data: d.othersData },
-                              { key: 'ประกาศและข่าวสาร', setter: setAnnouncements, data: d.announcements },
-                              { key: 'สิทธิ์การใช้งานระบบ', setter: setRolePermissions, data: d.rolePermissions }
-                          ];
-
-                          const totalTables = stateSetters.length;
-                          let currentTable = 0;
-
-                          setRestoreProgress('เริ่มดำเนินการกู้คืนข้อมูล (โปรดอย่าปิดหน้าต่าง)...');
-                          await new Promise(resolve => setTimeout(resolve, 500)); // พัก UI ให้เตรียมตัว
-
-                          // ทยอยทำทีละตาราง (Sequential Process) รอให้แต่ละตารางซิงค์เสร็จก่อนเริ่มตารางใหม่
-                          for (const item of stateSetters) {
-                              currentTable++;
-                              if (item.data !== undefined && item.data !== null) {
-                                  // อัปเดตข้อความให้ผู้ใช้ทราบว่าระบบไม่ได้ค้าง
-                                  setRestoreProgress(`กำลังเขียนและซิงค์คลาวด์ตาราง: ${item.key} (${currentTable}/${totalTables})`);
-                                  
-                                  // สำคัญ: บังคับให้เบราว์เซอร์วาดหน้าจอ (Render) แถบสถานะก่อนไปประมวลผลฐานข้อมูล
-                                  await new Promise(resolve => setTimeout(resolve, 50));
-
-                                  try {
-                                      // ใส่ค่า "true" ให้ setter เพื่อบังคับ Overwrite และรอจนกระบวนการทั้งหมดของตารางนี้สำเร็จ
-                                      const syncPromise = item.setter(item.data, true);
-                                      if (syncPromise) {
-                                          await syncPromise; 
-                                      }
-                                  } catch(e) {
-                                      console.error("Sync error for", item.key, e);
-                                  }
-                              }
-                          }
-                          
-                          if (d.theme) setTheme(d.theme);
-
-                          setRestoreProgress('ข้อมูลถูกนำเข้าและอัปโหลดเข้าสู่ระบบคลาวด์สมบูรณ์ 100% สำเร็จ!');
-                          
-                          // ลบการบังคับ Reload หน้าต่างทิ้ง เพื่อป้องกันปัญหาข้อมูลบน Firebase ดึงกลับมาทับ
-                          setTimeout(() => {
-                              showAlert("สำเร็จ", "ระบบนำเข้าและอัปเดตข้อมูลเสร็จสมบูรณ์ 100% ข้อมูลพร้อมใช้งานทันทีโดยไม่ต้องรีเฟรชหน้า");
-                              setIsRestoring(false);
-                              setRestoreProgress('');
-                          }, 500);
-                          
-                      } catch (err) {
-                          console.error("Restore state error:", err);
-                          showAlert("เกิดข้อผิดพลาด", "เกิดข้อผิดพลาดระหว่างการกู้คืนข้อมูล: " + err.message);
-                          setIsRestoring(false);
-                          setRestoreProgress('');
+                  // 1. กู้คืนไฟล์ PDF ต่างๆ ลง IndexedDB (ถ้าเลือกโมดูลที่เกี่ยวข้อง)
+                  if (d.localFiles && Object.keys(d.localFiles).length > 0) {
+                      if (restoreModules.projects || restoreModules.contracts || restoreModules.formsList || restoreModules.meetingsList) {
+                          const totalFiles = Object.keys(d.localFiles).length;
+                          setRestoreProgress(`กำลังกู้คืนไฟล์เอกสารแนบทั้งหมด (${totalFiles} ไฟล์)...`);
+                          await saveMultipleFilesLocally(d.localFiles);
+                          await new Promise(resolve => setTimeout(resolve, 50));
                       }
-                  };
-                  reader.readAsText(file);
-              }, 500); // รอให้ Modal ยืนยันปิดลงก่อนเริ่มอ่านไฟล์
+                  }
+
+                  // 2. เตรียมรายการข้อมูลที่จะกู้คืน เฉพาะที่ผู้ใช้เลือก
+                  const stateSetters = [];
+                  
+                  if (restoreModules.companyInfo && d.companyInfo) stateSetters.push({ key: 'ข้อมูลองค์กร', setter: setCompanyInfo, data: d.companyInfo });
+                  if (restoreModules.users && d.users) {
+                      stateSetters.push({ key: 'รายชื่อผู้ใช้งาน', setter: setUsers, data: d.users });
+                      if (d.rolePermissions) stateSetters.push({ key: 'สิทธิ์การใช้งานระบบ', setter: setRolePermissions, data: d.rolePermissions });
+                  }
+                  if (restoreModules.projects && d.projects) stateSetters.push({ key: 'ข้อมูลโครงการ', setter: setProjects, data: d.projects });
+                  if (restoreModules.contracts && d.contracts) stateSetters.push({ key: 'ข้อมูลสัญญา', setter: setContracts, data: d.contracts });
+                  if (restoreModules.contractors && d.contractors) stateSetters.push({ key: 'รายชื่อผู้รับเหมา', setter: setContractors, data: d.contractors });
+                  if (restoreModules.assets && d.assets) stateSetters.push({ key: 'ทะเบียนทรัพย์สิน', setter: setAssets, data: d.assets });
+                  if (restoreModules.tools && d.tools) stateSetters.push({ key: 'ทะเบียนเครื่องมือช่าง', setter: setTools, data: d.tools });
+                  if (restoreModules.machines && d.machines) stateSetters.push({ key: 'ทะเบียนเครื่องจักร', setter: setMachines, data: d.machines });
+                  if (restoreModules.pmPlans && d.pmPlans) stateSetters.push({ key: 'แผน PM', setter: setPmPlans, data: d.pmPlans });
+                  if (restoreModules.pmHistoryList && d.pmHistoryList) stateSetters.push({ key: 'ประวัติทำ PM', setter: setPmHistoryList, data: d.pmHistoryList });
+                  if (restoreModules.meters && d.meters) stateSetters.push({ key: 'ทะเบียนมิเตอร์', setter: setMeters, data: d.meters });
+                  if (restoreModules.utilityReadings && d.utilityReadings) stateSetters.push({ key: 'ประวัติจดมิเตอร์', setter: setUtilityReadings, data: d.utilityReadings });
+                  if (restoreModules.repairs && d.repairs) stateSetters.push({ key: 'งานแจ้งซ่อม', setter: setRepairs, data: d.repairs });
+                  if (restoreModules.actionPlans && d.actionPlans) stateSetters.push({ key: 'แผนปฏิบัติการ', setter: setActionPlans, data: d.actionPlans });
+                  if (restoreModules.formsList && d.formsList) stateSetters.push({ key: 'แบบฟอร์มมาตรฐาน', setter: setFormsList, data: d.formsList });
+                  if (restoreModules.meetingsList && d.meetingsList) {
+                      stateSetters.push({ key: 'บันทึกการประชุม', setter: setMeetingsList, data: d.meetingsList });
+                      if(d.meetingAgendas) stateSetters.push({ key: 'วาระการประชุม', setter: setMeetingAgendas, data: d.meetingAgendas });
+                      if(d.meetingAttendances) stateSetters.push({ key: 'ลงทะเบียนเข้าประชุม', setter: setMeetingAttendances, data: d.meetingAttendances });
+                      if(d.meetingBallots) stateSetters.push({ key: 'ใบลงคะแนน', setter: setMeetingBallots, data: d.meetingBallots });
+                      if(d.meetingInvitations) stateSetters.push({ key: 'หนังสือเชิญ', setter: setMeetingInvitations, data: d.meetingInvitations });
+                      if(d.meetingProxies) stateSetters.push({ key: 'ใบมอบฉันทะ', setter: setMeetingProxies, data: d.meetingProxies });
+                      if(d.meetingGanttPlans) stateSetters.push({ key: 'แผนจัดประชุม', setter: setMeetingGanttPlans, data: d.meetingGanttPlans });
+                  }
+                  if (restoreModules.audits && d.audits) stateSetters.push({ key: 'ผลการประเมิน (Audit)', setter: setAudits, data: d.audits });
+                  if (restoreModules.dailyReports && d.dailyReports) stateSetters.push({ key: 'รายงานประจำวัน', setter: setDailyReports, data: d.dailyReports });
+                  if (restoreModules.schedules && d.schedules) {
+                      stateSetters.push({ key: 'ตารางงาน', setter: setSchedules, data: d.schedules });
+                      if (d.scheduleNotes) stateSetters.push({ key: 'หมายเหตุตารางงาน', setter: setScheduleNotes, data: d.scheduleNotes });
+                      if (d.scheduleApprovals) stateSetters.push({ key: 'สถานะอนุมัติตารางงาน', setter: setScheduleApprovals, data: d.scheduleApprovals });
+                      if (d.projectStaffOrder) stateSetters.push({ key: 'ลำดับพนักงาน', setter: setProjectStaffOrder, data: d.projectStaffOrder });
+                  }
+                  if (restoreModules.othersData && d.othersData) stateSetters.push({ key: 'ข้อมูลอื่นๆ', setter: setOthersData, data: d.othersData });
+                  if (restoreModules.announcements && d.announcements) stateSetters.push({ key: 'ประกาศและข่าวสาร', setter: setAnnouncements, data: d.announcements });
+                  if (restoreModules.deposits && d.deposits) stateSetters.push({ key: 'ข้อมูลเงินฝาก', setter: setDeposits, data: d.deposits });
+                  if (restoreModules.inventory && d.inventoryList) {
+                      stateSetters.push({ key: 'สต๊อกวัสดุ', setter: setInventoryList, data: d.inventoryList });
+                      if (d.inventoryTransactions) stateSetters.push({ key: 'ประวัติรับ/เบิก', setter: setInventoryTransactions, data: d.inventoryTransactions });
+                  }
+
+                  const totalTables = stateSetters.length;
+                  let currentTable = 0;
+
+                  for (const item of stateSetters) {
+                      currentTable++;
+                      setRestoreProgress(`กำลังกู้คืน: ${item.key} (${currentTable}/${totalTables})`);
+                      await new Promise(resolve => setTimeout(resolve, 50));
+
+                      try {
+                          const syncPromise = item.setter(item.data, true);
+                          if (syncPromise) {
+                              await syncPromise; 
+                          }
+                      } catch(e) {
+                          console.error("Sync error for", item.key, e);
+                      }
+                  }
+                  
+                  if (d.theme) setTheme(d.theme);
+
+                  setRestoreProgress('การกู้คืนข้อมูลเฉพาะส่วนเสร็จสมบูรณ์!');
+                  
+                  setTimeout(() => {
+                      showAlert("สำเร็จ", `นำเข้าและอัปเดตข้อมูล ${totalTables} หมวดหมู่เสร็จสมบูรณ์ ข้อมูลพร้อมใช้งานทันที`);
+                      setIsRestoring(false);
+                      setRestoreProgress('');
+                      setImportDataPreview(null);
+                  }, 500);
+                  
+              } catch (err) {
+                  console.error("Restore state error:", err);
+                  showAlert("เกิดข้อผิดพลาด", "เกิดข้อผิดพลาดระหว่างการกู้คืนข้อมูล: " + err.message);
+                  setIsRestoring(false);
+                  setRestoreProgress('');
+                  setImportDataPreview(null);
+              }
           },
           'ยืนยันการกู้คืน',
           'warning'
@@ -13039,7 +13430,7 @@ export default function App() {
                                                       )}
                                                       {hasPerm('proj_repair', 'delete') && (
                                                           <button 
-                                                              onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบรายการแจ้งซ่อม ${rep.code} ใช่หรือไม่?`, () => setRepairs(prev => prev.filter(r => r.id !== rep.id))); }}
+                                                              onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบรายการแจ้งซ่อม ${rep.code} ใช่หรือไม่?`, () => handleDeleteRepair(rep)); }}
                                                               className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
                                                               title="ลบรายการ"
                                                           >
@@ -15447,6 +15838,17 @@ export default function App() {
           );
       }
 
+      // --- Helper for Module Selection Labels ---
+      const MODULE_LABELS = {
+          companyInfo: 'ข้อมูลองค์กร', users: 'ผู้ใช้งานและสิทธิ์', projects: 'ข้อมูลหน่วยงาน/โครงการ',
+          contracts: 'สัญญาบริการ', contractors: 'ซัพพลายเออร์/ผู้รับเหมา', assets: 'ทะเบียนทรัพย์สิน',
+          tools: 'เครื่องมือช่าง', machines: 'ทะเบียนเครื่องจักร', pmPlans: 'แผน PM', pmHistoryList: 'ประวัติการทำ PM',
+          meters: 'ทะเบียนมิเตอร์น้ำไฟ', utilityReadings: 'ประวัติจดมิเตอร์', repairs: 'งานแจ้งซ่อม',
+          actionPlans: 'แผน Action Plan', formsList: 'แบบฟอร์มมาตรฐาน', meetingsList: 'การประชุม/มติ/คะแนน',
+          audits: 'ผล Audit', dailyReports: 'รายงานประจำวัน', schedules: 'ตารางงาน/วันลา/อนุมัติ',
+          othersData: 'ลิงก์ข้อมูลอื่นๆ', announcements: 'ประกาศ/ข่าวสาร', deposits: 'เงินฝาก/สลากออมทรัพย์', inventory: 'สต๊อกพัสดุและเบิกจ่าย'
+      };
+
       return (
           <div className="space-y-6 animate-fade-in">
               <ReportHeader />
@@ -15459,75 +15861,160 @@ export default function App() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Backup Card */}
-                  <Card className="p-6 border-t-4 border-blue-500">
+                  <Card className="p-6 border-t-4 border-blue-500 relative">
                       <div className="flex items-center gap-3 mb-4">
                           <div className="p-3 bg-blue-100 text-blue-600 rounded-lg">
                               <Save size={24} />
                           </div>
                           <div>
-                              <h3 className="text-lg font-bold text-gray-800">สำรองข้อมูล (Export Full Backup)</h3>
-                              <p className="text-sm text-gray-500">ดาวน์โหลดข้อมูลทั้งหมดเป็นไฟล์ JSON</p>
+                              <h3 className="text-lg font-bold text-gray-800">สำรองข้อมูล (Export Backup)</h3>
+                              <p className="text-sm text-gray-500">ดาวน์โหลดข้อมูลที่เลือกเป็นไฟล์ JSON</p>
                           </div>
                       </div>
                       <p className="text-sm text-gray-600 mb-4 bg-blue-50 p-4 rounded-lg border border-blue-100 leading-relaxed">
-                          การสำรองข้อมูลนี้ <strong>รับประกันความครบถ้วน 100%</strong> ครอบคลุมข้อมูลตารางหลัก และ <strong>รายละเอียดเชิงลึกทั้งหมดที่ผู้ใช้งานบันทึกเข้ามา</strong> ได้แก่:<br/><br/>
-                          • <strong>ข้อความและรายละเอียด:</strong> โน้ต, หมายเหตุ, อาการแจ้งซ่อม, ผลการทำ PM, รายละเอียดการปฏิบัติงานรายวัน<br/>
-                          • <strong>สื่อและไฟล์แนบ:</strong> รูปภาพหน้างาน, รูปโปรไฟล์, รูปทรัพย์สิน, ไฟล์ PDF สัญญาและเอกสารโครงการ<br/>
-                          • <strong>ข้อมูลระบบ:</strong> ผู้ใช้งาน, สิทธิ์การใช้งาน, ตารางงาน, ทะเบียนมิเตอร์ ฯลฯ
+                          เลือกหมวดหมู่ที่ต้องการดาวน์โหลดเก็บไว้ หากข้อมูลใหญ่เกินไปสามารถแบ่งดาวน์โหลดทีละหมวดหมู่ได้
                       </p>
+                      
+                      {/* NEW: Module Selection for Backup */}
+                      <button 
+                          onClick={() => setShowBackupOptions(!showBackupOptions)}
+                          className="w-full flex justify-between items-center bg-gray-50 border border-gray-200 px-4 py-2.5 rounded-lg mb-4 hover:bg-gray-100 transition-colors"
+                      >
+                          <span className="font-bold text-gray-700 text-sm">เลือกหมวดหมู่ที่ต้องการสำรองข้อมูล</span>
+                          <ChevronDown size={18} className={`text-gray-500 transition-transform ${showBackupOptions ? 'rotate-180' : ''}`} />
+                      </button>
+                      
+                      {showBackupOptions && (
+                          <div className="mb-4 bg-gray-50 border border-gray-200 rounded-lg p-3 max-h-48 overflow-y-auto custom-scrollbar">
+                              <div className="flex justify-between mb-2 pb-2 border-b border-gray-200">
+                                  <span className="text-xs font-bold text-blue-600 cursor-pointer hover:underline" onClick={() => {
+                                      const allTrue = {};
+                                      Object.keys(backupModules).forEach(k => allTrue[k] = true);
+                                      setBackupModules(allTrue);
+                                  }}>เลือกทั้งหมด</span>
+                                  <span className="text-xs font-bold text-gray-500 cursor-pointer hover:underline" onClick={() => {
+                                      const allFalse = {};
+                                      Object.keys(backupModules).forEach(k => allFalse[k] = false);
+                                      setBackupModules(allFalse);
+                                  }}>ล้างการเลือก</span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                  {Object.keys(backupModules).map(key => (
+                                      <label key={key} className="flex items-center gap-2 cursor-pointer text-sm text-gray-700 hover:text-gray-900">
+                                          <input 
+                                              type="checkbox" 
+                                              className="w-4 h-4 accent-blue-600"
+                                              checked={backupModules[key]}
+                                              onChange={(e) => setBackupModules({...backupModules, [key]: e.target.checked})}
+                                          />
+                                          <span className="truncate" title={MODULE_LABELS[key]}>{MODULE_LABELS[key]}</span>
+                                      </label>
+                                  ))}
+                              </div>
+                          </div>
+                      )}
+
                       <Button 
                           className="w-full flex justify-center items-center gap-2 bg-blue-600 hover:bg-blue-700 shadow-md text-base py-3" 
                           onClick={handleExportBackup}
-                          disabled={isBackingUp}
+                          disabled={isBackingUp || !Object.values(backupModules).some(Boolean)}
                       >
                           {isBackingUp ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />} 
-                          {isBackingUp ? 'กำลังรวบรวมไฟล์และข้อมูล 100%...' : 'ส่งออกข้อมูล (Full Backup)'}
+                          {isBackingUp ? 'กำลังรวบรวมไฟล์และข้อมูล...' : 'ส่งออกข้อมูล (Export)'}
                       </Button>
                   </Card>
 
                   {/* Restore Card */}
-                  <Card className="p-6 border-t-4 border-red-500">
+                  <Card className="p-6 border-t-4 border-red-500 relative">
                       <div className="flex items-center gap-3 mb-4">
                           <div className="p-3 bg-red-100 text-red-600 rounded-lg">
                               <Upload size={24} />
                           </div>
                           <div>
                               <h3 className="text-lg font-bold text-gray-800">นำเข้าข้อมูล (Import / Restore)</h3>
-                              <p className="text-sm text-gray-500">อัปเดตระบบด้วยไฟล์ข้อมูล Backup</p>
+                              <p className="text-sm text-gray-500">อัปเดตระบบด้วยไฟล์ข้อมูล Backup (JSON)</p>
                           </div>
                       </div>
-                      <div className="text-sm text-red-700 font-medium mb-6 bg-red-50 p-4 rounded-lg border border-red-200 flex items-start gap-2">
-                          <AlertTriangle size={20} className="shrink-0 mt-0.5 text-red-600" />
-                          <div>
-                              <strong>คำเตือนอย่างร้ายแรง:</strong><br/>
-                              การนำเข้าข้อมูล จะทำการ <span className="underline">เขียนทับ (Overwrite)</span> ข้อมูลปัจจุบันในระบบทั้งหมดด้วยข้อมูลจากไฟล์ กรุณาตรวจสอบให้แน่ใจก่อนดำเนินการ
-                          </div>
-                      </div>
-                      <label className={`cursor-pointer w-full inline-block ${isRestoring ? 'opacity-90 pointer-events-none' : ''}`}>
-                          <div className={`w-full text-white font-medium py-3 px-4 rounded-md transition-all flex flex-col justify-center items-center gap-2 shadow-sm ${isRestoring ? 'bg-orange-500' : 'bg-red-600 hover:bg-red-700'}`}>
-                              {isRestoring ? (
-                                  <>
-                                      <div className="flex items-center gap-2">
-                                          <Loader2 size={20} className="animate-spin" />
-                                          <span className="font-bold tracking-wide">กำลังทำงาน โปรดอย่าปิดหน้าต่าง...</span>
-                                      </div>
-                                      <div className="text-xs bg-black/20 px-3 py-1 rounded-full text-white/90 mt-1 animate-pulse">
-                                          {restoreProgress}
-                                      </div>
-                                  </>
-                              ) : (
-                                  <div className="flex items-center gap-2"><Upload size={18} /> เลือกไฟล์เพื่อนำเข้า (Import JSON)</div>
+                      
+                      {!showRestoreOptions ? (
+                          <>
+                              <div className="text-sm text-red-700 font-medium mb-6 bg-red-50 p-4 rounded-lg border border-red-200 flex items-start gap-2">
+                                  <AlertTriangle size={20} className="shrink-0 mt-0.5 text-red-600" />
+                                  <div>
+                                      <strong>คำเตือน:</strong> การนำเข้าจะเขียนทับ (Overwrite) ข้อมูลเดิม<br/>
+                                      เมื่ออัปโหลดไฟล์ คุณจะได้เลือกหมวดหมู่ที่ต้องการกู้คืนก่อนกดยืนยัน
+                                  </div>
+                              </div>
+                              <label className={`cursor-pointer w-full inline-block ${isRestoring ? 'opacity-90 pointer-events-none' : ''}`}>
+                                  <div className={`w-full text-white font-medium py-3 px-4 rounded-md transition-all flex flex-col justify-center items-center gap-2 shadow-sm ${isRestoring ? 'bg-orange-500' : 'bg-red-600 hover:bg-red-700'}`}>
+                                      <div className="flex items-center gap-2"><Upload size={18} /> เลือกไฟล์เพื่อพรีวิว (Select JSON)</div>
+                                  </div>
+                                  <input 
+                                      type="file" 
+                                      accept=".json" 
+                                      className="hidden" 
+                                      onChange={handleImportFileSelect} 
+                                      disabled={isRestoring}
+                                  />
+                              </label>
+                          </>
+                      ) : (
+                          <div className="animate-fade-in border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                              <div className="bg-gray-100 p-3 border-b border-gray-200 flex justify-between items-center">
+                                  <span className="font-bold text-gray-800 text-sm">ข้อมูลที่พบในไฟล์</span>
+                                  <span className="text-xs text-gray-500">วันที่สร้าง: {importDataPreview?.timestamp ? new Date(importDataPreview.timestamp).toLocaleDateString('th-TH') : '-'}</span>
+                              </div>
+                              <div className="p-4 bg-white max-h-48 overflow-y-auto custom-scrollbar border-b border-gray-200">
+                                  <div className="flex justify-between mb-3 pb-2 border-b border-gray-100">
+                                      <span className="text-xs font-bold text-gray-800">เลือกหมวดที่ต้องการทับข้อมูลเดิม</span>
+                                      <span className="text-xs font-bold text-gray-500 cursor-pointer hover:underline" onClick={() => {
+                                          const allFalse = {};
+                                          Object.keys(restoreModules).forEach(k => allFalse[k] = false);
+                                          setRestoreModules(allFalse);
+                                      }}>ล้างการเลือก</span>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-y-2 gap-x-4">
+                                      {Object.keys(restoreModules).map(key => {
+                                          const hasData = importDataPreview?.data?.[key] !== undefined || 
+                                              (key === 'inventory' && importDataPreview?.data?.inventoryList) ||
+                                              (key === 'schedules' && importDataPreview?.data?.schedules) ||
+                                              (key === 'meetingsList' && importDataPreview?.data?.meetingsList);
+
+                                          if (!hasData) return null;
+
+                                          return (
+                                              <label key={key} className="flex items-center gap-2 cursor-pointer text-sm text-gray-700 hover:text-red-600 transition-colors">
+                                                  <input 
+                                                      type="checkbox" 
+                                                      className="w-4 h-4 accent-red-600"
+                                                      checked={restoreModules[key]}
+                                                      onChange={(e) => setRestoreModules({...restoreModules, [key]: e.target.checked})}
+                                                  />
+                                                  <span className="truncate" title={MODULE_LABELS[key]}>{MODULE_LABELS[key]}</span>
+                                              </label>
+                                          );
+                                      })}
+                                  </div>
+                              </div>
+                              <div className="p-4 bg-gray-50 flex gap-2">
+                                  <Button variant="secondary" className="flex-1" onClick={() => { setShowRestoreOptions(false); setImportDataPreview(null); }} disabled={isRestoring}>ยกเลิก</Button>
+                                  <Button 
+                                      variant="danger" 
+                                      className="flex-1" 
+                                      onClick={processRestore}
+                                      disabled={isRestoring || !Object.values(restoreModules).some(Boolean)}
+                                  >
+                                      {isRestoring ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                                      {isRestoring ? 'กำลังกู้คืน...' : 'กู้คืนข้อมูล'}
+                                  </Button>
+                              </div>
+                              {isRestoring && (
+                                  <div className="p-3 bg-red-100 text-red-800 text-xs text-center font-medium animate-pulse border-t border-red-200">
+                                      {restoreProgress}
+                                  </div>
                               )}
                           </div>
-                          <input 
-                              type="file" 
-                              accept=".json" 
-                              className="hidden" 
-                              onChange={handleImportBackup} 
-                              onClick={(e) => { e.target.value = null; }} // Allow selecting the same file again
-                              disabled={isRestoring}
-                          />
-                      </label>
+                      )}
                   </Card>
 
                   {/* Google Sheets Sync Card */}
