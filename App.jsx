@@ -1224,9 +1224,9 @@ const compressImage = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                // กำหนดขนาดสูงสุด 800px เพื่อคงความชัดเจน แต่ลดขนาดไฟล์ป้องกันปัญหา 1MB Limit ของฐานข้อมูล
-                const MAX_WIDTH = 800;
-                const MAX_HEIGHT = 800;
+                // แก้ไขเด็ดขาด: ลดขนาดสูงสุดลงเป็น 600px เพื่อป้องกันปัญหา Local Storage ลิมิต 5MB เต็ม ซึ่งเป็นสาเหตุที่เซฟแล้วรีเฟรชข้อมูลหาย
+                const MAX_WIDTH = 600;
+                const MAX_HEIGHT = 600;
                 let width = img.width;
                 let height = img.height;
 
@@ -1246,8 +1246,8 @@ const compressImage = (file) => {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
                 
-                // บีบอัดเป็น JPEG Quality 60%
-                resolve(canvas.toDataURL('image/jpeg', 0.6));
+                // บีบอัดเป็น JPEG Quality 40% (ไฟล์จะเล็กลงมาก ช่วยให้บันทึกรายงานได้เยอะขึ้นโดยไม่บัค)
+                resolve(canvas.toDataURL('image/jpeg', 0.4));
             };
             img.onerror = () => {
                 // กรณีเกิดข้อผิดพลาดในการโหลดรูป ให้ส่งค่าต้นฉบับกลับไป
@@ -5248,48 +5248,50 @@ export default function App() {
   };
   
   const handleSaveDailyReport = (e) => {
-      e.preventDefault();
-      let savedReport;
+      if (e && e.preventDefault) e.preventDefault();
       
-      // FIX: บังคับให้เป็น Array เสมอ และกรองข้อมูล Null หรือ Undefined ทิ้งป้องกันการพัง
-      const safeList = Array.isArray(dailyReports) ? dailyReports.filter(Boolean) : [];
-      let nextList; 
-      
-      // ป้องกันการสร้างรายงานซ้ำซ้อนในวันเดียวกัน (Enforce 1 report per day)
-      let finalId = newDailyReport.id;
-      if (!finalId) {
-          const existing = safeList.find(r => r.projectId === selectedProject.id && r.date === newDailyReport.date);
-          if (existing) {
-              finalId = existing.id;
+      // FIX: เปลี่ยนมาใช้ Callback Pattern (prevList) เพื่อให้ได้ข้อมูลล่าสุดเสมอ ป้องกันการนำข้อมูลเก่าไปทับ
+      setDailyReports(prevList => {
+          const safeList = Array.isArray(prevList) ? prevList.filter(Boolean) : [];
+          let savedReport;
+          let nextList; 
+          
+          // ป้องกันการสร้างรายงานซ้ำซ้อนในวันเดียวกัน (Enforce 1 report per day)
+          let finalId = newDailyReport.id;
+          if (!finalId) {
+              const existing = safeList.find(r => r.projectId === selectedProject.id && r.date === newDailyReport.date);
+              if (existing) {
+                  finalId = existing.id;
+              }
           }
-      }
 
-      // FIX: ไม่นำ Side Effect ไปใส่ใน setState และคำนวณ State ด้วยตนเองก่อนเซฟ
-      if (finalId) {
-          // Update existing report
-          savedReport = { ...newDailyReport, id: finalId, projectId: selectedProject.id };
-          nextList = safeList.map(r => r.id === finalId ? savedReport : r);
-      } else {
-          // Create new report
-          const id = generateId();
-          savedReport = { ...newDailyReport, id, projectId: selectedProject.id };
-          nextList = [savedReport, ...safeList]; // เพิ่มไว้ด้านบนสุด
-      }
+          if (finalId) {
+              // Update existing report
+              savedReport = { ...newDailyReport, id: finalId, projectId: selectedProject.id };
+              nextList = safeList.map(r => r.id === finalId ? savedReport : r);
+          } else {
+              // Create new report
+              const id = generateId();
+              savedReport = { ...newDailyReport, id, projectId: selectedProject.id };
+              nextList = [savedReport, ...safeList]; // เพิ่มไว้ด้านบนสุด
+          }
 
-      // สั่ง Update State แบบชัดเจน
-      setDailyReports(nextList);
+          // หน่วงเวลาให้ State อัปเดตเสร็จก่อน แล้วค่อยเปิด Modal ดูข้อมูล พร้อมทำ Auto Sync
+          setTimeout(() => {
+              let filesToUpload = [];
+              ['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].forEach(dept => {
+                  const images = savedReport.performance[dept]?.images || [];
+                  images.forEach((img, idx) => { filesToUpload.push({ name: `DailyReport_${savedReport.id}_${dept}_${idx}.jpg`, data: img }); });
+              });
+              triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, filesToUpload);
 
-      // --- AUTO SYNC TRIGGER ---
-      let filesToUpload = [];
-      ['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].forEach(dept => {
-          const images = savedReport.performance[dept]?.images || [];
-          images.forEach((img, idx) => { filesToUpload.push({ name: `DailyReport_${savedReport.id}_${dept}_${idx}.jpg`, data: img }); });
-      });
-      triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, filesToUpload);
+              setShowAddDailyReportModal(false);
+              setSelectedDailyReport(savedReport); // Open view modal immediately
+              alert('บันทึกรายงานประจำวันเสร็จสมบูรณ์แล้ว!'); 
+          }, 50);
 
-      setShowAddDailyReportModal(false);
-      setSelectedDailyReport(savedReport); // Open view modal immediately
-      alert('บันทึกรายงานประจำวันเสร็จสมบูรณ์'); // แจ้งเตือนเพื่อให้มั่นใจว่าบันทึกแล้ว
+          return nextList;
+      }, true); // <-- สำคัญมาก: ใส่ true เพื่อให้ระบบ "บังคับเขียนลง Storage และ Database ทันที" ไม่ต้องรอจังหวะหน่วงเวลา
   };
 
   const handleEditDailyReport = (report) => {
@@ -13442,7 +13444,8 @@ export default function App() {
                         const monthStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
                         const monthNameTh = targetDate.toLocaleDateString('th-TH', { month: 'short', year: '2-digit' });
                         
-                        const reportsInMonth = dailyReports.filter(r => r.projectId === selectedProject.id && r.date.startsWith(monthStr));
+                        // FIX: ป้องกัน Error จากข้อมูลที่ไม่มี Date
+                        const reportsInMonth = dailyReports.filter(r => r && r.projectId === selectedProject.id && r.date && r.date.startsWith(monthStr));
                         const uniqueDays = new Set(reportsInMonth.map(r => r.date)).size;
                         const daysInMonth = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0).getDate();
                         
@@ -13479,16 +13482,22 @@ export default function App() {
 
                 {/* List of reports */}
                 <div className="grid grid-cols-1 gap-4">
-                   {dailyReports.filter(r => r.projectId === selectedProject.id).length === 0 ? (
-                       <div className="text-center p-8 text-gray-500 bg-white rounded border border-dashed">{t('noData')}</div>
-                   ) : (
-                       dailyReports.filter(r => r.projectId === selectedProject.id).sort((a,b) => new Date(b.date) - new Date(a.date)).map(report => (
+                   {(() => {
+                       // FIX: กรองข้อมูลที่เป็น Null ออก และเรียงวันที่อย่างปลอดภัย
+                       const safeReports = Array.isArray(dailyReports) ? dailyReports.filter(Boolean) : [];
+                       const projReports = safeReports.filter(r => r.projectId === selectedProject.id);
+                       
+                       if (projReports.length === 0) {
+                           return <div className="text-center p-8 text-gray-500 bg-white rounded border border-dashed">{t('noData')}</div>;
+                       }
+                       
+                       return projReports.sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0)).map(report => (
                            <Card key={report.id} className="p-4 hover:shadow-md cursor-pointer relative group">
                                <div className="flex justify-between" onClick={() => setSelectedDailyReport(report)}>
                                    <span className="font-bold text-blue-700">
-                                       รายงานประจำวันที่ {new Date(report.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'})}
+                                       รายงานประจำวันที่ {report.date ? new Date(report.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'}) : '-'}
                                    </span>
-                                   <span className="text-sm text-gray-500 pr-8"><User size={12} className="inline mr-1"/>{report.reporter}</span>
+                                   <span className="text-sm text-gray-500 pr-8"><User size={12} className="inline mr-1"/>{report.reporter || 'ไม่ระบุ'}</span>
                                </div>
                                <div className="text-sm mt-2 text-gray-600 line-clamp-2 break-words" onClick={() => setSelectedDailyReport(report)}>{report.note || 'คลิกเพื่อดูรายละเอียดผลการปฏิบัติงาน...'}</div>
                                
@@ -13496,7 +13505,8 @@ export default function App() {
                                    <button 
                                        onClick={(e) => { 
                                            e.stopPropagation(); 
-                                           showConfirm('ยืนยันการลบ', `คุณต้องการลบรายงานประจำวันที่ ${report.date} ใช่หรือไม่?`, () => setDailyReports(prev => prev.filter(r => r.id !== report.id))); 
+                                           // อัปเดตแบบ Force Save ป้องกันลบแล้วรีเฟรชกลับมาใหม่
+                                           showConfirm('ยืนยันการลบ', `คุณต้องการลบรายงานประจำวันที่ ${report.date} ใช่หรือไม่?`, () => setDailyReports(prev => prev.filter(r => r.id !== report.id), true)); 
                                        }}
                                        className="absolute top-3 right-3 text-gray-300 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100"
                                        title="ลบรายงาน"
@@ -13505,8 +13515,8 @@ export default function App() {
                                    </button>
                                )}
                            </Card>
-                       ))
-                   )}
+                       ));
+                   })()}
                 </div>
             </div>
           )}
@@ -20143,7 +20153,8 @@ export default function App() {
                                 }
 
                                 const rankData = projects.map(p => {
-                                    const pReports = dailyReports.filter(r => r.projectId === p.id && r.date && r.date.startsWith(targetMonthStr));
+                                    // FIX: ป้องกัน Error จากข้อมูลที่ไม่มี Date
+                                    const pReports = dailyReports.filter(r => r && r.projectId === p.id && r.date && r.date.startsWith(targetMonthStr));
                                     const uniqueDays = new Set(pReports.map(r => r.date)).size;
                                     const percentage = passedDays > 0 ? Math.round((uniqueDays / passedDays) * 100) : 0;
                                     return { id: p.id, name: p.name, submittedDays: uniqueDays, percentage };
