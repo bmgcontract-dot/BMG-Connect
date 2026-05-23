@@ -1619,11 +1619,18 @@ function useUserPersistentState(key, initialValue, fbUser) {
         return initialValue;
     });
 
-    const setPersistentValue = (newValue) => {
-        setState(newValue);
-        if (typeof window !== 'undefined') {
-            localStorage.setItem(userSpecificKey, JSON.stringify(newValue));
-        }
+    const setPersistentValue = (newValueOrUpdater) => {
+        setState((prevState) => {
+            const newValue = typeof newValueOrUpdater === 'function' ? newValueOrUpdater(prevState) : newValueOrUpdater;
+            if (typeof window !== 'undefined') {
+                try {
+                    localStorage.setItem(userSpecificKey, JSON.stringify(newValue));
+                } catch (e) {
+                    console.warn("LocalStorage Quota Exceeded for", userSpecificKey);
+                }
+            }
+            return newValue;
+        });
     };
 
     return [state, setPersistentValue];
@@ -1697,7 +1704,9 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                             setData(legacyData);
                             dataRef.current = legacyData;
                         }
-                        if (typeof window !== 'undefined') localStorage.setItem(localKey, JSON.stringify(legacyData));
+                        if (typeof window !== 'undefined') {
+                            try { localStorage.setItem(localKey, JSON.stringify(legacyData)); } catch(e) {}
+                        }
                     }
                 }
 
@@ -1736,10 +1745,13 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                     const serverItems = [];
                     snapshot.forEach(docSnap => serverItems.push(docSnap.data()));
                     
+                    // ป้องกันเอาความว่างเปล่าจาก Server มาลบข้อมูลในเครื่อง (ยกเว้นโดนสั่งลบมาจริงๆ จาก snapshot.docChanges)
                     if (serverItems.length > 0 || snapshot.docChanges().length > 0) {
                         setData(serverItems);
                         dataRef.current = serverItems;
-                        if (typeof window !== 'undefined') localStorage.setItem(localKey, JSON.stringify(serverItems));
+                        if (typeof window !== 'undefined') {
+                            try { localStorage.setItem(localKey, JSON.stringify(serverItems)); } catch(e) {}
+                        }
                     }
                     setIsLoaded(true);
                 }, (error) => {
@@ -1761,14 +1773,20 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
         };
     }, [db, appId, fbUser, collectionName, localKey]);
 
-    // แก้ไขระบบอัปเดตสถานะให้รองรับฟังก์ชันการเปลี่ยนแปลงแบบ Functional Update (prev => prev + 1) ป้องกันข้อมูลหาย
     const setPersistentValue = async (newValueOrUpdater, isRestore = false) => {
         const oldValue = dataRef.current;
         const newValue = typeof newValueOrUpdater === 'function' ? newValueOrUpdater(oldValue) : newValueOrUpdater;
         
         setData(newValue);
         dataRef.current = newValue;
-        if (typeof window !== 'undefined') localStorage.setItem(localKey, JSON.stringify(newValue));
+        
+        if (typeof window !== 'undefined') {
+            try {
+                localStorage.setItem(localKey, JSON.stringify(newValue));
+            } catch (e) {
+                console.warn(`LocalStorage Quota Exceeded for ${localKey}. Skipping local cache, but will sync to Cloud.`);
+            }
+        }
 
         if (!db || !fbUser || !appId) return;
 
@@ -1821,12 +1839,33 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                         for (const fileId in itemToSave.files) {
                             safeFiles[fileId] = { ...itemToSave.files[fileId] };
                             if (safeFiles[fileId].data && safeFiles[fileId].data.length > 100000) {
-                                delete safeFiles[fileId].data; 
+                                delete safeFiles[fileId].data; // ไม่เซฟภาพฐาน64ใหญ่เกินไปลง Firestore
                                 safeFiles[fileId].isLocalOnly = true;
                             }
                         }
                         itemToSave.files = safeFiles;
                     }
+
+                    try {
+                        let docStr = JSON.stringify(itemToSave);
+                        if (docStr.length > 850000) { // Limit approaching ~850KB
+                            if (itemToSave.performance) {
+                                for (const dept in itemToSave.performance) {
+                                    if (itemToSave.performance[dept].images && itemToSave.performance[dept].images.length > 0) {
+                                        itemToSave.performance[dept].images = []; // Clear images
+                                        itemToSave.performance[dept].details = (itemToSave.performance[dept].details || '') + '\n[หมายเหตุ: รูปภาพถูกลบเนื่องจากขนาดไฟล์รวมเกินขีดจำกัด]';
+                                    }
+                                }
+                            }
+                            if (itemToSave.images && itemToSave.images.length > 0) {
+                                itemToSave.images = [];
+                                itemToSave.remark = (itemToSave.remark || '') + '\n[หมายเหตุ: รูปภาพถูกลบเนื่องจากขนาดไฟล์รวมเกินขีดจำกัด]';
+                            }
+                        }
+                    } catch (e) {
+                        console.warn("Error calculating doc size:", e);
+                    }
+
                     batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id), itemToSave);
                     opCount++;
                     if (opCount >= 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
@@ -5453,6 +5492,101 @@ export default function App() {
       return Number(commonFee) + Number(lateFee) + Number(water) + Number(parking) + Number(violation) + Number(other);
   };
   
+  // --- NEW: ฟังก์ชัน นำเข้า (Import) รายงานประจำวันด้วย CSV ---
+  const handleImportDailyReportsCSV = (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.readAsArrayBuffer(file);
+      reader.onload = (e) => {
+          try {
+              const buffer = e.target.result;
+              let text = '';
+              try { text = new TextDecoder('utf-8', { fatal: true }).decode(buffer); } 
+              catch (err) { text = new TextDecoder('windows-874').decode(buffer); }
+
+              const lines = text.split(/\r?\n/);
+              if (lines.length < 2) return alert('ไฟล์ CSV ไม่มีข้อมูล หรือมีแค่หัวตาราง');
+              
+              const parseCSVLine = (line) => {
+                  const regex = /,(?=(?:(?:[^"]*"){2})*[^"]*$)/;
+                  return line.split(regex).map(v => v.trim().replace(/^"|"$/g, ''));
+              };
+
+              const headers = parseCSVLine(lines[0]);
+              const newReports = [];
+              
+              for (let i = 1; i < lines.length; i++) {
+                  if (!lines[i].trim()) continue;
+                  const values = parseCSVLine(lines[i]);
+                  const rowObj = {};
+                  headers.forEach((header, index) => rowObj[header] = values[index]);
+                  
+                  const rawDate = rowObj['วันที่'] || rowObj['Date'] || rowObj['date'];
+                  if (!rawDate) continue;
+                  
+                  // Use normalizeImportedDate to handle different formats
+                  const dateStr = normalizeImportedDate(rawDate);
+                  if (!dateStr) continue;
+
+                  // Check if report already exists for this date in this project
+                  if (dailyReports.some(r => r.projectId === selectedProject.id && r.date === dateStr) || newReports.some(r => r.date === dateStr)) {
+                      continue; 
+                  }
+
+                  newReports.push({
+                      id: generateId(),
+                      projectId: selectedProject.id,
+                      date: dateStr,
+                      manpower: {
+                          juristic: parseInt(rowObj['จนท.นิติบุคคล'] || rowObj['Juristic'] || 0) || 0,
+                          security: parseInt(rowObj['รปภ.'] || rowObj['Security'] || 0) || 0,
+                          cleaning: parseInt(rowObj['แม่บ้าน'] || rowObj['Cleaning'] || 0) || 0,
+                          gardening: parseInt(rowObj['คนสวน'] || rowObj['Gardening'] || 0) || 0,
+                          sweeper: parseInt(rowObj['คนกวาดถนน'] || rowObj['Sweeper'] || 0) || 0,
+                          other: parseInt(rowObj['อื่นๆ'] || rowObj['Other'] || 0) || 0,
+                          otherLabel: ''
+                      },
+                      performance: {
+                          juristic: { details: rowObj['ผลงานนิติบุคคล'] || rowObj['Juristic Work'] || '', images: [] },
+                          security: { details: rowObj['ผลงานรปภ.'] || rowObj['Security Work'] || '', images: [] },
+                          cleaning: { details: rowObj['ผลงานแม่บ้าน'] || rowObj['Cleaning Work'] || '', images: [] },
+                          gardening: { details: rowObj['ผลงานคนสวน'] || rowObj['Gardening Work'] || '', images: [] },
+                          sweeper: { details: rowObj['ผลงานคนกวาด'] || rowObj['Sweeper Work'] || '', images: [] },
+                          other: { details: rowObj['ผลงานอื่นๆ'] || '', images: [] }
+                      },
+                      income: {
+                          commonFee: parseFloat(rowObj['รับค่าส่วนกลาง'] || 0) || 0,
+                          lateFee: parseFloat(rowObj['รับค่าปรับ'] || 0) || 0,
+                          water: parseFloat(rowObj['รับค่าน้ำ'] || 0) || 0,
+                          parking: parseFloat(rowObj['รับค่าจอดรถ'] || 0) || 0,
+                          violation: parseFloat(rowObj['รับค่าปรับผิดระเบียบ'] || 0) || 0,
+                          other: parseFloat(rowObj['รับอื่นๆ'] || 0) || 0,
+                          otherLabel: ''
+                      },
+                      note: rowObj['หมายเหตุ'] || rowObj['Note'] || '',
+                      reporter: rowObj['ผู้รายงาน'] || rowObj['Reporter'] || (currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System Import')
+                  });
+              }
+              
+              if (newReports.length > 0) {
+                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูลรายงานประจำวันที่ถูกต้องและไม่ซ้ำ ${newReports.length} วัน ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
+                      const nextList = [...newReports, ...dailyReports];
+                      setDailyReports(nextList);
+                      triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, []);
+                      alert('นำเข้าข้อมูลรายงานประจำวันสำเร็จแล้ว!');
+                  }, 'ยืนยันการนำเข้า', 'info');
+              } else {
+                  alert('ไม่พบข้อมูลใหม่ หรือข้อมูลวันที่ซ้ำกับที่มีอยู่ในระบบแล้ว (ระบบจะบันทึกได้แค่วันละ 1 ฉบับเท่านั้น)');
+              }
+          } catch (error) {
+              alert('เกิดข้อผิดพลาดในการอ่านไฟล์ CSV โปรดตรวจสอบรูปแบบไฟล์');
+              console.error(error);
+          }
+      };
+      event.target.value = '';
+  };
+
   const handleSaveDailyReport = (e) => {
       e.preventDefault();
       let savedReport;
@@ -13644,6 +13778,12 @@ export default function App() {
                 <div className="flex justify-between items-center">
                     <h3 className="font-bold text-lg">{t('dailyReports')}</h3>
                     <div className="flex gap-2">
+                        {hasPerm('proj_daily', 'save') && (
+                            <label className="cursor-pointer flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs rounded-md font-medium transition-colors bg-green-600 text-white hover:bg-green-700 shadow-sm" title="นำเข้าข้อมูลย้อนหลังจากไฟล์ .csv">
+                                <Upload size={14} /> นำเข้า CSV
+                                <input type="file" accept=".csv" className="hidden" onChange={handleImportDailyReportsCSV} />
+                            </label>
+                        )}
                         <Button variant="outline" icon={BarChart3} onClick={() => setShowDailyStats(!showDailyStats)}>
                             {showDailyStats ? 'ซ่อนสถิติ' : 'สถิติย้อนหลัง'}
                         </Button>
@@ -18588,6 +18728,41 @@ export default function App() {
                              <p className="text-xs text-gray-700 whitespace-pre-wrap break-words">{selectedDailyReport.note}</p>
                         </div>
                     )}
+
+                    {/* NEW: Actual Auto-fetched Utility Readings for Print View */}
+                    {(() => {
+                        const reportDate = selectedDailyReport.date;
+                        const projMeters = meters.filter(m => m.projectId === selectedDailyReport.projectId);
+                        const projMeterIds = projMeters.map(m => m.id);
+                        const dayReadings = utilityReadings.filter(r => r.date === reportDate && projMeterIds.includes(r.meterId));
+
+                        if (dayReadings.length === 0) return null;
+
+                        return (
+                            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mt-4" style={{ pageBreakInside: 'avoid' }}>
+                                 <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
+                                     <Zap size={16} className="text-orange-500"/> ข้อมูลการจดมิเตอร์ประจำวัน (Utility Readings)
+                                 </h3>
+                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                                     {dayReadings.map(r => {
+                                         const meter = projMeters.find(m => m.id === r.meterId);
+                                         return (
+                                             <div key={r.id} className="bg-white p-3 border border-gray-200 rounded-lg shadow-sm">
+                                                 <div className="flex items-center gap-1.5 mb-2 border-b pb-2">
+                                                     {meter?.type === 'Water' ? <Droplet size={14} className="text-blue-500"/> : <Zap size={14} className="text-orange-500"/>}
+                                                     <span className="font-bold text-gray-700 truncate">{meter?.name} <span className="text-xs font-normal text-gray-400">({meter?.code})</span></span>
+                                                 </div>
+                                                 <div className="flex justify-between items-end">
+                                                     <span className="text-xs text-gray-500">เลขปัจจุบัน: <br/><strong className="text-gray-800 text-sm">{Number(r.value || 0).toLocaleString()}</strong></span>
+                                                     <span className="font-bold text-red-600 text-lg">+{Number(r.usage || 0).toLocaleString()}</span>
+                                                 </div>
+                                             </div>
+                                         )
+                                     })}
+                                 </div>
+                            </div>
+                        );
+                    })()}
                     
                     {/* NEW: Auto-fetched Utility Readings Trend for Print View */}
                     {(() => {
@@ -18645,7 +18820,7 @@ export default function App() {
                         return (
                             <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mt-4" style={{ pageBreakInside: 'avoid' }}>
                                 <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
-                                    <BarChart3 size={16} className="text-orange-500"/> 5. แนวโน้มการใช้น้ำประปาและไฟฟ้า (7 วันล่าสุด)
+                                    <BarChart3 size={16} className="text-orange-500"/> แนวโน้มการใช้น้ำประปาและไฟฟ้า (7 วันล่าสุด)
                                 </h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     {waterMeters.length > 0 && (
