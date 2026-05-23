@@ -1418,11 +1418,13 @@ const getAllFilesLocally = async () => {
 // --- Custom Hook for Persistent Storage (Firebase or LocalStorage Fallback) ---
 function usePersistentState(key, initialValue, fbUser) {
   const [state, setState] = useState(() => {
+      // FIX: โหลดข้อมูลจาก Cache (Local Storage) ขึ้นมาแสดงผลทันทีก่อนเสมอ (Optimistic Load) เพื่อแก้ปัญหาโหลดหน้าเว็บช้า
       if (typeof window !== 'undefined') {
           const local = localStorage.getItem(key);
           if (local) {
               try { 
                   const parsed = JSON.parse(local); 
+                  // 🛡️ FIX: บังคับให้เป็น Array เสมอ หากค่าเริ่มต้นเป็น Array ป้องกันแอปพังหน้าขาว (Crash)
                   if (Array.isArray(initialValue)) {
                       if (!Array.isArray(parsed)) {
                           return (parsed && typeof parsed === 'object') ? Object.values(parsed) : [...initialValue];
@@ -1437,29 +1439,30 @@ function usePersistentState(key, initialValue, fbUser) {
   
   const stateRef = useRef(state);
   const syncTimeoutRef = useRef(null); 
-  const isUploadingRef = useRef(false);
-  
-  // FIX: เริ่มต้นระบบควบคุมเวอร์ชันที่ 0 เพื่อให้การโหลดครั้งแรกยอมรับข้อมูลจาก Server เสมอ
-  const localVersionRef = useRef(0); 
-  
-  const [isInitialLoadDone, setIsInitialLoadDone] = useState(false);
+  const isUploadingRef = useRef(false); // NEW: Track upload status
+  const lastLocalUpdateRef = useRef(0); // NEW: Track last local edit time
+  const pendingServerDataRef = useRef(null); // NEW: คิวพักข้อมูลหากมีการแก้ไขชนกัน
+  const checkPendingDataInterval = useRef(null);
   const [isSynced, setIsSynced] = useState(false);
-  
+  // OPTIMIZE: ถ้ามีข้อมูลใน Cache ให้ถือว่าโหลดเสร็จแล้วทันที ไม่ต้องรอหน้าจอหมุน
   const [isLoaded, setIsLoaded] = useState(() => {
       if (typeof window !== 'undefined' && localStorage.getItem(key)) return true;
       return false;
   });
 
   useEffect(() => {
+      stateRef.current = state;
+  }, [state]);
+
+  useEffect(() => {
     if (!db) {
         setIsLoaded(true);
-        setIsInitialLoadDone(true);
         return; 
     }
     
+    // OPTIMIZE: ขยายเวลาบังคับข้าม (Timeout) เป็น 4 วินาที เพื่อรองรับอินเทอร์เน็ตมือถือ
     const fallbackTimer = setTimeout(() => {
         setIsLoaded(true);
-        setIsInitialLoadDone(true);
     }, 4000);
 
     if (!fbUser || !appId) {
@@ -1467,130 +1470,110 @@ function usePersistentState(key, initialValue, fbUser) {
     }
     
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
+    
     let currentFetchId = 0;
 
     const unsubscribe = onSnapshot(docRef, async (docSnap) => {
       if (docSnap.exists()) {
         currentFetchId++;
         const thisFetchId = currentFetchId;
+
         const data = docSnap.data();
-        
-        // กำหนด timestamp ขั้นต่ำกรณีข้อมูลเก่าไม่มีการประทับเวลา
-        const serverTimestamp = data.timestamp || 1;
-
-        // --- FIX: Block Echoes and Stale Data ปราบอาการข้อมูลเด้งไปมา ---
-        // หากข้อมูลจากคลาวด์ เก่ากว่า หรือ "เท่ากับ" เวลาที่เครื่องเราพึ่งเซฟไปล่าสุด ให้เตะทิ้งทันที!
-        // เพราะนั่นคือเสียงสะท้อน (Echo) ของเราเอง การประกอบร่างข้อมูลซ้ำจะทำให้ดึง Cache เก่ามาปน
-        if (serverTimestamp <= localVersionRef.current) {
-            setIsLoaded(true);
-            setIsInitialLoadDone(true);
-            return;
-        }
-
         try {
           const applyData = (parsedData) => {
-              if (JSON.stringify(stateRef.current) === JSON.stringify(parsedData)) {
-                  setIsLoaded(true);
-                  setIsSynced(true);
-                  setIsInitialLoadDone(true);
-                  localVersionRef.current = serverTimestamp; // อัปเดตเวอร์ชันให้ตรงกัน
-                  return;
-              }
-
-              // อัปเดตเวอร์ชันในเครื่องให้ตรงกับคลาวด์
-              localVersionRef.current = serverTimestamp;
-
               let finalData = parsedData;
               
+              // 🛡️ FIX: บังคับการแปลงชนิดข้อมูล กรณีข้อมูลถูกเซฟจาก Firebase กลับมาเป็น Object แทน Array
               if (Array.isArray(initialValue) && !Array.isArray(parsedData)) {
                   finalData = (parsedData && typeof parsedData === 'object') ? Object.values(parsedData) : [];
               }
 
+              // --- FIX: Data Loss Prevention ---
               const isFinalEmpty = Array.isArray(finalData) ? finalData.length === 0 : (!finalData || (typeof finalData === 'object' && Object.keys(finalData || {}).length === 0));
               const isCurrentNotEmpty = Array.isArray(stateRef.current) ? stateRef.current.length > 0 : (stateRef.current && typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length > 0);
 
               if (isFinalEmpty && isCurrentNotEmpty) {
-                  return; // ป้องกันคลาวด์ล้างบางข้อมูล
+                  console.warn(`[BMG Sync] ป้องกันการทับข้อมูล ${key} ด้วยค่าว่าง`);
+                  return;
               }
-              
-              setState(finalData);
-              stateRef.current = finalData; // ซิงค์ State ทันที
-              if (typeof window !== 'undefined') {
-                  setTimeout(() => {
-                      try { localStorage.setItem(key, JSON.stringify(finalData)); } catch(e) {}
-                  }, 0);
+              // ---------------------------------
+              if (JSON.stringify(stateRef.current) !== JSON.stringify(finalData)) {
+                  setState(finalData);
+                  stateRef.current = finalData;
+                  if (typeof window !== 'undefined') localStorage.setItem(key, JSON.stringify(finalData));
               }
-              
               setIsLoaded(true);
               setIsSynced(true);
-              setIsInitialLoadDone(true);
           };
 
           if (data.totalChunks !== undefined) {
-              const expectedTimestamp = data.timestamp;
               let fullJson = '';
               let hasChunkError = false;
-              let retryCount = 0;
-
-              // Retry Mechanism for Chunks: พยายามประกอบร่างใหม่หากชิ้นส่วนมาไม่ครบ
-              while (retryCount < 3) {
-                  fullJson = '';
-                  hasChunkError = false;
-                  
-                  for (let i = 0; i < data.totalChunks; i++) {
-                      const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
-                      const chunkSnap = await getDoc(chunkRef);
-                      if (chunkSnap.exists()) {
-                          const chunkData = chunkSnap.data();
-                          if (chunkData.timestamp && expectedTimestamp && chunkData.timestamp !== expectedTimestamp) {
-                              hasChunkError = true;
-                              break;
-                          }
-                          fullJson += chunkData.chunk;
-                      } else {
-                          hasChunkError = true;
-                          break;
-                      }
+              for (let i = 0; i < data.totalChunks; i++) {
+                  const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
+                  const chunkSnap = await getDoc(chunkRef);
+                  if (chunkSnap.exists()) {
+                      fullJson += chunkSnap.data().chunk;
+                  } else {
+                      hasChunkError = true;
                   }
-                  
-                  if (!hasChunkError) break; 
-                  
-                  retryCount++;
-                  await new Promise(r => setTimeout(r, 600 * retryCount));
               }
               
-              if (thisFetchId !== currentFetchId || hasChunkError) {
-                  setIsInitialLoadDone(true); 
-                  return;
-              }
+              if (thisFetchId !== currentFetchId || hasChunkError) return;
 
               if (fullJson) {
                   const parsedData = JSON.parse(fullJson);
-                  applyData(parsedData);
+                  
+                  // 🛡️ 100% Data Loss Prevention: นำข้อมูลเข้าคิวหากผู้ใช้กำลังพิมพ์
+                  if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
+                      pendingServerDataRef.current = parsedData;
+                      if (!checkPendingDataInterval.current) {
+                          checkPendingDataInterval.current = setInterval(() => {
+                              if (Date.now() - lastLocalUpdateRef.current > 5000 && !isUploadingRef.current && !syncTimeoutRef.current) {
+                                  if (pendingServerDataRef.current) {
+                                      applyData(pendingServerDataRef.current);
+                                      pendingServerDataRef.current = null;
+                                  }
+                                  clearInterval(checkPendingDataInterval.current);
+                                  checkPendingDataInterval.current = null;
+                              }
+                          }, 1000);
+                      }
+                  } else {
+                      applyData(parsedData);
+                  }
               }
           } else if (data.value) {
               if (thisFetchId !== currentFetchId) return;
               const parsedData = JSON.parse(data.value);
-              applyData(parsedData);
+              
+              if (Date.now() - lastLocalUpdateRef.current < 5000 || isUploadingRef.current || syncTimeoutRef.current) {
+                  pendingServerDataRef.current = parsedData;
+                  if (!checkPendingDataInterval.current) {
+                      checkPendingDataInterval.current = setInterval(() => {
+                          if (Date.now() - lastLocalUpdateRef.current > 5000 && !isUploadingRef.current && !syncTimeoutRef.current) {
+                              if (pendingServerDataRef.current) {
+                                  applyData(pendingServerDataRef.current);
+                                  pendingServerDataRef.current = null;
+                              }
+                              clearInterval(checkPendingDataInterval.current);
+                              checkPendingDataInterval.current = null;
+                          }
+                      }, 1000);
+                  }
+              } else {
+                  applyData(parsedData);
+              }
           }
-        } catch(e) { 
-            console.error("Parse error", key, e); 
-            setIsInitialLoadDone(true);
-        }
-      } else {
+        } catch(e) { console.error("Parse error", key, e); }
+      } else if (!isSynced) {
+         setPersistentValue(stateRef.current);
          setIsLoaded(true);
-         setIsInitialLoadDone(true);
-         if (!isSynced && stateRef.current) {
-             const isCurrentEmpty = Array.isArray(stateRef.current) ? stateRef.current.length === 0 : (!stateRef.current || (typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length === 0));
-             if (!isCurrentEmpty) {
-                 setPersistentValue(stateRef.current, true);
-             }
-             setIsSynced(true);
-         }
+         setIsSynced(true);
       }
     }, (err) => {
+      console.error("Sync error", key, err);
       setIsLoaded(true);
-      setIsInitialLoadDone(true);
     });
 
     return () => {
@@ -1599,69 +1582,53 @@ function usePersistentState(key, initialValue, fbUser) {
     };
   }, [fbUser, key]);
 
-  const setPersistentValue = async (newValue, isForceSave = false) => {
-    if (!isInitialLoadDone && !isForceSave) {
-        if (typeof window !== 'undefined') {
-            try { localStorage.setItem(key, JSON.stringify(newValue)); } catch (e) {}
-        }
-        return;
-    }
+  const setPersistentValue = async (newValue, isRestore = false) => {
+    lastLocalUpdateRef.current = Date.now(); // บันทึกเวลาที่แก้ล่าสุด เพื่อกัน Firebase มาทับ
 
     const valueToStore = typeof newValue === 'function' ? newValue(stateRef.current) : newValue;
-    
-    if (!isForceSave && JSON.stringify(valueToStore) === JSON.stringify(stateRef.current)) return;
-
-    // --- FIX: อัปเดต Version Control ทันทีที่เครื่องมีการแก้ไข เพื่อปักหมุดความสดใหม่ และป้องกันเสียงสะท้อน ---
-    const newVersionTimestamp = Date.now();
-    localVersionRef.current = newVersionTimestamp; 
+    if (!isRestore && valueToStore === stateRef.current) return;
 
     setState(valueToStore);
-    stateRef.current = valueToStore; 
+    stateRef.current = valueToStore;
     
     if (typeof window !== 'undefined') {
+        // ผลักการทำงานของ LocalStorage ไปไว้คิวหลังสุด เพื่อไม่ให้หน้าจอค้าง
         setTimeout(() => {
             try { localStorage.setItem(key, JSON.stringify(valueToStore)); } catch (e) {}
         }, 0);
     }
 
     if (db && fbUser && appId) {
+       // NEW: ป้องกัน Data Corruption ด้วยการเคลียร์คำสั่งเซฟเดิมที่ยังไม่เสร็จทิ้ง
        if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
 
        return new Promise((resolve) => {
-           const doFirebaseSync = async () => {
+           // NEW: หน่วงเวลา 1 วินาที หลังจากหยุดพิมพ์/คลิก ค่อยเซฟขึ้น Database
+           syncTimeoutRef.current = setTimeout(async () => {
                isUploadingRef.current = true;
                try {
-                   const jsonStr = JSON.stringify(stateRef.current); 
-                   const CHUNK_SIZE = 250000; 
+                   const jsonStr = JSON.stringify(stateRef.current); // ใช้ state ล่าสุดเสมอ
+                   const CHUNK_SIZE = 250000; // FIX: ลดขนาด Chunk ลงจาก 900000 เป็น 250000 เพื่อป้องกัน 1MB Limit สำหรับภาษาไทย
                    const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
-                   
-                   // แพ็คเกจข้อมูลและส่งไปคลาวด์ในเวลาเดียวกัน (Atomic Write)
-                   const batch = writeBatch(db);
                    
                    for (let i = 0; i < totalChunks; i++) {
                        const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
                        const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                       batch.set(chunkRef, { chunk: chunkData, timestamp: newVersionTimestamp });
+                       await setDoc(chunkRef, { chunk: chunkData });
+                       // พัก UI เล็กน้อยให้เบราว์เซอร์ไม่ค้าง
+                       await new Promise(r => setTimeout(r, 10));
                    }
                    
                    const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
-                   batch.set(metaRef, { totalChunks, timestamp: newVersionTimestamp, updaterUid: fbUser.uid });
-                   
-                   await batch.commit();
+                   await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
                } catch (err) {
-                   console.error(`Firestore Batch Save Error [${key}]:`, err);
+                   console.error(`Firestore Single Save Error [${key}]:`, err);
                } finally {
                    syncTimeoutRef.current = null;
                    isUploadingRef.current = false;
                    resolve();
                }
-           };
-
-           if (isForceSave) {
-               doFirebaseSync();
-           } else {
-               syncTimeoutRef.current = setTimeout(doFirebaseSync, 1000);
-           }
+           }, 1000);
        });
     }
   };
@@ -3537,7 +3504,18 @@ export default function App() {
   const [showAddEventModal, setShowAddEventModal] = useState(false);
   const [currentEventMonth, setCurrentEventMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [selectedEventDate, setSelectedEventDate] = useState(() => new Date().toISOString().split('T')[0]);
-      // --- FIX: เปลี่ยนวิธีเก็บ schedules ให้ฉลาดขึ้น ลดภาระการโหลด ---
+  const [newEvent, setNewEvent] = useState({
+      id: null,
+      title: '',
+      date: new Date().toISOString().split('T')[0],
+      time: '09:00',
+      description: '',
+      color: 'bg-blue-500',
+      projectId: ''
+  });
+
+  // คงใช้ usePersistentState สำหรับข้อมูลที่เป็น Object เดี่ยวๆ
+  // --- FIX: เปลี่ยนวิธีเก็บ schedules ให้ฉลาดขึ้น ลดภาระการโหลด ---
   const [schedules, setSchedules] = useState(() => {
       if (typeof window !== 'undefined') {
           try {
@@ -3553,7 +3531,6 @@ export default function App() {
 
   const schedulesRef = useRef(schedules);
   const syncScheduleTimeoutRef = useRef(null);
-  const isInitialLoadDoneRef = useRef(false);
   
   useEffect(() => {
       schedulesRef.current = schedules;
@@ -3561,18 +3538,11 @@ export default function App() {
 
   // Sync Schedule Data
   useEffect(() => {
-      if (!db || !fbUser || !appId) {
-          isInitialLoadDoneRef.current = true;
-          return;
-      }
+      if (!db || !fbUser || !appId) return;
 
       const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', 'bmg_schedules_v2');
-      let currentFetchId = 0;
       
       const unsubscribe = onSnapshot(docRef, async (docSnap) => {
-          currentFetchId++;
-          const thisFetchId = currentFetchId;
-
           if (docSnap.exists()) {
               const data = docSnap.data();
               if (data.totalChunks !== undefined) {
@@ -3589,7 +3559,6 @@ export default function App() {
                   }
                   
                   if (!hasChunkError && fullJson) {
-                      if (thisFetchId !== currentFetchId) return;
                       try {
                           const parsedData = JSON.parse(fullJson);
                           if (JSON.stringify(schedulesRef.current) !== JSON.stringify(parsedData)) {
@@ -3605,14 +3574,12 @@ export default function App() {
                   }
               }
           }
-          isInitialLoadDoneRef.current = true;
       }, (err) => {
           console.error("Sync error for schedules", err);
-          isInitialLoadDoneRef.current = true;
       });
 
       return () => unsubscribe();
-  }, [fbUser, appId]);
+  }, [fbUser]);
   
   const getLocalMonthStr = () => {
       const d = new Date();
@@ -3732,7 +3699,40 @@ export default function App() {
       }
   }, [users]);
 
-  // (ยกเลิกระบบ Auto Update Presence ทุก 5 นาที เพื่อป้องกันปัญหา Data Race Condition ที่ทำให้รายชื่อพนักงานหายไปเมื่อเปิดหลายเครื่องพร้อมกัน)
+  // --- NEW: ตรวจจับและบันทึกเวลาล่าสุดเมื่อเปิดระบบ (Refresh/Auto-login) เพื่อให้ซิงค์ข้ามเครื่อง ---
+  useEffect(() => {
+      // 🛡️ ป้องกันการใช้ข้อมูลเก่าจาก LocalStorage ไปทับข้อมูลบน Server โดยการรอให้ Sync ข้อมูลจาก Server ให้เสร็จก่อนเสมอ!
+      if (!currentUser || !isUsersSynced) return; 
+
+      // ฟังก์ชันสำหรับอัปเดตเวลาล่าสุด
+      const updatePresence = () => {
+          setUsers(prevUsers => {
+              if (!Array.isArray(prevUsers)) return prevUsers;
+              const foundUser = prevUsers.find(u => u.id === currentUser.id);
+              if (!foundUser) return prevUsers;
+              
+              const lastLoginTime = new Date(foundUser.lastLogin || 0).getTime();
+              const nowTime = new Date().getTime();
+              
+              // อัปเดตเวลาลงฐานข้อมูลทุกๆ 5 นาที (300,000 ms) เพื่อให้สถานะไม่หมดอายุ (15 นาที)
+              if (nowTime - lastLoginTime > 5 * 60 * 1000) { 
+                  return prevUsers.map(u => 
+                      u.id === currentUser.id ? { ...u, lastLogin: new Date().toISOString() } : u
+                  );
+              }
+              return prevUsers; // ถ้าสียังไม่ถึง 5 นาที ไม่ต้องสั่งอัปเดต State (ลดการดึงเครือข่าย)
+          });
+      };
+
+      // รันเช็คครั้งแรกเมื่อระบบโหลดเสร็จ
+      updatePresence();
+
+      // ตั้งเวลาเช็คซ้ำทุกๆ 1 นาทีตราบใดที่เปิดหน้าเว็บอยู่
+      const intervalId = setInterval(updatePresence, 60 * 1000);
+
+      // ยกเลิกการตั้งเวลาเมื่อผู้ใช้ออกจากระบบหรือปิดหน้าต่าง
+      return () => clearInterval(intervalId);
+  }, [currentUser?.id, isUsersSynced]); // ผูกกับ Dependency 2 ตัวนี้
 
   // --- NEW: Auto-Sync State (สถานะการซิงค์อัตโนมัติ) ---
   const [autoSyncMessage, setAutoSyncMessage] = useState('');
@@ -4882,14 +4882,12 @@ export default function App() {
           setNewDailyReport(prev => ({...prev, reporter: `${updatedUser.firstName} ${updatedUser.lastName}`})); 
           setLoginError(''); 
 
-          // --- FIX 3: ป้องกันการนำข้อมูลเก่าไปบันทึกทับข้อมูลใหม่ตอน Login ---
-          setUsers(prevUsers => {
-              const safeUsers = Array.isArray(prevUsers) ? prevUsers : [];
-              if (safeUsers.some(u => u.id === updatedUser.id)) {
-                  return safeUsers.map(u => u.id === updatedUser.id ? { ...u, lastLogin: new Date().toISOString() } : u);
-              }
-              return safeUsers;
-          }, true);
+          // อัปเดตข้อมูลใน State เพื่อให้เวลาแสดงผลในตารางเป็นปัจจุบัน
+          const userExists = userList.some(u => u.id === updatedUser.id);
+          if (userExists) {
+              const updatedUsers = userList.map(u => u.id === updatedUser.id ? updatedUser : u);
+              setUsers(updatedUsers);
+          }
           
           // ตรวจสอบหน่วยงานประจำของผู้ใช้
           if (updatedUser.department && updatedUser.department !== 'Head Office') {
@@ -6801,7 +6799,7 @@ export default function App() {
                   meetingsList,
                   audits,
                   dailyReports,
-                  schedules: schedulesRef.current, // ใช้ข้อมูลปัจจุบันล่าสุดจาก Ref
+                  schedules,
                   scheduleNotes,
                   scheduleApprovals,
                   projectStaffOrder,
@@ -6917,7 +6915,7 @@ export default function App() {
                               { key: 'บันทึกการประชุม', setter: setMeetingsList, data: d.meetingsList },
                               { key: 'ผลการประเมิน (Audit)', setter: setAudits, data: d.audits },
                               { key: 'รายงานประจำวัน', setter: setDailyReports, data: d.dailyReports },
-                              // { key: 'ตารางงาน', setter: setSchedules, data: d.schedules }, // เอาออกจากการใช้ Hook ปกติ
+                              { key: 'ตารางงาน', setter: setSchedules, data: d.schedules },
                               { key: 'หมายเหตุตารางงาน', setter: setScheduleNotes, data: d.scheduleNotes },
                               { key: 'สถานะอนุมัติตารางงาน', setter: setScheduleApprovals, data: d.scheduleApprovals },
                               { key: 'ลำดับพนักงาน', setter: setProjectStaffOrder, data: d.projectStaffOrder },
@@ -6926,7 +6924,7 @@ export default function App() {
                               { key: 'สิทธิ์การใช้งานระบบ', setter: setRolePermissions, data: d.rolePermissions }
                           ];
 
-                          const totalTables = stateSetters.length + 1; // +1 สำหรับ Schedules แบบพิเศษ
+                          const totalTables = stateSetters.length;
                           let currentTable = 0;
 
                           setRestoreProgress('เริ่มดำเนินการกู้คืนข้อมูล (โปรดอย่าปิดหน้าต่าง)...');
@@ -6953,43 +6951,6 @@ export default function App() {
                                   }
                               }
                           }
-
-                          // --- จัดการ Schedule (ตารางงาน) แยกพิเศษ เนื่องจากมีระบบ Chunking เฉพาะตัว ---
-                          if (d.schedules) {
-                              currentTable++;
-                              setRestoreProgress(`กำลังเขียนและซิงค์คลาวด์ตาราง: ตารางงาน (${currentTable}/${totalTables})`);
-                              await new Promise(resolve => setTimeout(resolve, 50));
-
-                              try {
-                                  setSchedules(d.schedules);
-                                  schedulesRef.current = d.schedules;
-                                  if (typeof window !== 'undefined') {
-                                      localStorage.setItem('bmg_schedules_v2', JSON.stringify(d.schedules));
-                                  }
-                                  
-                                  // Force save to Firebase immediately
-                                  if (db && fbUser && appId) {
-                                      const jsonStr = JSON.stringify(d.schedules);
-                                      const CHUNK_SIZE = 250000;
-                                      const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
-                                      const newVersionTimestamp = Date.now();
-                                      
-                                      const batch = writeBatch(db);
-                                      for (let i = 0; i < totalChunks; i++) {
-                                          const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `bmg_schedules_v2_${i}`);
-                                          const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                                          batch.set(chunkRef, { chunk: chunkData, timestamp: newVersionTimestamp });
-                                      }
-                                      
-                                      const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', 'bmg_schedules_v2');
-                                      batch.set(metaRef, { totalChunks, timestamp: newVersionTimestamp, updaterUid: fbUser.uid });
-                                      
-                                      await batch.commit();
-                                  }
-                              } catch(e) {
-                                  console.error("Sync error for schedules", e);
-                              }
-                          }
                           
                           if (d.theme) setTheme(d.theme);
 
@@ -6997,30 +6958,31 @@ export default function App() {
                           
                           // ลบการบังคับ Reload หน้าต่างทิ้ง เพื่อป้องกันปัญหาข้อมูลบน Firebase ดึงกลับมาทับ
                           setTimeout(() => {
-                              showAlert("สำเร็จ", "ระบบนำเข้าและอัปเดตข้อมูลเสร็จสมบูรณ์ 100% ข้อมูลพร้อมใช้งานทันที");
+                              showAlert("สำเร็จ", "ระบบนำเข้าและอัปเดตข้อมูลเสร็จสมบูรณ์ 100% ข้อมูลพร้อมใช้งานทันทีโดยไม่ต้องรีเฟรชหน้า");
                               setIsRestoring(false);
                               setRestoreProgress('');
-                              // บังคับให้โหลดข้อมูลใหม่จาก State เพื่อให้ UI แสดงผลทันทีโดยไม่ต้อง Refresh
-                              setUsers(users => [...users]);
-                              setProjects(projects => [...projects]);
-                          }, 1500);
-
-                      } catch (error) {
-                          alert('เกิดข้อผิดพลาดในการประมวลผลไฟล์ (Invalid File Format)');
-                          console.error("Parse error:", error);
+                          }, 500);
+                          
+                      } catch (err) {
+                          console.error("Restore state error:", err);
+                          showAlert("เกิดข้อผิดพลาด", "เกิดข้อผิดพลาดระหว่างการกู้คืนข้อมูล: " + err.message);
                           setIsRestoring(false);
                           setRestoreProgress('');
                       }
                   };
                   reader.readAsText(file);
-              }, 500);
-          }
+              }, 500); // รอให้ Modal ยืนยันปิดลงก่อนเริ่มอ่านไฟล์
+          },
+          'ยืนยันการกู้คืน',
+          'warning'
       );
   };
 
+  // --- NEW: Google Sheets Sync Handler ---
   const handleSyncToGoogleSheets = async () => {
       const GOOGLE_SCRIPT_URL = GOOGLE_SCRIPT_CONFIG.SHEETS_URL;
       
+      // ปรับปรุงเงื่อนไขการตรวจสอบใหม่ ให้เช็คแค่ค่าว่างหรือค่า Placeholder เดิม
       if(!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes('YOUR_')) {
           alert("กรุณานำ Web App URL ของ Google Apps Script มาใส่ในโค้ดก่อนใช้งานฟังก์ชันนี้");
           return;
@@ -7028,16 +6990,11 @@ export default function App() {
 
       setIsSyncingSheets(true);
       try {
-          // เตรียมข้อมูลส่งไปยัง Google Apps Script
+          // เลือกเฉพาะข้อมูลที่เป็นตารางเพื่อส่งไป Google Sheets
           const payload = {
-              'Company_Info_ข้อมูลองค์กร': [companyInfo],
-              'Users_ผู้ใช้งาน': users.map(u => ({...u, photo: u.photo ? 'Base64 Image' : ''})),
-              'Projects_โครงการ': projects.map(p => {
-                  const safeProject = {...p, logo: p.logo ? 'Base64 Image' : ''};
-                  if (safeProject.files) safeProject.files = 'Files attached';
-                  return safeProject;
-              }),
-              'Contracts_สัญญา': contracts.map(c => ({...c, file: c.file ? 'File attached' : ''})),
+              'Users_พนักงาน': users,
+              'Projects_โครงการ': projects,
+              'Contracts_สัญญา': contracts,
               'Contractors_ผู้รับเหมา': contractors,
               'Assets_ทรัพย์สิน': assets.map(a => ({...a, photo: a.photo ? 'Base64 Image' : ''})), // ซ่อน Base64 เพื่อไม่ให้เซลล์เกินขีดจำกัด
               'Tools_เครื่องมือ': tools.map(t => ({...t, photo: t.photo ? 'Base64 Image' : ''})),
@@ -7283,53 +7240,15 @@ export default function App() {
   };
 
   const handleSaveUser = (e) => {
-      if (e && e.preventDefault) e.preventDefault();
-
-      const empId = (newUser.employeeId || '').trim();
-      const uName = (newUser.username || '').trim();
-      
-      // --- FIX: ใช้ functional update เพื่อเข้าถึงข้อมูลล่าสุด ตัดปัญหา Stale State (Closure) ---
-      setUsers(prevUsers => {
-          const safeUsers = Array.isArray(prevUsers) ? prevUsers : [];
-          
-          // --- FIX 1: ป้องกัน รหัสพนักงาน (employeeId) ซ้ำซ้อน ---
-          if (empId) {
-              const isEmpIdDuplicate = safeUsers.some(u => u.id !== newUser.id && (u.employeeId || '').trim() === empId);
-              if (isEmpIdDuplicate) {
-                  alert(`บันทึกไม่สำเร็จ: รหัสพนักงาน "${empId}" มีการใช้งานแล้วในระบบ กรุณาตรวจสอบและเปลี่ยนรหัสใหม่`);
-                  return safeUsers; // คืนค่าเดิม ไม่ทำการบันทึก
-              }
-          }
-          
-          // --- FIX 2: ป้องกัน ชื่อผู้ใช้ (username) ซ้ำซ้อน ---
-          if (uName) {
-              const isUnameDuplicate = safeUsers.some(u => u.id !== newUser.id && (u.username || '').trim().toLowerCase() === uName.toLowerCase());
-              if (isUnameDuplicate) {
-                  alert(`บันทึกไม่สำเร็จ: ชื่อผู้ใช้สำหรับล็อกอิน (Username) "${uName}" มีคนใช้แล้ว กรุณาเปลี่ยนใหม่`);
-                  return safeUsers; // คืนค่าเดิม ไม่ทำการบันทึก
-              }
-          }
-
-          // --- FIX 3: Deep copy สิทธิ์การใช้งาน เพื่อตัดขาด Object Reference ป้องกันบัคสิทธิ์เด้งกลับไปเป็นค่าเดิม ---
-          const permissionsToSave = JSON.parse(JSON.stringify(newUser.permissions || {}));
-          const finalUserData = { ...newUser, permissions: permissionsToSave };
-
-          let updatedList;
-          if (isEditingUser) {
-              updatedList = safeUsers.map(u => u.id === finalUserData.id ? finalUserData : u);
-          } else {
-              // ดันผู้ใช้งานที่เพิ่งเพิ่มใหม่ไว้บนสุด เพื่อให้หาเจอง่าย
-              updatedList = [{ ...finalUserData, id: generateId(), status: 'Active', created_at: new Date().toISOString() }, ...safeUsers];
-          }
-          
-          // ปิด Modal และแสดงข้อความสำเร็จหลังอัปเดต State (ใช้ setTimeout หลบการทำงานซ้อนทับ)
-          setTimeout(() => {
-              setShowAddUserModal(false);
-              alert(t('saveSuccess'));
-          }, 50);
-
-          return updatedList;
-      }, true); // <--- เพิ่ม true ตรงนี้เพื่อบังคับซิงค์คลาวด์แบบเร่งด่วน (Force Save) ไม่รอ 1 วินาที
+      e.preventDefault();
+      if (isEditingUser) {
+          setUsers(users.map(u => u.id === newUser.id ? { ...newUser } : u));
+      } else {
+          // แก้ไข: สลับตำแหน่ง ...newUser ไว้ด้านหน้า เพื่อไม่ให้เอา id เดิมมาทับ id ใหม่ (ป้องกันบัค ID ซ้ำในระบบ)
+          setUsers([...users, { ...newUser, id: generateId(), status: 'Active', created_at: new Date().toISOString() }]);
+      }
+      setShowAddUserModal(false);
+      alert(t('saveSuccess'));
   };
 
   const handleEditUser = (user) => {
@@ -7338,9 +7257,6 @@ export default function App() {
       if (typeof depts === 'string') {
           depts = depts.split(', ').filter(Boolean);
       }
-
-      // --- FIX 2: ป้องกันสิทธิ์หาย โดยผสานสิทธิ์เดิมของผู้ใช้เข้ากับโครงสร้างสิทธิ์หลักล่าสุดเสมอ ---
-      const safePermissions = getMergedPermissions(user.permissions || {});
 
       setNewUser({ 
           // กำหนดค่าเริ่มต้นป้องกัน undefined
@@ -7357,7 +7273,7 @@ export default function App() {
           // ใช้ค่าจาก user หรือถ้าไม่มีให้ใช้ค่าเริ่มต้น
           position: user.position || EMPLOYEE_POSITIONS[0],
           accessibleDepts: depts,
-          permissions: safePermissions, // ใช้สิทธิ์ที่ผ่านการตรวจสอบและผสานโครงสร้างแล้ว
+          permissions: user.permissions || getDefaultPermissions(),
       });
       setIsEditingUser(true);
       setShowAddUserModal(true);
@@ -8469,17 +8385,8 @@ export default function App() {
           .filter(u => userRoleFilter ? u.position === userRoleFilter : true)
           .sort((a, b) => {
               // FIX: แปลงเป็น String ก่อนเปรียบเทียบ ป้องกัน Error กรณีมีข้อมูลเป็นตัวเลข (Number)
-              const idA = String(a.employeeId || '').trim();
-              const idB = String(b.employeeId || '').trim();
-              
-              // --- FIX: กรณีที่ไม่ได้ใส่รหัสพนักงาน (พนักงานใหม่ที่รหัสว่าง) ให้เรียงตามเวลาที่สร้างใหม่สุดขึ้นก่อน เพื่อป้องกันผู้ใช้หาข้อมูลไม่เจอ ---
-              if (!idA && !idB) {
-                  return new Date(b.created_at || 0) - new Date(a.created_at || 0);
-              }
-              // ถ้าคนใดคนหนึ่งไม่มีรหัสพนักงาน ให้คนที่ไม่มีไปอยู่ท้ายสุดเสมอ (จะได้ไม่รบกวนการเรียงรหัส)
-              if (!idA) return 1;
-              if (!idB) return -1;
-
+              const idA = String(a.employeeId || '');
+              const idB = String(b.employeeId || '');
               if (userSortOrder === 'desc') return idB.localeCompare(idA); // มากไปน้อย
               return idA.localeCompare(idB); // น้อยไปมาก
           });
@@ -8708,8 +8615,8 @@ export default function App() {
                                               const lastDate = new Date(user.lastLogin);
                                               const now = new Date();
                                               const diffMins = Math.floor((now - lastDate) / 60000);
-                                              // ปรับเป็น 60 นาที เนื่องจากยกเลิกการอัปเดตอัตโนมัติ
-                                              const isOnline = diffMins <= 60; 
+                                              // หากมีคนเข้าสู่ระบบภายใน 15 นาที ให้แสดงเป็นสถานะออนไลน์ (จุดเขียว)
+                                              const isOnline = diffMins <= 15; 
                                               return (
                                                   <div className="flex flex-col gap-1">
                                                       <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md border w-fit shadow-sm ${isOnline ? 'bg-green-50 border-green-200 text-green-700' : 'bg-gray-50 border-gray-200 text-gray-600'}`} title={lastDate.toLocaleString('th-TH')}>
@@ -16657,162 +16564,6 @@ export default function App() {
                         handleSaveUser(e);
                     }
                 }}>{t('save')}</Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Add Project Modal */}
-      {showAddProjectModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto p-4 animate-fade-in">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl p-6 m-4 relative max-h-[90vh] flex flex-col">
-            <div className="flex justify-between items-center mb-6 border-b pb-4 shrink-0">
-              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                <Building2 className="text-orange-500" />
-                {isEditingProject ? 'แก้ไขข้อมูลโครงการ' : t('newProjectTitle')}
-              </h2>
-              <button onClick={() => setShowAddProjectModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
-            </div>
-            
-            <div className="overflow-y-auto custom-scrollbar flex-1 pr-2">
-                <form id="projectForm" onSubmit={handleSaveProject} className="space-y-6 pb-4">
-                    {/* 1. ข้อมูลทั่วไปและโลโก้ */}
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="flex flex-col items-center gap-3 bg-gray-50 p-4 rounded-xl border border-gray-200">
-                            <label className="text-sm font-bold text-gray-700">{t('projLogo')}</label>
-                            <div className="w-32 h-32 rounded-xl bg-white border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative group">
-                                {newProject.logo ? (
-                                    <img src={newProject.logo} alt="Logo" className="w-full h-full object-contain p-2" />
-                                ) : (
-                                    <Building2 size={40} className="text-gray-300" />
-                                )}
-                                <input type="file" accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleLogoUpload} />
-                                <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                                    <span className="text-white text-xs font-bold flex items-center gap-1"><Upload size={14}/> เลือกรูป</span>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div className="lg:col-span-2 space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">{t('projCode')}</label>
-                                    <input type="text" readOnly className="w-full border border-gray-300 rounded-md p-2 outline-none bg-gray-100 text-gray-500 font-mono" value={newProject.code} />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">{t('projType')} <span className="text-red-500">*</span></label>
-                                    <select className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 bg-white" value={newProject.type} onChange={e => setNewProject({...newProject, type: e.target.value})}>
-                                        {PROJECT_TYPES.map(type => <option key={type} value={type}>{t(type === 'Condo' ? 'tab_condo' : type === 'Village' ? 'tab_village' : 'tab_office')}</option>)}
-                                    </select>
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">{t('projName')} <span className="text-red-500">*</span></label>
-                                <input type="text" required className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200" value={newProject.name} onChange={e => setNewProject({...newProject, name: e.target.value})} />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">{t('projAddress')}</label>
-                                <textarea className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200 h-16 resize-none" value={newProject.address} onChange={e => setNewProject({...newProject, address: e.target.value})}></textarea>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* 2. ข้อมูลการติดต่อและนิติบุคคล */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-orange-50 p-4 rounded-xl border border-orange-100">
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-1">{t('officePhone')}</label>
-                            <input type="tel" className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200" value={newProject.phone} onChange={e => setNewProject({...newProject, phone: e.target.value})} />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-1">{t('taxId')}</label>
-                            <input type="text" className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200" value={newProject.taxId} onChange={e => setNewProject({...newProject, taxId: e.target.value})} />
-                        </div>
-                    </div>
-
-                    {/* 3. ข้อมูลสัญญาบริหาร */}
-                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-4">
-                        <h3 className="font-bold text-gray-800 border-b pb-2 flex items-center gap-2"><Briefcase size={16}/> สัญญาบริหารงานนิติบุคคล</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">{t('contractStartDate')} <span className="text-red-500">*</span></label>
-                                <input type="date" required className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200" value={newProject.contractStartDate} onChange={e => setNewProject({...newProject, contractStartDate: e.target.value})} />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">{t('contractEndDate')} <span className="text-red-500">*</span></label>
-                                <input type="date" required className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200" value={newProject.contractEndDate} onChange={e => setNewProject({...newProject, contractEndDate: e.target.value})} />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">มูลค่าสัญญา/เดือน (บาท)</label>
-                                <input type="number" className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200" value={newProject.contractValue} onChange={e => setNewProject({...newProject, contractValue: e.target.value})} placeholder="0.00" />
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* 4. เอกสารแนบ (PDF) */}
-                    <div>
-                        <h3 className="font-bold text-gray-800 border-b pb-2 mb-4 flex items-center gap-2"><FileText size={16}/> {t('uploadDocs')} <span className="text-xs font-normal text-gray-500">(แนบเป็นไฟล์ PDF)</span></h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {[
-                                { key: 'orchor', label: t('doc_orchor') },
-                                { key: 'committee', label: t('doc_committee') },
-                                { key: 'regulations', label: t('doc_regulations') },
-                                { key: 'resident_rules', label: t('doc_resident_rules') }
-                            ].map(doc => (
-                                <div key={doc.key} className="border border-gray-200 rounded-lg p-3 flex items-center justify-between bg-white shadow-sm hover:border-blue-300 transition-colors">
-                                    <div className="flex items-center gap-3 overflow-hidden">
-                                        <div className={`p-2 rounded shrink-0 ${newProject.files?.[doc.key] ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
-                                            <FileText size={18} />
-                                        </div>
-                                        <div className="flex flex-col min-w-0">
-                                            <span className="text-sm font-bold text-gray-700 truncate" title={doc.label}>{doc.label}</span>
-                                            {newProject.files?.[doc.key] ? (
-                                                <span className="text-xs text-green-600 font-medium truncate" title={newProject.files[doc.key].name}>
-                                                    {newProject.files[doc.key].name}
-                                                </span>
-                                            ) : (
-                                                <span className="text-xs text-gray-400">ยังไม่แนบไฟล์</span>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <label className="cursor-pointer shrink-0 ml-2">
-                                        <span className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-3 py-1.5 rounded font-medium transition-colors">
-                                          {newProject.files?.[doc.key] ? 'เปลี่ยนไฟล์' : 'เลือกไฟล์'}
-                                        </span>
-                                        <input type="file" accept=".pdf" className="hidden" onChange={(e) => handleProjectFileUpload(e, doc.key)} />
-                                    </label>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Status for editing */}
-                    {isEditingProject && (
-                        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 flex items-center justify-between">
-                            <label className="font-bold text-gray-700">สถานะโครงการ</label>
-                            <select 
-                                className="border border-gray-300 rounded-md p-2 outline-none focus:border-orange-500 bg-white font-bold"
-                                value={newProject.status}
-                                onChange={e => setNewProject({...newProject, status: e.target.value})}
-                            >
-                                <option value="Active" className="text-green-600">Active (รับบริหารอยู่)</option>
-                                <option value="Inactive" className="text-gray-600">Inactive (สิ้นสุดสัญญา/ไม่ได้รับบริหารแล้ว)</option>
-                            </select>
-                        </div>
-                    )}
-
-                </form>
-            </div>
-            
-            <div className="flex justify-end gap-2 pt-4 border-t border-gray-200 shrink-0">
-                <Button variant="secondary" onClick={() => setShowAddProjectModal(false)}>{t('cancel')}</Button>
-                <Button type="button" icon={isSavingProject ? Loader2 : Save} disabled={isSavingProject} onClick={(e) => {
-                    const form = document.getElementById('projectForm');
-                    if (form && form.reportValidity()) {
-                        handleSaveProject(e);
-                    }
-                }}>
-                    {isSavingProject ? 'กำลังบันทึก...' : t('save')}
-                </Button>
             </div>
           </div>
         </div>
