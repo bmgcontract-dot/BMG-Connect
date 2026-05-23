@@ -1224,9 +1224,9 @@ const compressImage = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                // แก้ไขเด็ดขาด: ลดขนาดสูงสุดลงเป็น 600px เพื่อป้องกันปัญหา Local Storage ลิมิต 5MB เต็ม ซึ่งเป็นสาเหตุที่เซฟแล้วรีเฟรชข้อมูลหาย
-                const MAX_WIDTH = 600;
-                const MAX_HEIGHT = 600;
+                // กำหนดขนาดสูงสุด 800px เพื่อคงความชัดเจน แต่ลดขนาดไฟล์ป้องกันปัญหา 1MB Limit ของฐานข้อมูล
+                const MAX_WIDTH = 800;
+                const MAX_HEIGHT = 800;
                 let width = img.width;
                 let height = img.height;
 
@@ -1246,8 +1246,8 @@ const compressImage = (file) => {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
                 
-                // บีบอัดเป็น JPEG Quality 40% (ไฟล์จะเล็กลงมาก ช่วยให้บันทึกรายงานได้เยอะขึ้นโดยไม่บัค)
-                resolve(canvas.toDataURL('image/jpeg', 0.4));
+                // บีบอัดเป็น JPEG Quality 60%
+                resolve(canvas.toDataURL('image/jpeg', 0.6));
             };
             img.onerror = () => {
                 // กรณีเกิดข้อผิดพลาดในการโหลดรูป ให้ส่งค่าต้นฉบับกลับไป
@@ -1417,10 +1417,6 @@ const getAllFilesLocally = async () => {
 
 // --- Custom Hook for Persistent Storage (Firebase or LocalStorage Fallback) ---
 function usePersistentState(key, initialValue, fbUser) {
-  // 🌟 FIX 100%: สร้างรหัสประจำตัวของแท็บ (Instance ID) 
-  // เพื่อใช้แยกแยะว่าการอัปเดตมาจากหน้าจอของเรา หรือมาจากเครื่องอื่น
-  const instanceIdRef = useRef(Math.random().toString(36).substring(2, 15));
-
   const [state, setState] = useState(() => {
       if (typeof window !== 'undefined') {
           const local = localStorage.getItem(key);
@@ -1441,6 +1437,10 @@ function usePersistentState(key, initialValue, fbUser) {
   
   const stateRef = useRef(state);
   const syncTimeoutRef = useRef(null); 
+  const isUploadingRef = useRef(false);
+  
+  // FIX: เริ่มต้นระบบควบคุมเวอร์ชันที่ 0 เพื่อให้การโหลดครั้งแรกยอมรับข้อมูลจาก Server เสมอ
+  const localVersionRef = useRef(0); 
   
   const [isInitialLoadDone, setIsInitialLoadDone] = useState(false);
   const [isSynced, setIsSynced] = useState(false);
@@ -1471,38 +1471,50 @@ function usePersistentState(key, initialValue, fbUser) {
 
     const unsubscribe = onSnapshot(docRef, async (docSnap) => {
       if (docSnap.exists()) {
+        currentFetchId++;
+        const thisFetchId = currentFetchId;
         const data = docSnap.data();
         
-        // 🌟 THE BULLETPROOF FIX: การป้องกันระดับสูงสุด 🌟
-        // หากข้อมูลอัปเดตถูกสร้างมาจาก "แท็บเบราว์เซอร์นี้" ให้ระบบปฏิเสธการโหลดซ้ำทันที!
-        if (data.updaterInstance === instanceIdRef.current) {
+        // กำหนด timestamp ขั้นต่ำกรณีข้อมูลเก่าไม่มีการประทับเวลา
+        const serverTimestamp = data.timestamp || 1;
+
+        // --- FIX: Block Echoes and Stale Data ปราบอาการข้อมูลเด้งไปมา ---
+        // หากข้อมูลจากคลาวด์ เก่ากว่า หรือ "เท่ากับ" เวลาที่เครื่องเราพึ่งเซฟไปล่าสุด ให้เตะทิ้งทันที!
+        // เพราะนั่นคือเสียงสะท้อน (Echo) ของเราเอง การประกอบร่างข้อมูลซ้ำจะทำให้ดึง Cache เก่ามาปน
+        if (serverTimestamp <= localVersionRef.current) {
             setIsLoaded(true);
             setIsInitialLoadDone(true);
             return;
         }
 
-        currentFetchId++;
-        const thisFetchId = currentFetchId;
-
         try {
           const applyData = (parsedData) => {
+              if (JSON.stringify(stateRef.current) === JSON.stringify(parsedData)) {
+                  setIsLoaded(true);
+                  setIsSynced(true);
+                  setIsInitialLoadDone(true);
+                  localVersionRef.current = serverTimestamp; // อัปเดตเวอร์ชันให้ตรงกัน
+                  return;
+              }
+
+              // อัปเดตเวอร์ชันในเครื่องให้ตรงกับคลาวด์
+              localVersionRef.current = serverTimestamp;
+
               let finalData = parsedData;
               
               if (Array.isArray(initialValue) && !Array.isArray(parsedData)) {
                   finalData = (parsedData && typeof parsedData === 'object') ? Object.values(parsedData) : [];
               }
 
-              // ป้องกันคลาวด์ว่างเปล่าลบข้อมูลที่มีอยู่ในเครื่อง
-              const isFinalEmpty = Array.isArray(finalData) ? finalData.length === 0 : (!finalData || Object.keys(finalData || {}).length === 0);
-              const isCurrentNotEmpty = Array.isArray(stateRef.current) ? stateRef.current.length > 0 : (stateRef.current && Object.keys(stateRef.current || {}).length > 0);
+              const isFinalEmpty = Array.isArray(finalData) ? finalData.length === 0 : (!finalData || (typeof finalData === 'object' && Object.keys(finalData || {}).length === 0));
+              const isCurrentNotEmpty = Array.isArray(stateRef.current) ? stateRef.current.length > 0 : (stateRef.current && typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length > 0);
 
               if (isFinalEmpty && isCurrentNotEmpty) {
-                  return; 
+                  return; // ป้องกันคลาวด์ล้างบางข้อมูล
               }
               
               setState(finalData);
-              stateRef.current = finalData; 
-              
+              stateRef.current = finalData; // ซิงค์ State ทันที
               if (typeof window !== 'undefined') {
                   setTimeout(() => {
                       try { localStorage.setItem(key, JSON.stringify(finalData)); } catch(e) {}
@@ -1520,53 +1532,36 @@ function usePersistentState(key, initialValue, fbUser) {
               let hasChunkError = false;
               let retryCount = 0;
 
-              // ระบบซ่อมแซมและประกอบร่างข้อมูล (อัปเกรดเป็นแบบ Parallel Fetching เร็วขึ้น 3-5 เท่า)
+              // Retry Mechanism for Chunks: พยายามประกอบร่างใหม่หากชิ้นส่วนมาไม่ครบ
               while (retryCount < 3) {
                   fullJson = '';
                   hasChunkError = false;
                   
-                  try {
-                      // สร้าง Request โหลดชิ้นส่วนทั้งหมด "พร้อมกัน"
-                      const chunkPromises = [];
-                      for (let i = 0; i < data.totalChunks; i++) {
-                          const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
-                          chunkPromises.push(getDoc(chunkRef));
-                      }
-                      
-                      // รอให้ทุกชิ้นส่วนดาวน์โหลดเสร็จสมบูรณ์
-                      const chunkSnaps = await Promise.all(chunkPromises);
-                      
-                      // นำชิ้นส่วนมาประกอบร่างตามลำดับ
-                      for (let i = 0; i < chunkSnaps.length; i++) {
-                          const chunkSnap = chunkSnaps[i];
-                          if (chunkSnap.exists()) {
-                              const chunkData = chunkSnap.data();
-                              // ตรวจสอบขั้นเด็ดขาด: ชิ้นส่วนต้องตรงกับเวลาที่อัปเดต ไม่เช่นนั้นถือว่าไฟล์เสีย
-                              if (chunkData.timestamp && expectedTimestamp && chunkData.timestamp !== expectedTimestamp) {
-                                  hasChunkError = true;
-                                  break;
-                              }
-                              fullJson += chunkData.chunk;
-                          } else {
+                  for (let i = 0; i < data.totalChunks; i++) {
+                      const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${key}_${i}`);
+                      const chunkSnap = await getDoc(chunkRef);
+                      if (chunkSnap.exists()) {
+                          const chunkData = chunkSnap.data();
+                          if (chunkData.timestamp && expectedTimestamp && chunkData.timestamp !== expectedTimestamp) {
                               hasChunkError = true;
                               break;
                           }
+                          fullJson += chunkData.chunk;
+                      } else {
+                          hasChunkError = true;
+                          break;
                       }
-                  } catch (error) {
-                      console.error("Parallel fetch error:", error);
-                      hasChunkError = true;
                   }
                   
                   if (!hasChunkError) break; 
                   
                   retryCount++;
-                  // ลดเวลาหน่วงเมื่อต้องพยายามโหลดใหม่ให้สั้นลง
-                  if (retryCount < 3) await new Promise(r => setTimeout(r, 400)); 
+                  await new Promise(r => setTimeout(r, 600 * retryCount));
               }
               
               if (thisFetchId !== currentFetchId || hasChunkError) {
                   setIsInitialLoadDone(true); 
-                  return; // ยกเลิกการอัปเดตหากข้อมูลมาไม่ครบ (ป้องกันข้อมูลหาย)
+                  return;
               }
 
               if (fullJson) {
@@ -1586,7 +1581,7 @@ function usePersistentState(key, initialValue, fbUser) {
          setIsLoaded(true);
          setIsInitialLoadDone(true);
          if (!isSynced && stateRef.current) {
-             const isCurrentEmpty = Array.isArray(stateRef.current) ? stateRef.current.length === 0 : (!stateRef.current || Object.keys(stateRef.current || {}).length === 0);
+             const isCurrentEmpty = Array.isArray(stateRef.current) ? stateRef.current.length === 0 : (!stateRef.current || (typeof stateRef.current === 'object' && Object.keys(stateRef.current || {}).length === 0));
              if (!isCurrentEmpty) {
                  setPersistentValue(stateRef.current, true);
              }
@@ -1616,6 +1611,10 @@ function usePersistentState(key, initialValue, fbUser) {
     
     if (!isForceSave && JSON.stringify(valueToStore) === JSON.stringify(stateRef.current)) return;
 
+    // --- FIX: อัปเดต Version Control ทันทีที่เครื่องมีการแก้ไข เพื่อปักหมุดความสดใหม่ และป้องกันเสียงสะท้อน ---
+    const newVersionTimestamp = Date.now();
+    localVersionRef.current = newVersionTimestamp; 
+
     setState(valueToStore);
     stateRef.current = valueToStore; 
     
@@ -1630,13 +1629,13 @@ function usePersistentState(key, initialValue, fbUser) {
 
        return new Promise((resolve) => {
            const doFirebaseSync = async () => {
+               isUploadingRef.current = true;
                try {
-                   const newVersionTimestamp = Date.now();
                    const jsonStr = JSON.stringify(stateRef.current); 
                    const CHUNK_SIZE = 250000; 
                    const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
                    
-                   // แพ็คเกจข้อมูลและส่งไปคลาวด์ในเวลาเดียวกันทั้งหมดแบบ Atomic
+                   // แพ็คเกจข้อมูลและส่งไปคลาวด์ในเวลาเดียวกัน (Atomic Write)
                    const batch = writeBatch(db);
                    
                    for (let i = 0; i < totalChunks; i++) {
@@ -1646,20 +1645,14 @@ function usePersistentState(key, initialValue, fbUser) {
                    }
                    
                    const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', key);
-                   
-                   // 🌟 ฝังรหัสประทับของหน้าจอเราลงไป (Instance ID)
-                   batch.set(metaRef, { 
-                       totalChunks, 
-                       timestamp: newVersionTimestamp, 
-                       updaterUid: fbUser.uid,
-                       updaterInstance: instanceIdRef.current 
-                   });
+                   batch.set(metaRef, { totalChunks, timestamp: newVersionTimestamp, updaterUid: fbUser.uid });
                    
                    await batch.commit();
                } catch (err) {
                    console.error(`Firestore Batch Save Error [${key}]:`, err);
                } finally {
                    syncTimeoutRef.current = null;
+                   isUploadingRef.current = false;
                    resolve();
                }
            };
@@ -5248,50 +5241,45 @@ export default function App() {
   };
   
   const handleSaveDailyReport = (e) => {
-      if (e && e.preventDefault) e.preventDefault();
+      e.preventDefault();
+      let savedReport;
+      let nextList; // สร้างตัวแปรรอรับ List ล่าสุด
       
-      // FIX: เปลี่ยนมาใช้ Callback Pattern (prevList) เพื่อให้ได้ข้อมูลล่าสุดเสมอ ป้องกันการนำข้อมูลเก่าไปทับ
-      setDailyReports(prevList => {
-          const safeList = Array.isArray(prevList) ? prevList.filter(Boolean) : [];
-          let savedReport;
-          let nextList; 
-          
-          // ป้องกันการสร้างรายงานซ้ำซ้อนในวันเดียวกัน (Enforce 1 report per day)
-          let finalId = newDailyReport.id;
-          if (!finalId) {
-              const existing = safeList.find(r => r.projectId === selectedProject.id && r.date === newDailyReport.date);
-              if (existing) {
-                  finalId = existing.id;
-              }
+      // ป้องกันการสร้างรายงานซ้ำซ้อนในวันเดียวกัน (Enforce 1 report per day)
+      let finalId = newDailyReport.id;
+      if (!finalId) {
+          const existing = dailyReports.find(r => r.projectId === selectedProject.id && r.date === newDailyReport.date);
+          if (existing) {
+              finalId = existing.id;
           }
+      }
 
-          if (finalId) {
-              // Update existing report
-              savedReport = { ...newDailyReport, id: finalId, projectId: selectedProject.id };
-              nextList = safeList.map(r => r.id === finalId ? savedReport : r);
-          } else {
-              // Create new report
-              const id = generateId();
-              savedReport = { ...newDailyReport, id, projectId: selectedProject.id };
-              nextList = [savedReport, ...safeList]; // เพิ่มไว้ด้านบนสุด
-          }
+      // FIX: ไม่นำ Side Effect ไปใส่ใน setState และคำนวณ State ด้วยตนเองก่อนเซฟ
+      if (finalId) {
+          // Update existing report
+          savedReport = { ...newDailyReport, id: finalId, projectId: selectedProject.id };
+          nextList = dailyReports.map(r => r.id === finalId ? savedReport : r);
+      } else {
+          // Create new report
+          const id = generateId();
+          savedReport = { ...newDailyReport, id, projectId: selectedProject.id };
+          nextList = [savedReport, ...dailyReports]; // เพิ่มไว้ด้านบนสุด
+      }
 
-          // หน่วงเวลาให้ State อัปเดตเสร็จก่อน แล้วค่อยเปิด Modal ดูข้อมูล พร้อมทำ Auto Sync
-          setTimeout(() => {
-              let filesToUpload = [];
-              ['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].forEach(dept => {
-                  const images = savedReport.performance[dept]?.images || [];
-                  images.forEach((img, idx) => { filesToUpload.push({ name: `DailyReport_${savedReport.id}_${dept}_${idx}.jpg`, data: img }); });
-              });
-              triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, filesToUpload);
+      // สั่ง Update State แบบชัดเจน
+      setDailyReports(nextList);
 
-              setShowAddDailyReportModal(false);
-              setSelectedDailyReport(savedReport); // Open view modal immediately
-              alert('บันทึกรายงานประจำวันเสร็จสมบูรณ์แล้ว!'); 
-          }, 50);
+      // --- AUTO SYNC TRIGGER ---
+      let filesToUpload = [];
+      ['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].forEach(dept => {
+          const images = savedReport.performance[dept]?.images || [];
+          images.forEach((img, idx) => { filesToUpload.push({ name: `DailyReport_${savedReport.id}_${dept}_${idx}.jpg`, data: img }); });
+      });
+      triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, filesToUpload);
 
-          return nextList;
-      }, true); // <-- สำคัญมาก: ใส่ true เพื่อให้ระบบ "บังคับเขียนลง Storage และ Database ทันที" ไม่ต้องรอจังหวะหน่วงเวลา
+      setShowAddDailyReportModal(false);
+      setSelectedDailyReport(savedReport); // Open view modal immediately
+      alert('บันทึกรายงานประจำวันเสร็จสมบูรณ์'); // แจ้งเตือนเพื่อให้มั่นใจว่าบันทึกแล้ว
   };
 
   const handleEditDailyReport = (report) => {
@@ -13444,8 +13432,7 @@ export default function App() {
                         const monthStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
                         const monthNameTh = targetDate.toLocaleDateString('th-TH', { month: 'short', year: '2-digit' });
                         
-                        // FIX: ป้องกัน Error จากข้อมูลที่ไม่มี Date
-                        const reportsInMonth = dailyReports.filter(r => r && r.projectId === selectedProject.id && r.date && r.date.startsWith(monthStr));
+                        const reportsInMonth = dailyReports.filter(r => r.projectId === selectedProject.id && r.date.startsWith(monthStr));
                         const uniqueDays = new Set(reportsInMonth.map(r => r.date)).size;
                         const daysInMonth = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0).getDate();
                         
@@ -13482,22 +13469,16 @@ export default function App() {
 
                 {/* List of reports */}
                 <div className="grid grid-cols-1 gap-4">
-                   {(() => {
-                       // FIX: กรองข้อมูลที่เป็น Null ออก และเรียงวันที่อย่างปลอดภัย
-                       const safeReports = Array.isArray(dailyReports) ? dailyReports.filter(Boolean) : [];
-                       const projReports = safeReports.filter(r => r.projectId === selectedProject.id);
-                       
-                       if (projReports.length === 0) {
-                           return <div className="text-center p-8 text-gray-500 bg-white rounded border border-dashed">{t('noData')}</div>;
-                       }
-                       
-                       return projReports.sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0)).map(report => (
+                   {dailyReports.filter(r => r.projectId === selectedProject.id).length === 0 ? (
+                       <div className="text-center p-8 text-gray-500 bg-white rounded border border-dashed">{t('noData')}</div>
+                   ) : (
+                       dailyReports.filter(r => r.projectId === selectedProject.id).sort((a,b) => new Date(b.date) - new Date(a.date)).map(report => (
                            <Card key={report.id} className="p-4 hover:shadow-md cursor-pointer relative group">
                                <div className="flex justify-between" onClick={() => setSelectedDailyReport(report)}>
                                    <span className="font-bold text-blue-700">
-                                       รายงานประจำวันที่ {report.date ? new Date(report.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'}) : '-'}
+                                       รายงานประจำวันที่ {new Date(report.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'})}
                                    </span>
-                                   <span className="text-sm text-gray-500 pr-8"><User size={12} className="inline mr-1"/>{report.reporter || 'ไม่ระบุ'}</span>
+                                   <span className="text-sm text-gray-500 pr-8"><User size={12} className="inline mr-1"/>{report.reporter}</span>
                                </div>
                                <div className="text-sm mt-2 text-gray-600 line-clamp-2 break-words" onClick={() => setSelectedDailyReport(report)}>{report.note || 'คลิกเพื่อดูรายละเอียดผลการปฏิบัติงาน...'}</div>
                                
@@ -13505,8 +13486,7 @@ export default function App() {
                                    <button 
                                        onClick={(e) => { 
                                            e.stopPropagation(); 
-                                           // อัปเดตแบบ Force Save ป้องกันลบแล้วรีเฟรชกลับมาใหม่
-                                           showConfirm('ยืนยันการลบ', `คุณต้องการลบรายงานประจำวันที่ ${report.date} ใช่หรือไม่?`, () => setDailyReports(prev => prev.filter(r => r.id !== report.id), true)); 
+                                           showConfirm('ยืนยันการลบ', `คุณต้องการลบรายงานประจำวันที่ ${report.date} ใช่หรือไม่?`, () => setDailyReports(prev => prev.filter(r => r.id !== report.id))); 
                                        }}
                                        className="absolute top-3 right-3 text-gray-300 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100"
                                        title="ลบรายงาน"
@@ -13515,8 +13495,8 @@ export default function App() {
                                    </button>
                                )}
                            </Card>
-                       ));
-                   })()}
+                       ))
+                   )}
                 </div>
             </div>
           )}
@@ -20153,8 +20133,7 @@ export default function App() {
                                 }
 
                                 const rankData = projects.map(p => {
-                                    // FIX: ป้องกัน Error จากข้อมูลที่ไม่มี Date
-                                    const pReports = dailyReports.filter(r => r && r.projectId === p.id && r.date && r.date.startsWith(targetMonthStr));
+                                    const pReports = dailyReports.filter(r => r.projectId === p.id && r.date && r.date.startsWith(targetMonthStr));
                                     const uniqueDays = new Set(pReports.map(r => r.date)).size;
                                     const percentage = passedDays > 0 ? Math.round((uniqueDays / passedDays) * 100) : 0;
                                     return { id: p.id, name: p.name, submittedDays: uniqueDays, percentage };
