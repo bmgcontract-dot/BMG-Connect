@@ -5276,8 +5276,8 @@ export default function App() {
           nextList = [savedReport, ...safeList]; // เพิ่มไว้ด้านบนสุด
       }
 
-      // สั่ง Update State แบบชัดเจน (ใช้ true เพื่อบังคับให้บันทึกลง Cloud ทันที)
-      setDailyReports(nextList, true);
+      // สั่ง Update State แบบชัดเจน
+      setDailyReports(nextList);
 
       // --- AUTO SYNC TRIGGER ---
       let filesToUpload = [];
