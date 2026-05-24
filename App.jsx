@@ -5348,10 +5348,15 @@ export default function App() {
       return Number(commonFee) + Number(lateFee) + Number(water) + Number(parking) + Number(violation) + Number(other);
   };
   
-  // --- NEW: ฟังก์ชันดึงกราฟย้อนหลัง 7 วัน ---
+  // --- NEW: ฟังก์ชันดึงกราฟย้อนหลัง 7 วัน (รวมทุกมิเตอร์) ---
   const getPast7DaysUtilityData = (targetDateStr) => {
       if (!targetDateStr || !selectedProject) return [];
-      const targetDate = new Date(targetDateStr);
+      
+      // ป้องกัน Timezone เพี้ยนโดยการแยก String
+      const targetParts = targetDateStr.split('-');
+      if (targetParts.length !== 3) return [];
+      const targetDate = new Date(targetParts[0], targetParts[1] - 1, targetParts[2]);
+      
       const data = [];
       const projectMeters = meters.filter(m => m.projectId === selectedProject.id);
       const waterMeterIds = projectMeters.filter(m => m.type === 'Water').map(m => m.id);
@@ -5361,9 +5366,9 @@ export default function App() {
           const d = new Date(targetDate);
           d.setDate(d.getDate() - i);
           const y = d.getFullYear();
-          const m = String(d.getMonth() + 1).padStart(2, '0');
-          const day = String(d.getDate()).padStart(2, '0');
-          const dateStr = `${y}-${m}-${day}`;
+          const mStr = String(d.getMonth() + 1).padStart(2, '0');
+          const dayStr = String(d.getDate()).padStart(2, '0');
+          const dateStr = `${y}-${mStr}-${dayStr}`;
           const displayDate = d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
 
           const dayReadings = utilityReadings.filter(r => r.date === dateStr);
@@ -5378,45 +5383,57 @@ export default function App() {
 
           data.push({
               date: displayDate,
-              water: waterUsage,
-              elec: elecUsage
+              water: Number(waterUsage.toFixed(2)),
+              elec: Number(elecUsage.toFixed(2))
           });
       }
       return data;
   };
 
   const renderUtilityTrendCharts = (dateStr) => {
+      if (!dateStr) return null;
       const chartData = getPast7DaysUtilityData(dateStr);
+      
+      // หาจำนวนมิเตอร์ที่นำมารวม
+      const projectMeters = meters.filter(m => m.projectId === selectedProject.id);
+      const waterCount = projectMeters.filter(m => m.type === 'Water').length;
+      const elecCount = projectMeters.filter(m => m.type === 'Electricity').length;
+
       return (
           <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-6" style={{ pageBreakInside: 'avoid' }}>
-              <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
-                  <BarChart3 size={16} className="text-blue-600"/> สถิติการใช้น้ำและไฟฟ้า ย้อนหลัง 7 วัน
-              </h3>
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2">
+                  <h3 className="font-bold text-gray-800 flex items-center gap-2 text-sm">
+                      <BarChart3 size={16} className="text-blue-600"/> สถิติการใช้พลังงาน ย้อนหลัง 7 วัน
+                  </h3>
+                  <div className="text-[10px] sm:text-xs text-blue-700 font-bold bg-blue-100 px-2.5 py-1 rounded-full border border-blue-200 shadow-sm flex items-center gap-1.5">
+                      <Zap size={12} className="text-blue-600"/> ดึงข้อมูลรวมอัตโนมัติ: น้ำ {waterCount} มิเตอร์, ไฟ {elecCount} มิเตอร์
+                  </div>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
-                      <h4 className="text-xs font-bold text-blue-600 mb-2 text-center flex items-center justify-center gap-1"><Droplet size={12}/> น้ำประปา (ลบ.ม.)</h4>
-                      <div className="h-32">
+                      <h4 className="text-xs font-bold text-blue-600 mb-3 text-center flex items-center justify-center gap-1"><Droplet size={12}/> น้ำประปารวม (ลบ.ม.)</h4>
+                      <div className="h-40">
                           <ResponsiveContainer width="100%" height="100%">
-                              <LineChart data={chartData} margin={{ top: 5, right: 10, left: -25, bottom: 0 }}>
+                              <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                  <XAxis dataKey="date" tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                  <YAxis tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                  <RechartsTooltip contentStyle={{ fontSize: '11px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                  <Line type="monotone" dataKey="water" name="ปริมาณใช้น้ำ" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} isAnimationActive={!isExporting} />
+                                  <XAxis dataKey="date" tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} dy={5} />
+                                  <YAxis tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                  <RechartsTooltip contentStyle={{ fontSize: '12px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                  <Line type="monotone" dataKey="water" name="ปริมาณใช้น้ำรวม" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, strokeWidth: 2, fill: '#fff' }} activeDot={{ r: 6 }} isAnimationActive={!isExporting} />
                               </LineChart>
                           </ResponsiveContainer>
                       </div>
                   </div>
                   <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
-                      <h4 className="text-xs font-bold text-orange-600 mb-2 text-center flex items-center justify-center gap-1"><Zap size={12}/> ไฟฟ้า (kWh)</h4>
-                      <div className="h-32">
+                      <h4 className="text-xs font-bold text-orange-600 mb-3 text-center flex items-center justify-center gap-1"><Zap size={12}/> ไฟฟ้ารวม (kWh)</h4>
+                      <div className="h-40">
                           <ResponsiveContainer width="100%" height="100%">
-                              <LineChart data={chartData} margin={{ top: 5, right: 10, left: -25, bottom: 0 }}>
+                              <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                  <XAxis dataKey="date" tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                  <YAxis tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                  <RechartsTooltip contentStyle={{ fontSize: '11px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                  <Line type="monotone" dataKey="elec" name="ปริมาณใช้ไฟ" stroke="#f97316" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} isAnimationActive={!isExporting} />
+                                  <XAxis dataKey="date" tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} dy={5} />
+                                  <YAxis tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                  <RechartsTooltip contentStyle={{ fontSize: '12px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                  <Line type="monotone" dataKey="elec" name="ปริมาณใช้ไฟรวม" stroke="#f97316" strokeWidth={3} dot={{ r: 4, strokeWidth: 2, fill: '#fff' }} activeDot={{ r: 6 }} isAnimationActive={!isExporting} />
                               </LineChart>
                           </ResponsiveContainer>
                       </div>
