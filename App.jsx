@@ -18588,39 +18588,6 @@ export default function App() {
                      ></textarea>
                 </div>
 
-                {/* NEW: Preview Auto-fetched Utility Readings */}
-                {(() => {
-                    const reportDate = newDailyReport.date;
-                    const projMeters = meters.filter(m => m.projectId === selectedProject.id);
-                    const projMeterIds = projMeters.map(m => m.id);
-                    const dayReadings = utilityReadings.filter(r => r.date === reportDate && projMeterIds.includes(r.meterId));
-
-                    if (dayReadings.length === 0) return null;
-
-                    return (
-                        <div className="mb-6 bg-gray-50 p-4 rounded-lg border border-gray-200 shadow-inner">
-                             <h3 className="font-bold text-gray-700 mb-1 text-sm flex items-center gap-2">
-                                 <Zap size={16} className="text-orange-500"/> ข้อมูลการจดมิเตอร์อัตโนมัติ ประจำวันที่ {new Date(reportDate).toLocaleDateString('th-TH')}
-                             </h3>
-                             <p className="text-[11px] text-gray-500 mb-3">* ระบบจะดึงข้อมูลมิเตอร์ที่ถูกจดในวันนี้ไปแสดงในรายงาน PDF โดยอัตโนมัติ ({dayReadings.length} รายการ)</p>
-                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                                 {dayReadings.map(r => {
-                                     const meter = projMeters.find(m => m.id === r.meterId);
-                                     return (
-                                         <div key={r.id} className="flex justify-between items-center bg-white p-2 border border-gray-200 rounded shadow-sm">
-                                             <div className="flex items-center gap-1.5 truncate pr-2">
-                                                 {meter?.type === 'Water' ? <Droplet size={14} className="text-blue-500 shrink-0"/> : <Zap size={14} className="text-orange-500 shrink-0"/>}
-                                                 <span className="font-medium text-gray-700 truncate" title={meter?.name}>{meter?.name} <span className="text-gray-400 font-normal">({meter?.code})</span></span>
-                                             </div>
-                                             <span className="font-bold text-red-600 shrink-0">+{Number(r.usage || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-                                         </div>
-                                     )
-                                 })}
-                             </div>
-                        </div>
-                    );
-                })()}
-
                 <div className="mt-6 flex justify-between items-center border-t pt-4">
                     <div className="flex items-center gap-2 text-sm text-gray-600">
                         <User size={16} /> {t('reporter')}: <span className="font-semibold text-gray-800">{newDailyReport.reporter}</span>
