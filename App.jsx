@@ -5513,16 +5513,53 @@ export default function App() {
               const headers = parseCSVLine(lines[0]);
               const newReports = [];
               
+              // NEW: หาตำแหน่งคอลัมน์ของข้อมูล เพื่อรองรับหัวตารางรูปแบบต่างๆ
+              const findColumn = (keywords) => {
+                  const idx = headers.findIndex(h => keywords.some(kw => h.toLowerCase().includes(kw.toLowerCase())));
+                  return idx !== -1 ? idx : -1;
+              };
+
+              // Map คอลัมน์ต่างๆ
+              const colMap = {
+                  date: findColumn(['วันที่', 'date']),
+                  reporter: findColumn(['ผู้รายงาน', 'reporter']),
+                  note: findColumn(['หมายเหตุ', 'note', 'รายละเอียดอื่น']),
+                  
+                  // กำลังพล
+                  mpJuristic: findColumn(['นิติบุคคล', 'juristic']),
+                  mpSecurity: findColumn(['รปภ', 'security', 'รักษาความปลอดภัย']),
+                  mpCleaning: findColumn(['แม่บ้าน', 'ทำความสะอาด', 'cleaning']),
+                  mpGardening: findColumn(['คนสวน', 'ดูแลสวน', 'gardening']),
+                  mpSweeper: findColumn(['คนกวาด', 'sweeper']),
+                  mpOther: findColumn(['กำลังพลอื่นๆ', 'other manpower']),
+                  
+                  // ผลการทำงาน
+                  perfJuristic: findColumn(['ผลงานนิติ', 'juristic work', 'รายละเอียดนิติ']),
+                  perfSecurity: findColumn(['ผลงานรปภ', 'security work', 'รายละเอียดรปภ']),
+                  perfCleaning: findColumn(['ผลงานแม่บ้าน', 'cleaning work', 'รายละเอียดแม่บ้าน']),
+                  perfGardening: findColumn(['ผลงานคนสวน', 'gardening work', 'รายละเอียดคนสวน']),
+                  perfSweeper: findColumn(['ผลงานกวาด', 'sweeper work', 'รายละเอียดคนกวาด']),
+                  perfOther: findColumn(['ผลงานอื่นๆ', 'other work', 'รายละเอียดอื่นๆ']),
+
+                  // รายรับ
+                  incCommon: findColumn(['ส่วนกลาง', 'common fee']),
+                  incLate: findColumn(['ค่าปรับล่าช้า', 'late fee']),
+                  incWater: findColumn(['ค่าน้ำ', 'water fee']),
+                  incParking: findColumn(['ค่าจอดรถ', 'parking fee']),
+                  incViolation: findColumn(['ผิดระเบียบ', 'violation fee']),
+                  incOther: findColumn(['รับอื่นๆ', 'other income'])
+              };
+
+              // --- FIX: ให้รับค่าวันที่จาก CSV แบบตรงไปตรงมามากขึ้น ป้องกันค่าหาย ---
               for (let i = 1; i < lines.length; i++) {
                   if (!lines[i].trim()) continue;
                   const values = parseCSVLine(lines[i]);
-                  const rowObj = {};
-                  headers.forEach((header, index) => rowObj[header] = values[index]);
                   
-                  const rawDate = rowObj['วันที่'] || rowObj['Date'] || rowObj['date'];
+                  // ดึงค่าตาม Mapping ใหม่ (ถ้าหาไม่เจอให้ใช้แบบเดิมเป็น Fallback)
+                  const rawDate = colMap.date !== -1 ? values[colMap.date] : (values[0] || ''); // สมมติว่าวันที่มักอยู่คอลัมน์แรก
                   if (!rawDate) continue;
                   
-                  // Use normalizeImportedDate to handle different formats
+                  // แปลงวันที่ให้อยู่ในรูปแบบ YYYY-MM-DD
                   const dateStr = normalizeImportedDate(rawDate);
                   if (!dateStr) continue;
 
@@ -5530,39 +5567,55 @@ export default function App() {
                   if (dailyReports.some(r => r.projectId === selectedProject.id && r.date === dateStr) || newReports.some(r => r.date === dateStr)) {
                       continue; 
                   }
+                  
+                  const getNum = (idx, fallbackName) => {
+                      if (idx !== -1) return parseFloat(values[idx]) || 0;
+                      // Fallback: ลองหาจาก Header แบบเป๊ะๆ
+                      const fallbackIdx = headers.indexOf(fallbackName);
+                      if (fallbackIdx !== -1) return parseFloat(values[fallbackIdx]) || 0;
+                      return 0;
+                  };
 
+                  const getStr = (idx, fallbackName) => {
+                      if (idx !== -1) return values[idx] || '';
+                      const fallbackIdx = headers.indexOf(fallbackName);
+                      if (fallbackIdx !== -1) return values[fallbackIdx] || '';
+                      return '';
+                  };
+
+                  // --- FIX: ตรวจสอบและให้ค่า Default อย่างรอบคอบ ป้องกัน Property หาย ---
                   newReports.push({
                       id: generateId(),
                       projectId: selectedProject.id,
                       date: dateStr,
                       manpower: {
-                          juristic: parseInt(rowObj['จนท.นิติบุคคล'] || rowObj['Juristic'] || 0) || 0,
-                          security: parseInt(rowObj['รปภ.'] || rowObj['Security'] || 0) || 0,
-                          cleaning: parseInt(rowObj['แม่บ้าน'] || rowObj['Cleaning'] || 0) || 0,
-                          gardening: parseInt(rowObj['คนสวน'] || rowObj['Gardening'] || 0) || 0,
-                          sweeper: parseInt(rowObj['คนกวาดถนน'] || rowObj['Sweeper'] || 0) || 0,
-                          other: parseInt(rowObj['อื่นๆ'] || rowObj['Other'] || 0) || 0,
+                          juristic: getNum(colMap.mpJuristic, 'จนท.นิติบุคคล'),
+                          security: getNum(colMap.mpSecurity, 'รปภ.'),
+                          cleaning: getNum(colMap.mpCleaning, 'แม่บ้าน'),
+                          gardening: getNum(colMap.mpGardening, 'คนสวน'),
+                          sweeper: getNum(colMap.mpSweeper, 'คนกวาดถนน'),
+                          other: getNum(colMap.mpOther, 'อื่นๆ'),
                           otherLabel: ''
                       },
                       performance: {
-                          juristic: { details: rowObj['ผลงานนิติบุคคล'] || rowObj['Juristic Work'] || '', images: [] },
-                          security: { details: rowObj['ผลงานรปภ.'] || rowObj['Security Work'] || '', images: [] },
-                          cleaning: { details: rowObj['ผลงานแม่บ้าน'] || rowObj['Cleaning Work'] || '', images: [] },
-                          gardening: { details: rowObj['ผลงานคนสวน'] || rowObj['Gardening Work'] || '', images: [] },
-                          sweeper: { details: rowObj['ผลงานคนกวาด'] || rowObj['Sweeper Work'] || '', images: [] },
-                          other: { details: rowObj['ผลงานอื่นๆ'] || '', images: [] }
+                          juristic: { details: getStr(colMap.perfJuristic, 'ผลงานนิติบุคคล'), images: [] },
+                          security: { details: getStr(colMap.perfSecurity, 'ผลงานรปภ.'), images: [] },
+                          cleaning: { details: getStr(colMap.perfCleaning, 'ผลงานแม่บ้าน'), images: [] },
+                          gardening: { details: getStr(colMap.perfGardening, 'ผลงานคนสวน'), images: [] },
+                          sweeper: { details: getStr(colMap.perfSweeper, 'ผลงานคนกวาด'), images: [] },
+                          other: { details: getStr(colMap.perfOther, 'ผลงานอื่นๆ'), images: [] }
                       },
                       income: {
-                          commonFee: parseFloat(rowObj['รับค่าส่วนกลาง'] || 0) || 0,
-                          lateFee: parseFloat(rowObj['รับค่าปรับ'] || 0) || 0,
-                          water: parseFloat(rowObj['รับค่าน้ำ'] || 0) || 0,
-                          parking: parseFloat(rowObj['รับค่าจอดรถ'] || 0) || 0,
-                          violation: parseFloat(rowObj['รับค่าปรับผิดระเบียบ'] || 0) || 0,
-                          other: parseFloat(rowObj['รับอื่นๆ'] || 0) || 0,
+                          commonFee: getNum(colMap.incCommon, 'รับค่าส่วนกลาง'),
+                          lateFee: getNum(colMap.incLate, 'รับค่าปรับ'),
+                          water: getNum(colMap.incWater, 'รับค่าน้ำ'),
+                          parking: getNum(colMap.incParking, 'รับค่าจอดรถ'),
+                          violation: getNum(colMap.incViolation, 'รับค่าปรับผิดระเบียบ'),
+                          other: getNum(colMap.incOther, 'รับอื่นๆ'),
                           otherLabel: ''
                       },
-                      note: rowObj['หมายเหตุ'] || rowObj['Note'] || '',
-                      reporter: rowObj['ผู้รายงาน'] || rowObj['Reporter'] || (currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System Import')
+                      note: getStr(colMap.note, 'หมายเหตุ'),
+                      reporter: getStr(colMap.reporter, 'ผู้รายงาน') || (currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System Import')
                   });
               }
               
@@ -5571,6 +5624,7 @@ export default function App() {
                       setDailyReports(prev => {
                           const safeNewReports = newReports.filter(nr => !prev.some(pr => pr.projectId === nr.projectId && pr.date === nr.date));
                           const nextList = [...safeNewReports, ...prev];
+                          // ย้าย triggerAutoSync ไปรันหลังจากการอัปเดต state เสร็จสิ้นเพื่อลดปัญหา
                           setTimeout(() => triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, []), 500);
                           return nextList;
                       }, true);
