@@ -1794,11 +1794,44 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
             try {
                 let batch = writeBatch(db);
                 let opCount = 0;
-                for (const item of newValue) {
+                for (let i = 0; i < newValue.length; i++) {
+                    const item = newValue[i];
                     if (!item.id) continue;
-                    batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id), item);
+
+                    // ป้องกัน Document มีขนาดใหญ่เกิน 1MB ตอนกู้คืนข้อมูล (มักจะเกิดกับ Daily Reports ที่มีรูป Base64 เยอะ)
+                    const safeItem = { ...item };
+                    try {
+                        let docStr = JSON.stringify(safeItem);
+                        if (docStr.length > 850000) { 
+                            if (safeItem.performance) {
+                                for (const dept in safeItem.performance) {
+                                    if (safeItem.performance[dept].images && safeItem.performance[dept].images.length > 0) {
+                                        safeItem.performance[dept].images = []; 
+                                        safeItem.performance[dept].details = (safeItem.performance[dept].details || '') + '\n[หมายเหตุ: รูปภาพถูกลบเพื่อลดขนาดข้อมูลระหว่างการกู้คืน]';
+                                    }
+                                }
+                            }
+                            if (safeItem.images && safeItem.images.length > 0) {
+                                safeItem.images = [];
+                            }
+                        }
+                    } catch (e) {
+                        console.warn("Error sizing doc during restore:", e);
+                    }
+
+                    batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, safeItem.id), safeItem);
                     opCount++;
-                    if (opCount >= 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
+                    
+                    if (opCount >= 400) { 
+                        await batch.commit(); 
+                        batch = writeBatch(db); 
+                        opCount = 0; 
+                    }
+
+                    // พักให้เบราว์เซอร์ทำงานอื่นทุกๆ 50 รายการ ป้องกันอาการหน้าจอค้าง (Freeze)
+                    if (i > 0 && i % 50 === 0) {
+                        await new Promise(resolve => setTimeout(resolve, 0));
+                    }
                 }
                 if (opCount > 0) await batch.commit();
             } catch (e) { console.error("Restore error", e); }
@@ -7205,6 +7238,22 @@ export default function App() {
                   if (d.contracts && Array.isArray(d.contracts)) {
                       d.contracts.forEach(c => {
                           if (c.file && c.file.data) delete c.file.data;
+                      });
+                  }
+                  // กรองขนาดของรายงานประจำวันเพื่อป้องกันเบราว์เซอร์ค้างก่อนส่งเข้า State
+                  if (d.dailyReports && Array.isArray(d.dailyReports)) {
+                      d.dailyReports.forEach(report => {
+                          if (report.performance) {
+                              Object.keys(report.performance).forEach(dept => {
+                                  if (report.performance[dept] && report.performance[dept].images && report.performance[dept].images.length > 0) {
+                                      const img = report.performance[dept].images[0];
+                                      if (img && img.length > 600000) { 
+                                           report.performance[dept].images = [];
+                                           report.performance[dept].details = (report.performance[dept].details || '') + '\n[หมายเหตุ: รูปภาพมีขนาดใหญ่เกินไป ถูกกรองออกระหว่างการกู้คืน]';
+                                      }
+                                  }
+                              });
+                          }
                       });
                   }
 
