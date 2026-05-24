@@ -9998,24 +9998,19 @@ export default function App() {
                       const totalProjectsWithAudit = projectAvgScores.filter(p => p.avg > 0).length;
 
                       // --- NEW: Project Specific Announcements ---
-                      const todayLocalForAnn = new Date();
-                      todayLocalForAnn.setHours(0,0,0,0);
+                      const tzOffsetLocal = (new Date()).getTimezoneOffset() * 60000;
+                      const todayStrLocal = (new Date(Date.now() - tzOffsetLocal)).toISOString().split('T')[0];
+                      
                       const projectAnnouncements = announcements.filter(a => {
                           if (a.status !== 'Published') return false;
-                          const startD = new Date(a.date);
-                          startD.setHours(0,0,0,0);
-                          if (todayLocalForAnn < startD) return false;
-                          if (a.endDate) {
-                              const endD = new Date(a.endDate);
-                              endD.setHours(0,0,0,0);
-                              if (todayLocalForAnn > endD) return false;
-                          }
+                          if (a.date > todayStrLocal) return false;
+                          if (a.hasEndDate && a.endDate && a.endDate < todayStrLocal) return false;
                           return a.projectId === 'All' || a.projectId === selectedProject.id;
                       }).sort((a,b) => {
                           if (a.date > b.date) return -1;
                           if (a.date < b.date) return 1;
                           return 0;
-                      }).slice(0, 5); // เพิ่มให้แสดงย้อนหลัง 5 รายการ
+                      }).slice(0, 5);
 
                       return (
                           <>
@@ -10520,7 +10515,7 @@ export default function App() {
                                       </h3>
                                       {hasPerm('projects', 'edit') && (
                                           <Button size="sm" icon={Plus} className="bg-emerald-600 hover:bg-emerald-700" onClick={() => {
-                                              setNewDeposit({ id: null, type: 'ฝากประจำ', customType: '', bank: '', amount: '', interestRate: '', duration: '12 เดือน', startDate: '', endDate: '' });
+                                              setNewDeposit({ id: null, type: 'ฝากประจำ', customType: '', bank: '', customBank: '', amount: '', interestRate: '', duration: '12 เดือน', startDate: '', endDate: '' });
                                               setIsEditingDeposit(false);
                                               setShowAddDepositModal(true);
                                           }}>เพิ่มรายการ</Button>
@@ -21329,23 +21324,28 @@ export default function App() {
                           const accessibleArray = Array.isArray(accessibleDeptsStr) ? accessibleDeptsStr : (typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : []);
                           const canAccessAll = accessibleArray.includes('All') || currentUser?.username === 'admin';
 
+                          const tzOffsetOther = (new Date()).getTimezoneOffset() * 60000;
+                          const todayStrOther = (new Date(Date.now() - tzOffsetOther)).toISOString().split('T')[0];
+
                           const otherAnnouncements = announcements.filter(a => {
                               // ไม่นำประกาศที่กำลังเปิดดูอยู่มาแสดงซ้ำ
                               if (a.id === selectedAnnouncementView.id) return false;
                               
+                              if (a.status !== 'Published') return false;
+                              
                               // ตรวจสอบวันที่ (แสดงเฉพาะประกาศที่ถึงกำหนดวันเริ่มแล้ว)
-                              const todayLocal = new Date();
-                              todayLocal.setHours(0,0,0,0);
-                              const startD = new Date(a.date);
-                              startD.setHours(0,0,0,0);
-                              if (todayLocal < startD) return false;
+                              if (a.date > todayStrOther) return false;
 
                               // ตรวจสอบสิทธิ์การเข้าถึงว่าประกาศนี้ส่งถึงหน่วยงานของผู้ใช้งานหรือไม่
                               if (a.projectId === 'All' || canAccessAll) return true;
                               const project = projects.find(p => p.id === a.projectId);
                               if (!project) return false;
                               return project.name === currentUser.department || accessibleArray.includes(project.name);
-                          }).sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0, 5); // จำกัดให้แสดงแค่ 5 รายการล่าสุด
+                          }).sort((a,b) => {
+                              if (a.date > b.date) return -1;
+                              if (a.date < b.date) return 1;
+                              return 0;
+                          }).slice(0, 5); // จำกัดให้แสดงแค่ 5 รายการล่าสุด
 
                           if (otherAnnouncements.length === 0) return null;
 
@@ -21441,20 +21441,20 @@ export default function App() {
                           {activePopupAnnouncement.title}
                       </h2>
                       
-                      <div className="text-sm md:text-base text-gray-700 whitespace-pre-wrap leading-relaxed">
+                      <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
                           {activePopupAnnouncement.content}
                       </div>
 
                       {activePopupAnnouncement.link && (
-                          <div className="mt-6">
-                              <a href={activePopupAnnouncement.link.startsWith('http') ? activePopupAnnouncement.link : `https://${activePopupAnnouncement.link}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 bg-blue-50 text-blue-600 hover:text-blue-800 hover:bg-blue-100 px-4 py-2.5 rounded-lg font-bold transition-colors border border-blue-200 shadow-sm w-full justify-center">
-                                  <LinkIcon size={18} />
-                                  ดูรายละเอียดเพิ่มเติม (Open Link)
+                          <div className="mt-6 pt-4 border-t border-gray-100">
+                              <a href={activePopupAnnouncement.link.startsWith('http') ? activePopupAnnouncement.link : `https://${activePopupAnnouncement.link}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 bg-blue-50 text-blue-600 hover:text-blue-800 hover:bg-blue-100 px-4 py-2.5 rounded-lg font-bold transition-colors border border-blue-200 shadow-sm text-sm">
+                                  <LinkIcon size={16} />
+                                  ไปยังลิงก์แนบ (Open Link)
                               </a>
                           </div>
                       )}
-
-                      {/* NEW: History of Other Announcements for Popup */}
+                      
+                      {/* NEW: Other Announcements (History) in Global Popup */}
                       {(() => {
                           const accessibleDeptsStr = currentUser?.accessibleDepts;
                           const accessibleArray = Array.isArray(accessibleDeptsStr) ? accessibleDeptsStr : (typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : []);
@@ -21464,15 +21464,10 @@ export default function App() {
                           const todayStrOther = (new Date(Date.now() - tzOffsetOther)).toISOString().split('T')[0];
 
                           const otherAnnouncements = announcements.filter(a => {
-                              // ไม่นำประกาศที่กำลังเปิดดูอยู่มาแสดงซ้ำ
                               if (a.id === activePopupAnnouncement.id) return false;
-                              
                               if (a.status !== 'Published') return false;
-                              
-                              // ตรวจสอบวันที่ (แสดงเฉพาะประกาศที่ถึงกำหนดวันเริ่มแล้ว)
                               if (a.date > todayStrOther) return false;
 
-                              // ตรวจสอบสิทธิ์การเข้าถึงว่าประกาศนี้ส่งถึงหน่วยงานของผู้ใช้งานหรือไม่
                               if (a.projectId === 'All' || canAccessAll) return true;
                               const project = projects.find(p => p.id === a.projectId);
                               if (!project) return false;
@@ -21481,42 +21476,47 @@ export default function App() {
                               if (a.date > b.date) return -1;
                               if (a.date < b.date) return 1;
                               return 0;
-                          }).slice(0, 3); // ใน Popup โชว์แค่ 3 รายการล่าสุดพอ
+                          }).slice(0, 3); // แสดงแค่ 3 รายการล่าสุดใน Popup เล็ก
 
                           if (otherAnnouncements.length === 0) return null;
 
                           return (
-                              <div className="mt-8 pt-6 border-t border-gray-200">
-                                  <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2 text-sm">
-                                      <History size={16} className="text-blue-500"/> ข่าวสารและประกาศอื่นๆ
+                              <div className="mt-8 pt-4 border-t border-gray-100">
+                                  <h3 className="font-bold text-gray-800 mb-3 text-sm flex items-center gap-2">
+                                      <History size={16} className="text-blue-500"/> ประกาศอื่นๆ ย้อนหลัง
                                   </h3>
-                                  <div className="space-y-3">
+                                  <div className="space-y-2">
                                       {otherAnnouncements.map(ann => (
                                           <div 
                                               key={ann.id} 
-                                              className="bg-white hover:bg-blue-50 border border-gray-200 hover:border-blue-300 p-2.5 rounded-xl cursor-pointer transition-all flex gap-3 group shadow-sm"
+                                              className="bg-gray-50 hover:bg-blue-50 border border-gray-200 hover:border-blue-300 p-2.5 rounded-lg cursor-pointer transition-all flex items-center gap-3 group"
                                               onClick={() => {
-                                                  // เปลี่ยนเรื่องที่กำลังแสดงบน Popup
-                                                  setActivePopupAnnouncement(ann);
-                                                  // รีเซ็ตการ scroll
+                                                  // ทำการ Mark Read ประกาศเก่า แล้วสลับเนื้อหามาเปิดประกาศใหม่
+                                                  const newDismissed = [...dismissedAnnouncements, activePopupAnnouncement.id];
+                                                  setDismissedAnnouncements(newDismissed);
+                                                  if (typeof window !== 'undefined') {
+                                                      localStorage.setItem('bmg_dismissed_announcements', JSON.stringify(newDismissed));
+                                                  }
+                                                  
                                                   const modal = document.getElementById('popup-announcement-content');
                                                   if (modal) modal.scrollTop = 0;
+                                                  setActivePopupAnnouncement(ann);
                                               }}
                                           >
                                               {ann.image ? (
-                                                  <div className="w-12 h-12 rounded-lg bg-gray-100 shrink-0 overflow-hidden border border-gray-200">
+                                                  <div className="w-10 h-10 rounded-md bg-white shrink-0 overflow-hidden border border-gray-200">
                                                       <img src={ann.image} className="w-full h-full object-cover" alt="" />
                                                   </div>
                                               ) : (
-                                                  <div className="w-12 h-12 rounded-lg bg-gray-50 border border-gray-200 text-gray-400 flex items-center justify-center shrink-0 group-hover:text-blue-500 group-hover:bg-white transition-colors">
+                                                  <div className="w-10 h-10 rounded-md bg-white border border-gray-200 text-gray-400 flex items-center justify-center shrink-0 group-hover:text-blue-500 transition-colors">
                                                       <Radio size={16} />
                                                   </div>
                                               )}
-                                              <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                              <div className="flex-1 min-w-0">
                                                   <h4 className="font-bold text-xs text-gray-800 truncate group-hover:text-blue-700 transition-colors">{ann.title}</h4>
                                                   <div className="text-[10px] text-gray-500 mt-1 flex items-center gap-2">
-                                                      <span className="flex items-center gap-1"><Calendar size={10}/> {new Date(ann.date).toLocaleDateString('th-TH', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                                                      {ann.priority === 'High' && <span className="text-red-600 font-bold flex items-center gap-0.5"><AlertTriangle size={10}/> ด่วน</span>}
+                                                      <span>{new Date(ann.date).toLocaleDateString('th-TH', { month: 'short', day: 'numeric', year: '2-digit' })}</span>
+                                                      {ann.priority === 'High' && <span className="text-red-600 font-bold">ด่วน</span>}
                                                   </div>
                                               </div>
                                           </div>
@@ -21526,54 +21526,163 @@ export default function App() {
                           );
                       })()}
                   </div>
-
-                  <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center shrink-0">
-                      <span className="text-xs text-gray-500">
-                          ประกาศเมื่อ: {new Date(activePopupAnnouncement.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric'})}
-                      </span>
-                      <Button onClick={handleDismissAnnouncement} variant="primary" className="bg-blue-600 hover:bg-blue-700">
-                          รับทราบ (Acknowledge)
-                      </Button>
+                  
+                  <div className="p-4 bg-gray-50 border-t border-gray-200 flex justify-between items-center shrink-0">
+                      <div className="text-[10px] text-gray-500 font-medium">
+                          หากกดยอมรับ ระบบจะไม่แสดงประกาศนี้อีก
+                      </div>
+                      <Button variant="primary" onClick={handleDismissAnnouncement}>รับทราบ (Acknowledge)</Button>
                   </div>
               </div>
           </div>
       )}
 
-      {/* Expanded Image Lightbox Modal */}
+      {/* Expanded Image Modal */}
       {expandedImage && (
-          <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-[10000] p-4 animate-fade-in" onClick={() => setExpandedImage(null)}>
-              <div className="relative w-full max-w-5xl flex flex-col items-center justify-center" onClick={e => e.stopPropagation()}>
-                  <button 
-                      onClick={() => setExpandedImage(null)} 
-                      className="absolute -top-12 right-0 md:-right-12 text-white/70 hover:text-white bg-black/50 hover:bg-black/80 rounded-full p-2 transition-all"
-                      title="ปิด"
-                  >
-                      <X size={24} />
-                  </button>
-                  <img 
-                      src={expandedImage} 
-                      alt="Expanded Preview" 
-                      className="max-w-full max-h-[75vh] object-contain rounded-lg shadow-2xl border border-white/10" 
-                  />
-                  <div className="mt-6 flex gap-4">
-                      <Button 
-                          variant="primary" 
-                          icon={Download} 
-                          onClick={() => {
-                              const a = document.createElement('a');
-                              a.href = expandedImage;
-                              a.download = `Image_${Date.now()}.jpg`;
-                              document.body.appendChild(a);
-                              a.click();
-                              document.body.removeChild(a);
-                          }}
-                          className="bg-white/10 hover:bg-white/20 text-white border border-white/20 shadow-lg backdrop-blur-md"
-                      >
-                          ดาวน์โหลดรูปภาพ
-                      </Button>
-                  </div>
-              </div>
+          <div className="fixed inset-0 bg-black/95 z-[99999] flex flex-col items-center justify-center p-4 md:p-8 animate-fade-in" onClick={() => setExpandedImage(null)}>
+              <button className="absolute top-4 right-4 md:top-8 md:right-8 text-white/50 hover:text-white bg-black/20 hover:bg-black/50 rounded-full p-2 transition-all">
+                  <X size={32} />
+              </button>
+              <img src={expandedImage} className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl border border-white/10" alt="Expanded" onClick={e => e.stopPropagation()} />
           </div>
+      )}
+      
+      {/* Add Deposit Modal */}
+      {showAddDepositModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 m-4 relative animate-fade-in max-h-[90vh] flex flex-col">
+            <div className="flex justify-between items-center mb-6 border-b pb-4 shrink-0">
+              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <Landmark className="text-emerald-500" />
+                {isEditingDeposit ? 'แก้ไขข้อมูลเงินฝาก' : 'เพิ่มข้อมูลเงินฝาก (New Deposit)'}
+              </h2>
+              <button onClick={() => setShowAddDepositModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                <form id="depositForm" onSubmit={handleSaveDeposit} className="space-y-4 pb-2">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">ประเภทเงินฝาก (Type)</label>
+                        <select 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200 bg-white"
+                            value={newDeposit.type}
+                            onChange={e => setNewDeposit({...newDeposit, type: e.target.value})}
+                        >
+                            {DEPOSIT_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
+                        </select>
+                        {newDeposit.type === 'อื่นๆ (ให้ระบุ)' && (
+                            <input 
+                                type="text" 
+                                required 
+                                className="mt-2 w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200"
+                                value={newDeposit.customType}
+                                onChange={e => setNewDeposit({...newDeposit, customType: e.target.value})}
+                                placeholder="ระบุประเภทเงินฝาก"
+                            />
+                        )}
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">ธนาคาร / สถาบันการเงิน (Bank)</label>
+                        <select 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200 bg-white"
+                            value={newDeposit.bank}
+                            onChange={e => setNewDeposit({...newDeposit, bank: e.target.value})}
+                        >
+                            <option value="" disabled>-- เลือกธนาคาร --</option>
+                            {BANK_LIST.map(bank => <option key={bank} value={bank}>{bank}</option>)}
+                        </select>
+                        {newDeposit.bank === 'อื่นๆ (ให้ระบุ)' && (
+                            <input 
+                                type="text" 
+                                required 
+                                className="mt-2 w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200"
+                                value={newDeposit.customBank}
+                                onChange={e => setNewDeposit({...newDeposit, customBank: e.target.value})}
+                                placeholder="ระบุชื่อธนาคาร"
+                            />
+                        )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">มูลค่าเงินฝาก (บาท)</label>
+                            <div className="relative">
+                                <span className="absolute left-3 top-2.5 text-gray-500 font-bold">฿</span>
+                                <input 
+                                    type="number" 
+                                    step="0.01"
+                                    required 
+                                    className="w-full border rounded-md pl-8 p-2 outline-none focus:ring-2 focus:ring-emerald-200"
+                                    value={newDeposit.amount}
+                                    onChange={e => setNewDeposit({...newDeposit, amount: e.target.value})}
+                                    placeholder="0.00"
+                                />
+                            </div>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">อัตราดอกเบี้ย (%)</label>
+                            <div className="relative">
+                                <input 
+                                    type="number" 
+                                    step="0.01"
+                                    className="w-full border rounded-md p-2 pr-8 outline-none focus:ring-2 focus:ring-emerald-200 text-right"
+                                    value={newDeposit.interestRate}
+                                    onChange={e => setNewDeposit({...newDeposit, interestRate: e.target.value})}
+                                    placeholder="0.00"
+                                />
+                                <span className="absolute right-3 top-2.5 text-gray-500 font-bold">%</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">ระยะเวลาฝาก (Duration)</label>
+                        <select 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200 bg-white"
+                            value={newDeposit.duration}
+                            onChange={e => setNewDeposit({...newDeposit, duration: e.target.value})}
+                        >
+                            {DEPOSIT_DURATIONS.map(dur => <option key={dur} value={dur}>{dur}</option>)}
+                        </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">วันที่เริ่มฝาก (Start Date) <span className="text-red-500">*</span></label>
+                            <input 
+                                type="date" 
+                                required 
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200"
+                                value={newDeposit.startDate}
+                                onChange={e => setNewDeposit({...newDeposit, startDate: e.target.value})}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">วันที่ครบกำหนด (End Date) <span className="text-red-500">*</span></label>
+                            <input 
+                                type="date" 
+                                required 
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200"
+                                value={newDeposit.endDate}
+                                onChange={e => setNewDeposit({...newDeposit, endDate: e.target.value})}
+                            />
+                        </div>
+                    </div>
+                </form>
+            </div>
+            
+            <div className="flex justify-end gap-2 pt-4 border-t border-gray-200 mt-4 shrink-0">
+                <Button variant="secondary" onClick={() => setShowAddDepositModal(false)}>{t('cancel')}</Button>
+                <Button type="button" icon={Save} className="bg-emerald-600 hover:bg-emerald-700" onClick={(e) => {
+                    const form = document.getElementById('depositForm');
+                    if (form && form.reportValidity()) {
+                        handleSaveDeposit(e);
+                    }
+                }}>{t('save')}</Button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Global Confirm / Alert Modal */}
