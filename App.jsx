@@ -18731,82 +18731,96 @@ export default function App() {
                     <X size={24} />
                 </button>
 
-                <div id="print-daily-report" className={`space-y-6 bg-white ${isExporting ? 'w-[190mm] min-w-[190mm] max-w-[190mm] mx-auto box-border py-8 px-0' : ''}`}>
+                <div id="print-daily-report" className={`bg-white ${isExporting ? 'w-[190mm] min-w-[190mm] max-w-[190mm] mx-auto box-border py-8 px-0' : 'w-full'}`}>
+                    
                     {/* Header */}
-                    <div className="text-center border-b pb-4 mb-6">
-                        <h2 className="text-2xl font-bold text-gray-800">
+                    <div className="text-center pb-6 mb-6 border-b border-gray-200">
+                        <h2 className="text-3xl font-black text-gray-800 mb-3 tracking-wide">
                             รายงานประจำวันที่ {new Date(selectedDailyReport.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'})}
                         </h2>
-                        <div className="flex justify-center gap-4 text-sm text-gray-500 mt-2">
-                             <span>{t('col_project')}: {projects.find(p => p.id === selectedDailyReport.projectId)?.name}</span>
-                             <span>|</span>
-                             <span>{t('reporter')}: {selectedDailyReport.reporter}</span>
+                        <div className="flex justify-center items-center gap-4 text-sm text-gray-600 font-medium">
+                             <span>โครงการ / หน่วยงาน: {projects.find(p => p.id === selectedDailyReport.projectId)?.name || '-'}</span>
+                             <span className="text-gray-300">|</span>
+                             <span>ผู้รายงาน: {selectedDailyReport.reporter || '-'}</span>
                         </div>
                     </div>
 
-                    {/* Content Body (Read-only A4 Layout) */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {/* Manpower */}
-                        <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
-                            <h3 className="font-bold text-blue-800 mb-3 flex items-center gap-2 text-sm"><Users size={16}/> {t('manpowerReport')}</h3>
-                            <div className="space-y-1 text-xs">
-                                {['juristic', 'security', 'cleaning', 'gardening', 'sweeper'].map(dept => (
-                                    <div key={dept} className="flex justify-between py-1 border-b border-blue-200 last:border-0">
-                                        <span>{t('dept_' + dept)}</span>
-                                        <span className="font-bold">{selectedDailyReport.manpower[dept] || 0}</span>
-                                    </div>
-                                ))}
-                                {selectedDailyReport.manpower.otherLabel && (
-                                    <div className="flex justify-between py-1 border-t border-blue-200 mt-1 gap-2">
-                                        <span className="break-words flex-1 leading-tight">{selectedDailyReport.manpower.otherLabel}</span>
-                                        <span className="font-bold shrink-0">{selectedDailyReport.manpower.other || 0}</span>
-                                    </div>
-                                )}
+                    {/* Section 1 & 3: Manpower & Income */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6" style={{ pageBreakInside: 'avoid' }}>
+                        {/* 1. Manpower */}
+                        <div className="bg-[#f8fafc] rounded-xl border border-gray-200 overflow-hidden flex flex-col h-full shadow-sm">
+                            <div className="p-4 border-b border-gray-200 flex items-center gap-2 bg-[#f1f5f9]">
+                                <Users size={20} className="text-blue-600"/>
+                                <h3 className="font-bold text-blue-800 text-lg">1. รายงานกำลังพลประจำวัน</h3>
                             </div>
-                        </div>
-
-                        {/* Income */}
-                        <div className="bg-green-50 p-4 rounded-lg border border-green-100">
-                            <h3 className="font-bold text-green-800 mb-3 flex items-center gap-2 text-sm"><DollarSign size={16}/> {t('incomeReport')}</h3>
-                             <div className="space-y-1 text-xs">
-                                {['commonFee', 'lateFee', 'water', 'parking', 'violation'].map(item => (
-                                    <div key={item} className="flex justify-between py-1 border-b border-green-200 last:border-0">
-                                        <span>{t('inc_' + item)}</span>
-                                        <span>{Number(selectedDailyReport.income[item] || 0).toLocaleString()}</span>
-                                    </div>
-                                ))}
-                                {selectedDailyReport.income.otherLabel && (
-                                    <div className="flex justify-between py-1 gap-2">
-                                        <span className="break-words flex-1 leading-tight">{selectedDailyReport.income.otherLabel}</span>
-                                        <span className="shrink-0">{Number(selectedDailyReport.income.other || 0).toLocaleString()}</span>
-                                    </div>
-                                )}
-                                <div className="border-t border-green-300 pt-2 mt-2 flex justify-between font-bold text-green-900">
-                                    <span>{t('totalIncome')}</span>
-                                    <span>฿ {(() => {
-                                        const { commonFee, lateFee, water, parking, violation, other } = selectedDailyReport.income;
-                                        return (Number(commonFee) + Number(lateFee) + Number(water) + Number(parking) + Number(violation) + Number(other)).toLocaleString();
-                                    })()}</span>
+                            <div className="p-5 flex-1 flex flex-col">
+                                <div className="space-y-4 text-sm text-gray-700">
+                                    {['juristic', 'security', 'cleaning', 'gardening', 'sweeper'].map(dept => (
+                                        <div key={dept} className="flex justify-between items-end border-b border-gray-200 border-dashed pb-2 last:border-0">
+                                            <span>{t('dept_' + dept)}</span>
+                                            <span className="font-black text-base text-gray-900">{selectedDailyReport.manpower[dept] || 0}</span>
+                                        </div>
+                                    ))}
+                                    {selectedDailyReport.manpower.otherLabel && (
+                                        <div className="flex justify-between items-end border-b border-gray-200 border-dashed pb-2 gap-2">
+                                            <span className="break-words flex-1 leading-tight">{selectedDailyReport.manpower.otherLabel}</span>
+                                            <span className="font-black text-base text-gray-900 shrink-0">{selectedDailyReport.manpower.other || 0}</span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
+
+                        {/* 3. Income (Numbered as 3 to match image) */}
+                        <div className="bg-[#f0fdf4] rounded-xl border border-green-200 overflow-hidden flex flex-col h-full shadow-sm">
+                            <div className="p-4 border-b border-green-200 flex items-center gap-2 bg-[#dcfce7]/50">
+                                <DollarSign size={20} className="text-green-600"/>
+                                <h3 className="font-bold text-green-800 text-lg">3. สรุปรายรับประจำวัน</h3>
+                            </div>
+                            <div className="p-5 flex-1 flex flex-col">
+                                <div className="space-y-4 text-sm text-gray-700">
+                                    {['commonFee', 'lateFee', 'water', 'parking', 'violation'].map(item => (
+                                        <div key={item} className="flex justify-between items-end border-b border-green-200/60 border-dashed pb-2 last:border-0">
+                                            <span>{t('inc_' + item)}</span>
+                                            <span className="font-medium text-gray-900">{Number(selectedDailyReport.income[item] || 0).toLocaleString()}</span>
+                                        </div>
+                                    ))}
+                                    {selectedDailyReport.income.otherLabel && (
+                                        <div className="flex justify-between items-end border-b border-green-200/60 border-dashed pb-2 gap-2">
+                                            <span className="break-words flex-1 leading-tight">{selectedDailyReport.income.otherLabel}</span>
+                                            <span className="font-medium text-gray-900 shrink-0">{Number(selectedDailyReport.income.other || 0).toLocaleString()}</span>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="p-4 bg-[#dcfce7] flex justify-between items-center font-bold text-green-900 text-base border-t border-green-300">
+                                <span>ผลรวมรายรับทั้งวัน</span>
+                                <span>฿ {(() => {
+                                    const { commonFee, lateFee, water, parking, violation, other } = selectedDailyReport.income;
+                                    return (Number(commonFee) + Number(lateFee) + Number(water) + Number(parking) + Number(violation) + Number(other)).toLocaleString();
+                                })()}</span>
+                            </div>
+                        </div>
                     </div>
 
-                    {/* Performance */}
-                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                        <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm"><ClipboardList size={16}/> {t('performanceReport')}</h3>
-                        <div className="grid grid-cols-2 gap-4">
+                    {/* Section 2: Performance */}
+                    <div className="bg-[#f8fafc] rounded-xl border border-gray-200 overflow-hidden mb-6 shadow-sm">
+                        <div className="p-4 border-b border-gray-200 flex items-center gap-2 bg-[#f1f5f9]">
+                            <ClipboardList size={20} className="text-gray-700"/>
+                            <h3 className="font-bold text-gray-800 text-lg">2. รายงานผลการดำเนินงาน</h3>
+                        </div>
+                        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                             {['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].map(dept => {
                                 const deptData = selectedDailyReport.performance?.[dept];
                                 if (!deptData || (!deptData.details && (!deptData.images || deptData.images.length === 0))) return null;
                                 return (
-                                    <div key={dept} className="bg-white p-3 rounded border shadow-sm">
-                                        <div className="font-semibold text-xs text-orange-600 mb-1">{t('dept_' + dept)}</div>
-                                        <div className="text-xs text-gray-700 whitespace-pre-wrap break-words mb-2">{deptData.details || '-'}</div>
+                                    <div key={dept} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col h-full" style={{ pageBreakInside: 'avoid' }}>
+                                        <div className="font-bold text-orange-600 text-base mb-3">{t('dept_' + dept)}</div>
+                                        <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed flex-1">{deptData.details || '-'}</div>
                                         {deptData.images && deptData.images.length > 0 && (
-                                            <div className="mt-2">
-                                                <div className="w-full h-40 rounded-lg overflow-hidden border border-gray-200 shadow-sm">
-                                                    <img src={deptData.images[0]} className="w-full h-full object-cover" />
+                                            <div className="mt-4 pt-4 border-t border-gray-100">
+                                                <div className="w-full h-48 md:h-56 rounded-lg overflow-hidden border border-gray-200 shadow-sm">
+                                                    <img src={deptData.images[0]} className="w-full h-full object-cover" alt="Performance Note" />
                                                 </div>
                                             </div>
                                         )}
@@ -18816,23 +18830,86 @@ export default function App() {
                         </div>
                     </div>
 
-                    {/* Section Trend Charts (NEW) */}
-                    {renderUtilityTrendCharts(selectedDailyReport.date)}
-
-                    {/* Notes */}
+                    {/* Section 4: Additional Details */}
                     {selectedDailyReport.note && (
-                        <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-                             <h3 className="font-bold text-yellow-800 mb-1 text-sm">{t('additionalDetails')}</h3>
-                             <p className="text-xs text-gray-700 whitespace-pre-wrap break-words">{selectedDailyReport.note}</p>
+                        <div className="bg-[#fefce8] rounded-xl border border-[#fef08a] overflow-hidden mb-6 shadow-sm" style={{ pageBreakInside: 'avoid' }}>
+                             <div className="p-4 border-b border-[#fde047] bg-[#fef08a]/40">
+                                 <h3 className="font-bold text-yellow-800 text-lg">4. รายละเอียดอื่นเพิ่มเติม</h3>
+                             </div>
+                             <div className="p-5 text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
+                                 {selectedDailyReport.note}
+                             </div>
                         </div>
                     )}
+
+                    {/* Section 5: Trend Charts */}
+                    {(() => {
+                        const chartData = getPast7DaysUtilityData(selectedDailyReport.date);
+                        const projectMeters = meters.filter(m => m.projectId === selectedProject.id);
+                        const waterMeters = projectMeters.filter(m => m.type === 'Water');
+                        const elecMeters = projectMeters.filter(m => m.type === 'Electricity');
+                        
+                        if (waterMeters.length === 0 && elecMeters.length === 0) return null;
+
+                        const waterColors = ['#3b82f6', '#0ea5e9', '#6366f1', '#06b6d4', '#8b5cf6', '#2563eb'];
+                        const elecColors = ['#f97316', '#f59e0b', '#ef4444', '#eab308', '#f43f5e', '#ea580c'];
+
+                        return (
+                            <div className="bg-[#f8fafc] rounded-xl border border-gray-200 overflow-hidden mb-6 shadow-sm" style={{ pageBreakInside: 'avoid' }}>
+                                <div className="p-4 border-b border-gray-200 flex items-center gap-2 bg-[#f1f5f9]">
+                                    <BarChart3 size={20} className="text-orange-500"/>
+                                    <h3 className="font-bold text-gray-800 text-lg">5. แนวโน้มการใช้น้ำประปาและไฟฟ้า (7 วันล่าสุด)</h3>
+                                </div>
+                                <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    {waterMeters.length > 0 && (
+                                        <div className="bg-white border border-blue-100 rounded-xl p-4 shadow-sm">
+                                            <h4 className="text-sm font-bold text-blue-600 flex justify-center items-center gap-2 mb-4"><Droplet size={16}/> ปริมาณการใช้น้ำประปา (หน่วย)</h4>
+                                            <div className="h-64">
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                                        <XAxis dataKey="date" tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} dy={5} />
+                                                        <YAxis tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                                        <RechartsTooltip contentStyle={{ fontSize: '12px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                                        <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '15px' }} />
+                                                        {waterMeters.map((m, idx) => (
+                                                            <Line key={m.id} type="monotone" dataKey={`${m.name} (${m.code})`} stroke={waterColors[idx % waterColors.length]} strokeWidth={2.5} dot={{ r: 4, strokeWidth: 1.5, fill: '#fff' }} activeDot={{ r: 6 }} isAnimationActive={!isExporting} />
+                                                        ))}
+                                                    </LineChart>
+                                                </ResponsiveContainer>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {elecMeters.length > 0 && (
+                                        <div className="bg-white border border-orange-100 rounded-xl p-4 shadow-sm">
+                                            <h4 className="text-sm font-bold text-orange-600 flex justify-center items-center gap-2 mb-4"><Zap size={16}/> ปริมาณการใช้ไฟฟ้า (หน่วย)</h4>
+                                            <div className="h-64">
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                                        <XAxis dataKey="date" tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} dy={5} />
+                                                        <YAxis tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                                        <RechartsTooltip contentStyle={{ fontSize: '12px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                                        <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '15px' }} />
+                                                        {elecMeters.map((m, idx) => (
+                                                            <Line key={m.id} type="monotone" dataKey={`${m.name} (${m.code})`} stroke={elecColors[idx % elecColors.length]} strokeWidth={2.5} dot={{ r: 4, strokeWidth: 1.5, fill: '#fff' }} activeDot={{ r: 6 }} isAnimationActive={!isExporting} />
+                                                        ))}
+                                                    </LineChart>
+                                                </ResponsiveContainer>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })()}
                     
-                    {/* Footer */}
-                    <div className="flex justify-between items-end pt-8 mt-4 border-t">
-                        <div className="text-xs text-gray-400">Ref: {selectedDailyReport.id}</div>
-                        <div className="text-center">
-                            <div className="text-sm font-bold">{selectedDailyReport.reporter}</div>
-                            <div className="text-xs text-gray-500">{t('reporter')}</div>
+                    {/* Footer Signatures */}
+                    <div className="flex justify-between items-end pt-12 mt-6 border-t border-gray-300" style={{ pageBreakInside: 'avoid' }}>
+                        <div className="text-sm text-gray-400 font-mono">Ref: {selectedDailyReport.id}</div>
+                        <div className="text-center w-48">
+                            <div className="font-bold text-base text-gray-800 border-b border-gray-400 pb-1 mb-1">{selectedDailyReport.reporter || '-'}</div>
+                            <div className="text-sm text-gray-500">ผู้รายงาน</div>
                         </div>
                     </div>
                 </div>
