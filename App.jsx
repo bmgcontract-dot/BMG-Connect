@@ -1772,7 +1772,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
         };
     }, [db, appId, fbUser, collectionName, localKey]);
 
-    const setPersistentValue = async (newValueOrUpdater, isRestore = false) => {
+    const setPersistentValue = async (newValueOrUpdater, isRestore = false, progressCallback = null) => {
         const oldValue = dataRef.current;
         const newValue = typeof newValueOrUpdater === 'function' ? newValueOrUpdater(oldValue) : newValueOrUpdater;
         
@@ -1828,12 +1828,14 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                         opCount = 0; 
                     }
 
-                    // พักให้เบราว์เซอร์ทำงานอื่นทุกๆ 50 รายการ ป้องกันอาการหน้าจอค้าง (Freeze)
-                    if (i > 0 && i % 50 === 0) {
-                        await new Promise(resolve => setTimeout(resolve, 0));
+                    // พักให้เบราว์เซอร์ทำงานอื่นทุกๆ 20 รายการ ป้องกันอาการหน้าจอค้าง (Freeze)
+                    if (i > 0 && i % 20 === 0) {
+                        if (progressCallback) progressCallback(i, newValue.length);
+                        await new Promise(resolve => setTimeout(resolve, 10));
                     }
                 }
                 if (opCount > 0) await batch.commit();
+                if (progressCallback) progressCallback(newValue.length, newValue.length);
             } catch (e) { console.error("Restore error", e); }
             return;
         }
@@ -1848,7 +1850,8 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
         (Array.isArray(newValue) ? newValue : []).forEach(newItem => {
             if (!newItem.id) return;
             const oldItem = oldMap.get(newItem.id);
-            if (!oldItem || JSON.stringify(oldItem) !== JSON.stringify(newItem)) {
+            // FIX: ข้ามกระบวนการ JSON.stringify ที่กินทรัพยากรสูง หาก Object Reference ไม่เปลี่ยนแปลง (ช่วยลดเวลาประมวลผลได้มหาศาล)
+            if (!oldItem || (oldItem !== newItem && JSON.stringify(oldItem) !== JSON.stringify(newItem))) {
                 toSet.push(newItem);
             }
         });
@@ -1860,9 +1863,11 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
         });
 
         try {
-            if (toSet.length > 0 || toDelete.length > 0) {
+            const totalOps = toSet.length + toDelete.length;
+            if (totalOps > 0) {
                 let batch = writeBatch(db);
                 let opCount = 0;
+                let currentOp = 0;
                 
                 for (const item of toSet) {
                     const itemToSave = { ...item };
@@ -1900,16 +1905,29 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
 
                     batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id), itemToSave);
                     opCount++;
+                    currentOp++;
                     if (opCount >= 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
+                    
+                    if (currentOp % 20 === 0) {
+                        if (progressCallback && !isRestore) progressCallback(currentOp, totalOps);
+                        await new Promise(resolve => setTimeout(resolve, 10));
+                    }
                 }
 
                 for (const id of toDelete) {
                     batch.delete(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, id));
                     opCount++;
+                    currentOp++;
                     if (opCount >= 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
+                    
+                    if (currentOp % 20 === 0) {
+                        if (progressCallback && !isRestore) progressCallback(currentOp, totalOps);
+                        await new Promise(resolve => setTimeout(resolve, 10));
+                    }
                 }
 
                 if (opCount > 0) await batch.commit();
+                if (progressCallback && !isRestore) progressCallback(totalOps, totalOps);
             }
         } catch (e) {
             console.error(`Save error ${collectionName}:`, e);
@@ -7318,13 +7336,20 @@ export default function App() {
 
                   for (const item of stateSetters) {
                       currentTable++;
-                      const p = 10 + Math.round((currentTable / totalTables) * 90);
-                      setImportProgress({ isImporting: true, percent: p, current: currentTable, total: totalTables, label: `กำลังนำเข้าหมวด: ${item.key}`, unit: 'หมวด' });
+                      const baseP = 10 + Math.round(((currentTable - 1) / totalTables) * 90);
+                      const nextP = 10 + Math.round((currentTable / totalTables) * 90);
+                      
+                      setImportProgress({ isImporting: true, percent: baseP, current: currentTable, total: totalTables, label: `กำลังนำเข้าหมวด: ${item.key}`, unit: 'หมวด' });
                       await new Promise(resolve => setTimeout(resolve, 50));
 
                       try {
-                          const syncPromise = item.setter(item.data, true);
-                          if (syncPromise) {
+                          const progressCb = (current, total) => {
+                               const progressWithinTable = current / total;
+                               const currentPercent = baseP + Math.round((nextP - baseP) * progressWithinTable);
+                               setImportProgress({ isImporting: true, percent: currentPercent, current: currentTable, total: totalTables, label: `กำลังนำเข้าหมวด: ${item.key} (${current}/${total})`, unit: 'หมวด' });
+                          };
+                          const syncPromise = item.setter(item.data, true, progressCb);
+                          if (syncPromise && typeof syncPromise.then === 'function') {
                               await syncPromise; 
                           }
                       } catch(e) {
@@ -8817,45 +8842,46 @@ export default function App() {
                   const headers = parseCSVLine(lines[0]);
                   const newUsers = [];
                   
-                  for (let i = 1; i < lines.length; i++) {
-                      if (!lines[i].trim()) continue;
-                      
-                      const values = parseCSVLine(lines[i]);
-                      const userObj = {};
-                      headers.forEach((header, index) => {
-                          userObj[header] = values[index];
-                      });
-                      
-                      // เช็คเฉพาะฟิลด์บังคับ คือ username และ firstName
-                      if (userObj.username && userObj.firstName) {
-                          const finalUsername = userObj.username;
+                  const usernameIdx = headers.indexOf('username');
+                  const firstNameIdx = headers.indexOf('firstName');
+                  const lastNameIdx = headers.indexOf('lastName');
+                  const employeeIdIdx = headers.indexOf('employeeId');
+                  const positionIdx = headers.indexOf('position');
+                  const departmentIdx = headers.indexOf('department');
+
+                  if (usernameIdx !== -1 && firstNameIdx !== -1) {
+                      for (let i = 1; i < lines.length; i++) {
+                          if (!lines[i].trim()) continue;
+                          const values = parseCSVLine(lines[i]);
+                          
+                          const username = values[usernameIdx];
+                          if (!username || users.some(u => u.username === username) || newUsers.some(u => u.username === username)) continue;
+
                           newUsers.push({
                               id: generateId(),
-                              employeeId: finalUsername, // บังคับให้รหัสพนักงานเป็นค่าเดียวกับชื่อผู้ใช้งาน
-                              firstName: userObj.firstName || '',
-                              lastName: userObj.lastName || '',
-                              position: userObj.position || EMPLOYEE_POSITIONS[0], // ค่าเริ่มต้น
-                              department: userObj.department || 'Head Office',
-                              phone: userObj.phone || '',
-                              username: finalUsername, // บังคับให้ชื่อผู้ใช้งานเป็นค่าเดียวกับรหัสพนักงาน
-                              password: userObj.password || '1234', // รหัสผ่านตั้งต้นถ้าไม่ได้ใส่มา
+                              username: username,
+                              password: username, // default password
+                              firstName: values[firstNameIdx] || '',
+                              lastName: lastNameIdx !== -1 ? values[lastNameIdx] : '',
+                              employeeId: employeeIdIdx !== -1 ? values[employeeIdIdx] : '',
+                              position: positionIdx !== -1 ? values[positionIdx] : EMPLOYEE_POSITIONS[0],
+                              department: departmentIdx !== -1 ? values[departmentIdx] : '',
+                              accessibleDepts: [],
+                              phone: '',
                               status: 'Active',
                               created_at: new Date().toISOString(),
-                              accessibleDepts: [],
-                              permissions: getDefaultPermissions(),
-                              photo: null
+                              permissions: getDefaultPermissions()
                           });
                       }
-                  }
-                  
-                  if (newUsers.length > 0) {
-                      showConfirm('ยืนยันการนำเข้า', `พบข้อมูลพนักงานใหม่ที่ถูกต้อง ${newUsers.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
-                          setUsers(prev => {
-                              const safeNewUsers = newUsers.filter(nu => !prev.some(pu => pu.username === nu.username));
-                              return [...prev, ...safeNewUsers];
-                          }, true);
-                          alert('นำเข้าข้อมูลพนักงานสำเร็จแล้ว!');
-                      }, 'ยืนยันการนำเข้า', 'info');
+
+                      if (newUsers.length > 0) {
+                          showConfirm('ยืนยันการนำเข้า', `พบข้อมูลพนักงานที่ถูกต้อง ${newUsers.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
+                              setUsers(prev => [...prev, ...newUsers]);
+                              alert('นำเข้าข้อมูลพนักงานสำเร็จแล้ว!');
+                          }, 'ยืนยันการนำเข้า', 'info');
+                      } else {
+                          alert('ไม่มีข้อมูลใหม่ หรือ username ซ้ำกับที่มีอยู่ในระบบแล้ว');
+                      }
                   } else {
                       alert('ไม่พบข้อมูลพนักงานที่ถูกต้องในไฟล์ (กรุณาตรวจสอบว่ามีคอลัมน์ username และ firstName)');
                   }
