@@ -5568,9 +5568,12 @@ export default function App() {
               
               if (newReports.length > 0) {
                   showConfirm('ยืนยันการนำเข้า', `พบข้อมูลรายงานประจำวันที่ถูกต้องและไม่ซ้ำ ${newReports.length} วัน ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
-                      const nextList = [...newReports, ...dailyReports];
-                      setDailyReports(nextList);
-                      triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, []);
+                      setDailyReports(prev => {
+                          const safeNewReports = newReports.filter(nr => !prev.some(pr => pr.projectId === nr.projectId && pr.date === nr.date));
+                          const nextList = [...safeNewReports, ...prev];
+                          setTimeout(() => triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, []), 500);
+                          return nextList;
+                      }, true);
                       alert('นำเข้าข้อมูลรายงานประจำวันสำเร็จแล้ว!');
                   }, 'ยืนยันการนำเข้า', 'info');
               } else {
@@ -5586,44 +5589,47 @@ export default function App() {
 
   const handleSaveDailyReport = (e) => {
       e.preventDefault();
-      let savedReport;
-      let nextList; // สร้างตัวแปรรอรับ List ล่าสุด
       
-      // ป้องกันการสร้างรายงานซ้ำซ้อนในวันเดียวกัน (Enforce 1 report per day)
-      let finalId = newDailyReport.id;
-      if (!finalId) {
-          const existing = dailyReports.find(r => r.projectId === selectedProject.id && r.date === newDailyReport.date);
-          if (existing) {
-              finalId = existing.id;
+      setDailyReports(prev => {
+          let savedReport;
+          let nextList;
+          
+          // ป้องกันการสร้างรายงานซ้ำซ้อนในวันเดียวกัน (Enforce 1 report per day)
+          let finalId = newDailyReport.id;
+          if (!finalId) {
+              const existing = prev.find(r => r.projectId === selectedProject.id && r.date === newDailyReport.date);
+              if (existing) {
+                  finalId = existing.id;
+              }
           }
-      }
 
-      // FIX: ไม่นำ Side Effect ไปใส่ใน setState และคำนวณ State ด้วยตนเองก่อนเซฟ
-      if (finalId) {
-          // Update existing report
-          savedReport = { ...newDailyReport, id: finalId, projectId: selectedProject.id };
-          nextList = dailyReports.map(r => r.id === finalId ? savedReport : r);
-      } else {
-          // Create new report
-          const id = generateId();
-          savedReport = { ...newDailyReport, id, projectId: selectedProject.id };
-          nextList = [savedReport, ...dailyReports]; // เพิ่มไว้ด้านบนสุด
-      }
+          if (finalId) {
+              // Update existing report
+              savedReport = { ...newDailyReport, id: finalId, projectId: selectedProject.id };
+              nextList = prev.map(r => r.id === finalId ? savedReport : r);
+          } else {
+              // Create new report
+              const id = generateId();
+              savedReport = { ...newDailyReport, id, projectId: selectedProject.id };
+              nextList = [savedReport, ...prev]; // เพิ่มไว้ด้านบนสุด
+          }
 
-      // สั่ง Update State แบบชัดเจน
-      setDailyReports(nextList);
+          // นำ Side Effect แยกออกมาทำงานหลังจาก Update State หลีกเลี่ยงการบล็อกการทำงานของ React
+          setTimeout(() => {
+              let filesToUpload = [];
+              ['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].forEach(dept => {
+                  const images = savedReport.performance[dept]?.images || [];
+                  images.forEach((img, idx) => { filesToUpload.push({ name: `DailyReport_${savedReport.id}_${dept}_${idx}.jpg`, data: img }); });
+              });
+              triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, filesToUpload);
 
-      // --- AUTO SYNC TRIGGER ---
-      let filesToUpload = [];
-      ['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].forEach(dept => {
-          const images = savedReport.performance[dept]?.images || [];
-          images.forEach((img, idx) => { filesToUpload.push({ name: `DailyReport_${savedReport.id}_${dept}_${idx}.jpg`, data: img }); });
+              setShowAddDailyReportModal(false);
+              setSelectedDailyReport(savedReport); // Open view modal immediately
+              alert('บันทึกรายงานประจำวันเสร็จสมบูรณ์');
+          }, 100);
+
+          return nextList;
       });
-      triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, filesToUpload);
-
-      setShowAddDailyReportModal(false);
-      setSelectedDailyReport(savedReport); // Open view modal immediately
-      alert('บันทึกรายงานประจำวันเสร็จสมบูรณ์'); // แจ้งเตือนเพื่อให้มั่นใจว่าบันทึกแล้ว
   };
 
   const handleEditDailyReport = (report) => {
