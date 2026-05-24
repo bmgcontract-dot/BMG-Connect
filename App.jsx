@@ -1886,256 +1886,9 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
     return [data, setPersistentValue, isLoaded, true];
 }
 
-const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
+const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId, setImportProgress }) => {
   const [rawData, setRawData] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState('ทั้งหมด'); 
-  const [filterMinAmount, setFilterMinAmount] = useState(''); 
-  const [filterMaxAmount, setFilterMaxAmount] = useState(''); 
-  const [feeSortOrder, setFeeSortOrder] = useState('amount_desc'); // NEW: State สำหรับการเรียงลำดับ
-  const [fullScreenFeeChart, setFullScreenFeeChart] = useState(null); // NEW: State สำหรับแสดงกราฟเต็มจอ
-  
-  const [projectTitle, setProjectTitle] = useState('ระบบสรุปค้างค่าส่วนกลาง (Central Fee Manager)');
-  const [reportDate, setReportDate] = useState('บริหารจัดการโดย บริษัท เบสท์ มิลเลี่ยน กรุ๊ป จำกัด');
-
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [encoding, setEncoding] = useState('windows-874'); 
-  const [freezeThresholdMonths, setFreezeThresholdMonths] = useState(6); 
-  const [noticeThresholdDays, setNoticeThresholdDays] = useState(90); 
-
-  const [showExportMenu, setShowExportMenu] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
-
-  const [customStatuses, setCustomStatuses] = useState({});
-  const [notes, setNotes] = useState({}); 
-  const [histories, setHistories] = useState({}); 
-  
-  const [selectedHouse, setSelectedHouse] = useState(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [tempStatus, setTempStatus] = useState("");
-  const [tempCustomStatus, setTempCustomStatus] = useState(""); 
-  const [tempNote, setTempNote] = useState(""); 
-  
-  const [tempHistory, setTempHistory] = useState([]); 
-  const getTodayStr = () => {
-    const tzOffset = (new Date()).getTimezoneOffset() * 60000;
-    return (new Date(Date.now() - tzOffset)).toISOString().split('T')[0];
-  };
-  const [newHistoryDate, setNewHistoryDate] = useState(getTodayStr());
-  const [newHistoryAction, setNewHistoryAction] = useState("โทรติดตาม");
-  const [newHistoryDetail, setNewHistoryDetail] = useState("");
-
-  // --- Firebase Cloud Data Sync ---
-  useEffect(() => {
-    if (!db || !appId || !selectedProject) return;
-
-    // Use a unique collection for each project's central fee data to prevent mixing
-    const statusColRef = collection(db, 'artifacts', appId, 'public', 'data', `house_statuses_${selectedProject.id}`);
-    
-    const unsubscribeStatuses = onSnapshot(statusColRef, (snapshot) => {
-      const loadedStatuses = {};
-      const loadedNotes = {};
-      const loadedHistories = {};
-      
-      snapshot.docs.forEach(docSnap => {
-        const data = docSnap.data();
-        if (data.houseNo) {
-          if (data.status) loadedStatuses[data.houseNo] = data.status;
-          if (data.note) loadedNotes[data.houseNo] = data.note;
-          if (data.history) loadedHistories[data.houseNo] = data.history;
-        }
-      });
-      
-      setCustomStatuses(loadedStatuses);
-      setNotes(loadedNotes);
-      setHistories(loadedHistories);
-    }, (error) => {
-      console.error("Firestore onSnapshot error:", error);
-    });
-
-    // 2. NEW: ซิงค์ข้อมูลดิบรายการลูกหนี้ (Raw CSV Data) ที่เคยอัปโหลดไว้ล่าสุด
-    // FIX: เปลี่ยนมาใช้โครงสร้าง app_state เพื่อรองรับระบบ Chunking ป้องกันปัญหาข้อมูลเกิน 1MB ทำให้เครื่องอื่นโหลดไม่ขึ้น
-    const rawDataRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', `central_fee_raw_${selectedProject.id}`);
-    
-    const unsubscribeRawData = onSnapshot(rawDataRef, async (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        // รองรับระบบ Chunking
-        if (data.totalChunks !== undefined) {
-            // แก้ไข: ใช้ Promise.all สำหรับการดึงไฟล์ Chunk เพื่อลดปัญหาดึงช้าจนโหลดไม่ขึ้น
-            const chunkPromises = [];
-            for (let i = 0; i < data.totalChunks; i++) {
-                const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `central_fee_raw_${selectedProject.id}_${i}`);
-                chunkPromises.push(getDoc(chunkRef));
-            }
-            
-            const chunkSnaps = await Promise.all(chunkPromises);
-            let fullJson = '';
-            chunkSnaps.forEach(snap => {
-                if (snap.exists()) fullJson += snap.data().chunk;
-            });
-
-            if (fullJson) {
-                // ซ่อมแซม JSON กรณี Chunk หาย
-                let safeJson = fullJson;
-                try { JSON.parse(safeJson); } catch (e) {
-                    if (safeJson.startsWith('{')) safeJson += '}';
-                }
-                try {
-                    const parsed = JSON.parse(safeJson);
-                    setRawData(parsed.payload || []);
-                    if (parsed.projectTitle) setProjectTitle(parsed.projectTitle);
-                    if (parsed.reportDate) setReportDate(parsed.reportDate);
-                } catch(e) { console.error("Error parsing chunks", e); }
-            }
-        } else if (data.payload) {
-            // Backward compatibility
-            try {
-                const parsed = JSON.parse(data.payload);
-                setRawData(Array.isArray(parsed) ? parsed : (parsed?.payload || []));
-            } catch(e) { console.error("Error parsing raw data from Cloud", e); }
-        }
-      } else {
-        setRawData([]); // ถ้ายืนยันว่ายังไม่มีข้อมูลใน Cloud ให้ล้างค่า (Clear)
-      }
-    }, (error) => {
-      console.error("Firestore Raw Data sync error:", error);
-    });
-
-    return () => {
-      unsubscribeStatuses();
-      unsubscribeRawData();
-    };
-  }, [db, appId, selectedProject]);
-
-  // --- CSV Parser Logic ---
-  const handleFileUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const text = evt.target.result;
-      processCSV(text);
-    };
-    reader.readAsText(file, encoding);
-    e.target.value = null; // รีเซ็ต input เพื่อให้กดอัปโหลดไฟล์เดิมซ้ำได้
-  };
-
-  const processCSV = (csvText) => {
-    const lines = csvText.split('\n').map(line => line.trim()).filter(line => line !== '');
-    
-    let newProjectTitle = projectTitle;
-    let newReportDate = reportDate;
-
-    if (lines.length >= 3) {
-      const row1 = lines[0].replace(/,+$/, '').trim();
-      const row3 = lines[2].replace(/,+$/, '').trim();
-      if (row1) {
-          newProjectTitle = row1;
-          setProjectTitle(row1);
-      }
-      if (row3) {
-          newReportDate = row3;
-          setReportDate(row3);
-      }
-    }
-
-    let headerIndex = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].includes('ลำดับ') && lines[i].includes('บ้านเลขที่')) {
-        headerIndex = i;
-        break;
-      }
-    }
-
-    if (headerIndex === -1) {
-      alert("รูปแบบไฟล์ไม่ถูกต้อง กรุณาใช้ไฟล์รายงานลูกหนี้ค้างชำระจากระบบบัญชี");
-      return;
-    }
-
-    const dataLines = lines.slice(headerIndex + 2);
-    const parsedData = [];
-
-    let lastHouseNo = "";
-    let lastName = "";
-
-    dataLines.forEach(line => {
-      const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(c => c.replace(/"/g, '').trim());
-      
-      if (cols[0]?.includes('รวม') || cols[1]?.includes('รวม')) return;
-
-      const houseNo = cols[1];
-      const name = cols[2];
-      
-      if (houseNo) lastHouseNo = houseNo;
-      if (name) lastName = name;
-
-      const detail = cols[5];
-      const overdueDays = parseInt(cols[8]) || 0;
-
-      let amount = 0;
-      for (let i = 9; i < cols.length; i++) {
-        const val = parseFloat(cols[i]?.replace(/,/g, ''));
-        if (!isNaN(val)) amount += val;
-      }
-
-      if (lastHouseNo && amount > 0) {
-        parsedData.push({
-          houseNo: lastHouseNo,
-          name: lastName,
-          detail,
-          overdueDays,
-          amount
-        });
-      }
-    });
-
-    setRawData(parsedData);
-
-    // --- NEW: บันทึกข้อมูลที่แปลงสำเร็จขึ้น Cloud อัตโนมัติ (Online Sync) ---
-    if (db && appId && selectedProject) {
-        try {
-            const syncData = async () => {
-                const jsonStr = JSON.stringify({
-                    payload: parsedData,
-                    projectTitle: newProjectTitle,
-                    reportDate: newReportDate,
-                    updatedAt: new Date().toISOString(),
-                    updatedBy: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
-                });
-                
-                // ใช้เทคนิค Chunking ตัดข้อมูลเป็นส่วนๆ ป้องกันปัญหาไฟล์เกินข้อจำกัด 1MB ของฐานข้อมูล
-                const CHUNK_SIZE = 150000; // FIX: ลดขนาดลงเพื่อรองรับอักขระภาษาไทยอย่างปลอดภัย
-                const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
-
-                for (let i = 0; i < totalChunks; i++) {
-                    const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `central_fee_raw_${selectedProject.id}_${i}`);
-                    const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                    await setDoc(chunkRef, { chunk: chunkData });
-                    await new Promise(r => setTimeout(r, 10)); // พัก UI
-                }
-
-                const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', `central_fee_raw_${selectedProject.id}`);
-                await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
-            };
-
-            syncData().then(() => {
-                alert('อัปโหลดและซิงค์ตารางข้อมูลลูกหนี้ขึ้นระบบออนไลน์สำเร็จ ทุกเครื่องจะมองเห็นข้อมูลนี้ตรงกัน!');
-                setIsSettingsOpen(false); // ปิดหน้าต่างการตั้งค่า
-            }).catch(e => {
-                console.error("Save CSV to Cloud Error:", e);
-                alert('เกิดข้อผิดพลาดในการบันทึกขึ้น Cloud: ' + e.message);
-            });
-        } catch (e) {
-            console.error(e);
-        }
-    } else {
-        alert('อัปโหลดสำเร็จ (ระบบกำลังทำงานในโหมดออฟไลน์ ข้อมูลจะอยู่เฉพาะในเครื่องนี้)');
-        setIsSettingsOpen(false);
-    }
-  };
-
   // --- Data Aggregation ---
   const summaryData = useMemo(() => {
     const grouped = {};
@@ -2333,22 +2086,58 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
 
       if (db && appId && selectedProject) {
         try {
-          const safeId = selectedHouse.houseNo.replace(/\//g, '-');
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', `house_statuses_${selectedProject.id}`, safeId);
-          
-          await setDoc(docRef, {
-            houseNo: selectedHouse.houseNo,
-            status: finalStatusToSave,
-            note: tempNote,
-            history: tempHistory,
-            updatedAt: new Date().toISOString(),
-            updatedBy: currentUser?.firstName || 'System'
-          }, { merge: true });
+            const syncData = async () => {
+                const jsonStr = JSON.stringify({
+                    payload: parsedData,
+                    projectTitle: newProjectTitle,
+                    reportDate: newReportDate,
+                    updatedAt: new Date().toISOString(),
+                    updatedBy: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
+                });
+                
+                // ใช้เทคนิค Chunking ตัดข้อมูลเป็นส่วนๆ ป้องกันปัญหาไฟล์เกินข้อจำกัด 1MB ของฐานข้อมูล
+                const CHUNK_SIZE = 150000; // FIX: ลดขนาดลงเพื่อรองรับอักขระภาษาไทยอย่างปลอดภัย
+                const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
 
-        } catch (error) {
-          console.error("Error saving to Cloud:", error);
+                if (setImportProgress) {
+                    setImportProgress({ isImporting: true, percent: 0, current: 0, total: totalChunks, label: 'กำลังนำเข้าและซิงค์ยอดค้างชำระ...', unit: 'ส่วน' });
+                }
+
+                for (let i = 0; i < totalChunks; i++) {
+                    const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `central_fee_raw_${selectedProject.id}_${i}`);
+                    const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+                    await setDoc(chunkRef, { chunk: chunkData });
+                    
+                    if (setImportProgress) {
+                        setImportProgress({ 
+                            isImporting: true, 
+                            percent: Math.round(((i + 1) / totalChunks) * 100), 
+                            current: i + 1, 
+                            total: totalChunks, 
+                            label: 'กำลังซิงค์ข้อมูลยอดค้างชำระขึ้นคลาวด์...', 
+                            unit: 'ส่วน' 
+                        });
+                    }
+                    await new Promise(r => setTimeout(r, 50)); // พัก UI
+                }
+
+                const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', `central_fee_raw_${selectedProject.id}`);
+                await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
+            };
+
+            syncData().then(() => {
+                if (setImportProgress) setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
+                alert('อัปโหลดและซิงค์ตารางข้อมูลลูกหนี้ขึ้นระบบออนไลน์สำเร็จ ทุกเครื่องจะมองเห็นข้อมูลนี้ตรงกัน!');
+                setIsSettingsOpen(false); // ปิดหน้าต่างการตั้งค่า
+            }).catch(e => {
+                if (setImportProgress) setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
+                console.error("Save CSV to Cloud Error:", e);
+                alert('เกิดข้อผิดพลาดในการบันทึกขึ้น Cloud: ' + e.message);
+            });
+        } catch (e) {
+            console.error(e);
         }
-      } else {
+    } else {
         setCustomStatuses(prev => ({ ...prev, [selectedHouse.houseNo]: finalStatusToSave }));
         setNotes(prev => ({ ...prev, [selectedHouse.houseNo]: tempNote }));
         setHistories(prev => ({ ...prev, [selectedHouse.houseNo]: tempHistory }));
@@ -3317,7 +3106,6 @@ export default function App() {
   const [isExporting, setIsExporting] = useState(false);
   const [isBackingUp, setIsBackingUp] = useState(false); // NEW: State สำหรับตอนกด Export Backup
   const [isRestoring, setIsRestoring] = useState(false); // NEW: State สำหรับตอนกำลัง Import Restore
-  const [restoreProgress, setRestoreProgress] = useState(''); // NEW: State สำหรับแสดงความคืบหน้าตอน Import
   // --- NEW: State for Selective Backup/Restore ---
   const [showBackupOptions, setShowBackupOptions] = useState(false);
   const [backupModules, setBackupModules] = useState({
@@ -3700,8 +3488,8 @@ export default function App() {
   const [inventoryList, setInventoryList] = usePersistentCollection('bmg_inventory', INITIAL_INVENTORY, fbUser);
   const [inventoryTransactions, setInventoryTransactions] = usePersistentCollection('bmg_inventory_transactions', INITIAL_TRANSACTIONS, fbUser);
 
-  // --- NEW: State สำหรับแสดง Progress ตอน Import CSV ---
-  const [importProgress, setImportProgress] = useState({ isImporting: false, percent: 0, current: 0, total: 0 });
+  // --- NEW: State สำหรับแสดง Progress ตอน Import CSV และ Restore ---
+  const [importProgress, setImportProgress] = useState({ isImporting: false, percent: 0, current: 0, total: 0, label: '', unit: '' });
 
   // --- NEW: Meeting Invitations State ---
   const [meetingInvitations, setMeetingInvitations] = usePersistentCollection('bmg_meeting_invitations', [], fbUser);
@@ -5652,7 +5440,9 @@ export default function App() {
                               isImporting: true, 
                               percent: Math.round((currentCount / totalToImport) * 100), 
                               current: currentCount, 
-                              total: totalToImport 
+                              total: totalToImport,
+                              label: 'กำลังนำเข้าข้อมูลรายงานประจำวัน...',
+                              unit: 'วัน'
                           });
 
                           // พักให้เบราว์เซอร์ Render UI
@@ -5662,7 +5452,7 @@ export default function App() {
                       // เสร็จสิ้นการนำเข้า แจ้งคลาวด์และปิดสถานะ
                       setTimeout(() => {
                           triggerAutoSync('DailyReports_รายงานประจำวัน', accumulatedReports, []);
-                          setImportProgress({ isImporting: false, percent: 100, current: totalToImport, total: totalToImport });
+                          setImportProgress({ isImporting: false, percent: 100, current: totalToImport, total: totalToImport, label: 'เสร็จสิ้น' });
                           alert('นำเข้าข้อมูลรายงานประจำวันสำเร็จแล้ว!');
                           setTimeout(() => setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 }), 1000);
                       }, 500);
@@ -7395,7 +7185,7 @@ export default function App() {
           async () => {
               setIsRestoring(true);
               setShowRestoreOptions(false);
-              setRestoreProgress('เริ่มดำเนินการกู้คืนข้อมูล (โปรดอย่าปิดหน้าต่าง)...');
+              setImportProgress({ isImporting: true, percent: 0, current: 0, total: 100, label: 'กำลังเตรียมการกู้คืนข้อมูล...' });
 
               try {
                   await new Promise(resolve => setTimeout(resolve, 500)); // พัก UI ให้เตรียมตัว
@@ -7422,7 +7212,7 @@ export default function App() {
                   if (d.localFiles && Object.keys(d.localFiles).length > 0) {
                       if (restoreModules.projects || restoreModules.contracts || restoreModules.formsList || restoreModules.meetingsList) {
                           const totalFiles = Object.keys(d.localFiles).length;
-                          setRestoreProgress(`กำลังกู้คืนไฟล์เอกสารแนบทั้งหมด (${totalFiles} ไฟล์)...`);
+                          setImportProgress({ isImporting: true, percent: 10, current: 0, total: totalFiles, label: 'กำลังกู้คืนไฟล์เอกสารแนบ...', unit: 'ไฟล์' });
                           await saveMultipleFilesLocally(d.localFiles);
                           await new Promise(resolve => setTimeout(resolve, 50));
                       }
@@ -7479,7 +7269,8 @@ export default function App() {
 
                   for (const item of stateSetters) {
                       currentTable++;
-                      setRestoreProgress(`กำลังกู้คืน: ${item.key} (${currentTable}/${totalTables})`);
+                      const p = 10 + Math.round((currentTable / totalTables) * 90);
+                      setImportProgress({ isImporting: true, percent: p, current: currentTable, total: totalTables, label: `กำลังนำเข้าหมวด: ${item.key}`, unit: 'หมวด' });
                       await new Promise(resolve => setTimeout(resolve, 50));
 
                       try {
@@ -7494,12 +7285,12 @@ export default function App() {
                   
                   if (d.theme) setTheme(d.theme);
 
-                  setRestoreProgress('การกู้คืนข้อมูลเฉพาะส่วนเสร็จสมบูรณ์!');
+                  setImportProgress({ isImporting: true, percent: 100, current: totalTables, total: totalTables, label: 'กู้คืนข้อมูลเสร็จสมบูรณ์!' });
                   
                   setTimeout(() => {
                       showAlert("สำเร็จ", `นำเข้าและอัปเดตข้อมูล ${totalTables} หมวดหมู่เสร็จสมบูรณ์ ข้อมูลพร้อมใช้งานทันที`);
                       setIsRestoring(false);
-                      setRestoreProgress('');
+                      setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
                       setImportDataPreview(null);
                   }, 500);
                   
@@ -7507,7 +7298,7 @@ export default function App() {
                   console.error("Restore state error:", err);
                   showAlert("เกิดข้อผิดพลาด", "เกิดข้อผิดพลาดระหว่างการกู้คืนข้อมูล: " + err.message);
                   setIsRestoring(false);
-                  setRestoreProgress('');
+                  setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
                   setImportDataPreview(null);
               }
           },
@@ -7662,6 +7453,8 @@ export default function App() {
           let successCount = 0;
           let failCount = 0;
 
+          setImportProgress({ isImporting: true, percent: 0, current: 0, total: filesToUpload.length, label: 'กำลังเตรียมสำรองไฟล์...', unit: 'ไฟล์' });
+
           // ส่งข้อมูลไปบันทึกทีละไฟล์
           for (let i = 0; i < filesToUpload.length; i++) {
               const file = filesToUpload[i];
@@ -7697,18 +7490,30 @@ export default function App() {
                   failCount++;
               }
 
+              setImportProgress({ 
+                  isImporting: true, 
+                  percent: Math.round(((i + 1) / filesToUpload.length) * 100), 
+                  current: i + 1, 
+                  total: filesToUpload.length, 
+                  label: 'กำลังส่งไฟล์ไปที่ Google Drive...', 
+                  unit: 'ไฟล์' 
+              });
+
               // FIX: พักให้เบราว์เซอร์ประมวลผล 50ms ป้องกันหน้าจอค้าง (Out of memory / Call stack size exceeded)
               await new Promise(resolve => setTimeout(resolve, 50));
           }
 
+          setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
           alert(`✅ สำรองไฟล์ไปยัง Google Drive เสร็จสิ้น!\nสำเร็จ: ${successCount} ไฟล์\nล้มเหลว: ${failCount} ไฟล์\n\nโฟลเดอร์ปลายทาง: ${autoFolderName}`);
 
       } catch (error) {
+          setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
           console.error("Drive Backup error:", error);
           // แสดงข้อความ Error ที่แท้จริงออกมาเพื่อให้ทราบสาเหตุ
           alert(`❌ เกิดข้อผิดพลาดในการสำรองข้อมูลไปยัง Google Drive\n\nรายละเอียด: ${error.message || 'กรุณาตรวจสอบว่ามีไฟล์หรือข้อมูลที่เสียหายอยู่ในระบบหรือไม่'}`);
       } finally {
           setIsBackingUpToDrive(false);
+          setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
       }
   };
   // ----------------------------------------
@@ -16175,7 +15980,7 @@ export default function App() {
                               </div>
                               {isRestoring && (
                                   <div className="p-3 bg-red-100 text-red-800 text-xs text-center font-medium animate-pulse border-t border-red-200">
-                                      {restoreProgress}
+                                      ระบบกำลังกู้คืนและนำเข้าข้อมูล กรุณารอสักครู่...
                                   </div>
                               )}
                           </div>
@@ -16966,7 +16771,10 @@ export default function App() {
         )}
 
         <div id="print-area" className={`${isExporting ? 'w-full max-w-none px-[10mm]' : 'max-w-7xl mx-auto w-full p-4 md:p-6 lg:p-8 h-full flex flex-col'}`}>
-          {selectedProject ? ProjectDetail() : (
+          {selectedProject ? (
+              selectedProject.id === 'centralfee' ? null : 
+              React.cloneElement(ProjectDetail(), { setImportProgress })
+          ) : (
             <>
               {activeMenu === 'dashboard' && DashboardView()}
               {activeMenu === 'users' && UserManagement()}
@@ -16976,6 +16784,17 @@ export default function App() {
               {activeMenu === 'manual' && ManualView()}
               {activeMenu === 'settings' && SettingsView()}
             </>
+          )}
+          {selectedProject && projectTab === 'centralfee' && (
+              <div className="animate-fade-in -mt-6">
+                  <CentralFeeManagerTab 
+                      selectedProject={selectedProject} 
+                      currentUser={currentUser} 
+                      db={db} 
+                      appId={appId} 
+                      setImportProgress={setImportProgress}
+                  />
+              </div>
           )}
         </div>
       </main>
@@ -16990,10 +16809,10 @@ export default function App() {
 
       {/* NEW: Import Progress Overlay */}
       {importProgress.isImporting && (
-          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[10000] flex flex-col items-center justify-center animate-fade-in">
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[10000] flex flex-col items-center justify-center animate-fade-in p-4">
               <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-sm flex flex-col items-center text-center">
                   <Loader2 size={48} className="text-blue-500 animate-spin mb-4" />
-                  <h3 className="text-xl font-bold text-gray-800 mb-2">กำลังนำเข้าข้อมูล...</h3>
+                  <h3 className="text-lg font-bold text-gray-800 mb-2">{importProgress.label || 'กำลังนำเข้าข้อมูล...'}</h3>
                   <p className="text-sm text-gray-500 mb-6">กรุณารอสักครู่ ห้ามปิดหน้าต่างหรือรีเฟรช</p>
                   
                   {/* Progress Bar */}
@@ -17005,7 +16824,11 @@ export default function App() {
                   </div>
                   <div className="flex justify-between w-full text-xs font-bold text-gray-600">
                       <span>{importProgress.percent}%</span>
-                      <span>{importProgress.current} / {importProgress.total} รายการ</span>
+                      {importProgress.total > 0 ? (
+                          <span>{importProgress.current} / {importProgress.total} {importProgress.unit || 'รายการ'}</span>
+                      ) : (
+                          <span>ระบบกำลังประมวลผล...</span>
+                      )}
                   </div>
               </div>
           </div>
