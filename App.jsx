@@ -3700,6 +3700,9 @@ export default function App() {
   const [inventoryList, setInventoryList] = usePersistentCollection('bmg_inventory', INITIAL_INVENTORY, fbUser);
   const [inventoryTransactions, setInventoryTransactions] = usePersistentCollection('bmg_inventory_transactions', INITIAL_TRANSACTIONS, fbUser);
 
+  // --- NEW: State สำหรับแสดง Progress ตอน Import CSV ---
+  const [importProgress, setImportProgress] = useState({ isImporting: false, percent: 0, current: 0, total: 0 });
+
   // --- NEW: Meeting Invitations State ---
   const [meetingInvitations, setMeetingInvitations] = usePersistentCollection('bmg_meeting_invitations', [], fbUser);
   const [showAddInvitationModal, setShowAddInvitationModal] = useState(false);
@@ -5489,13 +5492,13 @@ export default function App() {
       return Number(commonFee) + Number(lateFee) + Number(water) + Number(parking) + Number(violation) + Number(other);
   };
   
-  // --- NEW: ฟังก์ชัน นำเข้า (Import) รายงานประจำวันด้วย CSV ---
+      // --- NEW: ฟังก์ชัน นำเข้า (Import) รายงานประจำวันด้วย CSV ---
   const handleImportDailyReportsCSV = (event) => {
       const file = event.target.files[0];
       if (!file) return;
       const reader = new FileReader();
       reader.readAsArrayBuffer(file);
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
           try {
               const buffer = e.target.result;
               let text = '';
@@ -5620,15 +5623,50 @@ export default function App() {
               }
               
               if (newReports.length > 0) {
-                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูลรายงานประจำวันที่ถูกต้องและไม่ซ้ำ ${newReports.length} วัน ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
-                      setDailyReports(prev => {
-                          const safeNewReports = newReports.filter(nr => !prev.some(pr => pr.projectId === nr.projectId && pr.date === nr.date));
-                          const nextList = [...safeNewReports, ...prev];
-                          // ย้าย triggerAutoSync ไปรันหลังจากการอัปเดต state เสร็จสิ้นเพื่อลดปัญหา
-                          setTimeout(() => triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, []), 500);
-                          return nextList;
-                      }, true);
-                      alert('นำเข้าข้อมูลรายงานประจำวันสำเร็จแล้ว!');
+                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูลรายงานประจำวันที่ถูกต้องและไม่ซ้ำ ${newReports.length} วัน ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, async () => {
+                      
+                      setImportProgress({ isImporting: true, percent: 0, current: 0, total: newReports.length });
+                      
+                      // คัดแยกรายงานที่ไม่ซ้ำจริงๆ
+                      const safeNewReports = newReports.filter(nr => !dailyReports.some(pr => pr.projectId === nr.projectId && pr.date === nr.date));
+                      const totalToImport = safeNewReports.length;
+
+                      if (totalToImport === 0) {
+                          setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
+                          alert('ไม่มีข้อมูลใหม่ที่จะนำเข้า (ข้อมูลซ้ำกับในระบบทั้งหมด)');
+                          return;
+                      }
+
+                      // ใช้เทคนิค Chunking อัปเดตทีละนิด เพื่อให้ React แสดง UI ความคืบหน้าได้ และไม่ค้าง
+                      const CHUNK_SIZE = 10;
+                      let accumulatedReports = [...dailyReports];
+
+                      for (let i = 0; i < totalToImport; i += CHUNK_SIZE) {
+                          const chunk = safeNewReports.slice(i, i + CHUNK_SIZE);
+                          accumulatedReports = [...chunk, ...accumulatedReports];
+                          
+                          // อัปเดต State ทีละก้อนเล็กๆ พร้อมเปอร์เซ็นต์
+                          setDailyReports(accumulatedReports);
+                          const currentCount = Math.min(i + CHUNK_SIZE, totalToImport);
+                          setImportProgress({ 
+                              isImporting: true, 
+                              percent: Math.round((currentCount / totalToImport) * 100), 
+                              current: currentCount, 
+                              total: totalToImport 
+                          });
+
+                          // พักให้เบราว์เซอร์ Render UI
+                          await new Promise(resolve => setTimeout(resolve, 50)); 
+                      }
+
+                      // เสร็จสิ้นการนำเข้า แจ้งคลาวด์และปิดสถานะ
+                      setTimeout(() => {
+                          triggerAutoSync('DailyReports_รายงานประจำวัน', accumulatedReports, []);
+                          setImportProgress({ isImporting: false, percent: 100, current: totalToImport, total: totalToImport });
+                          alert('นำเข้าข้อมูลรายงานประจำวันสำเร็จแล้ว!');
+                          setTimeout(() => setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 }), 1000);
+                      }, 500);
+
                   }, 'ยืนยันการนำเข้า', 'info');
               } else {
                   alert('ไม่พบข้อมูลใหม่ หรือข้อมูลวันที่ซ้ำกับที่มีอยู่ในระบบแล้ว (ระบบจะบันทึกได้แค่วันละ 1 ฉบับเท่านั้น)');
@@ -16947,6 +16985,29 @@ export default function App() {
           <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-gray-900/90 text-white px-5 py-2.5 rounded-full shadow-2xl flex items-center gap-3 z-[9999] animate-fade-in backdrop-blur-sm border border-gray-700">
               <Cloud size={16} className="text-blue-400 animate-pulse" />
               <span className="text-sm font-medium tracking-wide">{autoSyncMessage}</span>
+          </div>
+      )}
+
+      {/* NEW: Import Progress Overlay */}
+      {importProgress.isImporting && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[10000] flex flex-col items-center justify-center animate-fade-in">
+              <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-sm flex flex-col items-center text-center">
+                  <Loader2 size={48} className="text-blue-500 animate-spin mb-4" />
+                  <h3 className="text-xl font-bold text-gray-800 mb-2">กำลังนำเข้าข้อมูล...</h3>
+                  <p className="text-sm text-gray-500 mb-6">กรุณารอสักครู่ ห้ามปิดหน้าต่างหรือรีเฟรช</p>
+                  
+                  {/* Progress Bar */}
+                  <div className="w-full bg-gray-100 rounded-full h-4 mb-2 overflow-hidden shadow-inner border border-gray-200">
+                      <div 
+                          className="bg-blue-500 h-full transition-all duration-300 ease-out" 
+                          style={{ width: `${importProgress.percent}%` }}
+                      ></div>
+                  </div>
+                  <div className="flex justify-between w-full text-xs font-bold text-gray-600">
+                      <span>{importProgress.percent}%</span>
+                      <span>{importProgress.current} / {importProgress.total} รายการ</span>
+                  </div>
+              </div>
           </div>
       )}
 
