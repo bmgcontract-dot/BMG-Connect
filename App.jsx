@@ -1736,31 +1736,8 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                         if (opCount > 0) await batch.commit();
                     }
                 }
-
-                // 3. เริ่มฟังสัญญาณซิงค์ข้อมูล Real-time
-                const colRef = collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
-                unsubscribe = onSnapshot(colRef, (snapshot) => {
-                    if (!isMounted) return;
-                    const serverItems = [];
-                    snapshot.forEach(docSnap => serverItems.push(docSnap.data()));
-                    
-                    // ป้องกันเอาความว่างเปล่าจาก Server มาลบข้อมูลในเครื่อง (ยกเว้นโดนสั่งลบมาจริงๆ จาก snapshot.docChanges)
-                    if (serverItems.length > 0 || snapshot.docChanges().length > 0) {
-                        setData(serverItems);
-                        dataRef.current = serverItems;
-                        if (typeof window !== 'undefined') {
-                            try { localStorage.setItem(localKey, JSON.stringify(serverItems)); } catch(e) {}
-                        }
-                    }
-                    setIsLoaded(true);
-                }, (error) => {
-                    console.error(`Sync error for ${collectionName}:`, error);
-                    if (isMounted) setIsLoaded(true);
-                });
-
-            } catch (err) {
-                console.error(`Init error for ${collectionName}:`, err);
-                if (isMounted) setIsLoaded(true);
+            } catch (e) {
+                console.error(`Save error ${collectionName}:`, e);
             }
         };
 
@@ -1772,7 +1749,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
         };
     }, [db, appId, fbUser, collectionName, localKey]);
 
-    const setPersistentValue = async (newValueOrUpdater, isRestore = false, progressCallback = null) => {
+    const setPersistentValue = async (newValueOrUpdater, isRestore = false) => {
         const oldValue = dataRef.current;
         const newValue = typeof newValueOrUpdater === 'function' ? newValueOrUpdater(oldValue) : newValueOrUpdater;
         
@@ -1789,54 +1766,57 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
 
         if (!db || !fbUser || !appId) return;
 
-        // โหมดกู้คืนข้อมูลแบบ Batch
+        // โหมดกู้คืนข้อมูลแบบ Batch (ทำเป็น Background Process เพื่อให้ UI ตอบสนองได้เร็วขึ้นมาก)
         if (isRestore && Array.isArray(newValue)) {
-            try {
-                let batch = writeBatch(db);
-                let opCount = 0;
-                for (let i = 0; i < newValue.length; i++) {
-                    const item = newValue[i];
-                    if (!item.id) continue;
+            const uploadToFirebase = async () => {
+                try {
+                    let batch = writeBatch(db);
+                    let opCount = 0;
+                    for (let i = 0; i < newValue.length; i++) {
+                        const item = newValue[i];
+                        if (!item.id) continue;
 
-                    // ป้องกัน Document มีขนาดใหญ่เกิน 1MB ตอนกู้คืนข้อมูล (มักจะเกิดกับ Daily Reports ที่มีรูป Base64 เยอะ)
-                    const safeItem = { ...item };
-                    try {
-                        let docStr = JSON.stringify(safeItem);
-                        if (docStr.length > 850000) { 
-                            if (safeItem.performance) {
-                                for (const dept in safeItem.performance) {
-                                    if (safeItem.performance[dept].images && safeItem.performance[dept].images.length > 0) {
-                                        safeItem.performance[dept].images = []; 
-                                        safeItem.performance[dept].details = (safeItem.performance[dept].details || '') + '\n[หมายเหตุ: รูปภาพถูกลบเพื่อลดขนาดข้อมูลระหว่างการกู้คืน]';
+                        // ป้องกัน Document มีขนาดใหญ่เกิน 1MB ตอนกู้คืนข้อมูล
+                        const safeItem = { ...item };
+                        try {
+                            let docStr = JSON.stringify(safeItem);
+                            if (docStr.length > 850000) { 
+                                if (safeItem.performance) {
+                                    for (const dept in safeItem.performance) {
+                                        if (safeItem.performance[dept].images && safeItem.performance[dept].images.length > 0) {
+                                            safeItem.performance[dept].images = []; 
+                                            safeItem.performance[dept].details = (safeItem.performance[dept].details || '') + '\n[หมายเหตุ: รูปภาพถูกลบเพื่อลดขนาดข้อมูลระหว่างการกู้คืน]';
+                                        }
                                     }
                                 }
+                                if (safeItem.images && safeItem.images.length > 0) {
+                                    safeItem.images = [];
+                                }
                             }
-                            if (safeItem.images && safeItem.images.length > 0) {
-                                safeItem.images = [];
-                            }
+                        } catch (e) {
+                            console.warn("Error sizing doc during restore:", e);
                         }
-                    } catch (e) {
-                        console.warn("Error sizing doc during restore:", e);
-                    }
 
-                    batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, safeItem.id), safeItem);
-                    opCount++;
-                    
-                    if (opCount >= 400) { 
-                        await batch.commit(); 
-                        batch = writeBatch(db); 
-                        opCount = 0; 
-                    }
+                        batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, safeItem.id), safeItem);
+                        opCount++;
+                        
+                        if (opCount >= 400) { 
+                            await batch.commit(); 
+                            batch = writeBatch(db); 
+                            opCount = 0; 
+                        }
 
-                    // พักให้เบราว์เซอร์ทำงานอื่นทุกๆ 20 รายการ ป้องกันอาการหน้าจอค้าง (Freeze)
-                    if (i > 0 && i % 20 === 0) {
-                        if (progressCallback) progressCallback(i, newValue.length);
-                        await new Promise(resolve => setTimeout(resolve, 10));
+                        // พักลดการใช้ CPU ป้องกันเครื่องค้าง
+                        if (i > 0 && i % 100 === 0) {
+                            await new Promise(resolve => setTimeout(resolve, 0));
+                        }
                     }
-                }
-                if (opCount > 0) await batch.commit();
-                if (progressCallback) progressCallback(newValue.length, newValue.length);
-            } catch (e) { console.error("Restore error", e); }
+                    if (opCount > 0) await batch.commit();
+                } catch (e) { console.error("Restore error", e); }
+            };
+            
+            // เรียกใช้โดยไม่ต้อง await เพื่อให้ function หลักคืนค่า (และอัปเดต Progress) ได้ทันที
+            uploadToFirebase();
             return;
         }
 
@@ -1850,8 +1830,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
         (Array.isArray(newValue) ? newValue : []).forEach(newItem => {
             if (!newItem.id) return;
             const oldItem = oldMap.get(newItem.id);
-            // FIX: ข้ามกระบวนการ JSON.stringify ที่กินทรัพยากรสูง หาก Object Reference ไม่เปลี่ยนแปลง (ช่วยลดเวลาประมวลผลได้มหาศาล)
-            if (!oldItem || (oldItem !== newItem && JSON.stringify(oldItem) !== JSON.stringify(newItem))) {
+            if (!oldItem || JSON.stringify(oldItem) !== JSON.stringify(newItem)) {
                 toSet.push(newItem);
             }
         });
@@ -1863,11 +1842,9 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
         });
 
         try {
-            const totalOps = toSet.length + toDelete.length;
-            if (totalOps > 0) {
+            if (toSet.length > 0 || toDelete.length > 0) {
                 let batch = writeBatch(db);
                 let opCount = 0;
-                let currentOp = 0;
                 
                 for (const item of toSet) {
                     const itemToSave = { ...item };
@@ -1905,29 +1882,16 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
 
                     batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id), itemToSave);
                     opCount++;
-                    currentOp++;
                     if (opCount >= 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
-                    
-                    if (currentOp % 20 === 0) {
-                        if (progressCallback && !isRestore) progressCallback(currentOp, totalOps);
-                        await new Promise(resolve => setTimeout(resolve, 10));
-                    }
                 }
 
                 for (const id of toDelete) {
                     batch.delete(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, id));
                     opCount++;
-                    currentOp++;
                     if (opCount >= 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
-                    
-                    if (currentOp % 20 === 0) {
-                        if (progressCallback && !isRestore) progressCallback(currentOp, totalOps);
-                        await new Promise(resolve => setTimeout(resolve, 10));
-                    }
                 }
 
                 if (opCount > 0) await batch.commit();
-                if (progressCallback && !isRestore) progressCallback(totalOps, totalOps);
             }
         } catch (e) {
             console.error(`Save error ${collectionName}:`, e);
@@ -7336,21 +7300,15 @@ export default function App() {
 
                   for (const item of stateSetters) {
                       currentTable++;
-                      const baseP = 10 + Math.round(((currentTable - 1) / totalTables) * 90);
-                      const nextP = 10 + Math.round((currentTable / totalTables) * 90);
-                      
-                      setImportProgress({ isImporting: true, percent: baseP, current: currentTable, total: totalTables, label: `กำลังนำเข้าหมวด: ${item.key}`, unit: 'หมวด' });
-                      await new Promise(resolve => setTimeout(resolve, 50));
+                      const p = 10 + Math.round((currentTable / totalTables) * 90);
+                      setImportProgress({ isImporting: true, percent: p, current: currentTable, total: totalTables, label: `กำลังนำเข้าหมวด: ${item.key}`, unit: 'หมวด' });
+                      await new Promise(resolve => setTimeout(resolve, 10)); // ลดเวลาพักลงเพื่อให้โชว์ความเร็วเต็มที่
 
                       try {
-                          const progressCb = (current, total) => {
-                               const progressWithinTable = current / total;
-                               const currentPercent = baseP + Math.round((nextP - baseP) * progressWithinTable);
-                               setImportProgress({ isImporting: true, percent: currentPercent, current: currentTable, total: totalTables, label: `กำลังนำเข้าหมวด: ${item.key} (${current}/${total})`, unit: 'หมวด' });
-                          };
-                          const syncPromise = item.setter(item.data, true, progressCb);
-                          if (syncPromise && typeof syncPromise.then === 'function') {
-                              await syncPromise; 
+                          const syncPromise = item.setter(item.data, true);
+                          // ไม่ทำการ await กีดขวาง ปล่อยให้มัน Sync ใน Background ตัวเอง
+                          if (syncPromise) {
+                              syncPromise.catch(e => console.error("Background sync error for", item.key, e));
                           }
                       } catch(e) {
                           console.error("Sync error for", item.key, e);
@@ -7362,10 +7320,14 @@ export default function App() {
                   setImportProgress({ isImporting: true, percent: 100, current: totalTables, total: totalTables, label: 'กู้คืนข้อมูลเสร็จสมบูรณ์!' });
                   
                   setTimeout(() => {
-                      showAlert("สำเร็จ", `นำเข้าและอัปเดตข้อมูล ${totalTables} หมวดหมู่เสร็จสมบูรณ์ ข้อมูลพร้อมใช้งานทันที`);
+                      showAlert("สำเร็จ", `นำเข้าและอัปเดตข้อมูล ${totalTables} หมวดหมู่เสร็จสมบูรณ์ (ข้อมูลถูกกู้คืนและพร้อมใช้งานแล้ว ระบบจะทยอยซิงค์ขึ้น Cloud อยู่เบื้องหลัง)`);
                       setIsRestoring(false);
                       setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
                       setImportDataPreview(null);
+                      
+                      // โชว์แจ้งเตือนด้านล่างให้รู้ว่าคลาวด์ซิงค์กำลังทำงาน
+                      setAutoSyncMessage('กำลังซิงค์ข้อมูลกู้คืนขึ้นคลาวด์...');
+                      setTimeout(() => setAutoSyncMessage(''), 8000); 
                   }, 500);
                   
               } catch (err) {
@@ -8842,46 +8804,45 @@ export default function App() {
                   const headers = parseCSVLine(lines[0]);
                   const newUsers = [];
                   
-                  const usernameIdx = headers.indexOf('username');
-                  const firstNameIdx = headers.indexOf('firstName');
-                  const lastNameIdx = headers.indexOf('lastName');
-                  const employeeIdIdx = headers.indexOf('employeeId');
-                  const positionIdx = headers.indexOf('position');
-                  const departmentIdx = headers.indexOf('department');
-
-                  if (usernameIdx !== -1 && firstNameIdx !== -1) {
-                      for (let i = 1; i < lines.length; i++) {
-                          if (!lines[i].trim()) continue;
-                          const values = parseCSVLine(lines[i]);
-                          
-                          const username = values[usernameIdx];
-                          if (!username || users.some(u => u.username === username) || newUsers.some(u => u.username === username)) continue;
-
+                  for (let i = 1; i < lines.length; i++) {
+                      if (!lines[i].trim()) continue;
+                      
+                      const values = parseCSVLine(lines[i]);
+                      const userObj = {};
+                      headers.forEach((header, index) => {
+                          userObj[header] = values[index];
+                      });
+                      
+                      // เช็คเฉพาะฟิลด์บังคับ คือ username และ firstName
+                      if (userObj.username && userObj.firstName) {
+                          const finalUsername = userObj.username;
                           newUsers.push({
                               id: generateId(),
-                              username: username,
-                              password: username, // default password
-                              firstName: values[firstNameIdx] || '',
-                              lastName: lastNameIdx !== -1 ? values[lastNameIdx] : '',
-                              employeeId: employeeIdIdx !== -1 ? values[employeeIdIdx] : '',
-                              position: positionIdx !== -1 ? values[positionIdx] : EMPLOYEE_POSITIONS[0],
-                              department: departmentIdx !== -1 ? values[departmentIdx] : '',
-                              accessibleDepts: [],
-                              phone: '',
+                              employeeId: finalUsername, // บังคับให้รหัสพนักงานเป็นค่าเดียวกับชื่อผู้ใช้งาน
+                              firstName: userObj.firstName || '',
+                              lastName: userObj.lastName || '',
+                              position: userObj.position || EMPLOYEE_POSITIONS[0], // ค่าเริ่มต้น
+                              department: userObj.department || 'Head Office',
+                              phone: userObj.phone || '',
+                              username: finalUsername, // บังคับให้ชื่อผู้ใช้งานเป็นค่าเดียวกับรหัสพนักงาน
+                              password: userObj.password || '1234', // รหัสผ่านตั้งต้นถ้าไม่ได้ใส่มา
                               status: 'Active',
                               created_at: new Date().toISOString(),
-                              permissions: getDefaultPermissions()
+                              accessibleDepts: [],
+                              permissions: getDefaultPermissions(),
+                              photo: null
                           });
                       }
-
-                      if (newUsers.length > 0) {
-                          showConfirm('ยืนยันการนำเข้า', `พบข้อมูลพนักงานที่ถูกต้อง ${newUsers.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
-                              setUsers(prev => [...prev, ...newUsers]);
-                              alert('นำเข้าข้อมูลพนักงานสำเร็จแล้ว!');
-                          }, 'ยืนยันการนำเข้า', 'info');
-                      } else {
-                          alert('ไม่มีข้อมูลใหม่ หรือ username ซ้ำกับที่มีอยู่ในระบบแล้ว');
-                      }
+                  }
+                  
+                  if (newUsers.length > 0) {
+                      showConfirm('ยืนยันการนำเข้า', `พบข้อมูลพนักงานใหม่ที่ถูกต้อง ${newUsers.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
+                          setUsers(prev => {
+                              const safeNewUsers = newUsers.filter(nu => !prev.some(pu => pu.username === nu.username));
+                              return [...prev, ...safeNewUsers];
+                          }, true);
+                          alert('นำเข้าข้อมูลพนักงานสำเร็จแล้ว!');
+                      }, 'ยืนยันการนำเข้า', 'info');
                   } else {
                       alert('ไม่พบข้อมูลพนักงานที่ถูกต้องในไฟล์ (กรุณาตรวจสอบว่ามีคอลัมน์ username และ firstName)');
                   }
