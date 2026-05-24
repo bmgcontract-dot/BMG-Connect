@@ -1736,8 +1736,31 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                         if (opCount > 0) await batch.commit();
                     }
                 }
-            } catch (e) {
-                console.error(`Save error ${collectionName}:`, e);
+
+                // 3. เริ่มฟังสัญญาณซิงค์ข้อมูล Real-time
+                const colRef = collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
+                unsubscribe = onSnapshot(colRef, (snapshot) => {
+                    if (!isMounted) return;
+                    const serverItems = [];
+                    snapshot.forEach(docSnap => serverItems.push(docSnap.data()));
+                    
+                    // ป้องกันเอาความว่างเปล่าจาก Server มาลบข้อมูลในเครื่อง (ยกเว้นโดนสั่งลบมาจริงๆ จาก snapshot.docChanges)
+                    if (serverItems.length > 0 || snapshot.docChanges().length > 0) {
+                        setData(serverItems);
+                        dataRef.current = serverItems;
+                        if (typeof window !== 'undefined') {
+                            try { localStorage.setItem(localKey, JSON.stringify(serverItems)); } catch(e) {}
+                        }
+                    }
+                    setIsLoaded(true);
+                }, (error) => {
+                    console.error(`Sync error for ${collectionName}:`, error);
+                    if (isMounted) setIsLoaded(true);
+                });
+
+            } catch (err) {
+                console.error(`Init error for ${collectionName}:`, err);
+                if (isMounted) setIsLoaded(true);
             }
         };
 
@@ -1766,57 +1789,19 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
 
         if (!db || !fbUser || !appId) return;
 
-        // โหมดกู้คืนข้อมูลแบบ Batch (ทำเป็น Background Process เพื่อให้ UI ตอบสนองได้เร็วขึ้นมาก)
+        // โหมดกู้คืนข้อมูลแบบ Batch
         if (isRestore && Array.isArray(newValue)) {
-            const uploadToFirebase = async () => {
-                try {
-                    let batch = writeBatch(db);
-                    let opCount = 0;
-                    for (let i = 0; i < newValue.length; i++) {
-                        const item = newValue[i];
-                        if (!item.id) continue;
-
-                        // ป้องกัน Document มีขนาดใหญ่เกิน 1MB ตอนกู้คืนข้อมูล
-                        const safeItem = { ...item };
-                        try {
-                            let docStr = JSON.stringify(safeItem);
-                            if (docStr.length > 850000) { 
-                                if (safeItem.performance) {
-                                    for (const dept in safeItem.performance) {
-                                        if (safeItem.performance[dept].images && safeItem.performance[dept].images.length > 0) {
-                                            safeItem.performance[dept].images = []; 
-                                            safeItem.performance[dept].details = (safeItem.performance[dept].details || '') + '\n[หมายเหตุ: รูปภาพถูกลบเพื่อลดขนาดข้อมูลระหว่างการกู้คืน]';
-                                        }
-                                    }
-                                }
-                                if (safeItem.images && safeItem.images.length > 0) {
-                                    safeItem.images = [];
-                                }
-                            }
-                        } catch (e) {
-                            console.warn("Error sizing doc during restore:", e);
-                        }
-
-                        batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, safeItem.id), safeItem);
-                        opCount++;
-                        
-                        if (opCount >= 400) { 
-                            await batch.commit(); 
-                            batch = writeBatch(db); 
-                            opCount = 0; 
-                        }
-
-                        // พักลดการใช้ CPU ป้องกันเครื่องค้าง
-                        if (i > 0 && i % 100 === 0) {
-                            await new Promise(resolve => setTimeout(resolve, 0));
-                        }
-                    }
-                    if (opCount > 0) await batch.commit();
-                } catch (e) { console.error("Restore error", e); }
-            };
-            
-            // เรียกใช้โดยไม่ต้อง await เพื่อให้ function หลักคืนค่า (และอัปเดต Progress) ได้ทันที
-            uploadToFirebase();
+            try {
+                let batch = writeBatch(db);
+                let opCount = 0;
+                for (const item of newValue) {
+                    if (!item.id) continue;
+                    batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id), item);
+                    opCount++;
+                    if (opCount >= 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
+                }
+                if (opCount > 0) await batch.commit();
+            } catch (e) { console.error("Restore error", e); }
             return;
         }
 
@@ -7222,22 +7207,6 @@ export default function App() {
                           if (c.file && c.file.data) delete c.file.data;
                       });
                   }
-                  // กรองขนาดของรายงานประจำวันเพื่อป้องกันเบราว์เซอร์ค้างก่อนส่งเข้า State
-                  if (d.dailyReports && Array.isArray(d.dailyReports)) {
-                      d.dailyReports.forEach(report => {
-                          if (report.performance) {
-                              Object.keys(report.performance).forEach(dept => {
-                                  if (report.performance[dept] && report.performance[dept].images && report.performance[dept].images.length > 0) {
-                                      const img = report.performance[dept].images[0];
-                                      if (img && img.length > 600000) { 
-                                           report.performance[dept].images = [];
-                                           report.performance[dept].details = (report.performance[dept].details || '') + '\n[หมายเหตุ: รูปภาพมีขนาดใหญ่เกินไป ถูกกรองออกระหว่างการกู้คืน]';
-                                      }
-                                  }
-                              });
-                          }
-                      });
-                  }
 
                   // 1. กู้คืนไฟล์ PDF ต่างๆ ลง IndexedDB (ถ้าเลือกโมดูลที่เกี่ยวข้อง)
                   if (d.localFiles && Object.keys(d.localFiles).length > 0) {
@@ -7302,13 +7271,12 @@ export default function App() {
                       currentTable++;
                       const p = 10 + Math.round((currentTable / totalTables) * 90);
                       setImportProgress({ isImporting: true, percent: p, current: currentTable, total: totalTables, label: `กำลังนำเข้าหมวด: ${item.key}`, unit: 'หมวด' });
-                      await new Promise(resolve => setTimeout(resolve, 10)); // ลดเวลาพักลงเพื่อให้โชว์ความเร็วเต็มที่
+                      await new Promise(resolve => setTimeout(resolve, 50));
 
                       try {
                           const syncPromise = item.setter(item.data, true);
-                          // ไม่ทำการ await กีดขวาง ปล่อยให้มัน Sync ใน Background ตัวเอง
                           if (syncPromise) {
-                              syncPromise.catch(e => console.error("Background sync error for", item.key, e));
+                              await syncPromise; 
                           }
                       } catch(e) {
                           console.error("Sync error for", item.key, e);
@@ -7320,14 +7288,10 @@ export default function App() {
                   setImportProgress({ isImporting: true, percent: 100, current: totalTables, total: totalTables, label: 'กู้คืนข้อมูลเสร็จสมบูรณ์!' });
                   
                   setTimeout(() => {
-                      showAlert("สำเร็จ", `นำเข้าและอัปเดตข้อมูล ${totalTables} หมวดหมู่เสร็จสมบูรณ์ (ข้อมูลถูกกู้คืนและพร้อมใช้งานแล้ว ระบบจะทยอยซิงค์ขึ้น Cloud อยู่เบื้องหลัง)`);
+                      showAlert("สำเร็จ", `นำเข้าและอัปเดตข้อมูล ${totalTables} หมวดหมู่เสร็จสมบูรณ์ ข้อมูลพร้อมใช้งานทันที`);
                       setIsRestoring(false);
                       setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
                       setImportDataPreview(null);
-                      
-                      // โชว์แจ้งเตือนด้านล่างให้รู้ว่าคลาวด์ซิงค์กำลังทำงาน
-                      setAutoSyncMessage('กำลังซิงค์ข้อมูลกู้คืนขึ้นคลาวด์...');
-                      setTimeout(() => setAutoSyncMessage(''), 8000); 
                   }, 500);
                   
               } catch (err) {
