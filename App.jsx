@@ -2084,64 +2084,9 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId, setImpo
     if (selectedHouse) {
       const finalStatusToSave = tempStatus === "อื่นๆ (ให้ระบุ)" ? tempCustomStatus : tempStatus;
 
-      if (db && appId && selectedProject) {
-        try {
-            const syncData = async () => {
-                const jsonStr = JSON.stringify({
-                    payload: parsedData,
-                    projectTitle: newProjectTitle,
-                    reportDate: newReportDate,
-                    updatedAt: new Date().toISOString(),
-                    updatedBy: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
-                });
-                
-                // ใช้เทคนิค Chunking ตัดข้อมูลเป็นส่วนๆ ป้องกันปัญหาไฟล์เกินข้อจำกัด 1MB ของฐานข้อมูล
-                const CHUNK_SIZE = 150000; // FIX: ลดขนาดลงเพื่อรองรับอักขระภาษาไทยอย่างปลอดภัย
-                const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
-
-                if (setImportProgress) {
-                    setImportProgress({ isImporting: true, percent: 0, current: 0, total: totalChunks, label: 'กำลังนำเข้าและซิงค์ยอดค้างชำระ...', unit: 'ส่วน' });
-                }
-
-                for (let i = 0; i < totalChunks; i++) {
-                    const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `central_fee_raw_${selectedProject.id}_${i}`);
-                    const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                    await setDoc(chunkRef, { chunk: chunkData });
-                    
-                    if (setImportProgress) {
-                        setImportProgress({ 
-                            isImporting: true, 
-                            percent: Math.round(((i + 1) / totalChunks) * 100), 
-                            current: i + 1, 
-                            total: totalChunks, 
-                            label: 'กำลังซิงค์ข้อมูลยอดค้างชำระขึ้นคลาวด์...', 
-                            unit: 'ส่วน' 
-                        });
-                    }
-                    await new Promise(r => setTimeout(r, 50)); // พัก UI
-                }
-
-                const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', `central_fee_raw_${selectedProject.id}`);
-                await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
-            };
-
-            syncData().then(() => {
-                if (setImportProgress) setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
-                alert('อัปโหลดและซิงค์ตารางข้อมูลลูกหนี้ขึ้นระบบออนไลน์สำเร็จ ทุกเครื่องจะมองเห็นข้อมูลนี้ตรงกัน!');
-                setIsSettingsOpen(false); // ปิดหน้าต่างการตั้งค่า
-            }).catch(e => {
-                if (setImportProgress) setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
-                console.error("Save CSV to Cloud Error:", e);
-                alert('เกิดข้อผิดพลาดในการบันทึกขึ้น Cloud: ' + e.message);
-            });
-        } catch (e) {
-            console.error(e);
-        }
-    } else {
-        setCustomStatuses(prev => ({ ...prev, [selectedHouse.houseNo]: finalStatusToSave }));
-        setNotes(prev => ({ ...prev, [selectedHouse.houseNo]: tempNote }));
-        setHistories(prev => ({ ...prev, [selectedHouse.houseNo]: tempHistory }));
-      }
+      setCustomStatuses(prev => ({ ...prev, [selectedHouse.houseNo]: finalStatusToSave }));
+      setNotes(prev => ({ ...prev, [selectedHouse.houseNo]: tempNote }));
+      setHistories(prev => ({ ...prev, [selectedHouse.houseNo]: tempHistory }));
     }
     setIsModalOpen(false);
   };
@@ -5413,9 +5358,6 @@ export default function App() {
               if (newReports.length > 0) {
                   showConfirm('ยืนยันการนำเข้า', `พบข้อมูลรายงานประจำวันที่ถูกต้องและไม่ซ้ำ ${newReports.length} วัน ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, async () => {
                       
-                      setImportProgress({ isImporting: true, percent: 0, current: 0, total: newReports.length });
-                      
-                      // คัดแยกรายงานที่ไม่ซ้ำจริงๆ
                       const safeNewReports = newReports.filter(nr => !dailyReports.some(pr => pr.projectId === nr.projectId && pr.date === nr.date));
                       const totalToImport = safeNewReports.length;
 
@@ -5425,33 +5367,16 @@ export default function App() {
                           return;
                       }
 
-                      // ใช้เทคนิค Chunking อัปเดตทีละนิด เพื่อให้ React แสดง UI ความคืบหน้าได้ และไม่ค้าง
-                      const CHUNK_SIZE = 10;
-                      let accumulatedReports = [...dailyReports];
+                      // แสดง Progress และให้เซฟรวดเดียว โดยไม่ต้อง Chunking เพราะระบบจะใช้ Smart Diffing อัตโนมัติ
+                      setImportProgress({ isImporting: true, percent: 50, current: totalToImport, total: totalToImport, label: 'กำลังบันทึกข้อมูลเข้าระบบ...', unit: 'รายการ' });
+                      
+                      setDailyReports(prev => {
+                          const nextList = [...safeNewReports, ...prev];
+                          setTimeout(() => triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, []), 500);
+                          return nextList;
+                      }); // นำพารามิเตอร์ true ออก เพื่อให้อัปโหลดขึ้น DB แค่ส่วนต่าง
 
-                      for (let i = 0; i < totalToImport; i += CHUNK_SIZE) {
-                          const chunk = safeNewReports.slice(i, i + CHUNK_SIZE);
-                          accumulatedReports = [...chunk, ...accumulatedReports];
-                          
-                          // อัปเดต State ทีละก้อนเล็กๆ พร้อมเปอร์เซ็นต์
-                          setDailyReports(accumulatedReports);
-                          const currentCount = Math.min(i + CHUNK_SIZE, totalToImport);
-                          setImportProgress({ 
-                              isImporting: true, 
-                              percent: Math.round((currentCount / totalToImport) * 100), 
-                              current: currentCount, 
-                              total: totalToImport,
-                              label: 'กำลังนำเข้าข้อมูลรายงานประจำวัน...',
-                              unit: 'วัน'
-                          });
-
-                          // พักให้เบราว์เซอร์ Render UI
-                          await new Promise(resolve => setTimeout(resolve, 50)); 
-                      }
-
-                      // เสร็จสิ้นการนำเข้า แจ้งคลาวด์และปิดสถานะ
                       setTimeout(() => {
-                          triggerAutoSync('DailyReports_รายงานประจำวัน', accumulatedReports, []);
                           setImportProgress({ isImporting: false, percent: 100, current: totalToImport, total: totalToImport, label: 'เสร็จสิ้น' });
                           alert('นำเข้าข้อมูลรายงานประจำวันสำเร็จแล้ว!');
                           setTimeout(() => setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 }), 1000);
@@ -6124,7 +6049,7 @@ export default function App() {
                           const nextList = [...prev, ...safeNewMeters];
                           setTimeout(() => triggerAutoSync('UtilityMeters_มิเตอร์', nextList, []), 500);
                           return nextList;
-                      }, true);
+                      }); // นำพารามิเตอร์ true ออก
                       alert('นำเข้าข้อมูลมิเตอร์สำเร็จแล้ว!');
                   }, 'ยืนยันการนำเข้า', 'info');
               } else {
@@ -6311,13 +6236,13 @@ export default function App() {
                           const nextReadings = [...newReadings, ...prev];
                           setTimeout(() => triggerAutoSync('UtilityReadings_จดมิเตอร์', nextReadings, []), 500);
                           return nextReadings;
-                      }, true);
+                      }); // นำพารามิเตอร์ true ออก
                       
                       setMeters(prev => {
                           const nextMeters = prev.map(m => updatedMetersMap.has(m.id) ? { ...m, ...updatedMetersMap.get(m.id) } : m);
                           setTimeout(() => triggerAutoSync('UtilityMeters_มิเตอร์', nextMeters, []), 500);
                           return nextMeters;
-                      }, true);
+                      }); // นำพารามิเตอร์ true ออก
                       
                       alert('นำเข้าข้อมูลการจดมิเตอร์สำเร็จแล้ว!');
                   }, 'ยืนยันการนำเข้า', 'info');
@@ -6391,7 +6316,7 @@ export default function App() {
                           const nextList = [...prev, ...newAPs];
                           setTimeout(() => triggerAutoSync('ActionPlans_แผนงาน', nextList, []), 500);
                           return nextList;
-                      }, true);
+                      }); // นำพารามิเตอร์ true ออก
                       alert('นำเข้าข้อมูลสำเร็จแล้ว!');
                   }, 'ยืนยันการนำเข้า', 'info');
               } else {
@@ -7288,15 +7213,11 @@ export default function App() {
                   setImportProgress({ isImporting: true, percent: 100, current: totalTables, total: totalTables, label: 'กู้คืนข้อมูลเสร็จสมบูรณ์!' });
                   
                   setTimeout(() => {
-                      // ใช้ Alert ของระบบที่มีปุ่มตกลง แทนการ alert() ปกติ
-                      showAlert(
-                          "กู้คืนข้อมูลเสร็จสมบูรณ์", 
-                          `กู้คืนและอัปเดตข้อมูล ${totalTables} หมวดหมู่เสร็จเรียบร้อย ข้อมูลพร้อมใช้งานทันที\n(หากหน้าจอยังไม่เปลี่ยน กรุณากดรีเฟรชหรือ F5 หนึ่งครั้ง)`
-                      );
+                      showAlert("สำเร็จ", `นำเข้าและอัปเดตข้อมูล ${totalTables} หมวดหมู่เสร็จสมบูรณ์ ข้อมูลพร้อมใช้งานทันที`);
                       setIsRestoring(false);
                       setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
                       setImportDataPreview(null);
-                  }, 800); // เพิ่ม Delay เล็กน้อยให้ Progress Bar วิ่งเต็ม 100% ก่อนแสดง Alert
+                  }, 500);
                   
               } catch (err) {
                   console.error("Restore state error:", err);
@@ -8808,7 +8729,7 @@ export default function App() {
                           setUsers(prev => {
                               const safeNewUsers = newUsers.filter(nu => !prev.some(pu => pu.username === nu.username));
                               return [...prev, ...safeNewUsers];
-                          }, true);
+                          }); // นำพารามิเตอร์ true ออก
                           alert('นำเข้าข้อมูลพนักงานสำเร็จแล้ว!');
                       }, 'ยืนยันการนำเข้า', 'info');
                   } else {
