@@ -1233,9 +1233,8 @@ const compressImage = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                // แก้ไข: ลดขนาดสูงสุดลงเหลือ 600px เพื่อป้องกันข้อจำกัด 1MB ของฐานข้อมูลออนไลน์อย่างเด็ดขาด
-                const MAX_WIDTH = 600;
-                const MAX_HEIGHT = 600;
+                const MAX_WIDTH = 1200;
+                const MAX_HEIGHT = 1200;
                 let width = img.width;
                 let height = img.height;
 
@@ -6232,9 +6231,12 @@ export default function App() {
               
               if (newMetersList.length > 0) {
                   showConfirm('ยืนยันการนำเข้า', `พบข้อมูลมิเตอร์ที่ถูกต้องและไม่ซ้ำในระบบ ${newMetersList.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
-                      const nextList = [...meters, ...newMetersList];
-                      setMeters(nextList);
-                      triggerAutoSync('UtilityMeters_มิเตอร์', nextList, []);
+                      setMeters(prev => {
+                          const safeNewMeters = newMetersList.filter(nm => !prev.some(pm => pm.code === nm.code && pm.projectId === nm.projectId));
+                          const nextList = [...prev, ...safeNewMeters];
+                          setTimeout(() => triggerAutoSync('UtilityMeters_มิเตอร์', nextList, []), 500);
+                          return nextList;
+                      }, true);
                       alert('นำเข้าข้อมูลมิเตอร์สำเร็จแล้ว!');
                   }, 'ยืนยันการนำเข้า', 'info');
               } else {
@@ -6416,15 +6418,19 @@ export default function App() {
               }
               
               if (newReadings.length > 0) {
-                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูลการจดมิเตอร์ ${newReadings.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, async () => {
-                      const nextReadings = [...newReadings, ...utilityReadings];
-                      setUtilityReadings(nextReadings);
+                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูลการจดมิเตอร์ ${newReadings.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
+                      setUtilityReadings(prev => {
+                          const nextReadings = [...newReadings, ...prev];
+                          setTimeout(() => triggerAutoSync('UtilityReadings_จดมิเตอร์', nextReadings, []), 500);
+                          return nextReadings;
+                      }, true);
                       
-                      const nextMeters = meters.map(m => updatedMetersMap.has(m.id) ? { ...m, ...updatedMetersMap.get(m.id) } : m);
-                      setMeters(nextMeters);
+                      setMeters(prev => {
+                          const nextMeters = prev.map(m => updatedMetersMap.has(m.id) ? { ...m, ...updatedMetersMap.get(m.id) } : m);
+                          setTimeout(() => triggerAutoSync('UtilityMeters_มิเตอร์', nextMeters, []), 500);
+                          return nextMeters;
+                      }, true);
                       
-                      triggerAutoSync('UtilityReadings_จดมิเตอร์', nextReadings, []);
-                      triggerAutoSync('UtilityMeters_มิเตอร์', nextMeters, []);
                       alert('นำเข้าข้อมูลการจดมิเตอร์สำเร็จแล้ว!');
                   }, 'ยืนยันการนำเข้า', 'info');
               } else {
@@ -6493,9 +6499,11 @@ export default function App() {
               
               if (newAPs.length > 0) {
                   showConfirm('ยืนยันการนำเข้า', `พบข้อมูล Action Plan ที่ถูกต้อง ${newAPs.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
-                      const nextList = [...actionPlans, ...newAPs];
-                      setActionPlans(nextList);
-                      triggerAutoSync('ActionPlans_แผนงาน', nextList, []); // แจ้งเตือน Cloud Sync ด้วย
+                      setActionPlans(prev => {
+                          const nextList = [...prev, ...newAPs];
+                          setTimeout(() => triggerAutoSync('ActionPlans_แผนงาน', nextList, []), 500);
+                          return nextList;
+                      }, true);
                       alert('นำเข้าข้อมูลสำเร็จแล้ว!');
                   }, 'ยืนยันการนำเข้า', 'info');
               } else {
@@ -8890,7 +8898,10 @@ export default function App() {
                   
                   if (newUsers.length > 0) {
                       showConfirm('ยืนยันการนำเข้า', `พบข้อมูลพนักงานใหม่ที่ถูกต้อง ${newUsers.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
-                          setUsers(prev => [...prev, ...newUsers]);
+                          setUsers(prev => {
+                              const safeNewUsers = newUsers.filter(nu => !prev.some(pu => pu.username === nu.username));
+                              return [...prev, ...safeNewUsers];
+                          }, true);
                           alert('นำเข้าข้อมูลพนักงานสำเร็จแล้ว!');
                       }, 'ยืนยันการนำเข้า', 'info');
                   } else {
