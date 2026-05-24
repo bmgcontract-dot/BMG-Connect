@@ -1887,8 +1887,128 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
 }
 
 const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId, setImportProgress }) => {
-  const [rawData, setRawData] = useState([]);
+  const [rawData, setRawData] = usePersistentState(`bmg_fee_raw_${selectedProject.id}`, [], currentUser);
+  const [customStatuses, setCustomStatuses] = usePersistentState(`bmg_fee_statuses_${selectedProject.id}`, {}, currentUser);
+  const [notes, setNotes] = usePersistentState(`bmg_fee_notes_${selectedProject.id}`, {}, currentUser);
+  const [histories, setHistories] = usePersistentState(`bmg_fee_history_${selectedProject.id}`, {}, currentUser);
+  
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterStatus, setFilterStatus] = useState('ทั้งหมด');
+  const [filterMinAmount, setFilterMinAmount] = useState('');
+  const [filterMaxAmount, setFilterMaxAmount] = useState('');
+  const [feeSortOrder, setFeeSortOrder] = useState('amount_desc');
+  
+  const [freezeThresholdMonths, setFreezeThresholdMonths] = usePersistentState(`bmg_fee_freeze_${selectedProject.id}`, 6, currentUser);
+  const [noticeThresholdDays, setNoticeThresholdDays] = usePersistentState(`bmg_fee_notice_${selectedProject.id}`, 90, currentUser);
+  
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [projectTitle, setProjectTitle] = useState('รายงานสรุปยอดค้างชำระค่าส่วนกลาง');
+  const [reportDate, setReportDate] = useState(() => new Date().toLocaleDateString('th-TH', { month: 'long', year: 'numeric' }));
+  const [fullScreenFeeChart, setFullScreenFeeChart] = useState(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedHouse, setSelectedHouse] = useState(null);
+  const [tempStatus, setTempStatus] = useState('');
+  const [tempCustomStatus, setTempCustomStatus] = useState('');
+  const [tempNote, setTempNote] = useState('');
+  const [tempHistory, setTempHistory] = useState([]);
+  
+  const getTodayStr = () => new Date().toISOString().split('T')[0];
+  
+  const [newHistoryDate, setNewHistoryDate] = useState(getTodayStr());
+  const [newHistoryAction, setNewHistoryAction] = useState('โทรติดตาม');
+  const [newHistoryDetail, setNewHistoryDetail] = useState('');
+  const [encoding, setEncoding] = useState('windows-874');
+
+  // --- NEW: เพิ่มฟังก์ชัน handleFileUpload สำหรับนำเข้า CSV ลงฐานข้อมูลแบบถาวร ---
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    if (setImportProgress) setImportProgress({ isImporting: true, percent: 10, label: 'กำลังอ่านไฟล์...' });
+
+    const reader = new FileReader();
+    reader.readAsArrayBuffer(file);
+    reader.onload = (e) => {
+        try {
+            const buffer = e.target.result;
+            let text = '';
+            try { text = new TextDecoder(encoding, { fatal: true }).decode(buffer); } 
+            catch (err) { text = new TextDecoder('utf-8').decode(buffer); }
+
+            const lines = text.split(/\r?\n/);
+            if (lines.length < 2) {
+                if (setImportProgress) setImportProgress({ isImporting: false, percent: 0 });
+                return alert('ไฟล์ CSV ไม่มีข้อมูล หรือมีแค่หัวตาราง');
+            }
+            
+            const parseCSVLine = (line) => {
+                const regex = /,(?=(?:(?:[^"]*"){2})*[^"]*$)/;
+                return line.split(regex).map(v => v.trim().replace(/^"|"$/g, ''));
+            };
+
+            const headers = parseCSVLine(lines[0]);
+            const newData = [];
+            
+            // หา Index คอลัมน์ที่น่าจะเป็นข้อมูลสำคัญ
+            const findCol = (keywords) => headers.findIndex(h => keywords.some(k => h.toLowerCase().includes(k)));
+            const houseIdx = findCol(['บ้านเลขที่', 'แปลง', 'ห้อง', 'unit', 'house']);
+            const nameIdx = findCol(['ชื่อ', 'เจ้าของ', 'ลูกบ้าน', 'name', 'owner']);
+            const amountIdx = findCol(['ยอด', 'จำนวนเงิน', 'ค้างชำระ', 'amount', 'total']);
+            
+            if (houseIdx === -1) {
+                if (setImportProgress) setImportProgress({ isImporting: false, percent: 0 });
+                return alert('รูปแบบไฟล์ไม่ถูกต้อง: ไม่พบคอลัมน์ บ้านเลขที่/ห้อง');
+            }
+
+            for (let i = 1; i < lines.length; i++) {
+                if (!lines[i].trim()) continue;
+                const values = parseCSVLine(lines[i]);
+                
+                const houseNo = values[houseIdx] || '';
+                const name = nameIdx !== -1 ? values[nameIdx] : '-';
+                const amountStr = amountIdx !== -1 ? values[amountIdx] : values[values.length - 1]; // ถ้าหาไม่เจอ ให้เอาคอลัมน์สุดท้าย
+                const amount = parseFloat((amountStr || '0').replace(/,/g, '')) || 0;
+                
+                if (houseNo && amount > 0) {
+                    // จำลองจำนวนวันที่ค้างชำระจากยอดเงิน (สมมติยอดเดือนละ 1000) เพื่อให้จัดกลุ่มในกราฟได้
+                    const assumedOverdueDays = Math.max(30, Math.floor(amount / 1000) * 30);
+                    
+                    newData.push({
+                        id: Date.now().toString() + i,
+                        houseNo,
+                        name,
+                        amount,
+                        overdueDays: assumedOverdueDays,
+                        invoiceCount: Math.ceil(assumedOverdueDays / 30)
+                    });
+                }
+            }
+            
+            if (newData.length > 0) {
+                if (setImportProgress) setImportProgress({ isImporting: true, percent: 100, label: 'บันทึกข้อมูลเรียบร้อย' });
+                // บันทึกลงตัวแปร PersistentState ซึ่งจะถูกโยนขึ้น Firebase ให้เครื่องอื่นเห็นอัตโนมัติ
+                setRawData(newData);
+                setTimeout(() => {
+                    if (setImportProgress) setImportProgress({ isImporting: false, percent: 0 });
+                    alert(`นำเข้าข้อมูลยอดค้างส่วนกลางสำเร็จ ${newData.length} รายการ (ระบบบันทึกและซิงค์เรียบร้อย)`);
+                    setIsSettingsOpen(false);
+                }, 500);
+            } else {
+                if (setImportProgress) setImportProgress({ isImporting: false, percent: 0 });
+                alert('ไม่พบข้อมูลยอดหนี้ที่ถูกต้องในไฟล์ (ยอดเงินอาจเป็น 0)');
+            }
+        } catch (error) {
+            if (setImportProgress) setImportProgress({ isImporting: false, percent: 0 });
+            console.error(error);
+            alert('เกิดข้อผิดพลาดในการอ่านไฟล์ CSV โปรดตรวจสอบการเข้ารหัส (Encoding)');
+        }
+    };
+    event.target.value = '';
+  };
+
   // --- Data Aggregation ---
   const summaryData = useMemo(() => {
     const grouped = {};
@@ -2083,10 +2203,13 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId, setImpo
   const handleSaveStatus = async () => {
     if (selectedHouse) {
       const finalStatusToSave = tempStatus === "อื่นๆ (ให้ระบุ)" ? tempCustomStatus : tempStatus;
-
+      
+      // บันทึกลงตัวแปร PersistentState เพื่อให้ข้อมูลไม่หายเมื่อรีเฟรช
       setCustomStatuses(prev => ({ ...prev, [selectedHouse.houseNo]: finalStatusToSave }));
       setNotes(prev => ({ ...prev, [selectedHouse.houseNo]: tempNote }));
       setHistories(prev => ({ ...prev, [selectedHouse.houseNo]: tempHistory }));
+      
+      alert('บันทึกสถานะการทวงถามเรียบร้อยแล้ว (ระบบบันทึกข้อมูลถาวร)');
     }
     setIsModalOpen(false);
   };
