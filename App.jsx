@@ -7288,11 +7288,15 @@ export default function App() {
                   setImportProgress({ isImporting: true, percent: 100, current: totalTables, total: totalTables, label: 'กู้คืนข้อมูลเสร็จสมบูรณ์!' });
                   
                   setTimeout(() => {
-                      showAlert("สำเร็จ", `นำเข้าและอัปเดตข้อมูล ${totalTables} หมวดหมู่เสร็จสมบูรณ์ ข้อมูลพร้อมใช้งานทันที`);
+                      // ใช้ Alert ของระบบที่มีปุ่มตกลง แทนการ alert() ปกติ
+                      showAlert(
+                          "กู้คืนข้อมูลเสร็จสมบูรณ์", 
+                          `กู้คืนและอัปเดตข้อมูล ${totalTables} หมวดหมู่เสร็จเรียบร้อย ข้อมูลพร้อมใช้งานทันที\n(หากหน้าจอยังไม่เปลี่ยน กรุณากดรีเฟรชหรือ F5 หนึ่งครั้ง)`
+                      );
                       setIsRestoring(false);
                       setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
                       setImportDataPreview(null);
-                  }, 500);
+                  }, 800); // เพิ่ม Delay เล็กน้อยให้ Progress Bar วิ่งเต็ม 100% ก่อนแสดง Alert
                   
               } catch (err) {
                   console.error("Restore state error:", err);
