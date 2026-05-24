@@ -5582,21 +5582,26 @@ export default function App() {
   };
 
   // Image Upload for Daily Report
-  const handleDailyPerformanceImageUpload = async (dept, file) => {
-    if (file) {
-        // ผ่านกระบวนการบีบอัดแล้ว เพื่อป้องกันระบบค้างและข้อมูลสูญหาย
-        const compressedBase64 = await compressImage(file);
-        setNewDailyReport(prev => ({
-            ...prev,
-            performance: {
-                ...prev.performance,
-                [dept]: {
-                    ...(prev.performance[dept] || { details: '' }),
-                    images: [compressedBase64] // บังคับให้เป็น 1 รูปเสมอ (แทนที่รูปเดิมทันที)
-                }
-            }
-        }));
-    }
+  const handleDailyPerformanceImageUpload = async (dept, e) => {
+      const file = e.target.files[0];
+      if (file) {
+          try {
+              const compressedBase64 = await compressImage(file);
+              setNewDailyReport(prev => ({
+                  ...prev,
+                  performance: {
+                      ...prev.performance,
+                      [dept]: {
+                          ...(prev.performance[dept] || { details: '' }),
+                          images: [compressedBase64] // บังคับ 1 รูปต่อแผนก
+                      }
+                  }
+              }));
+          } catch (error) {
+              console.error("Error compressing image:", error);
+          }
+      }
+      e.target.value = ''; // เคลียร์ค่า input เพื่อให้สามารถเลือกไฟล์เดิมได้อีกครั้ง
   };
 
   const removeDailyPerformanceImage = (dept, index) => {
@@ -18541,11 +18546,11 @@ export default function App() {
                                     <div className="flex items-center gap-2">
                                         <label className="cursor-pointer text-gray-400 hover:text-blue-500 transition-colors" title="อัปโหลดรูปภาพ">
                                             <ImageIcon size={14} />
-                                            <input type="file" accept="image/*" className="hidden" onChange={(e) => handleDailyPerformanceImageUpload(dept, e.target.files[0])} />
+                                            <input type="file" accept="image/*" className="hidden" onChange={(e) => handleDailyPerformanceImageUpload(dept, e)} />
                                         </label>
                                         <label className="cursor-pointer text-gray-400 hover:text-orange-500 transition-colors" title="ถ่ายรูปจากกล้อง">
                                             <Camera size={14} />
-                                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleDailyPerformanceImageUpload(dept, e.target.files[0])} />
+                                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleDailyPerformanceImageUpload(dept, e)} />
                                         </label>
                                     </div>
                                 </div>
@@ -18556,7 +18561,7 @@ export default function App() {
                                     onChange={(e) => handleDailyPerformanceChange(dept, e.target.value)}
                                 ></textarea>
                                 
-                                {/* Large Image Preview (อัปเดตให้รูปขยายใหญ่ขึ้น) */}
+                                {/* Image Preview (บังคับ 1 รูป) */}
                                 {newDailyReport.performance[dept]?.images?.length > 0 && (
                                     <div className="mt-auto pt-2 border-t border-dashed">
                                         <div className="relative w-full h-32 rounded-lg overflow-hidden border border-gray-200 shadow-sm group">
@@ -18677,7 +18682,7 @@ export default function App() {
                     {/* Performance */}
                     <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
                         <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm"><ClipboardList size={16}/> {t('performanceReport')}</h3>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].map(dept => {
                                 const deptData = selectedDailyReport.performance?.[dept];
                                 if (!deptData || (!deptData.details && (!deptData.images || deptData.images.length === 0))) return null;
