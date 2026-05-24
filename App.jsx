@@ -5348,6 +5348,84 @@ export default function App() {
       return Number(commonFee) + Number(lateFee) + Number(water) + Number(parking) + Number(violation) + Number(other);
   };
   
+  // --- NEW: ฟังก์ชันดึงกราฟย้อนหลัง 7 วัน ---
+  const getPast7DaysUtilityData = (targetDateStr) => {
+      if (!targetDateStr || !selectedProject) return [];
+      const targetDate = new Date(targetDateStr);
+      const data = [];
+      const projectMeters = meters.filter(m => m.projectId === selectedProject.id);
+      const waterMeterIds = projectMeters.filter(m => m.type === 'Water').map(m => m.id);
+      const elecMeterIds = projectMeters.filter(m => m.type === 'Electricity').map(m => m.id);
+
+      for (let i = 6; i >= 0; i--) {
+          const d = new Date(targetDate);
+          d.setDate(d.getDate() - i);
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          const dateStr = `${y}-${m}-${day}`;
+          const displayDate = d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+
+          const dayReadings = utilityReadings.filter(r => r.date === dateStr);
+          
+          const waterUsage = dayReadings
+              .filter(r => waterMeterIds.includes(r.meterId))
+              .reduce((sum, r) => sum + (Number(r.usage) || 0), 0);
+              
+          const elecUsage = dayReadings
+              .filter(r => elecMeterIds.includes(r.meterId))
+              .reduce((sum, r) => sum + (Number(r.usage) || 0), 0);
+
+          data.push({
+              date: displayDate,
+              water: waterUsage,
+              elec: elecUsage
+          });
+      }
+      return data;
+  };
+
+  const renderUtilityTrendCharts = (dateStr) => {
+      const chartData = getPast7DaysUtilityData(dateStr);
+      return (
+          <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-6" style={{ pageBreakInside: 'avoid' }}>
+              <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
+                  <BarChart3 size={16} className="text-blue-600"/> สถิติการใช้น้ำและไฟฟ้า ย้อนหลัง 7 วัน
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+                      <h4 className="text-xs font-bold text-blue-600 mb-2 text-center flex items-center justify-center gap-1"><Droplet size={12}/> น้ำประปา (ลบ.ม.)</h4>
+                      <div className="h-32">
+                          <ResponsiveContainer width="100%" height="100%">
+                              <LineChart data={chartData} margin={{ top: 5, right: 10, left: -25, bottom: 0 }}>
+                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                  <XAxis dataKey="date" tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                  <YAxis tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                  <RechartsTooltip contentStyle={{ fontSize: '11px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                  <Line type="monotone" dataKey="water" name="ปริมาณใช้น้ำ" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} isAnimationActive={!isExporting} />
+                              </LineChart>
+                          </ResponsiveContainer>
+                      </div>
+                  </div>
+                  <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+                      <h4 className="text-xs font-bold text-orange-600 mb-2 text-center flex items-center justify-center gap-1"><Zap size={12}/> ไฟฟ้า (kWh)</h4>
+                      <div className="h-32">
+                          <ResponsiveContainer width="100%" height="100%">
+                              <LineChart data={chartData} margin={{ top: 5, right: 10, left: -25, bottom: 0 }}>
+                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                  <XAxis dataKey="date" tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                  <YAxis tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                  <RechartsTooltip contentStyle={{ fontSize: '11px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                  <Line type="monotone" dataKey="elec" name="ปริมาณใช้ไฟ" stroke="#f97316" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} isAnimationActive={!isExporting} />
+                              </LineChart>
+                          </ResponsiveContainer>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      );
+  };
+
       // --- NEW: ฟังก์ชัน นำเข้า (Import) รายงานประจำวันด้วย CSV ---
   const handleImportDailyReportsCSV = (event) => {
       const file = event.target.files[0];
@@ -18583,6 +18661,9 @@ export default function App() {
                     </div>
                 </div>
 
+                {/* Section Trend Charts (NEW) */}
+                {renderUtilityTrendCharts(newDailyReport.date)}
+
                 {/* Section 3: Additional Note */}
                 <div className="mb-6">
                      <h3 className="font-bold text-gray-700 mb-2 text-sm">{t('additionalDetails')}</h3>
@@ -18703,6 +18784,9 @@ export default function App() {
                             })}
                         </div>
                     </div>
+
+                    {/* Section Trend Charts (NEW) */}
+                    {renderUtilityTrendCharts(selectedDailyReport.date)}
 
                     {/* Notes */}
                     {selectedDailyReport.note && (
