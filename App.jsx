@@ -5348,7 +5348,7 @@ export default function App() {
       return Number(commonFee) + Number(lateFee) + Number(water) + Number(parking) + Number(violation) + Number(other);
   };
   
-  // --- NEW: ฟังก์ชันดึงกราฟย้อนหลัง 7 วัน (รวมทุกมิเตอร์) ---
+  // --- NEW: ฟังก์ชันดึงกราฟย้อนหลัง 7 วัน (แยกรายมิเตอร์แบบ Multi-line) ---
   const getPast7DaysUtilityData = (targetDateStr) => {
       if (!targetDateStr || !selectedProject) return [];
       
@@ -5359,8 +5359,8 @@ export default function App() {
       
       const data = [];
       const projectMeters = meters.filter(m => m.projectId === selectedProject.id);
-      const waterMeterIds = projectMeters.filter(m => m.type === 'Water').map(m => m.id);
-      const elecMeterIds = projectMeters.filter(m => m.type === 'Electricity').map(m => m.id);
+      const waterMeters = projectMeters.filter(m => m.type === 'Water');
+      const elecMeters = projectMeters.filter(m => m.type === 'Electricity');
 
       for (let i = 6; i >= 0; i--) {
           const d = new Date(targetDate);
@@ -5372,20 +5372,19 @@ export default function App() {
           const displayDate = d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
 
           const dayReadings = utilityReadings.filter(r => r.date === dateStr);
+          const dataPoint = { date: displayDate };
           
-          const waterUsage = dayReadings
-              .filter(r => waterMeterIds.includes(r.meterId))
-              .reduce((sum, r) => sum + (Number(r.usage) || 0), 0);
-              
-          const elecUsage = dayReadings
-              .filter(r => elecMeterIds.includes(r.meterId))
-              .reduce((sum, r) => sum + (Number(r.usage) || 0), 0);
-
-          data.push({
-              date: displayDate,
-              water: Number(waterUsage.toFixed(2)),
-              elec: Number(elecUsage.toFixed(2))
+          waterMeters.forEach(m => {
+              const r = dayReadings.find(dr => dr.meterId === m.id);
+              dataPoint[`${m.name} (${m.code})`] = r ? Number(Number(r.usage).toFixed(2)) : 0;
           });
+          
+          elecMeters.forEach(m => {
+              const r = dayReadings.find(dr => dr.meterId === m.id);
+              dataPoint[`${m.name} (${m.code})`] = r ? Number(Number(r.usage).toFixed(2)) : 0;
+          });
+
+          data.push(dataPoint);
       }
       return data;
   };
@@ -5396,48 +5395,63 @@ export default function App() {
       
       // หาจำนวนมิเตอร์ที่นำมารวม
       const projectMeters = meters.filter(m => m.projectId === selectedProject.id);
-      const waterCount = projectMeters.filter(m => m.type === 'Water').length;
-      const elecCount = projectMeters.filter(m => m.type === 'Electricity').length;
+      const waterMeters = projectMeters.filter(m => m.type === 'Water');
+      const elecMeters = projectMeters.filter(m => m.type === 'Electricity');
+
+      if (waterMeters.length === 0 && elecMeters.length === 0) return null;
+
+      const waterColors = ['#3b82f6', '#0ea5e9', '#6366f1', '#06b6d4', '#8b5cf6', '#2563eb'];
+      const elecColors = ['#f97316', '#f59e0b', '#ef4444', '#eab308', '#f43f5e', '#ea580c'];
 
       return (
           <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-6" style={{ pageBreakInside: 'avoid' }}>
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2">
                   <h3 className="font-bold text-gray-800 flex items-center gap-2 text-sm">
-                      <BarChart3 size={16} className="text-blue-600"/> สถิติการใช้พลังงาน ย้อนหลัง 7 วัน
+                      <BarChart3 size={16} className="text-blue-600"/> สถิติการใช้พลังงาน ย้อนหลัง 7 วัน (รายมิเตอร์)
                   </h3>
                   <div className="text-[10px] sm:text-xs text-blue-700 font-bold bg-blue-100 px-2.5 py-1 rounded-full border border-blue-200 shadow-sm flex items-center gap-1.5">
-                      <Zap size={12} className="text-blue-600"/> ดึงข้อมูลรวมอัตโนมัติ: น้ำ {waterCount} มิเตอร์, ไฟ {elecCount} มิเตอร์
+                      <Zap size={12} className="text-blue-600"/> ดึงข้อมูลอัตโนมัติ: น้ำ {waterMeters.length} มิเตอร์, ไฟ {elecMeters.length} มิเตอร์
                   </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
-                      <h4 className="text-xs font-bold text-blue-600 mb-3 text-center flex items-center justify-center gap-1"><Droplet size={12}/> น้ำประปารวม (ลบ.ม.)</h4>
-                      <div className="h-40">
-                          <ResponsiveContainer width="100%" height="100%">
-                              <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                  <XAxis dataKey="date" tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} dy={5} />
-                                  <YAxis tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                  <RechartsTooltip contentStyle={{ fontSize: '12px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                  <Line type="monotone" dataKey="water" name="ปริมาณใช้น้ำรวม" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, strokeWidth: 2, fill: '#fff' }} activeDot={{ r: 6 }} isAnimationActive={!isExporting} />
-                              </LineChart>
-                          </ResponsiveContainer>
+              <div className="grid grid-cols-1 gap-6">
+                  {waterMeters.length > 0 && (
+                      <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                          <h4 className="text-xs font-bold text-blue-600 mb-4 text-center flex items-center justify-center gap-1"><Droplet size={14}/> น้ำประปา (ลบ.ม.)</h4>
+                          <div className="h-64 md:h-80">
+                              <ResponsiveContainer width="100%" height="100%">
+                                  <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                      <XAxis dataKey="date" tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} dy={5} />
+                                      <YAxis tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                      <RechartsTooltip contentStyle={{ fontSize: '12px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                      <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '15px' }} />
+                                      {waterMeters.map((m, idx) => (
+                                          <Line key={m.id} type="monotone" dataKey={`${m.name} (${m.code})`} stroke={waterColors[idx % waterColors.length]} strokeWidth={2.5} dot={{ r: 4, strokeWidth: 1.5, fill: '#fff' }} activeDot={{ r: 6 }} isAnimationActive={!isExporting} />
+                                      ))}
+                                  </LineChart>
+                              </ResponsiveContainer>
+                          </div>
                       </div>
-                  </div>
-                  <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
-                      <h4 className="text-xs font-bold text-orange-600 mb-3 text-center flex items-center justify-center gap-1"><Zap size={12}/> ไฟฟ้ารวม (kWh)</h4>
-                      <div className="h-40">
-                          <ResponsiveContainer width="100%" height="100%">
-                              <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                  <XAxis dataKey="date" tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} dy={5} />
-                                  <YAxis tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                  <RechartsTooltip contentStyle={{ fontSize: '12px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                  <Line type="monotone" dataKey="elec" name="ปริมาณใช้ไฟรวม" stroke="#f97316" strokeWidth={3} dot={{ r: 4, strokeWidth: 2, fill: '#fff' }} activeDot={{ r: 6 }} isAnimationActive={!isExporting} />
-                              </LineChart>
-                          </ResponsiveContainer>
+                  )}
+                  {elecMeters.length > 0 && (
+                      <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                          <h4 className="text-xs font-bold text-orange-600 mb-4 text-center flex items-center justify-center gap-1"><Zap size={14}/> ไฟฟ้า (kWh)</h4>
+                          <div className="h-64 md:h-80">
+                              <ResponsiveContainer width="100%" height="100%">
+                                  <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                      <XAxis dataKey="date" tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} dy={5} />
+                                      <YAxis tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                      <RechartsTooltip contentStyle={{ fontSize: '12px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                      <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '15px' }} />
+                                      {elecMeters.map((m, idx) => (
+                                          <Line key={m.id} type="monotone" dataKey={`${m.name} (${m.code})`} stroke={elecColors[idx % elecColors.length]} strokeWidth={2.5} dot={{ r: 4, strokeWidth: 1.5, fill: '#fff' }} activeDot={{ r: 6 }} isAnimationActive={!isExporting} />
+                                      ))}
+                                  </LineChart>
+                              </ResponsiveContainer>
+                          </div>
                       </div>
-                  </div>
+                  )}
               </div>
           </div>
       );
