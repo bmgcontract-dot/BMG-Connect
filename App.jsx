@@ -5582,26 +5582,21 @@ export default function App() {
   };
 
   // Image Upload for Daily Report
-  const handleDailyPerformanceImageUpload = async (dept, e) => {
-      const file = e.target.files[0];
-      if (file) {
-          try {
-              const compressedBase64 = await compressImage(file);
-              setNewDailyReport(prev => ({
-                  ...prev,
-                  performance: {
-                      ...prev.performance,
-                      [dept]: {
-                          ...(prev.performance[dept] || { details: '' }),
-                          images: [compressedBase64] // บังคับ 1 รูปต่อแผนก
-                      }
-                  }
-              }));
-          } catch (error) {
-              console.error("Error compressing image:", error);
-          }
-      }
-      e.target.value = ''; // เคลียร์ค่า input เพื่อให้สามารถเลือกไฟล์เดิมได้อีกครั้ง
+  const handleDailyPerformanceImageUpload = async (dept, file) => {
+    if (file) {
+        // ผ่านกระบวนการบีบอัดแล้ว เพื่อป้องกันระบบค้างและข้อมูลสูญหาย
+        const compressedBase64 = await compressImage(file);
+        setNewDailyReport(prev => ({
+            ...prev,
+            performance: {
+                ...prev.performance,
+                [dept]: {
+                    ...(prev.performance[dept] || { details: '' }),
+                    images: [compressedBase64] // บังคับให้เป็น 1 รูปเสมอ (แทนที่รูปเดิมทันที)
+                }
+            }
+        }));
+    }
   };
 
   const removeDailyPerformanceImage = (dept, index) => {
@@ -18537,22 +18532,28 @@ export default function App() {
 
                 {/* Section 2: Performance (Grid Layout) */}
                 <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-6">
-                    <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm"><ClipboardList size={16}/> {t('performanceReport')}</h3>
+                    <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm"><ClipboardList size={16}/> {t('performanceReport')} <span className="text-xs text-gray-500 font-normal ml-2">(จำกัด 1 รูปภาพต่อ 1 แผนก)</span></h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].map(dept => (
                             <div key={dept} className="bg-white p-3 rounded border shadow-sm flex flex-col">
                                 <div className="flex justify-between items-start mb-2">
                                     <div className="font-semibold text-xs text-orange-600">{t('dept_' + dept)}</div>
-                                    <div className="flex items-center gap-2">
-                                        <label className="cursor-pointer text-gray-400 hover:text-blue-500 transition-colors" title="อัปโหลดรูปภาพ">
-                                            <ImageIcon size={14} />
-                                            <input type="file" accept="image/*" className="hidden" onChange={(e) => handleDailyPerformanceImageUpload(dept, e)} />
-                                        </label>
-                                        <label className="cursor-pointer text-gray-400 hover:text-orange-500 transition-colors" title="ถ่ายรูปจากกล้อง">
-                                            <Camera size={14} />
-                                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleDailyPerformanceImageUpload(dept, e)} />
-                                        </label>
-                                    </div>
+                                    {!(newDailyReport.performance[dept]?.images?.length > 0) ? (
+                                        <div className="flex items-center gap-2">
+                                            <label className="cursor-pointer text-gray-400 hover:text-blue-500 transition-colors" title="อัปโหลดรูปภาพ">
+                                                <ImageIcon size={14} />
+                                                <input type="file" accept="image/*" className="hidden" onChange={(e) => handleDailyPerformanceImageUpload(dept, e.target.files[0])} />
+                                            </label>
+                                            <label className="cursor-pointer text-gray-400 hover:text-orange-500 transition-colors" title="ถ่ายรูปจากกล้อง">
+                                                <Camera size={14} />
+                                                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleDailyPerformanceImageUpload(dept, e.target.files[0])} />
+                                            </label>
+                                        </div>
+                                    ) : (
+                                        <span className="text-[10px] text-green-600 bg-green-50 px-2 py-0.5 rounded font-bold border border-green-200">
+                                            <CheckCircle size={10} className="inline mr-1 -mt-0.5"/> แนบรูปแล้ว
+                                        </span>
+                                    )}
                                 </div>
                                 <textarea 
                                     className="w-full border rounded p-2 text-xs h-20 mb-2 focus:ring-1 focus:ring-orange-300 outline-none resize-none bg-gray-50 focus:bg-white transition-colors" 
@@ -18561,7 +18562,7 @@ export default function App() {
                                     onChange={(e) => handleDailyPerformanceChange(dept, e.target.value)}
                                 ></textarea>
                                 
-                                {/* Image Preview (บังคับ 1 รูป) */}
+                                {/* Large Image Preview (อัปเดตให้รูปขยายใหญ่ขึ้น) */}
                                 {newDailyReport.performance[dept]?.images?.length > 0 && (
                                     <div className="mt-auto pt-2 border-t border-dashed">
                                         <div className="relative w-full h-32 rounded-lg overflow-hidden border border-gray-200 shadow-sm group">
@@ -18582,99 +18583,7 @@ export default function App() {
                     </div>
                 </div>
 
-                {/* Section 3: Utilities (Auto-fetched) */}
-                {(() => {
-                    const reportDate = newDailyReport.date;
-                    const projMeters = meters.filter(m => m.projectId === selectedProject.id);
-                    const dayReadings = utilityReadings.filter(r => r.date === reportDate && projMeters.some(m => m.id === r.meterId));
-
-                    if (dayReadings.length === 0) return null;
-
-                    const waterReadings = dayReadings.filter(r => projMeters.find(m => m.id === r.meterId)?.type === 'Water');
-                    const elecReadings = dayReadings.filter(r => projMeters.find(m => m.id === r.meterId)?.type === 'Electricity');
-
-                    return (
-                        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-6">
-                            <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
-                                <Zap size={16} className="text-orange-500" /> สรุปการใช้พลังงานประจำวัน (ดึงข้อมูลอัตโนมัติ)
-                            </h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {waterReadings.length > 0 && (
-                                    <div className="bg-white p-3 rounded border shadow-sm flex flex-col">
-                                        <div className="font-semibold text-xs text-blue-600 mb-2 flex items-center gap-1"><Droplet size={14}/> น้ำประปา (Water)</div>
-                                        <table className="w-full text-[10px] text-left mb-3">
-                                            <thead className="bg-blue-50 text-blue-800">
-                                                <tr>
-                                                    <th className="p-1 w-1/2">มิเตอร์</th>
-                                                    <th className="p-1 text-right">การใช้ (หน่วย)</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-gray-100">
-                                                {waterReadings.map(r => {
-                                                    const m = projMeters.find(x => x.id === r.meterId);
-                                                    return (
-                                                        <tr key={r.id}>
-                                                            <td className="p-1 text-gray-700 truncate">{m?.name}</td>
-                                                            <td className="p-1 text-right font-bold text-blue-600">+{Number(r.usage).toLocaleString()}</td>
-                                                        </tr>
-                                                    )
-                                                })}
-                                            </tbody>
-                                        </table>
-                                        <div className="h-24 mt-auto">
-                                            <ResponsiveContainer width="100%" height="100%">
-                                                <BarChart data={waterReadings.map(r => ({ name: projMeters.find(m => m.id === r.meterId)?.name || 'Unk', usage: r.usage }))} margin={{top: 5, right: 5, left: -20, bottom: 0}}>
-                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                                    <XAxis dataKey="name" tick={{fontSize: 8, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                                    <YAxis tick={{fontSize: 8, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                                    <RechartsTooltip contentStyle={{fontSize: '10px', borderRadius: '4px'}} />
-                                                    <Bar dataKey="usage" fill="#3b82f6" radius={[2,2,0,0]} isAnimationActive={!isExporting} />
-                                                </BarChart>
-                                            </ResponsiveContainer>
-                                        </div>
-                                    </div>
-                                )}
-                                {elecReadings.length > 0 && (
-                                    <div className="bg-white p-3 rounded border shadow-sm flex flex-col">
-                                        <div className="font-semibold text-xs text-orange-600 mb-2 flex items-center gap-1"><Zap size={14}/> ไฟฟ้า (Electricity)</div>
-                                        <table className="w-full text-[10px] text-left mb-3">
-                                            <thead className="bg-orange-50 text-orange-800">
-                                                <tr>
-                                                    <th className="p-1 w-1/2">มิเตอร์</th>
-                                                    <th className="p-1 text-right">การใช้ (หน่วย)</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-gray-100">
-                                                {elecReadings.map(r => {
-                                                    const m = projMeters.find(x => x.id === r.meterId);
-                                                    return (
-                                                        <tr key={r.id}>
-                                                            <td className="p-1 text-gray-700 truncate">{m?.name}</td>
-                                                            <td className="p-1 text-right font-bold text-orange-600">+{Number(r.usage).toLocaleString()}</td>
-                                                        </tr>
-                                                    )
-                                                })}
-                                            </tbody>
-                                        </table>
-                                        <div className="h-24 mt-auto">
-                                            <ResponsiveContainer width="100%" height="100%">
-                                                <BarChart data={elecReadings.map(r => ({ name: projMeters.find(m => m.id === r.meterId)?.name || 'Unk', usage: r.usage }))} margin={{top: 5, right: 5, left: -20, bottom: 0}}>
-                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                                    <XAxis dataKey="name" tick={{fontSize: 8, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                                    <YAxis tick={{fontSize: 8, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                                    <RechartsTooltip contentStyle={{fontSize: '10px', borderRadius: '4px'}} />
-                                                    <Bar dataKey="usage" fill="#f97316" radius={[2,2,0,0]} isAnimationActive={!isExporting} />
-                                                </BarChart>
-                                            </ResponsiveContainer>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    );
-                })()}
-
-                {/* Section 4: Additional Note */}
+                {/* Section 3: Additional Note */}
                 <div className="mb-6">
                      <h3 className="font-bold text-gray-700 mb-2 text-sm">{t('additionalDetails')}</h3>
                      <textarea 
@@ -18774,7 +18683,7 @@ export default function App() {
                     {/* Performance */}
                     <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
                         <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm"><ClipboardList size={16}/> {t('performanceReport')}</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="grid grid-cols-2 gap-4">
                             {['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].map(dept => {
                                 const deptData = selectedDailyReport.performance?.[dept];
                                 if (!deptData || (!deptData.details && (!deptData.images || deptData.images.length === 0))) return null;
@@ -18794,98 +18703,6 @@ export default function App() {
                             })}
                         </div>
                     </div>
-
-                    {/* Auto-fetched Utilities */}
-                    {(() => {
-                        const reportDate = selectedDailyReport.date;
-                        const projMeters = meters.filter(m => m.projectId === selectedProject.id);
-                        const dayReadings = utilityReadings.filter(r => r.date === reportDate && projMeters.some(m => m.id === r.meterId));
-
-                        if (dayReadings.length === 0) return null;
-
-                        const waterReadings = dayReadings.filter(r => projMeters.find(m => m.id === r.meterId)?.type === 'Water');
-                        const elecReadings = dayReadings.filter(r => projMeters.find(m => m.id === r.meterId)?.type === 'Electricity');
-
-                        return (
-                            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                                <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
-                                    <Zap size={16} className="text-orange-500" /> สรุปการใช้พลังงานประจำวัน (Utilities)
-                                </h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {waterReadings.length > 0 && (
-                                        <div className="bg-white p-3 rounded border shadow-sm flex flex-col">
-                                            <div className="font-semibold text-xs text-blue-600 mb-2 flex items-center gap-1"><Droplet size={14}/> น้ำประปา (Water)</div>
-                                            <table className="w-full text-[10px] text-left mb-3">
-                                                <thead className="bg-blue-50 text-blue-800">
-                                                    <tr>
-                                                        <th className="p-1 w-1/2">มิเตอร์</th>
-                                                        <th className="p-1 text-right">การใช้ (หน่วย)</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-gray-100">
-                                                    {waterReadings.map(r => {
-                                                        const m = projMeters.find(x => x.id === r.meterId);
-                                                        return (
-                                                            <tr key={r.id}>
-                                                                <td className="p-1 text-gray-700 truncate">{m?.name}</td>
-                                                                <td className="p-1 text-right font-bold text-blue-600">+{Number(r.usage).toLocaleString()}</td>
-                                                            </tr>
-                                                        )
-                                                    })}
-                                                </tbody>
-                                            </table>
-                                            <div className="h-24 mt-auto">
-                                                <ResponsiveContainer width="100%" height="100%">
-                                                    <BarChart data={waterReadings.map(r => ({ name: projMeters.find(m => m.id === r.meterId)?.name || 'Unk', usage: r.usage }))} margin={{top: 5, right: 5, left: -20, bottom: 0}}>
-                                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                                        <XAxis dataKey="name" tick={{fontSize: 8, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                                        <YAxis tick={{fontSize: 8, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                                        <RechartsTooltip contentStyle={{fontSize: '10px', borderRadius: '4px'}} />
-                                                        <Bar dataKey="usage" fill="#3b82f6" radius={[2,2,0,0]} isAnimationActive={!isExporting} />
-                                                    </BarChart>
-                                                </ResponsiveContainer>
-                                            </div>
-                                        </div>
-                                    )}
-                                    {elecReadings.length > 0 && (
-                                        <div className="bg-white p-3 rounded border shadow-sm flex flex-col">
-                                            <div className="font-semibold text-xs text-orange-600 mb-2 flex items-center gap-1"><Zap size={14}/> ไฟฟ้า (Electricity)</div>
-                                            <table className="w-full text-[10px] text-left mb-3">
-                                                <thead className="bg-orange-50 text-orange-800">
-                                                    <tr>
-                                                        <th className="p-1 w-1/2">มิเตอร์</th>
-                                                        <th className="p-1 text-right">การใช้ (หน่วย)</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-gray-100">
-                                                    {elecReadings.map(r => {
-                                                        const m = projMeters.find(x => x.id === r.meterId);
-                                                        return (
-                                                            <tr key={r.id}>
-                                                                <td className="p-1 text-gray-700 truncate">{m?.name}</td>
-                                                                <td className="p-1 text-right font-bold text-orange-600">+{Number(r.usage).toLocaleString()}</td>
-                                                            </tr>
-                                                        )
-                                                    })}
-                                                </tbody>
-                                            </table>
-                                            <div className="h-24 mt-auto">
-                                                <ResponsiveContainer width="100%" height="100%">
-                                                    <BarChart data={elecReadings.map(r => ({ name: projMeters.find(m => m.id === r.meterId)?.name || 'Unk', usage: r.usage }))} margin={{top: 5, right: 5, left: -20, bottom: 0}}>
-                                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                                        <XAxis dataKey="name" tick={{fontSize: 8, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                                        <YAxis tick={{fontSize: 8, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                                        <RechartsTooltip contentStyle={{fontSize: '10px', borderRadius: '4px'}} />
-                                                        <Bar dataKey="usage" fill="#f97316" radius={[2,2,0,0]} isAnimationActive={!isExporting} />
-                                                    </BarChart>
-                                                </ResponsiveContainer>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        );
-                    })()}
 
                     {/* Notes */}
                     {selectedDailyReport.note && (
