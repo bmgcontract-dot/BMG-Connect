@@ -1944,74 +1944,113 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId, setImpo
                 return alert('ไฟล์ CSV ไม่มีข้อมูล หรือมีแค่หัวตาราง');
             }
             
+            // ฟังก์ชันแยกคอลัมน์ CSV ที่แม่นยำขึ้น (รองรับลูกน้ำในเครื่องหมายคำพูด)
             const parseCSVLine = (line) => {
-                const regex = /,(?=(?:(?:[^"]*"){2})*[^"]*$)/;
-                return line.split(regex).map(v => v.trim().replace(/^"|"$/g, ''));
+                const result = [];
+                let startValueBndry = -1;
+                let isInsideQuote = false;
+                for (let i = 0; i < line.length; i++) {
+                    let c = line[i];
+                    if (c === '"') isInsideQuote = !isInsideQuote;
+                    else if (c === ',' && !isInsideQuote) {
+                        let value = line.substring(startValueBndry + 1, i).trim().replace(/^"|"$/g, '').replace(/""/g, '"');
+                        result.push(value);
+                        startValueBndry = i;
+                    }
+                }
+                result.push(line.substring(startValueBndry + 1).trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
+                return result;
             };
 
-            // ค้นหาบรรทัดที่เป็น Header (ลองหาจาก 10 บรรทัดแรก เพื่อรองรับไฟล์ที่มีหัวรายงาน)
-            let headerLineIndex = 0;
+            let headerLineIndex = -1;
             let headers = [];
             let bestHouseIdx = -1;
             let bestNameIdx = -1;
             let bestAmountIdx = -1;
+            let bestDaysIdx = -1;
 
-            const houseKeywords = ['บ้านเลขที่', 'แปลง', 'ห้อง', 'unit', 'house', 'เลขที่', 'ที่อยู่', 'รหัส', 'no', 'address', 'เลข'];
-            const nameKeywords = ['ชื่อ', 'เจ้าของ', 'ลูกบ้าน', 'name', 'owner', 'ลูกค้า', 'ผู้เช่า', 'customer'];
-            const amountKeywords = ['ยอด', 'จำนวนเงิน', 'ค้างชำระ', 'amount', 'total', 'หนี้', 'รวม', 'balance', 'ค้าง'];
+            // คีย์เวิร์ดสำหรับค้นหาคอลัมน์
+            const houseKeywords = ['บ้านเลขที่', 'แปลง', 'ห้อง', 'unit', 'house', 'เลขที่', 'ที่อยู่'];
+            const nameKeywords = ['ชื่อ', 'เจ้าของ', 'ลูกบ้าน', 'name', 'owner', 'ลูกค้า', 'ผู้ติดต่อ'];
+            const amountKeywords = ['ค้างชำระสุทธิ', 'ค้างชำระ', 'ยอด', 'จำนวนเงิน', 'amount', 'total', 'หนี้', 'รวม', 'balance'];
+            const daysKeywords = ['จำนวนวัน', 'เกินกำหนด', 'อายุหนี้', 'days', 'overdue', 'วัน'];
 
-            for (let i = 0; i < Math.min(10, lines.length); i++) {
+            // ค้นหาบรรทัดที่เป็น Header (ลองหาจาก 20 บรรทัดแรก เผื่อรายงานมีหัวกระดาษยาว)
+            for (let i = 0; i < Math.min(20, lines.length); i++) {
                 const currentHeaders = parseCSVLine(lines[i]);
-                const findCol = (keywords) => currentHeaders.findIndex(h => keywords.some(k => h.toLowerCase().includes(k)));
-                
+                const findCol = (keywords) => currentHeaders.findIndex(h => keywords.some(k => h.toLowerCase().includes(k.toLowerCase())));
+
                 const hIdx = findCol(houseKeywords);
                 const nIdx = findCol(nameKeywords);
                 const aIdx = findCol(amountKeywords);
+                const dIdx = findCol(daysKeywords);
 
-                // ถ้าเจอคำสำคัญอย่างน้อย 1 อย่าง ให้ถือว่าบรรทัดนี้คือ Header
-                if (hIdx !== -1 || aIdx !== -1 || nIdx !== -1) {
+                // ต้องพบคอลัมน์บ้านเลขที่แน่ๆ ถึงจะถือว่าเป็นบรรทัดหัวตาราง
+                if (hIdx !== -1) {
                     headerLineIndex = i;
                     headers = currentHeaders;
-                    bestHouseIdx = hIdx !== -1 ? hIdx : 0; // ถ้าไม่เจอจริงๆ ให้เหมาคอลัมน์แรก (0)
+                    bestHouseIdx = hIdx;
                     bestNameIdx = nIdx;
-                    bestAmountIdx = aIdx !== -1 ? aIdx : currentHeaders.length - 1; // ถ้าไม่เจอ ให้เหมาคอลัมน์สุดท้าย
+                    bestAmountIdx = aIdx;
+                    bestDaysIdx = dIdx;
                     break;
                 }
             }
 
-            // ถ้าพยายามหาแล้วยังไม่เจอเลย ให้ใช้แถวแรกเป็น Header และกะค่า Index เอา
             if (bestHouseIdx === -1) {
-                headers = parseCSVLine(lines[0]);
-                bestHouseIdx = 0;
-                bestNameIdx = headers.length > 1 ? 1 : -1;
-                bestAmountIdx = headers.length - 1;
-                headerLineIndex = 0;
+                if (setImportProgress) setImportProgress({ isImporting: false, percent: 0 });
+                return alert('รูปแบบไฟล์ไม่ถูกต้อง: ไม่พบคอลัมน์ "บ้านเลขที่" หรือ "ห้อง" ในส่วนของหัวตาราง');
             }
 
             const newData = [];
 
             for (let i = headerLineIndex + 1; i < lines.length; i++) {
-                const values = parseCSVLine(lines[i]);
-                if (values.length < Math.max(bestHouseIdx, bestAmountIdx)) continue; // ข้ามบรรทัดที่คอลัมน์ไม่ครบ
-                
-                const houseNo = values[bestHouseIdx] || '';
+                const rawLine = lines[i];
+                // ข้ามบรรทัดซับเฮดเดอร์ของรายงานบัญชี (เช่น 1-30, 31-60)
+                if (rawLine.includes('1-30') && rawLine.includes('31-60')) continue;
+
+                const values = parseCSVLine(rawLine);
+                if (values.length <= bestHouseIdx) continue;
+
+                const houseNo = values[bestHouseIdx];
+                // ข้ามบรรทัดว่าง หรือ บรรทัดสรุปผลรวม
+                if (!houseNo || houseNo === '-' || houseNo.includes('รวม') || houseNo.toLowerCase().includes('total')) continue;
+
                 const name = bestNameIdx !== -1 ? values[bestNameIdx] : '-';
-                const amountStr = bestAmountIdx !== -1 ? values[bestAmountIdx] : values[values.length - 1];
-                
-                // แปลงค่าเงิน กรองสัญลักษณ์ที่ไม่ใช่ตัวเลขออก (ยกเว้น จุดทศนิยมและเครื่องหมายลบ)
-                const amount = parseFloat((amountStr || '0').toString().replace(/[^\d.-]/g, '')) || 0;
-                
-                if (houseNo && houseNo !== '-' && amount > 0) {
-                    // จำลองจำนวนวันที่ค้างชำระจากยอดเงิน (สมมติยอดเดือนละ 1000) เพื่อให้จัดกลุ่มในกราฟได้
-                    const assumedOverdueDays = Math.max(30, Math.floor(amount / 1000) * 30);
-                    
+
+                // หายอดเงิน
+                let amountStr = '0';
+                if (bestAmountIdx !== -1 && values[bestAmountIdx]) {
+                    amountStr = values[bestAmountIdx];
+                } else {
+                    // ค้นหาตัวเลขในคอลัมน์ท้ายๆ ถ้าระบุคอลัมน์ยอดเงินไม่ชัดเจน (เป็น Fallback)
+                    for (let j = values.length - 1; j > bestHouseIdx; j--) {
+                        let val = values[j].replace(/[^\d.-]/g, '');
+                        if (val && !isNaN(parseFloat(val))) {
+                            amountStr = values[j];
+                            break;
+                        }
+                    }
+                }
+
+                const amount = parseFloat(amountStr.replace(/[^\d.-]/g, '')) || 0;
+
+                // หาวันที่ค้างชำระ
+                let overdueDays = 30;
+                if (bestDaysIdx !== -1 && values[bestDaysIdx]) {
+                    overdueDays = parseInt(values[bestDaysIdx].replace(/[^\d]/g, '')) || 30;
+                } else {
+                    overdueDays = Math.max(30, Math.floor(amount / 1000) * 30); // จำลองวันจากยอดเงินหากไม่มีบอก
+                }
+
+                if (amount > 0) {
                     newData.push({
                         id: Date.now().toString() + i,
                         houseNo,
-                        name,
+                        name: name || '-',
                         amount,
-                        overdueDays: assumedOverdueDays,
-                        invoiceCount: Math.ceil(assumedOverdueDays / 30)
+                        overdueDays: overdueDays,
+                        invoiceCount: Math.ceil(overdueDays / 30)
                     });
                 }
             }
@@ -2022,12 +2061,12 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId, setImpo
                 setRawData(newData);
                 setTimeout(() => {
                     if (setImportProgress) setImportProgress({ isImporting: false, percent: 0 });
-                    alert(`นำเข้าข้อมูลยอดค้างส่วนกลางสำเร็จ ${newData.length} รายการ (ระบบบันทึกและซิงค์เรียบร้อย)`);
+                    alert(`นำเข้าข้อมูลยอดค้างสำเร็จ ${newData.length} ใบแจ้งหนี้ (ระบบจะจับกลุ่มตามบ้านเลขที่ให้อัตโนมัติ)`);
                     setIsSettingsOpen(false);
                 }, 500);
             } else {
                 if (setImportProgress) setImportProgress({ isImporting: false, percent: 0 });
-                alert('ไม่พบข้อมูลยอดหนี้ที่ถูกต้องในไฟล์ (ยอดเงินอาจเป็น 0)');
+                alert('ไม่พบข้อมูลยอดหนี้ที่ถูกต้องในไฟล์ (ยอดเงินอาจเป็น 0 หรือข้อมูลไม่ตรงรูปแบบ)');
             }
         } catch (error) {
             if (setImportProgress) setImportProgress({ isImporting: false, percent: 0 });
