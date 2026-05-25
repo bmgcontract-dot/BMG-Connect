@@ -18607,39 +18607,6 @@ export default function App() {
                      ></textarea>
                 </div>
 
-                {/* NEW: Preview Auto-fetched Utility Readings */}
-                {(() => {
-                    const reportDate = newDailyReport.date;
-                    const projMeters = meters.filter(m => m.projectId === selectedProject.id);
-                    const projMeterIds = projMeters.map(m => m.id);
-                    const dayReadings = utilityReadings.filter(r => r.date === reportDate && projMeterIds.includes(r.meterId));
-
-                    if (dayReadings.length === 0) return null;
-
-                    return (
-                        <div className="mb-6 bg-gray-50 p-4 rounded-lg border border-gray-200 shadow-inner">
-                             <h3 className="font-bold text-gray-700 mb-1 text-sm flex items-center gap-2">
-                                 <Zap size={16} className="text-orange-500"/> ข้อมูลการจดมิเตอร์อัตโนมัติ ประจำวันที่ {new Date(reportDate).toLocaleDateString('th-TH')}
-                             </h3>
-                             <p className="text-[11px] text-gray-500 mb-3">* ระบบจะดึงข้อมูลมิเตอร์ที่ถูกจดในวันนี้ไปแสดงในรายงาน PDF โดยอัตโนมัติ ({dayReadings.length} รายการ)</p>
-                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                                 {dayReadings.map(r => {
-                                     const meter = projMeters.find(m => m.id === r.meterId);
-                                     return (
-                                         <div key={r.id} className="flex justify-between items-center bg-white p-2 border border-gray-200 rounded shadow-sm">
-                                             <div className="flex items-center gap-1.5 truncate pr-2">
-                                                 {meter?.type === 'Water' ? <Droplet size={14} className="text-blue-500 shrink-0"/> : <Zap size={14} className="text-orange-500 shrink-0"/>}
-                                                 <span className="font-medium text-gray-700 truncate" title={meter?.name}>{meter?.name} <span className="text-gray-400 font-normal">({meter?.code})</span></span>
-                                             </div>
-                                             <span className="font-bold text-red-600 shrink-0">+{Number(r.usage || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-                                         </div>
-                                     )
-                                 })}
-                             </div>
-                        </div>
-                    );
-                })()}
-
                 <div className="mt-6 flex justify-between items-center border-t pt-4">
                     <div className="flex items-center gap-2 text-sm text-gray-600">
                         <User size={16} /> {t('reporter')}: <span className="font-semibold text-gray-800">{newDailyReport.reporter}</span>
@@ -18760,41 +18727,6 @@ export default function App() {
                         </div>
                     )}
 
-                    {/* ACTUAL Auto-fetched Utility Readings for Print View */}
-                    {(() => {
-                        const reportDate = selectedDailyReport.date;
-                        const projMeters = meters.filter(m => m.projectId === selectedDailyReport.projectId);
-                        const projMeterIds = projMeters.map(m => m.id);
-                        const dayReadings = utilityReadings.filter(r => r.date === reportDate && projMeterIds.includes(r.meterId));
-
-                        if (dayReadings.length === 0) return null;
-
-                        return (
-                            <div className="bg-gray-50 p-6 rounded-xl border border-gray-200 mb-4 shadow-sm" style={{ pageBreakInside: 'avoid' }}>
-                                 <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2 text-lg">
-                                     <Zap size={20} className="text-orange-500"/> ข้อมูลการจดมิเตอร์ประจำวัน (Utility Readings)
-                                 </h3>
-                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                                     {dayReadings.map(r => {
-                                         const meter = projMeters.find(m => m.id === r.meterId);
-                                         return (
-                                             <div key={r.id} className="bg-white p-4 border border-gray-200 rounded-lg shadow-sm">
-                                                 <div className="flex items-center gap-2 mb-3 border-b border-gray-100 pb-3">
-                                                     {meter?.type === 'Water' ? <Droplet size={16} className="text-blue-500"/> : <Zap size={16} className="text-orange-500"/>}
-                                                     <span className="font-bold text-gray-700 truncate">{meter?.name} <span className="text-xs font-normal text-gray-400">({meter?.code})</span></span>
-                                                 </div>
-                                                 <div className="flex justify-between items-end">
-                                                     <span className="text-xs text-gray-500">เลขปัจจุบัน: <br/><strong className="text-gray-800 text-sm">{Number(r.value || 0).toLocaleString()}</strong></span>
-                                                     <span className="font-bold text-red-600 text-xl">+{Number(r.usage || 0).toLocaleString()}</span>
-                                                 </div>
-                                             </div>
-                                         )
-                                     })}
-                                 </div>
-                            </div>
-                        );
-                    })()}
-                    
                     {/* Auto-fetched Utility Readings Trend for Print View */}
                     {(() => {
                         const reportDate = selectedDailyReport.date;
