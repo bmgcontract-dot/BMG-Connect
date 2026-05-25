@@ -1938,7 +1938,8 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId, setImpo
             try { text = new TextDecoder(encoding, { fatal: true }).decode(buffer); } 
             catch (err) { text = new TextDecoder('utf-8').decode(buffer); }
 
-            const lines = text.split(/\r?\n/);
+            // กรองบรรทัดที่ว่างเปล่าออกไป
+            const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
             if (lines.length < 2) {
                 if (setImportProgress) setImportProgress({ isImporting: false, percent: 0 });
                 return alert('ไฟล์ CSV ไม่มีข้อมูล หรือมีแค่หัวตาราง');
@@ -1949,35 +1950,65 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId, setImpo
                 return line.split(regex).map(v => v.trim().replace(/^"|"$/g, ''));
             };
 
-            const headers = parseCSVLine(lines[0]);
-            const newData = [];
-            
-            // หา Index คอลัมน์ที่น่าจะเป็นข้อมูลสำคัญ
-            const findCol = (keywords) => headers.findIndex(h => keywords.some(k => h.toLowerCase().includes(k)));
-            const houseIdx = findCol(['บ้านเลขที่', 'แปลง', 'ห้อง', 'unit', 'house']);
-            const nameIdx = findCol(['ชื่อ', 'เจ้าของ', 'ลูกบ้าน', 'name', 'owner']);
-            const amountIdx = findCol(['ยอด', 'จำนวนเงิน', 'ค้างชำระ', 'amount', 'total']);
+            // ค้นหาแถวที่เป็นหัวตารางจริงๆ โดยสแกนจาก 10 บรรทัดแรก
+            let headerRowIndex = 0;
+            let houseIdx = -1;
+            let nameIdx = -1;
+            let amountIdx = -1;
+            let headers = [];
+
+            const findCol = (hdrs, keywords) => hdrs.findIndex(h => keywords.some(k => h.toLowerCase().includes(k.toLowerCase())));
+
+            for (let i = 0; i < Math.min(10, lines.length); i++) {
+                const tempHeaders = parseCSVLine(lines[i]);
+                const hIdx = findCol(tempHeaders, ['บ้านเลขที่', 'แปลง', 'ห้อง', 'unit', 'house', 'ห้องชุด', 'เลขที่']);
+                if (hIdx !== -1) {
+                    headerRowIndex = i;
+                    headers = tempHeaders;
+                    houseIdx = hIdx;
+                    nameIdx = findCol(headers, ['ชื่อ', 'เจ้าของ', 'ลูกบ้าน', 'name', 'owner', 'ผู้พักอาศัย']);
+                    amountIdx = findCol(headers, ['ยอด', 'จำนวนเงิน', 'ค้างชำระ', 'amount', 'total', 'หนี้', 'รวม']);
+                    break;
+                }
+            }
             
             if (houseIdx === -1) {
                 if (setImportProgress) setImportProgress({ isImporting: false, percent: 0 });
-                return alert('รูปแบบไฟล์ไม่ถูกต้อง: ไม่พบคอลัมน์ บ้านเลขที่/ห้อง');
+                return alert('รูปแบบไฟล์ไม่ถูกต้อง: ไม่พบคอลัมน์ บ้านเลขที่/ห้อง/เลขที่');
             }
 
-            for (let i = 1; i < lines.length; i++) {
-                if (!lines[i].trim()) continue;
+            const newData = [];
+
+            for (let i = headerRowIndex + 1; i < lines.length; i++) {
                 const values = parseCSVLine(lines[i]);
                 
                 const houseNo = values[houseIdx] || '';
                 const name = nameIdx !== -1 ? values[nameIdx] : '-';
-                const amountStr = amountIdx !== -1 ? values[amountIdx] : values[values.length - 1]; // ถ้าหาไม่เจอ ให้เอาคอลัมน์สุดท้าย
+                
+                // ถ้าระบุคอลัมน์ยอดเงินไม่ได้ ให้พยายามหาจากคอลัมน์ท้ายๆ ที่เป็นตัวเลข
+                let amountStr = '';
+                if (amountIdx !== -1) {
+                    amountStr = values[amountIdx];
+                } else {
+                    for(let j = values.length - 1; j >= 0; j--) {
+                        const cleanVal = (values[j] || '').replace(/,/g, '');
+                        if (!isNaN(parseFloat(cleanVal)) && cleanVal.trim() !== '') {
+                            amountStr = cleanVal;
+                            break;
+                        }
+                    }
+                }
+                
                 const amount = parseFloat((amountStr || '0').replace(/,/g, '')) || 0;
                 
-                if (houseNo && amount > 0) {
+                // กรองข้อมูลขยะ หรือบรรทัดรวมยอดทิ้ง
+                if (houseNo && houseNo !== '' && amount > 0 && !houseNo.toLowerCase().includes('รวม') && !houseNo.toLowerCase().includes('total')) {
                     // จำลองจำนวนวันที่ค้างชำระจากยอดเงิน (สมมติยอดเดือนละ 1000) เพื่อให้จัดกลุ่มในกราฟได้
                     const assumedOverdueDays = Math.max(30, Math.floor(amount / 1000) * 30);
                     
                     newData.push({
-                        id: Date.now().toString() + i,
+                        // สุ่ม ID ให้ไม่ซ้ำกันอย่างแน่นอน
+                        id: Date.now().toString() + i + Math.random().toString(36).substr(2, 5),
                         houseNo,
                         name,
                         amount,
@@ -1998,12 +2029,12 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId, setImpo
                 }, 500);
             } else {
                 if (setImportProgress) setImportProgress({ isImporting: false, percent: 0 });
-                alert('ไม่พบข้อมูลยอดหนี้ที่ถูกต้องในไฟล์ (ยอดเงินอาจเป็น 0)');
+                alert('ไม่พบข้อมูลยอดหนี้ที่ถูกต้องในไฟล์ (ยอดเงินอาจเป็น 0 หรือไม่ตรงรูปแบบ)');
             }
         } catch (error) {
             if (setImportProgress) setImportProgress({ isImporting: false, percent: 0 });
             console.error(error);
-            alert('เกิดข้อผิดพลาดในการอ่านไฟล์ CSV โปรดตรวจสอบการเข้ารหัส (Encoding)');
+            alert('เกิดข้อผิดพลาดในการอ่านไฟล์ CSV โปรดตรวจสอบการเข้ารหัส (Encoding) หรือโครงสร้างไฟล์');
         }
     };
     event.target.value = '';
@@ -14186,6 +14217,7 @@ export default function App() {
                   currentUser={currentUser} 
                   db={db} 
                   appId={appId} 
+                  setImportProgress={setImportProgress}
               />
           )}
 
@@ -16929,8 +16961,7 @@ export default function App() {
 
         <div id="print-area" className={`${isExporting ? 'w-full max-w-none px-[10mm]' : 'max-w-7xl mx-auto w-full p-4 md:p-6 lg:p-8 h-full flex flex-col'}`}>
           {selectedProject ? (
-              selectedProject.id === 'centralfee' ? null : 
-              React.cloneElement(ProjectDetail(), { setImportProgress })
+              ProjectDetail()
           ) : (
             <>
               {activeMenu === 'dashboard' && DashboardView()}
@@ -16941,17 +16972,6 @@ export default function App() {
               {activeMenu === 'manual' && ManualView()}
               {activeMenu === 'settings' && SettingsView()}
             </>
-          )}
-          {selectedProject && projectTab === 'centralfee' && (
-              <div className="animate-fade-in -mt-6">
-                  <CentralFeeManagerTab 
-                      selectedProject={selectedProject} 
-                      currentUser={currentUser} 
-                      db={db} 
-                      appId={appId} 
-                      setImportProgress={setImportProgress}
-                  />
-              </div>
           )}
         </div>
       </main>
