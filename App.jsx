@@ -18552,16 +18552,21 @@ export default function App() {
                             <div key={dept} className="bg-white p-3 rounded border shadow-sm flex flex-col">
                                 <div className="flex justify-between items-start mb-2">
                                     <div className="font-semibold text-xs text-orange-600">{t('dept_' + dept)}</div>
-                                    <div className="flex items-center gap-2">
-                                        <label className="cursor-pointer text-gray-400 hover:text-blue-500 transition-colors" title="อัปโหลดรูปภาพ">
-                                            <ImageIcon size={14} />
-                                            <input type="file" accept="image/*" className="hidden" onChange={(e) => handleDailyPerformanceImageUpload(dept, e.target.files[0])} />
-                                        </label>
-                                        <label className="cursor-pointer text-gray-400 hover:text-orange-500 transition-colors" title="ถ่ายรูปจากกล้อง">
-                                            <Camera size={14} />
-                                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleDailyPerformanceImageUpload(dept, e.target.files[0])} />
-                                        </label>
-                                    </div>
+                                    {!(newDailyReport.performance[dept]?.images?.length > 0) ? (
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[10px] text-gray-400 mr-1">(แนบได้ 1 รูป)</span>
+                                            <label className="cursor-pointer text-gray-400 hover:text-blue-500 transition-colors" title="อัปโหลดรูปภาพ">
+                                                <ImageIcon size={14} />
+                                                <input type="file" accept="image/*" className="hidden" onChange={(e) => handleDailyPerformanceImageUpload(dept, e.target.files[0])} />
+                                            </label>
+                                            <label className="cursor-pointer text-gray-400 hover:text-orange-500 transition-colors" title="ถ่ายรูปจากกล้อง">
+                                                <Camera size={14} />
+                                                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleDailyPerformanceImageUpload(dept, e.target.files[0])} />
+                                            </label>
+                                        </div>
+                                    ) : (
+                                        <span className="text-[10px] text-green-600 bg-green-50 px-2 py-0.5 rounded border border-green-200 font-medium">แนบรูปแล้ว (1/1)</span>
+                                    )}
                                 </div>
                                 <textarea 
                                     className="w-full border rounded p-2 text-xs h-20 mb-2 focus:ring-1 focus:ring-orange-300 outline-none resize-none bg-gray-50 focus:bg-white transition-colors" 
@@ -18662,56 +18667,56 @@ export default function App() {
 
                 <div id="print-daily-report" className={`space-y-6 bg-white ${isExporting ? 'w-[190mm] min-w-[190mm] max-w-[190mm] mx-auto box-border py-8 px-0' : ''}`}>
                     {/* Header */}
-                    <div className="text-center border-b pb-4 mb-6">
-                        <h2 className="text-2xl font-bold text-gray-800">
+                    <div className="text-center border-b pb-6 mb-8">
+                        <h2 className="text-3xl font-bold text-gray-800">
                             รายงานประจำวันที่ {new Date(selectedDailyReport.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'})}
                         </h2>
-                        <div className="flex justify-center gap-4 text-sm text-gray-500 mt-2">
-                             <span>{t('col_project')}: {projects.find(p => p.id === selectedDailyReport.projectId)?.name}</span>
-                             <span>|</span>
-                             <span>{t('reporter')}: {selectedDailyReport.reporter}</span>
+                        <div className="flex justify-center items-center gap-4 text-sm text-gray-600 mt-4">
+                             <span>โครงการ / หน่วยงาน: {projects.find(p => p.id === selectedDailyReport.projectId)?.name || '-'}</span>
+                             <span className="text-gray-300">|</span>
+                             <span>ผู้รายงาน: {selectedDailyReport.reporter}</span>
                         </div>
                     </div>
 
                     {/* Content Body (Read-only A4 Layout) */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {/* Manpower */}
-                        <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
-                            <h3 className="font-bold text-blue-800 mb-3 flex items-center gap-2 text-sm"><Users size={16}/> {t('manpowerReport')}</h3>
-                            <div className="space-y-1 text-xs">
+                        <div className="bg-blue-50/40 p-6 rounded-xl border border-blue-100 shadow-sm">
+                            <h3 className="font-bold text-blue-800 mb-4 flex items-center gap-2 text-lg"><Users size={20}/> 1. รายงานกำลังพลประจำวัน</h3>
+                            <div className="space-y-3 text-sm">
                                 {['juristic', 'security', 'cleaning', 'gardening', 'sweeper'].map(dept => (
-                                    <div key={dept} className="flex justify-between py-1 border-b border-blue-200 last:border-0">
-                                        <span>{t('dept_' + dept)}</span>
-                                        <span className="font-bold">{selectedDailyReport.manpower[dept] || 0}</span>
+                                    <div key={dept} className="flex justify-between items-center py-2 border-b border-blue-100/70 last:border-0">
+                                        <span className="text-gray-700">{t('dept_' + dept)}</span>
+                                        <span className="font-bold text-gray-900 text-base">{selectedDailyReport.manpower[dept] || 0}</span>
                                     </div>
                                 ))}
                                 {selectedDailyReport.manpower.otherLabel && (
-                                    <div className="flex justify-between py-1 border-t border-blue-200 mt-1 gap-2">
-                                        <span className="break-words flex-1 leading-tight">{selectedDailyReport.manpower.otherLabel}</span>
-                                        <span className="font-bold shrink-0">{selectedDailyReport.manpower.other || 0}</span>
+                                    <div className="flex justify-between items-center py-2 border-t border-blue-100/70 gap-2">
+                                        <span className="break-words flex-1 leading-tight text-gray-700">{selectedDailyReport.manpower.otherLabel}</span>
+                                        <span className="font-bold text-gray-900 text-base shrink-0">{selectedDailyReport.manpower.other || 0}</span>
                                     </div>
                                 )}
                             </div>
                         </div>
 
                         {/* Income */}
-                        <div className="bg-green-50 p-4 rounded-lg border border-green-100">
-                            <h3 className="font-bold text-green-800 mb-3 flex items-center gap-2 text-sm"><DollarSign size={16}/> {t('incomeReport')}</h3>
-                             <div className="space-y-1 text-xs">
+                        <div className="bg-green-50/40 p-6 rounded-xl border border-green-100 shadow-sm">
+                            <h3 className="font-bold text-green-800 mb-4 flex items-center gap-2 text-lg"><DollarSign size={20}/> 3. สรุปรายรับประจำวัน</h3>
+                             <div className="space-y-3 text-sm">
                                 {['commonFee', 'lateFee', 'water', 'parking', 'violation'].map(item => (
-                                    <div key={item} className="flex justify-between py-1 border-b border-green-200 last:border-0">
-                                        <span>{t('inc_' + item)}</span>
-                                        <span>{Number(selectedDailyReport.income[item] || 0).toLocaleString()}</span>
+                                    <div key={item} className="flex justify-between items-center py-2 border-b border-green-100/70 last:border-0">
+                                        <span className="text-gray-700">{t('inc_' + item)}</span>
+                                        <span className="text-gray-900 font-medium">{Number(selectedDailyReport.income[item] || 0).toLocaleString()}</span>
                                     </div>
                                 ))}
                                 {selectedDailyReport.income.otherLabel && (
-                                    <div className="flex justify-between py-1 gap-2">
-                                        <span className="break-words flex-1 leading-tight">{selectedDailyReport.income.otherLabel}</span>
-                                        <span className="shrink-0">{Number(selectedDailyReport.income.other || 0).toLocaleString()}</span>
+                                    <div className="flex justify-between items-center py-2 border-b border-green-100/70 gap-2">
+                                        <span className="break-words flex-1 leading-tight text-gray-700">{selectedDailyReport.income.otherLabel}</span>
+                                        <span className="text-gray-900 font-medium shrink-0">{Number(selectedDailyReport.income.other || 0).toLocaleString()}</span>
                                     </div>
                                 )}
-                                <div className="border-t border-green-300 pt-2 mt-2 flex justify-between font-bold text-green-900">
-                                    <span>{t('totalIncome')}</span>
+                                <div className="border-t-2 border-green-200 pt-3 mt-1 flex justify-between items-center font-bold text-green-800 text-base">
+                                    <span>ผลรวมรายรับทั้งวัน</span>
                                     <span>฿ {(() => {
                                         const { commonFee, lateFee, water, parking, violation, other } = selectedDailyReport.income;
                                         return (Number(commonFee) + Number(lateFee) + Number(water) + Number(parking) + Number(violation) + Number(other)).toLocaleString();
@@ -18722,20 +18727,22 @@ export default function App() {
                     </div>
 
                     {/* Performance */}
-                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                        <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm"><ClipboardList size={16}/> {t('performanceReport')}</h3>
-                        <div className="grid grid-cols-2 gap-4">
+                    <div className="border border-gray-200 rounded-xl bg-white shadow-sm overflow-hidden" style={{ pageBreakInside: 'avoid' }}>
+                        <div className="bg-gray-50 p-4 border-b border-gray-200">
+                            <h3 className="font-bold text-gray-800 flex items-center gap-2 text-lg"><ClipboardList size={20}/> 2. รายงานผลการดำเนินงาน</h3>
+                        </div>
+                        <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
                             {['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].map(dept => {
                                 const deptData = selectedDailyReport.performance?.[dept];
                                 if (!deptData || (!deptData.details && (!deptData.images || deptData.images.length === 0))) return null;
                                 return (
-                                    <div key={dept} className="bg-white p-3 rounded border shadow-sm">
-                                        <div className="font-semibold text-xs text-orange-600 mb-1">{t('dept_' + dept)}</div>
-                                        <div className="text-xs text-gray-700 whitespace-pre-wrap break-words mb-2">{deptData.details || '-'}</div>
+                                    <div key={dept} className="bg-white p-5 rounded-lg border border-gray-200 shadow-sm flex flex-col h-full">
+                                        <h4 className="font-bold text-orange-600 mb-3 text-base">{t('dept_' + dept)}</h4>
+                                        <div className="text-sm text-gray-700 whitespace-pre-wrap break-words leading-relaxed flex-1">{deptData.details || '-'}</div>
                                         {deptData.images && deptData.images.length > 0 && (
-                                            <div className="mt-2">
-                                                <div className="w-full h-40 rounded-lg overflow-hidden border border-gray-200 shadow-sm">
-                                                    <img src={deptData.images[0]} className="w-full h-full object-cover" />
+                                            <div className="mt-4 pt-4 border-t border-gray-100">
+                                                <div className="w-full h-56 rounded-lg overflow-hidden border border-gray-200 shadow-sm">
+                                                    <img src={deptData.images[0]} className="w-full h-full object-cover" alt={t('dept_' + dept)} />
                                                 </div>
                                             </div>
                                         )}
@@ -18747,13 +18754,13 @@ export default function App() {
 
                     {/* Notes */}
                     {selectedDailyReport.note && (
-                        <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-                             <h3 className="font-bold text-yellow-800 mb-1 text-sm">{t('additionalDetails')}</h3>
-                             <p className="text-xs text-gray-700 whitespace-pre-wrap break-words">{selectedDailyReport.note}</p>
+                        <div className="bg-yellow-50 p-6 rounded-xl border border-yellow-200 shadow-sm" style={{ pageBreakInside: 'avoid' }}>
+                             <h3 className="font-bold text-yellow-800 mb-3 text-lg flex items-center gap-2">4. รายละเอียดเพิ่มเติม</h3>
+                             <p className="text-sm text-gray-700 whitespace-pre-wrap break-words leading-relaxed pl-6">{selectedDailyReport.note}</p>
                         </div>
                     )}
 
-                    {/* NEW: Actual Auto-fetched Utility Readings for Print View */}
+                    {/* ACTUAL Auto-fetched Utility Readings for Print View */}
                     {(() => {
                         const reportDate = selectedDailyReport.date;
                         const projMeters = meters.filter(m => m.projectId === selectedDailyReport.projectId);
@@ -18763,22 +18770,22 @@ export default function App() {
                         if (dayReadings.length === 0) return null;
 
                         return (
-                            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mt-4" style={{ pageBreakInside: 'avoid' }}>
-                                 <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
-                                     <Zap size={16} className="text-orange-500"/> ข้อมูลการจดมิเตอร์ประจำวัน (Utility Readings)
+                            <div className="bg-gray-50 p-6 rounded-xl border border-gray-200 mt-6 shadow-sm" style={{ pageBreakInside: 'avoid' }}>
+                                 <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2 text-lg">
+                                     <Zap size={20} className="text-orange-500"/> ข้อมูลการจดมิเตอร์ประจำวัน (Utility Readings)
                                  </h3>
                                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
                                      {dayReadings.map(r => {
                                          const meter = projMeters.find(m => m.id === r.meterId);
                                          return (
-                                             <div key={r.id} className="bg-white p-3 border border-gray-200 rounded-lg shadow-sm">
-                                                 <div className="flex items-center gap-1.5 mb-2 border-b pb-2">
-                                                     {meter?.type === 'Water' ? <Droplet size={14} className="text-blue-500"/> : <Zap size={14} className="text-orange-500"/>}
+                                             <div key={r.id} className="bg-white p-4 border border-gray-200 rounded-lg shadow-sm">
+                                                 <div className="flex items-center gap-2 mb-3 border-b border-gray-100 pb-3">
+                                                     {meter?.type === 'Water' ? <Droplet size={16} className="text-blue-500"/> : <Zap size={16} className="text-orange-500"/>}
                                                      <span className="font-bold text-gray-700 truncate">{meter?.name} <span className="text-xs font-normal text-gray-400">({meter?.code})</span></span>
                                                  </div>
                                                  <div className="flex justify-between items-end">
                                                      <span className="text-xs text-gray-500">เลขปัจจุบัน: <br/><strong className="text-gray-800 text-sm">{Number(r.value || 0).toLocaleString()}</strong></span>
-                                                     <span className="font-bold text-red-600 text-lg">+{Number(r.usage || 0).toLocaleString()}</span>
+                                                     <span className="font-bold text-red-600 text-xl">+{Number(r.usage || 0).toLocaleString()}</span>
                                                  </div>
                                              </div>
                                          )
@@ -18788,7 +18795,7 @@ export default function App() {
                         );
                     })()}
                     
-                    {/* NEW: Auto-fetched Utility Readings Trend for Print View */}
+                    {/* Auto-fetched Utility Readings Trend for Print View */}
                     {(() => {
                         const reportDate = selectedDailyReport.date;
                         const projMeters = meters.filter(m => m.projectId === selectedDailyReport.projectId);
@@ -18842,40 +18849,40 @@ export default function App() {
                         const elecColors = ['#f97316', '#f59e0b', '#ef4444', '#eab308', '#f43f5e', '#ea580c'];
 
                         return (
-                            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mt-4" style={{ pageBreakInside: 'avoid' }}>
-                                <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
-                                    <BarChart3 size={16} className="text-orange-500"/> แนวโน้มการใช้น้ำประปาและไฟฟ้า (7 วันล่าสุด)
+                            <div className="bg-gray-50 p-6 rounded-xl border border-gray-200 mt-6 shadow-sm" style={{ pageBreakInside: 'avoid' }}>
+                                <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2 text-lg">
+                                    <BarChart3 size={20} className="text-orange-500"/> 5. แนวโน้มการใช้น้ำประปาและไฟฟ้า (7 วันล่าสุด)
                                 </h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     {waterMeters.length > 0 && (
-                                        <div className="h-56 bg-white border border-blue-100 rounded-lg p-2 shadow-sm">
-                                            <h4 className="text-[11px] font-bold text-blue-700 text-center mb-2 flex justify-center items-center gap-1"><Droplet size={12}/> ปริมาณการใช้น้ำประปา (หน่วย)</h4>
+                                        <div className="h-72 bg-white border border-blue-100 rounded-xl p-4 shadow-sm">
+                                            <h4 className="text-sm font-bold text-blue-700 text-center mb-4 flex justify-center items-center gap-2"><Droplet size={16}/> ปริมาณการใช้น้ำประปา (หน่วย)</h4>
                                             <ResponsiveContainer width="100%" height="100%">
                                                 <LineChart data={waterData} margin={{ top: 5, right: 10, left: -25, bottom: 0 }}>
                                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                                    <XAxis dataKey="date" tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                                    <YAxis tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                                    <RechartsTooltip contentStyle={{ fontSize: '10px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                                    <Legend wrapperStyle={{ fontSize: '9px', paddingTop: '5px' }} />
+                                                    <XAxis dataKey="date" tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                                    <YAxis tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                                    <RechartsTooltip contentStyle={{ fontSize: '11px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
                                                     {waterMeters.map((m, idx) => (
-                                                        <Line key={m.id} type="monotone" dataKey={m.name} stroke={waterColors[idx % waterColors.length]} strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false} />
+                                                        <Line key={m.id} type="monotone" dataKey={m.name} stroke={waterColors[idx % waterColors.length]} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} isAnimationActive={false} />
                                                     ))}
                                                 </LineChart>
                                             </ResponsiveContainer>
                                         </div>
                                     )}
                                     {elecMeters.length > 0 && (
-                                        <div className="h-56 bg-white border border-orange-100 rounded-lg p-2 shadow-sm">
-                                            <h4 className="text-[11px] font-bold text-orange-600 text-center mb-2 flex justify-center items-center gap-1"><Zap size={12}/> ปริมาณการใช้ไฟฟ้า (หน่วย)</h4>
+                                        <div className="h-72 bg-white border border-orange-100 rounded-xl p-4 shadow-sm">
+                                            <h4 className="text-sm font-bold text-orange-600 text-center mb-4 flex justify-center items-center gap-2"><Zap size={16}/> ปริมาณการใช้ไฟฟ้า (หน่วย)</h4>
                                             <ResponsiveContainer width="100%" height="100%">
                                                 <LineChart data={elecData} margin={{ top: 5, right: 10, left: -25, bottom: 0 }}>
                                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                                    <XAxis dataKey="date" tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                                    <YAxis tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                                    <RechartsTooltip contentStyle={{ fontSize: '10px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                                    <Legend wrapperStyle={{ fontSize: '9px', paddingTop: '5px' }} />
+                                                    <XAxis dataKey="date" tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                                    <YAxis tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                                    <RechartsTooltip contentStyle={{ fontSize: '11px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
                                                     {elecMeters.map((m, idx) => (
-                                                        <Line key={m.id} type="monotone" dataKey={m.name} stroke={elecColors[idx % elecColors.length]} strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false} />
+                                                        <Line key={m.id} type="monotone" dataKey={m.name} stroke={elecColors[idx % elecColors.length]} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} isAnimationActive={false} />
                                                     ))}
                                                 </LineChart>
                                             </ResponsiveContainer>
@@ -18887,11 +18894,11 @@ export default function App() {
                     })()}
                     
                     {/* Footer */}
-                    <div className="flex justify-between items-end pt-8 mt-4 border-t">
+                    <div className="flex justify-between items-end pt-8 mt-8 border-t border-gray-300" style={{ pageBreakInside: 'avoid' }}>
                         <div className="text-xs text-gray-400">Ref: {selectedDailyReport.id}</div>
-                        <div className="text-center">
-                            <div className="text-sm font-bold">{selectedDailyReport.reporter}</div>
-                            <div className="text-xs text-gray-500">{t('reporter')}</div>
+                        <div className="text-center px-8">
+                            <h3 className="text-lg font-bold text-gray-800 mb-1">{selectedDailyReport.reporter}</h3>
+                            <div className="text-sm text-gray-500">ผู้รายงาน</div>
                         </div>
                     </div>
                 </div>
