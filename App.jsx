@@ -1968,33 +1968,43 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId, setImpo
             let bestNameIdx = -1;
             let bestAmountIdx = -1;
             let bestDaysIdx = -1;
+            let agingColIndices = [];
 
             // คีย์เวิร์ดสำหรับค้นหาคอลัมน์
             const houseKeywords = ['บ้านเลขที่', 'แปลง', 'ห้อง', 'unit', 'house', 'เลขที่', 'ที่อยู่'];
             const nameKeywords = ['ชื่อ', 'เจ้าของ', 'ลูกบ้าน', 'name', 'owner', 'ลูกค้า', 'ผู้ติดต่อ'];
             const amountKeywords = ['ค้างชำระสุทธิ', 'ค้างชำระ', 'ยอด', 'จำนวนเงิน', 'amount', 'total', 'หนี้', 'รวม', 'balance'];
             const daysKeywords = ['จำนวนวัน', 'เกินกำหนด', 'อายุหนี้', 'days', 'overdue', 'วัน'];
+            const agingKeywords = [
+                'ยังไม่เกินกำหนด', 'ยังไม่ถึงกำหนด', 'current', 'notdue',
+                '1-30', '31-60', '61-90', '91-120', '121-150', '151-180', 
+                'มากกว่า180', 'over180', 'มากกว่า120', 'over120', 'มากกว่า90', 'over90',
+                '>180', '>120', '>90', '>60', '>30'
+            ];
 
             // ค้นหาบรรทัดที่เป็น Header (ลองหาจาก 20 บรรทัดแรก เผื่อรายงานมีหัวกระดาษยาว)
             for (let i = 0; i < Math.min(20, lines.length); i++) {
                 const currentHeaders = parseCSVLine(lines[i]);
                 const findCol = (keywords) => currentHeaders.findIndex(h => keywords.some(k => h.toLowerCase().includes(k.toLowerCase())));
 
-                const hIdx = findCol(houseKeywords);
-                const nIdx = findCol(nameKeywords);
-                const aIdx = findCol(amountKeywords);
-                const dIdx = findCol(daysKeywords);
-
-                // ต้องพบคอลัมน์บ้านเลขที่แน่ๆ ถึงจะถือว่าเป็นบรรทัดหัวตาราง
-                if (hIdx !== -1) {
-                    headerLineIndex = i;
-                    headers = currentHeaders;
-                    bestHouseIdx = hIdx;
-                    bestNameIdx = nIdx;
-                    bestAmountIdx = aIdx;
-                    bestDaysIdx = dIdx;
-                    break;
+                if (bestHouseIdx === -1) {
+                    const hIdx = findCol(houseKeywords);
+                    if (hIdx !== -1) {
+                        headerLineIndex = i;
+                        headers = currentHeaders;
+                        bestHouseIdx = hIdx;
+                        bestNameIdx = findCol(nameKeywords);
+                        bestAmountIdx = findCol(amountKeywords);
+                        bestDaysIdx = findCol(daysKeywords);
+                    }
                 }
+
+                // สแกนหาคอลัมน์ช่วงอายุหนี้จากทุกบรรทัดในส่วนหัว (รวมถึงบรรทัดซับเฮดเดอร์)
+                currentHeaders.forEach((h, idx) => {
+                    if (agingKeywords.some(k => h.toLowerCase().replace(/\s/g,'').includes(k))) {
+                        if (!agingColIndices.includes(idx)) agingColIndices.push(idx);
+                    }
+                });
             }
 
             if (bestHouseIdx === -1) {
@@ -2019,21 +2029,31 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId, setImpo
                 const name = bestNameIdx !== -1 ? values[bestNameIdx] : '-';
 
                 // หายอดเงิน
-                let amountStr = '0';
-                if (bestAmountIdx !== -1 && values[bestAmountIdx]) {
-                    amountStr = values[bestAmountIdx];
+                let amount = 0;
+                if (agingColIndices.length > 0) {
+                    // หากเป็นรายงาน Aging ให้นำคอลัมน์ช่วงอายุหนี้มารวมกันเป็นยอดของใบแจ้งหนี้นั้นๆ (ป้องกันการนำยอด Subtotal มารวมซ้ำ)
+                    agingColIndices.forEach(idx => {
+                        if (values[idx]) {
+                            const val = parseFloat(values[idx].replace(/[^\d.-]/g, ''));
+                            if (!isNaN(val)) amount += val;
+                        }
+                    });
                 } else {
-                    // ค้นหาตัวเลขในคอลัมน์ท้ายๆ ถ้าระบุคอลัมน์ยอดเงินไม่ชัดเจน (เป็น Fallback)
-                    for (let j = values.length - 1; j > bestHouseIdx; j--) {
-                        let val = values[j].replace(/[^\d.-]/g, '');
-                        if (val && !isNaN(parseFloat(val))) {
-                            amountStr = values[j];
-                            break;
+                    let amountStr = '0';
+                    if (bestAmountIdx !== -1 && values[bestAmountIdx]) {
+                        amountStr = values[bestAmountIdx];
+                    } else {
+                        // ค้นหาตัวเลขในคอลัมน์ท้ายๆ ถ้าระบุคอลัมน์ยอดเงินไม่ชัดเจน (เป็น Fallback)
+                        for (let j = values.length - 1; j > bestHouseIdx; j--) {
+                            let val = values[j].replace(/[^\d.-]/g, '');
+                            if (val && !isNaN(parseFloat(val))) {
+                                amountStr = values[j];
+                                break;
+                            }
                         }
                     }
+                    amount = parseFloat(amountStr.replace(/[^\d.-]/g, '')) || 0;
                 }
-
-                const amount = parseFloat(amountStr.replace(/[^\d.-]/g, '')) || 0;
 
                 // หาวันที่ค้างชำระ
                 let overdueDays = 30;
@@ -2050,7 +2070,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId, setImpo
                         name: name || '-',
                         amount,
                         overdueDays: overdueDays,
-                        invoiceCount: Math.ceil(overdueDays / 30)
+                        invoiceCount: 1 // แต่ละบรรทัดที่ยอด > 0 คือ 1 invoice (เดี๋ยวใช้ summaryData ไปรวมต่ออีกที)
                     });
                 }
             }
