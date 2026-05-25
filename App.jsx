@@ -1886,215 +1886,254 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
     return [data, setPersistentValue, isLoaded, true];
 }
 
-const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId, setImportProgress }) => {
-  const [rawData, setRawData] = usePersistentState(`bmg_fee_raw_${selectedProject.id}`, [], currentUser);
-  const [customStatuses, setCustomStatuses] = usePersistentState(`bmg_fee_statuses_${selectedProject.id}`, {}, currentUser);
-  const [notes, setNotes] = usePersistentState(`bmg_fee_notes_${selectedProject.id}`, {}, currentUser);
-  const [histories, setHistories] = usePersistentState(`bmg_fee_history_${selectedProject.id}`, {}, currentUser);
-  
+const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
+  const [rawData, setRawData] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState('ทั้งหมด');
-  const [filterMinAmount, setFilterMinAmount] = useState('');
-  const [filterMaxAmount, setFilterMaxAmount] = useState('');
-  const [feeSortOrder, setFeeSortOrder] = useState('amount_desc');
+  const [filterStatus, setFilterStatus] = useState('ทั้งหมด'); 
+  const [filterMinAmount, setFilterMinAmount] = useState(''); 
+  const [filterMaxAmount, setFilterMaxAmount] = useState(''); 
+  const [feeSortOrder, setFeeSortOrder] = useState('amount_desc'); // NEW: State สำหรับการเรียงลำดับ
+  const [fullScreenFeeChart, setFullScreenFeeChart] = useState(null); // NEW: State สำหรับแสดงกราฟเต็มจอ
   
-  const [freezeThresholdMonths, setFreezeThresholdMonths] = usePersistentState(`bmg_fee_freeze_${selectedProject.id}`, 6, currentUser);
-  const [noticeThresholdDays, setNoticeThresholdDays] = usePersistentState(`bmg_fee_notice_${selectedProject.id}`, 90, currentUser);
-  
-  const [showExportMenu, setShowExportMenu] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [projectTitle, setProjectTitle] = useState('รายงานสรุปยอดค้างชำระค่าส่วนกลาง');
-  const [reportDate, setReportDate] = useState(() => new Date().toLocaleDateString('th-TH', { month: 'long', year: 'numeric' }));
-  const [fullScreenFeeChart, setFullScreenFeeChart] = useState(null);
-  const [isDownloading, setIsDownloading] = useState(false);
-  
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedHouse, setSelectedHouse] = useState(null);
-  const [tempStatus, setTempStatus] = useState('');
-  const [tempCustomStatus, setTempCustomStatus] = useState('');
-  const [tempNote, setTempNote] = useState('');
-  const [tempHistory, setTempHistory] = useState([]);
-  
-  const getTodayStr = () => new Date().toISOString().split('T')[0];
-  
-  const [newHistoryDate, setNewHistoryDate] = useState(getTodayStr());
-  const [newHistoryAction, setNewHistoryAction] = useState('โทรติดตาม');
-  const [newHistoryDetail, setNewHistoryDetail] = useState('');
-  const [encoding, setEncoding] = useState('windows-874');
+  const [projectTitle, setProjectTitle] = useState('ระบบสรุปค้างค่าส่วนกลาง (Central Fee Manager)');
+  const [reportDate, setReportDate] = useState('บริหารจัดการโดย บริษัท เบสท์ มิลเลี่ยน กรุ๊ป จำกัด');
 
-  // --- NEW: เพิ่มฟังก์ชัน handleFileUpload สำหรับนำเข้า CSV ลงฐานข้อมูลแบบถาวร ---
-  const handleFileUpload = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [encoding, setEncoding] = useState('windows-874'); 
+  const [freezeThresholdMonths, setFreezeThresholdMonths] = useState(6); 
+  const [noticeThresholdDays, setNoticeThresholdDays] = useState(90); 
+
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const [customStatuses, setCustomStatuses] = useState({});
+  const [notes, setNotes] = useState({}); 
+  const [histories, setHistories] = useState({}); 
+  
+  const [selectedHouse, setSelectedHouse] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [tempStatus, setTempStatus] = useState("");
+  const [tempCustomStatus, setTempCustomStatus] = useState(""); 
+  const [tempNote, setTempNote] = useState(""); 
+  
+  const [tempHistory, setTempHistory] = useState([]); 
+  const getTodayStr = () => {
+    const tzOffset = (new Date()).getTimezoneOffset() * 60000;
+    return (new Date(Date.now() - tzOffset)).toISOString().split('T')[0];
+  };
+  const [newHistoryDate, setNewHistoryDate] = useState(getTodayStr());
+  const [newHistoryAction, setNewHistoryAction] = useState("โทรติดตาม");
+  const [newHistoryDetail, setNewHistoryDetail] = useState("");
+
+  // --- Firebase Cloud Data Sync ---
+  useEffect(() => {
+    if (!db || !appId || !selectedProject) return;
+
+    // Use a unique collection for each project's central fee data to prevent mixing
+    const statusColRef = collection(db, 'artifacts', appId, 'public', 'data', `house_statuses_${selectedProject.id}`);
     
-    if (setImportProgress) setImportProgress({ isImporting: true, percent: 10, label: 'กำลังอ่านไฟล์...' });
+    const unsubscribeStatuses = onSnapshot(statusColRef, (snapshot) => {
+      const loadedStatuses = {};
+      const loadedNotes = {};
+      const loadedHistories = {};
+      
+      snapshot.docs.forEach(docSnap => {
+        const data = docSnap.data();
+        if (data.houseNo) {
+          if (data.status) loadedStatuses[data.houseNo] = data.status;
+          if (data.note) loadedNotes[data.houseNo] = data.note;
+          if (data.history) loadedHistories[data.houseNo] = data.history;
+        }
+      });
+      
+      setCustomStatuses(loadedStatuses);
+      setNotes(loadedNotes);
+      setHistories(loadedHistories);
+    }, (error) => {
+      console.error("Firestore onSnapshot error:", error);
+    });
+
+    // 2. NEW: ซิงค์ข้อมูลดิบรายการลูกหนี้ (Raw CSV Data) ที่เคยอัปโหลดไว้ล่าสุด
+    // FIX: เปลี่ยนมาใช้โครงสร้าง app_state เพื่อรองรับระบบ Chunking ป้องกันปัญหาข้อมูลเกิน 1MB ทำให้เครื่องอื่นโหลดไม่ขึ้น
+    const rawDataRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', `central_fee_raw_${selectedProject.id}`);
+    
+    const unsubscribeRawData = onSnapshot(rawDataRef, async (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        // รองรับระบบ Chunking
+        if (data.totalChunks !== undefined) {
+            // แก้ไข: ใช้ Promise.all สำหรับการดึงไฟล์ Chunk เพื่อลดปัญหาดึงช้าจนโหลดไม่ขึ้น
+            const chunkPromises = [];
+            for (let i = 0; i < data.totalChunks; i++) {
+                const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `central_fee_raw_${selectedProject.id}_${i}`);
+                chunkPromises.push(getDoc(chunkRef));
+            }
+            
+            const chunkSnaps = await Promise.all(chunkPromises);
+            let fullJson = '';
+            chunkSnaps.forEach(snap => {
+                if (snap.exists()) fullJson += snap.data().chunk;
+            });
+
+            if (fullJson) {
+                // ซ่อมแซม JSON กรณี Chunk หาย
+                let safeJson = fullJson;
+                try { JSON.parse(safeJson); } catch (e) {
+                    if (safeJson.startsWith('{')) safeJson += '}';
+                }
+                try {
+                    const parsed = JSON.parse(safeJson);
+                    setRawData(parsed.payload || []);
+                    if (parsed.projectTitle) setProjectTitle(parsed.projectTitle);
+                    if (parsed.reportDate) setReportDate(parsed.reportDate);
+                } catch(e) { console.error("Error parsing chunks", e); }
+            }
+        } else if (data.payload) {
+            // Backward compatibility
+            try {
+                const parsed = JSON.parse(data.payload);
+                setRawData(Array.isArray(parsed) ? parsed : (parsed?.payload || []));
+            } catch(e) { console.error("Error parsing raw data from Cloud", e); }
+        }
+      } else {
+        setRawData([]); // ถ้ายืนยันว่ายังไม่มีข้อมูลใน Cloud ให้ล้างค่า (Clear)
+      }
+    }, (error) => {
+      console.error("Firestore Raw Data sync error:", error);
+    });
+
+    return () => {
+      unsubscribeStatuses();
+      unsubscribeRawData();
+    };
+  }, [db, appId, selectedProject]);
+
+  // --- CSV Parser Logic ---
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
     const reader = new FileReader();
-    reader.readAsArrayBuffer(file);
-    reader.onload = (e) => {
-        try {
-            const buffer = e.target.result;
-            let text = '';
-            try { text = new TextDecoder(encoding, { fatal: true }).decode(buffer); } 
-            catch (err) { text = new TextDecoder('utf-8').decode(buffer); }
+    reader.onload = (evt) => {
+      const text = evt.target.result;
+      processCSV(text);
+    };
+    reader.readAsText(file, encoding);
+    e.target.value = null; // รีเซ็ต input เพื่อให้กดอัปโหลดไฟล์เดิมซ้ำได้
+  };
 
-            const lines = text.split(/\r?\n/).filter(line => line.trim() !== ''); // Remove empty lines
-            if (lines.length < 2) {
-                if (setImportProgress) setImportProgress({ isImporting: false, percent: 0 });
-                return alert('ไฟล์ CSV ไม่มีข้อมูล หรือมีแค่หัวตาราง');
-            }
-            
-            // ฟังก์ชันแยกคอลัมน์ CSV ที่แม่นยำขึ้น (รองรับลูกน้ำในเครื่องหมายคำพูด)
-            const parseCSVLine = (line) => {
-                const result = [];
-                let startValueBndry = -1;
-                let isInsideQuote = false;
-                for (let i = 0; i < line.length; i++) {
-                    let c = line[i];
-                    if (c === '"') isInsideQuote = !isInsideQuote;
-                    else if (c === ',' && !isInsideQuote) {
-                        let value = line.substring(startValueBndry + 1, i).trim().replace(/^"|"$/g, '').replace(/""/g, '"');
-                        result.push(value);
-                        startValueBndry = i;
-                    }
+  const processCSV = (csvText) => {
+    const lines = csvText.split('\n').map(line => line.trim()).filter(line => line !== '');
+    
+    let newProjectTitle = projectTitle;
+    let newReportDate = reportDate;
+
+    if (lines.length >= 3) {
+      const row1 = lines[0].replace(/,+$/, '').trim();
+      const row3 = lines[2].replace(/,+$/, '').trim();
+      if (row1) {
+          newProjectTitle = row1;
+          setProjectTitle(row1);
+      }
+      if (row3) {
+          newReportDate = row3;
+          setReportDate(row3);
+      }
+    }
+
+    let headerIndex = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes('ลำดับ') && lines[i].includes('บ้านเลขที่')) {
+        headerIndex = i;
+        break;
+      }
+    }
+
+    if (headerIndex === -1) {
+      alert("รูปแบบไฟล์ไม่ถูกต้อง กรุณาใช้ไฟล์รายงานลูกหนี้ค้างชำระจากระบบบัญชี");
+      return;
+    }
+
+    const dataLines = lines.slice(headerIndex + 2);
+    const parsedData = [];
+
+    let lastHouseNo = "";
+    let lastName = "";
+
+    dataLines.forEach(line => {
+      const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(c => c.replace(/"/g, '').trim());
+      
+      if (cols[0]?.includes('รวม') || cols[1]?.includes('รวม')) return;
+
+      const houseNo = cols[1];
+      const name = cols[2];
+      
+      if (houseNo) lastHouseNo = houseNo;
+      if (name) lastName = name;
+
+      const detail = cols[5];
+      const overdueDays = parseInt(cols[8]) || 0;
+
+      let amount = 0;
+      for (let i = 9; i < cols.length; i++) {
+        const val = parseFloat(cols[i]?.replace(/,/g, ''));
+        if (!isNaN(val)) amount += val;
+      }
+
+      if (lastHouseNo && amount > 0) {
+        parsedData.push({
+          houseNo: lastHouseNo,
+          name: lastName,
+          detail,
+          overdueDays,
+          amount
+        });
+      }
+    });
+
+    setRawData(parsedData);
+
+    // --- NEW: บันทึกข้อมูลที่แปลงสำเร็จขึ้น Cloud อัตโนมัติ (Online Sync) ---
+    if (db && appId && selectedProject) {
+        try {
+            const syncData = async () => {
+                const jsonStr = JSON.stringify({
+                    payload: parsedData,
+                    projectTitle: newProjectTitle,
+                    reportDate: newReportDate,
+                    updatedAt: new Date().toISOString(),
+                    updatedBy: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
+                });
+                
+                // ใช้เทคนิค Chunking ตัดข้อมูลเป็นส่วนๆ ป้องกันปัญหาไฟล์เกินข้อจำกัด 1MB ของฐานข้อมูล
+                const CHUNK_SIZE = 150000; // FIX: ลดขนาดลงเพื่อรองรับอักขระภาษาไทยอย่างปลอดภัย
+                const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
+
+                for (let i = 0; i < totalChunks; i++) {
+                    const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `central_fee_raw_${selectedProject.id}_${i}`);
+                    const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+                    await setDoc(chunkRef, { chunk: chunkData });
+                    await new Promise(r => setTimeout(r, 10)); // พัก UI
                 }
-                result.push(line.substring(startValueBndry + 1).trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
-                return result;
+
+                const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', `central_fee_raw_${selectedProject.id}`);
+                await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
             };
 
-            let headerLineIndex = -1;
-            let headers = [];
-            let bestHouseIdx = -1;
-            let bestNameIdx = -1;
-            let bestAmountIdx = -1;
-            let bestDaysIdx = -1;
-            let agingColIndices = [];
-
-            // คีย์เวิร์ดสำหรับค้นหาคอลัมน์
-            const houseKeywords = ['บ้านเลขที่', 'แปลง', 'ห้อง', 'unit', 'house', 'เลขที่', 'ที่อยู่'];
-            const nameKeywords = ['ชื่อ', 'เจ้าของ', 'ลูกบ้าน', 'name', 'owner', 'ลูกค้า', 'ผู้ติดต่อ'];
-            const amountKeywords = ['ค้างชำระสุทธิ', 'ค้างชำระ', 'ยอด', 'จำนวนเงิน', 'amount', 'total', 'หนี้', 'รวม', 'balance'];
-            const daysKeywords = ['จำนวนวัน', 'เกินกำหนด', 'อายุหนี้', 'days', 'overdue', 'วัน'];
-            const agingKeywords = [
-                'ยังไม่เกินกำหนด', 'ยังไม่ถึงกำหนด', 'current', 'notdue',
-                '1-30', '31-60', '61-90', '91-120', '121-150', '151-180', 
-                'มากกว่า180', 'over180', 'มากกว่า120', 'over120', 'มากกว่า90', 'over90',
-                '>180', '>120', '>90', '>60', '>30'
-            ];
-
-            // ค้นหาบรรทัดที่เป็น Header (ลองหาจาก 20 บรรทัดแรก เผื่อรายงานมีหัวกระดาษยาว)
-            for (let i = 0; i < Math.min(20, lines.length); i++) {
-                const currentHeaders = parseCSVLine(lines[i]);
-                const findCol = (keywords) => currentHeaders.findIndex(h => keywords.some(k => h.toLowerCase().includes(k.toLowerCase())));
-
-                if (bestHouseIdx === -1) {
-                    const hIdx = findCol(houseKeywords);
-                    if (hIdx !== -1) {
-                        headerLineIndex = i;
-                        headers = currentHeaders;
-                        bestHouseIdx = hIdx;
-                        bestNameIdx = findCol(nameKeywords);
-                        bestAmountIdx = findCol(amountKeywords);
-                        bestDaysIdx = findCol(daysKeywords);
-                    }
-                }
-
-                // สแกนหาคอลัมน์ช่วงอายุหนี้จากทุกบรรทัดในส่วนหัว (รวมถึงบรรทัดซับเฮดเดอร์)
-                currentHeaders.forEach((h, idx) => {
-                    if (agingKeywords.some(k => h.toLowerCase().replace(/\s/g,'').includes(k))) {
-                        if (!agingColIndices.includes(idx)) agingColIndices.push(idx);
-                    }
-                });
-            }
-
-            if (bestHouseIdx === -1) {
-                if (setImportProgress) setImportProgress({ isImporting: false, percent: 0 });
-                return alert('รูปแบบไฟล์ไม่ถูกต้อง: ไม่พบคอลัมน์ "บ้านเลขที่" หรือ "ห้อง" ในส่วนของหัวตาราง');
-            }
-
-            const newData = [];
-
-            for (let i = headerLineIndex + 1; i < lines.length; i++) {
-                const rawLine = lines[i];
-                // ข้ามบรรทัดซับเฮดเดอร์ของรายงานบัญชี (เช่น 1-30, 31-60)
-                if (rawLine.includes('1-30') && rawLine.includes('31-60')) continue;
-
-                const values = parseCSVLine(rawLine);
-                if (values.length <= bestHouseIdx) continue;
-
-                const houseNo = values[bestHouseIdx];
-                // ข้ามบรรทัดว่าง หรือ บรรทัดสรุปผลรวม
-                if (!houseNo || houseNo === '-' || houseNo.includes('รวม') || houseNo.toLowerCase().includes('total')) continue;
-
-                const name = bestNameIdx !== -1 ? values[bestNameIdx] : '-';
-
-                // หายอดเงิน
-                let amount = 0;
-                if (agingColIndices.length > 0) {
-                    // หากเป็นรายงาน Aging ให้นำคอลัมน์ช่วงอายุหนี้มารวมกันเป็นยอดของใบแจ้งหนี้นั้นๆ (ป้องกันการนำยอด Subtotal มารวมซ้ำ)
-                    agingColIndices.forEach(idx => {
-                        if (values[idx]) {
-                            const val = parseFloat(values[idx].replace(/[^\d.-]/g, ''));
-                            if (!isNaN(val)) amount += val;
-                        }
-                    });
-                } else {
-                    let amountStr = '0';
-                    if (bestAmountIdx !== -1 && values[bestAmountIdx]) {
-                        amountStr = values[bestAmountIdx];
-                    } else {
-                        // ค้นหาตัวเลขในคอลัมน์ท้ายๆ ถ้าระบุคอลัมน์ยอดเงินไม่ชัดเจน (เป็น Fallback)
-                        for (let j = values.length - 1; j > bestHouseIdx; j--) {
-                            let val = values[j].replace(/[^\d.-]/g, '');
-                            if (val && !isNaN(parseFloat(val))) {
-                                amountStr = values[j];
-                                break;
-                            }
-                        }
-                    }
-                    amount = parseFloat(amountStr.replace(/[^\d.-]/g, '')) || 0;
-                }
-
-                // หาวันที่ค้างชำระ
-                let overdueDays = 30;
-                if (bestDaysIdx !== -1 && values[bestDaysIdx]) {
-                    overdueDays = parseInt(values[bestDaysIdx].replace(/[^\d]/g, '')) || 30;
-                } else {
-                    overdueDays = Math.max(30, Math.floor(amount / 1000) * 30); // จำลองวันจากยอดเงินหากไม่มีบอก
-                }
-
-                if (amount > 0) {
-                    newData.push({
-                        id: Date.now().toString() + i,
-                        houseNo,
-                        name: name || '-',
-                        amount,
-                        overdueDays: overdueDays,
-                        invoiceCount: 1 // แต่ละบรรทัดที่ยอด > 0 คือ 1 invoice (เดี๋ยวใช้ summaryData ไปรวมต่ออีกที)
-                    });
-                }
-            }
-            
-            if (newData.length > 0) {
-                if (setImportProgress) setImportProgress({ isImporting: true, percent: 100, label: 'บันทึกข้อมูลเรียบร้อย' });
-                // บันทึกลงตัวแปร PersistentState ซึ่งจะถูกโยนขึ้น Firebase ให้เครื่องอื่นเห็นอัตโนมัติ
-                setRawData(newData);
-                setTimeout(() => {
-                    if (setImportProgress) setImportProgress({ isImporting: false, percent: 0 });
-                    alert(`นำเข้าข้อมูลยอดค้างสำเร็จ ${newData.length} ใบแจ้งหนี้ (ระบบจะจับกลุ่มตามบ้านเลขที่ให้อัตโนมัติ)`);
-                    setIsSettingsOpen(false);
-                }, 500);
-            } else {
-                if (setImportProgress) setImportProgress({ isImporting: false, percent: 0 });
-                alert('ไม่พบข้อมูลยอดหนี้ที่ถูกต้องในไฟล์ (ยอดเงินอาจเป็น 0 หรือข้อมูลไม่ตรงรูปแบบ)');
-            }
-        } catch (error) {
-            if (setImportProgress) setImportProgress({ isImporting: false, percent: 0 });
-            console.error(error);
-            alert('เกิดข้อผิดพลาดในการอ่านไฟล์ CSV โปรดตรวจสอบการเข้ารหัส (Encoding)');
+            syncData().then(() => {
+                alert('อัปโหลดและซิงค์ตารางข้อมูลลูกหนี้ขึ้นระบบออนไลน์สำเร็จ ทุกเครื่องจะมองเห็นข้อมูลนี้ตรงกัน!');
+                setIsSettingsOpen(false); // ปิดหน้าต่างการตั้งค่า
+            }).catch(e => {
+                console.error("Save CSV to Cloud Error:", e);
+                alert('เกิดข้อผิดพลาดในการบันทึกขึ้น Cloud: ' + e.message);
+            });
+        } catch (e) {
+            console.error(e);
         }
-    };
-    event.target.value = '';
+    } else {
+        alert('อัปโหลดสำเร็จ (ระบบกำลังทำงานในโหมดออฟไลน์ ข้อมูลจะอยู่เฉพาะในเครื่องนี้)');
+        setIsSettingsOpen(false);
+    }
   };
 
   // --- Data Aggregation ---
@@ -2291,13 +2330,29 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId, setImpo
   const handleSaveStatus = async () => {
     if (selectedHouse) {
       const finalStatusToSave = tempStatus === "อื่นๆ (ให้ระบุ)" ? tempCustomStatus : tempStatus;
-      
-      // บันทึกลงตัวแปร PersistentState เพื่อให้ข้อมูลไม่หายเมื่อรีเฟรช
-      setCustomStatuses(prev => ({ ...prev, [selectedHouse.houseNo]: finalStatusToSave }));
-      setNotes(prev => ({ ...prev, [selectedHouse.houseNo]: tempNote }));
-      setHistories(prev => ({ ...prev, [selectedHouse.houseNo]: tempHistory }));
-      
-      alert('บันทึกสถานะการทวงถามเรียบร้อยแล้ว (ระบบบันทึกข้อมูลถาวร)');
+
+      if (db && appId && selectedProject) {
+        try {
+          const safeId = selectedHouse.houseNo.replace(/\//g, '-');
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', `house_statuses_${selectedProject.id}`, safeId);
+          
+          await setDoc(docRef, {
+            houseNo: selectedHouse.houseNo,
+            status: finalStatusToSave,
+            note: tempNote,
+            history: tempHistory,
+            updatedAt: new Date().toISOString(),
+            updatedBy: currentUser?.firstName || 'System'
+          }, { merge: true });
+
+        } catch (error) {
+          console.error("Error saving to Cloud:", error);
+        }
+      } else {
+        setCustomStatuses(prev => ({ ...prev, [selectedHouse.houseNo]: finalStatusToSave }));
+        setNotes(prev => ({ ...prev, [selectedHouse.houseNo]: tempNote }));
+        setHistories(prev => ({ ...prev, [selectedHouse.houseNo]: tempHistory }));
+      }
     }
     setIsModalOpen(false);
   };
@@ -3262,6 +3317,7 @@ export default function App() {
   const [isExporting, setIsExporting] = useState(false);
   const [isBackingUp, setIsBackingUp] = useState(false); // NEW: State สำหรับตอนกด Export Backup
   const [isRestoring, setIsRestoring] = useState(false); // NEW: State สำหรับตอนกำลัง Import Restore
+  const [restoreProgress, setRestoreProgress] = useState(''); // NEW: State สำหรับแสดงความคืบหน้าตอน Import
   // --- NEW: State for Selective Backup/Restore ---
   const [showBackupOptions, setShowBackupOptions] = useState(false);
   const [backupModules, setBackupModules] = useState({
@@ -3643,9 +3699,6 @@ export default function App() {
   const [deposits, setDeposits] = usePersistentCollection('bmg_deposits', INITIAL_DEPOSITS, fbUser);
   const [inventoryList, setInventoryList] = usePersistentCollection('bmg_inventory', INITIAL_INVENTORY, fbUser);
   const [inventoryTransactions, setInventoryTransactions] = usePersistentCollection('bmg_inventory_transactions', INITIAL_TRANSACTIONS, fbUser);
-
-  // --- NEW: State สำหรับแสดง Progress ตอน Import CSV และ Restore ---
-  const [importProgress, setImportProgress] = useState({ isImporting: false, percent: 0, current: 0, total: 0, label: '', unit: '' });
 
   // --- NEW: Meeting Invitations State ---
   const [meetingInvitations, setMeetingInvitations] = usePersistentCollection('bmg_meeting_invitations', [], fbUser);
@@ -5436,122 +5489,13 @@ export default function App() {
       return Number(commonFee) + Number(lateFee) + Number(water) + Number(parking) + Number(violation) + Number(other);
   };
   
-  // --- NEW: ฟังก์ชันดึงกราฟย้อนหลัง 7 วัน (แยกรายมิเตอร์แบบ Multi-line) ---
-  const getPast7DaysUtilityData = (targetDateStr) => {
-      if (!targetDateStr || !selectedProject) return [];
-      
-      // ป้องกัน Timezone เพี้ยนโดยการแยก String
-      const targetParts = targetDateStr.split('-');
-      if (targetParts.length !== 3) return [];
-      const targetDate = new Date(targetParts[0], targetParts[1] - 1, targetParts[2]);
-      
-      const data = [];
-      const projectMeters = meters.filter(m => m.projectId === selectedProject.id);
-      const waterMeters = projectMeters.filter(m => m.type === 'Water');
-      const elecMeters = projectMeters.filter(m => m.type === 'Electricity');
-
-      for (let i = 6; i >= 0; i--) {
-          const d = new Date(targetDate);
-          d.setDate(d.getDate() - i);
-          const y = d.getFullYear();
-          const mStr = String(d.getMonth() + 1).padStart(2, '0');
-          const dayStr = String(d.getDate()).padStart(2, '0');
-          const dateStr = `${y}-${mStr}-${dayStr}`;
-          const displayDate = d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
-
-          const dayReadings = utilityReadings.filter(r => r.date === dateStr);
-          const dataPoint = { date: displayDate };
-          
-          waterMeters.forEach(m => {
-              const r = dayReadings.find(dr => dr.meterId === m.id);
-              dataPoint[`${m.name} (${m.code})`] = r ? Number(Number(r.usage).toFixed(2)) : 0;
-          });
-          
-          elecMeters.forEach(m => {
-              const r = dayReadings.find(dr => dr.meterId === m.id);
-              dataPoint[`${m.name} (${m.code})`] = r ? Number(Number(r.usage).toFixed(2)) : 0;
-          });
-
-          data.push(dataPoint);
-      }
-      return data;
-  };
-
-  const renderUtilityTrendCharts = (dateStr) => {
-      if (!dateStr) return null;
-      const chartData = getPast7DaysUtilityData(dateStr);
-      
-      // หาจำนวนมิเตอร์ที่นำมารวม
-      const projectMeters = meters.filter(m => m.projectId === selectedProject.id);
-      const waterMeters = projectMeters.filter(m => m.type === 'Water');
-      const elecMeters = projectMeters.filter(m => m.type === 'Electricity');
-
-      if (waterMeters.length === 0 && elecMeters.length === 0) return null;
-
-      const waterColors = ['#3b82f6', '#0ea5e9', '#6366f1', '#06b6d4', '#8b5cf6', '#2563eb'];
-      const elecColors = ['#f97316', '#f59e0b', '#ef4444', '#eab308', '#f43f5e', '#ea580c'];
-
-      return (
-          <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-6" style={{ pageBreakInside: 'avoid' }}>
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2">
-                  <h3 className="font-bold text-gray-800 flex items-center gap-2 text-sm">
-                      <BarChart3 size={16} className="text-blue-600"/> สถิติการใช้พลังงาน ย้อนหลัง 7 วัน (รายมิเตอร์)
-                  </h3>
-                  <div className="text-[10px] sm:text-xs text-blue-700 font-bold bg-blue-100 px-2.5 py-1 rounded-full border border-blue-200 shadow-sm flex items-center gap-1.5">
-                      <Zap size={12} className="text-blue-600"/> ดึงข้อมูลอัตโนมัติ: น้ำ {waterMeters.length} มิเตอร์, ไฟ {elecMeters.length} มิเตอร์
-                  </div>
-              </div>
-              <div className="grid grid-cols-1 gap-6">
-                  {waterMeters.length > 0 && (
-                      <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-                          <h4 className="text-xs font-bold text-blue-600 mb-4 text-center flex items-center justify-center gap-1"><Droplet size={14}/> น้ำประปา (ลบ.ม.)</h4>
-                          <div className="h-64 md:h-80">
-                              <ResponsiveContainer width="100%" height="100%">
-                                  <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                      <XAxis dataKey="date" tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} dy={5} />
-                                      <YAxis tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                      <RechartsTooltip contentStyle={{ fontSize: '12px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                      <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '15px' }} />
-                                      {waterMeters.map((m, idx) => (
-                                          <Line key={m.id} type="monotone" dataKey={`${m.name} (${m.code})`} stroke={waterColors[idx % waterColors.length]} strokeWidth={2.5} dot={{ r: 4, strokeWidth: 1.5, fill: '#fff' }} activeDot={{ r: 6 }} isAnimationActive={!isExporting} />
-                                      ))}
-                                  </LineChart>
-                              </ResponsiveContainer>
-                          </div>
-                      </div>
-                  )}
-                  {elecMeters.length > 0 && (
-                      <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-                          <h4 className="text-xs font-bold text-orange-600 mb-4 text-center flex items-center justify-center gap-1"><Zap size={14}/> ไฟฟ้า (kWh)</h4>
-                          <div className="h-64 md:h-80">
-                              <ResponsiveContainer width="100%" height="100%">
-                                  <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                      <XAxis dataKey="date" tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} dy={5} />
-                                      <YAxis tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                      <RechartsTooltip contentStyle={{ fontSize: '12px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                      <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '15px' }} />
-                                      {elecMeters.map((m, idx) => (
-                                          <Line key={m.id} type="monotone" dataKey={`${m.name} (${m.code})`} stroke={elecColors[idx % elecColors.length]} strokeWidth={2.5} dot={{ r: 4, strokeWidth: 1.5, fill: '#fff' }} activeDot={{ r: 6 }} isAnimationActive={!isExporting} />
-                                      ))}
-                                  </LineChart>
-                              </ResponsiveContainer>
-                          </div>
-                      </div>
-                  )}
-              </div>
-          </div>
-      );
-  };
-
-      // --- NEW: ฟังก์ชัน นำเข้า (Import) รายงานประจำวันด้วย CSV ---
+  // --- NEW: ฟังก์ชัน นำเข้า (Import) รายงานประจำวันด้วย CSV ---
   const handleImportDailyReportsCSV = (event) => {
       const file = event.target.files[0];
       if (!file) return;
       const reader = new FileReader();
       reader.readAsArrayBuffer(file);
-      reader.onload = async (e) => {
+      reader.onload = (e) => {
           try {
               const buffer = e.target.result;
               let text = '';
@@ -5569,53 +5513,16 @@ export default function App() {
               const headers = parseCSVLine(lines[0]);
               const newReports = [];
               
-              // NEW: หาตำแหน่งคอลัมน์ของข้อมูล เพื่อรองรับหัวตารางรูปแบบต่างๆ
-              const findColumn = (keywords) => {
-                  const idx = headers.findIndex(h => keywords.some(kw => h.toLowerCase().includes(kw.toLowerCase())));
-                  return idx !== -1 ? idx : -1;
-              };
-
-              // Map คอลัมน์ต่างๆ
-              const colMap = {
-                  date: findColumn(['วันที่', 'date']),
-                  reporter: findColumn(['ผู้รายงาน', 'reporter']),
-                  note: findColumn(['หมายเหตุ', 'note', 'รายละเอียดอื่น']),
-                  
-                  // กำลังพล
-                  mpJuristic: findColumn(['นิติบุคคล', 'juristic']),
-                  mpSecurity: findColumn(['รปภ', 'security', 'รักษาความปลอดภัย']),
-                  mpCleaning: findColumn(['แม่บ้าน', 'ทำความสะอาด', 'cleaning']),
-                  mpGardening: findColumn(['คนสวน', 'ดูแลสวน', 'gardening']),
-                  mpSweeper: findColumn(['คนกวาด', 'sweeper']),
-                  mpOther: findColumn(['กำลังพลอื่นๆ', 'other manpower']),
-                  
-                  // ผลการทำงาน
-                  perfJuristic: findColumn(['ผลงานนิติ', 'juristic work', 'รายละเอียดนิติ']),
-                  perfSecurity: findColumn(['ผลงานรปภ', 'security work', 'รายละเอียดรปภ']),
-                  perfCleaning: findColumn(['ผลงานแม่บ้าน', 'cleaning work', 'รายละเอียดแม่บ้าน']),
-                  perfGardening: findColumn(['ผลงานคนสวน', 'gardening work', 'รายละเอียดคนสวน']),
-                  perfSweeper: findColumn(['ผลงานกวาด', 'sweeper work', 'รายละเอียดคนกวาด']),
-                  perfOther: findColumn(['ผลงานอื่นๆ', 'other work', 'รายละเอียดอื่นๆ']),
-
-                  // รายรับ
-                  incCommon: findColumn(['ส่วนกลาง', 'common fee']),
-                  incLate: findColumn(['ค่าปรับล่าช้า', 'late fee']),
-                  incWater: findColumn(['ค่าน้ำ', 'water fee']),
-                  incParking: findColumn(['ค่าจอดรถ', 'parking fee']),
-                  incViolation: findColumn(['ผิดระเบียบ', 'violation fee']),
-                  incOther: findColumn(['รับอื่นๆ', 'other income'])
-              };
-
-              // --- FIX: ให้รับค่าวันที่จาก CSV แบบตรงไปตรงมามากขึ้น ป้องกันค่าหาย ---
               for (let i = 1; i < lines.length; i++) {
                   if (!lines[i].trim()) continue;
                   const values = parseCSVLine(lines[i]);
+                  const rowObj = {};
+                  headers.forEach((header, index) => rowObj[header] = values[index]);
                   
-                  // ดึงค่าตาม Mapping ใหม่ (ถ้าหาไม่เจอให้ใช้แบบเดิมเป็น Fallback)
-                  const rawDate = colMap.date !== -1 ? values[colMap.date] : (values[0] || ''); // สมมติว่าวันที่มักอยู่คอลัมน์แรก
+                  const rawDate = rowObj['วันที่'] || rowObj['Date'] || rowObj['date'];
                   if (!rawDate) continue;
                   
-                  // แปลงวันที่ให้อยู่ในรูปแบบ YYYY-MM-DD
+                  // Use normalizeImportedDate to handle different formats
                   const dateStr = normalizeImportedDate(rawDate);
                   if (!dateStr) continue;
 
@@ -5623,85 +5530,51 @@ export default function App() {
                   if (dailyReports.some(r => r.projectId === selectedProject.id && r.date === dateStr) || newReports.some(r => r.date === dateStr)) {
                       continue; 
                   }
-                  
-                  const getNum = (idx, fallbackName) => {
-                      if (idx !== -1) return parseFloat(values[idx]) || 0;
-                      // Fallback: ลองหาจาก Header แบบเป๊ะๆ
-                      const fallbackIdx = headers.indexOf(fallbackName);
-                      if (fallbackIdx !== -1) return parseFloat(values[fallbackIdx]) || 0;
-                      return 0;
-                  };
 
-                  const getStr = (idx, fallbackName) => {
-                      if (idx !== -1) return values[idx] || '';
-                      const fallbackIdx = headers.indexOf(fallbackName);
-                      if (fallbackIdx !== -1) return values[fallbackIdx] || '';
-                      return '';
-                  };
-
-                  // --- FIX: ตรวจสอบและให้ค่า Default อย่างรอบคอบ ป้องกัน Property หาย ---
                   newReports.push({
                       id: generateId(),
                       projectId: selectedProject.id,
                       date: dateStr,
                       manpower: {
-                          juristic: getNum(colMap.mpJuristic, 'จนท.นิติบุคคล'),
-                          security: getNum(colMap.mpSecurity, 'รปภ.'),
-                          cleaning: getNum(colMap.mpCleaning, 'แม่บ้าน'),
-                          gardening: getNum(colMap.mpGardening, 'คนสวน'),
-                          sweeper: getNum(colMap.mpSweeper, 'คนกวาดถนน'),
-                          other: getNum(colMap.mpOther, 'อื่นๆ'),
+                          juristic: parseInt(rowObj['จนท.นิติบุคคล'] || rowObj['Juristic'] || 0) || 0,
+                          security: parseInt(rowObj['รปภ.'] || rowObj['Security'] || 0) || 0,
+                          cleaning: parseInt(rowObj['แม่บ้าน'] || rowObj['Cleaning'] || 0) || 0,
+                          gardening: parseInt(rowObj['คนสวน'] || rowObj['Gardening'] || 0) || 0,
+                          sweeper: parseInt(rowObj['คนกวาดถนน'] || rowObj['Sweeper'] || 0) || 0,
+                          other: parseInt(rowObj['อื่นๆ'] || rowObj['Other'] || 0) || 0,
                           otherLabel: ''
                       },
                       performance: {
-                          juristic: { details: getStr(colMap.perfJuristic, 'ผลงานนิติบุคคล'), images: [] },
-                          security: { details: getStr(colMap.perfSecurity, 'ผลงานรปภ.'), images: [] },
-                          cleaning: { details: getStr(colMap.perfCleaning, 'ผลงานแม่บ้าน'), images: [] },
-                          gardening: { details: getStr(colMap.perfGardening, 'ผลงานคนสวน'), images: [] },
-                          sweeper: { details: getStr(colMap.perfSweeper, 'ผลงานคนกวาด'), images: [] },
-                          other: { details: getStr(colMap.perfOther, 'ผลงานอื่นๆ'), images: [] }
+                          juristic: { details: rowObj['ผลงานนิติบุคคล'] || rowObj['Juristic Work'] || '', images: [] },
+                          security: { details: rowObj['ผลงานรปภ.'] || rowObj['Security Work'] || '', images: [] },
+                          cleaning: { details: rowObj['ผลงานแม่บ้าน'] || rowObj['Cleaning Work'] || '', images: [] },
+                          gardening: { details: rowObj['ผลงานคนสวน'] || rowObj['Gardening Work'] || '', images: [] },
+                          sweeper: { details: rowObj['ผลงานคนกวาด'] || rowObj['Sweeper Work'] || '', images: [] },
+                          other: { details: rowObj['ผลงานอื่นๆ'] || '', images: [] }
                       },
                       income: {
-                          commonFee: getNum(colMap.incCommon, 'รับค่าส่วนกลาง'),
-                          lateFee: getNum(colMap.incLate, 'รับค่าปรับ'),
-                          water: getNum(colMap.incWater, 'รับค่าน้ำ'),
-                          parking: getNum(colMap.incParking, 'รับค่าจอดรถ'),
-                          violation: getNum(colMap.incViolation, 'รับค่าปรับผิดระเบียบ'),
-                          other: getNum(colMap.incOther, 'รับอื่นๆ'),
+                          commonFee: parseFloat(rowObj['รับค่าส่วนกลาง'] || 0) || 0,
+                          lateFee: parseFloat(rowObj['รับค่าปรับ'] || 0) || 0,
+                          water: parseFloat(rowObj['รับค่าน้ำ'] || 0) || 0,
+                          parking: parseFloat(rowObj['รับค่าจอดรถ'] || 0) || 0,
+                          violation: parseFloat(rowObj['รับค่าปรับผิดระเบียบ'] || 0) || 0,
+                          other: parseFloat(rowObj['รับอื่นๆ'] || 0) || 0,
                           otherLabel: ''
                       },
-                      note: getStr(colMap.note, 'หมายเหตุ'),
-                      reporter: getStr(colMap.reporter, 'ผู้รายงาน') || (currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System Import')
+                      note: rowObj['หมายเหตุ'] || rowObj['Note'] || '',
+                      reporter: rowObj['ผู้รายงาน'] || rowObj['Reporter'] || (currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System Import')
                   });
               }
               
               if (newReports.length > 0) {
-                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูลรายงานประจำวันที่ถูกต้องและไม่ซ้ำ ${newReports.length} วัน ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, async () => {
-                      
-                      const safeNewReports = newReports.filter(nr => !dailyReports.some(pr => pr.projectId === nr.projectId && pr.date === nr.date));
-                      const totalToImport = safeNewReports.length;
-
-                      if (totalToImport === 0) {
-                          setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
-                          alert('ไม่มีข้อมูลใหม่ที่จะนำเข้า (ข้อมูลซ้ำกับในระบบทั้งหมด)');
-                          return;
-                      }
-
-                      // แสดง Progress และให้เซฟรวดเดียว โดยไม่ต้อง Chunking เพราะระบบจะใช้ Smart Diffing อัตโนมัติ
-                      setImportProgress({ isImporting: true, percent: 50, current: totalToImport, total: totalToImport, label: 'กำลังบันทึกข้อมูลเข้าระบบ...', unit: 'รายการ' });
-                      
+                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูลรายงานประจำวันที่ถูกต้องและไม่ซ้ำ ${newReports.length} วัน ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
                       setDailyReports(prev => {
+                          const safeNewReports = newReports.filter(nr => !prev.some(pr => pr.projectId === nr.projectId && pr.date === nr.date));
                           const nextList = [...safeNewReports, ...prev];
                           setTimeout(() => triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, []), 500);
                           return nextList;
-                      }); // นำพารามิเตอร์ true ออก เพื่อให้อัปโหลดขึ้น DB แค่ส่วนต่าง
-
-                      setTimeout(() => {
-                          setImportProgress({ isImporting: false, percent: 100, current: totalToImport, total: totalToImport, label: 'เสร็จสิ้น' });
-                          alert('นำเข้าข้อมูลรายงานประจำวันสำเร็จแล้ว!');
-                          setTimeout(() => setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 }), 1000);
-                      }, 500);
-
+                      }, true);
+                      alert('นำเข้าข้อมูลรายงานประจำวันสำเร็จแล้ว!');
                   }, 'ยืนยันการนำเข้า', 'info');
               } else {
                   alert('ไม่พบข้อมูลใหม่ หรือข้อมูลวันที่ซ้ำกับที่มีอยู่ในระบบแล้ว (ระบบจะบันทึกได้แค่วันละ 1 ฉบับเท่านั้น)');
@@ -6369,7 +6242,7 @@ export default function App() {
                           const nextList = [...prev, ...safeNewMeters];
                           setTimeout(() => triggerAutoSync('UtilityMeters_มิเตอร์', nextList, []), 500);
                           return nextList;
-                      }); // นำพารามิเตอร์ true ออก
+                      }, true);
                       alert('นำเข้าข้อมูลมิเตอร์สำเร็จแล้ว!');
                   }, 'ยืนยันการนำเข้า', 'info');
               } else {
@@ -6556,13 +6429,13 @@ export default function App() {
                           const nextReadings = [...newReadings, ...prev];
                           setTimeout(() => triggerAutoSync('UtilityReadings_จดมิเตอร์', nextReadings, []), 500);
                           return nextReadings;
-                      }); // นำพารามิเตอร์ true ออก
+                      }, true);
                       
                       setMeters(prev => {
                           const nextMeters = prev.map(m => updatedMetersMap.has(m.id) ? { ...m, ...updatedMetersMap.get(m.id) } : m);
                           setTimeout(() => triggerAutoSync('UtilityMeters_มิเตอร์', nextMeters, []), 500);
                           return nextMeters;
-                      }); // นำพารามิเตอร์ true ออก
+                      }, true);
                       
                       alert('นำเข้าข้อมูลการจดมิเตอร์สำเร็จแล้ว!');
                   }, 'ยืนยันการนำเข้า', 'info');
@@ -6636,7 +6509,7 @@ export default function App() {
                           const nextList = [...prev, ...newAPs];
                           setTimeout(() => triggerAutoSync('ActionPlans_แผนงาน', nextList, []), 500);
                           return nextList;
-                      }); // นำพารามิเตอร์ true ออก
+                      }, true);
                       alert('นำเข้าข้อมูลสำเร็จแล้ว!');
                   }, 'ยืนยันการนำเข้า', 'info');
               } else {
@@ -7430,7 +7303,7 @@ export default function App() {
           async () => {
               setIsRestoring(true);
               setShowRestoreOptions(false);
-              setImportProgress({ isImporting: true, percent: 0, current: 0, total: 100, label: 'กำลังเตรียมการกู้คืนข้อมูล...' });
+              setRestoreProgress('เริ่มดำเนินการกู้คืนข้อมูล (โปรดอย่าปิดหน้าต่าง)...');
 
               try {
                   await new Promise(resolve => setTimeout(resolve, 500)); // พัก UI ให้เตรียมตัว
@@ -7457,7 +7330,7 @@ export default function App() {
                   if (d.localFiles && Object.keys(d.localFiles).length > 0) {
                       if (restoreModules.projects || restoreModules.contracts || restoreModules.formsList || restoreModules.meetingsList) {
                           const totalFiles = Object.keys(d.localFiles).length;
-                          setImportProgress({ isImporting: true, percent: 10, current: 0, total: totalFiles, label: 'กำลังกู้คืนไฟล์เอกสารแนบ...', unit: 'ไฟล์' });
+                          setRestoreProgress(`กำลังกู้คืนไฟล์เอกสารแนบทั้งหมด (${totalFiles} ไฟล์)...`);
                           await saveMultipleFilesLocally(d.localFiles);
                           await new Promise(resolve => setTimeout(resolve, 50));
                       }
@@ -7514,8 +7387,7 @@ export default function App() {
 
                   for (const item of stateSetters) {
                       currentTable++;
-                      const p = 10 + Math.round((currentTable / totalTables) * 90);
-                      setImportProgress({ isImporting: true, percent: p, current: currentTable, total: totalTables, label: `กำลังนำเข้าหมวด: ${item.key}`, unit: 'หมวด' });
+                      setRestoreProgress(`กำลังกู้คืน: ${item.key} (${currentTable}/${totalTables})`);
                       await new Promise(resolve => setTimeout(resolve, 50));
 
                       try {
@@ -7530,12 +7402,12 @@ export default function App() {
                   
                   if (d.theme) setTheme(d.theme);
 
-                  setImportProgress({ isImporting: true, percent: 100, current: totalTables, total: totalTables, label: 'กู้คืนข้อมูลเสร็จสมบูรณ์!' });
+                  setRestoreProgress('การกู้คืนข้อมูลเฉพาะส่วนเสร็จสมบูรณ์!');
                   
                   setTimeout(() => {
                       showAlert("สำเร็จ", `นำเข้าและอัปเดตข้อมูล ${totalTables} หมวดหมู่เสร็จสมบูรณ์ ข้อมูลพร้อมใช้งานทันที`);
                       setIsRestoring(false);
-                      setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
+                      setRestoreProgress('');
                       setImportDataPreview(null);
                   }, 500);
                   
@@ -7543,7 +7415,7 @@ export default function App() {
                   console.error("Restore state error:", err);
                   showAlert("เกิดข้อผิดพลาด", "เกิดข้อผิดพลาดระหว่างการกู้คืนข้อมูล: " + err.message);
                   setIsRestoring(false);
-                  setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
+                  setRestoreProgress('');
                   setImportDataPreview(null);
               }
           },
@@ -7698,8 +7570,6 @@ export default function App() {
           let successCount = 0;
           let failCount = 0;
 
-          setImportProgress({ isImporting: true, percent: 0, current: 0, total: filesToUpload.length, label: 'กำลังเตรียมสำรองไฟล์...', unit: 'ไฟล์' });
-
           // ส่งข้อมูลไปบันทึกทีละไฟล์
           for (let i = 0; i < filesToUpload.length; i++) {
               const file = filesToUpload[i];
@@ -7735,30 +7605,18 @@ export default function App() {
                   failCount++;
               }
 
-              setImportProgress({ 
-                  isImporting: true, 
-                  percent: Math.round(((i + 1) / filesToUpload.length) * 100), 
-                  current: i + 1, 
-                  total: filesToUpload.length, 
-                  label: 'กำลังส่งไฟล์ไปที่ Google Drive...', 
-                  unit: 'ไฟล์' 
-              });
-
               // FIX: พักให้เบราว์เซอร์ประมวลผล 50ms ป้องกันหน้าจอค้าง (Out of memory / Call stack size exceeded)
               await new Promise(resolve => setTimeout(resolve, 50));
           }
 
-          setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
           alert(`✅ สำรองไฟล์ไปยัง Google Drive เสร็จสิ้น!\nสำเร็จ: ${successCount} ไฟล์\nล้มเหลว: ${failCount} ไฟล์\n\nโฟลเดอร์ปลายทาง: ${autoFolderName}`);
 
       } catch (error) {
-          setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
           console.error("Drive Backup error:", error);
           // แสดงข้อความ Error ที่แท้จริงออกมาเพื่อให้ทราบสาเหตุ
           alert(`❌ เกิดข้อผิดพลาดในการสำรองข้อมูลไปยัง Google Drive\n\nรายละเอียด: ${error.message || 'กรุณาตรวจสอบว่ามีไฟล์หรือข้อมูลที่เสียหายอยู่ในระบบหรือไม่'}`);
       } finally {
           setIsBackingUpToDrive(false);
-          setImportProgress({ isImporting: false, percent: 0, current: 0, total: 0 });
       }
   };
   // ----------------------------------------
@@ -9049,7 +8907,7 @@ export default function App() {
                           setUsers(prev => {
                               const safeNewUsers = newUsers.filter(nu => !prev.some(pu => pu.username === nu.username));
                               return [...prev, ...safeNewUsers];
-                          }); // นำพารามิเตอร์ true ออก
+                          }, true);
                           alert('นำเข้าข้อมูลพนักงานสำเร็จแล้ว!');
                       }, 'ยืนยันการนำเข้า', 'info');
                   } else {
@@ -14274,7 +14132,6 @@ export default function App() {
                   currentUser={currentUser} 
                   db={db} 
                   appId={appId} 
-                  setImportProgress={setImportProgress}
               />
           )}
 
@@ -16226,7 +16083,7 @@ export default function App() {
                               </div>
                               {isRestoring && (
                                   <div className="p-3 bg-red-100 text-red-800 text-xs text-center font-medium animate-pulse border-t border-red-200">
-                                      ระบบกำลังกู้คืนและนำเข้าข้อมูล กรุณารอสักครู่...
+                                      {restoreProgress}
                                   </div>
                               )}
                           </div>
@@ -17017,9 +16874,7 @@ export default function App() {
         )}
 
         <div id="print-area" className={`${isExporting ? 'w-full max-w-none px-[10mm]' : 'max-w-7xl mx-auto w-full p-4 md:p-6 lg:p-8 h-full flex flex-col'}`}>
-          {selectedProject ? (
-              ProjectDetail()
-          ) : (
+          {selectedProject ? ProjectDetail() : (
             <>
               {activeMenu === 'dashboard' && DashboardView()}
               {activeMenu === 'users' && UserManagement()}
@@ -17038,33 +16893,6 @@ export default function App() {
           <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-gray-900/90 text-white px-5 py-2.5 rounded-full shadow-2xl flex items-center gap-3 z-[9999] animate-fade-in backdrop-blur-sm border border-gray-700">
               <Cloud size={16} className="text-blue-400 animate-pulse" />
               <span className="text-sm font-medium tracking-wide">{autoSyncMessage}</span>
-          </div>
-      )}
-
-      {/* NEW: Import Progress Overlay */}
-      {importProgress.isImporting && (
-          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[10000] flex flex-col items-center justify-center animate-fade-in p-4">
-              <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-sm flex flex-col items-center text-center">
-                  <Loader2 size={48} className="text-blue-500 animate-spin mb-4" />
-                  <h3 className="text-lg font-bold text-gray-800 mb-2">{importProgress.label || 'กำลังนำเข้าข้อมูล...'}</h3>
-                  <p className="text-sm text-gray-500 mb-6">กรุณารอสักครู่ ห้ามปิดหน้าต่างหรือรีเฟรช</p>
-                  
-                  {/* Progress Bar */}
-                  <div className="w-full bg-gray-100 rounded-full h-4 mb-2 overflow-hidden shadow-inner border border-gray-200">
-                      <div 
-                          className="bg-blue-500 h-full transition-all duration-300 ease-out" 
-                          style={{ width: `${importProgress.percent}%` }}
-                      ></div>
-                  </div>
-                  <div className="flex justify-between w-full text-xs font-bold text-gray-600">
-                      <span>{importProgress.percent}%</span>
-                      {importProgress.total > 0 ? (
-                          <span>{importProgress.current} / {importProgress.total} {importProgress.unit || 'รายการ'}</span>
-                      ) : (
-                          <span>ระบบกำลังประมวลผล...</span>
-                      )}
-                  </div>
-              </div>
           </div>
       )}
 
@@ -18718,28 +18546,22 @@ export default function App() {
 
                 {/* Section 2: Performance (Grid Layout) */}
                 <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-6">
-                    <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm"><ClipboardList size={16}/> {t('performanceReport')} <span className="text-xs text-gray-500 font-normal ml-2">(จำกัด 1 รูปภาพต่อ 1 แผนก)</span></h3>
+                    <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm"><ClipboardList size={16}/> {t('performanceReport')}</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].map(dept => (
                             <div key={dept} className="bg-white p-3 rounded border shadow-sm flex flex-col">
                                 <div className="flex justify-between items-start mb-2">
                                     <div className="font-semibold text-xs text-orange-600">{t('dept_' + dept)}</div>
-                                    {!(newDailyReport.performance[dept]?.images?.length > 0) ? (
-                                        <div className="flex items-center gap-2">
-                                            <label className="cursor-pointer text-gray-400 hover:text-blue-500 transition-colors" title="อัปโหลดรูปภาพ">
-                                                <ImageIcon size={14} />
-                                                <input type="file" accept="image/*" className="hidden" onChange={(e) => handleDailyPerformanceImageUpload(dept, e.target.files[0])} />
-                                            </label>
-                                            <label className="cursor-pointer text-gray-400 hover:text-orange-500 transition-colors" title="ถ่ายรูปจากกล้อง">
-                                                <Camera size={14} />
-                                                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleDailyPerformanceImageUpload(dept, e.target.files[0])} />
-                                            </label>
-                                        </div>
-                                    ) : (
-                                        <span className="text-[10px] text-green-600 bg-green-50 px-2 py-0.5 rounded font-bold border border-green-200">
-                                            <CheckCircle size={10} className="inline mr-1 -mt-0.5"/> แนบรูปแล้ว
-                                        </span>
-                                    )}
+                                    <div className="flex items-center gap-2">
+                                        <label className="cursor-pointer text-gray-400 hover:text-blue-500 transition-colors" title="อัปโหลดรูปภาพ">
+                                            <ImageIcon size={14} />
+                                            <input type="file" accept="image/*" className="hidden" onChange={(e) => handleDailyPerformanceImageUpload(dept, e.target.files[0])} />
+                                        </label>
+                                        <label className="cursor-pointer text-gray-400 hover:text-orange-500 transition-colors" title="ถ่ายรูปจากกล้อง">
+                                            <Camera size={14} />
+                                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleDailyPerformanceImageUpload(dept, e.target.files[0])} />
+                                        </label>
+                                    </div>
                                 </div>
                                 <textarea 
                                     className="w-full border rounded p-2 text-xs h-20 mb-2 focus:ring-1 focus:ring-orange-300 outline-none resize-none bg-gray-50 focus:bg-white transition-colors" 
@@ -18769,9 +18591,6 @@ export default function App() {
                     </div>
                 </div>
 
-                {/* Section Trend Charts (NEW) */}
-                {renderUtilityTrendCharts(newDailyReport.date)}
-
                 {/* Section 3: Additional Note */}
                 <div className="mb-6">
                      <h3 className="font-bold text-gray-700 mb-2 text-sm">{t('additionalDetails')}</h3>
@@ -18782,6 +18601,39 @@ export default function App() {
                         placeholder="หมายเหตุเพิ่มเติม / ปัญหาที่พบ..."
                      ></textarea>
                 </div>
+
+                {/* NEW: Preview Auto-fetched Utility Readings */}
+                {(() => {
+                    const reportDate = newDailyReport.date;
+                    const projMeters = meters.filter(m => m.projectId === selectedProject.id);
+                    const projMeterIds = projMeters.map(m => m.id);
+                    const dayReadings = utilityReadings.filter(r => r.date === reportDate && projMeterIds.includes(r.meterId));
+
+                    if (dayReadings.length === 0) return null;
+
+                    return (
+                        <div className="mb-6 bg-gray-50 p-4 rounded-lg border border-gray-200 shadow-inner">
+                             <h3 className="font-bold text-gray-700 mb-1 text-sm flex items-center gap-2">
+                                 <Zap size={16} className="text-orange-500"/> ข้อมูลการจดมิเตอร์อัตโนมัติ ประจำวันที่ {new Date(reportDate).toLocaleDateString('th-TH')}
+                             </h3>
+                             <p className="text-[11px] text-gray-500 mb-3">* ระบบจะดึงข้อมูลมิเตอร์ที่ถูกจดในวันนี้ไปแสดงในรายงาน PDF โดยอัตโนมัติ ({dayReadings.length} รายการ)</p>
+                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                                 {dayReadings.map(r => {
+                                     const meter = projMeters.find(m => m.id === r.meterId);
+                                     return (
+                                         <div key={r.id} className="flex justify-between items-center bg-white p-2 border border-gray-200 rounded shadow-sm">
+                                             <div className="flex items-center gap-1.5 truncate pr-2">
+                                                 {meter?.type === 'Water' ? <Droplet size={14} className="text-blue-500 shrink-0"/> : <Zap size={14} className="text-orange-500 shrink-0"/>}
+                                                 <span className="font-medium text-gray-700 truncate" title={meter?.name}>{meter?.name} <span className="text-gray-400 font-normal">({meter?.code})</span></span>
+                                             </div>
+                                             <span className="font-bold text-red-600 shrink-0">+{Number(r.usage || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                                         </div>
+                                     )
+                                 })}
+                             </div>
+                        </div>
+                    );
+                })()}
 
                 <div className="mt-6 flex justify-between items-center border-t pt-4">
                     <div className="flex items-center gap-2 text-sm text-gray-600">
@@ -18808,96 +18660,82 @@ export default function App() {
                     <X size={24} />
                 </button>
 
-                <div id="print-daily-report" className={`bg-white ${isExporting ? 'w-[190mm] min-w-[190mm] max-w-[190mm] mx-auto box-border py-8 px-0' : 'w-full'}`}>
-                    
+                <div id="print-daily-report" className={`space-y-6 bg-white ${isExporting ? 'w-[190mm] min-w-[190mm] max-w-[190mm] mx-auto box-border py-8 px-0' : ''}`}>
                     {/* Header */}
-                    <div className="text-center pb-6 mb-6 border-b border-gray-200">
-                        <h2 className="text-3xl font-black text-gray-800 mb-3 tracking-wide">
+                    <div className="text-center border-b pb-4 mb-6">
+                        <h2 className="text-2xl font-bold text-gray-800">
                             รายงานประจำวันที่ {new Date(selectedDailyReport.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric'})}
                         </h2>
-                        <div className="flex justify-center items-center gap-4 text-sm text-gray-600 font-medium">
-                             <span>โครงการ / หน่วยงาน: {projects.find(p => p.id === selectedDailyReport.projectId)?.name || '-'}</span>
-                             <span className="text-gray-300">|</span>
-                             <span>ผู้รายงาน: {selectedDailyReport.reporter || '-'}</span>
+                        <div className="flex justify-center gap-4 text-sm text-gray-500 mt-2">
+                             <span>{t('col_project')}: {projects.find(p => p.id === selectedDailyReport.projectId)?.name}</span>
+                             <span>|</span>
+                             <span>{t('reporter')}: {selectedDailyReport.reporter}</span>
                         </div>
                     </div>
 
-                    {/* Section 1 & 3: Manpower & Income */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6" style={{ pageBreakInside: 'avoid' }}>
-                        {/* 1. Manpower */}
-                        <div className="bg-[#f8fafc] rounded-xl border border-gray-200 overflow-hidden flex flex-col h-full shadow-sm">
-                            <div className="p-4 border-b border-gray-200 flex items-center gap-2 bg-[#f1f5f9]">
-                                <Users size={20} className="text-blue-600"/>
-                                <h3 className="font-bold text-blue-800 text-lg">1. รายงานกำลังพลประจำวัน</h3>
-                            </div>
-                            <div className="p-5 flex-1 flex flex-col">
-                                <div className="space-y-4 text-sm text-gray-700">
-                                    {['juristic', 'security', 'cleaning', 'gardening', 'sweeper'].map(dept => (
-                                        <div key={dept} className="flex justify-between items-end border-b border-gray-200 border-dashed pb-2 last:border-0">
-                                            <span>{t('dept_' + dept)}</span>
-                                            <span className="font-black text-base text-gray-900">{selectedDailyReport.manpower[dept] || 0}</span>
-                                        </div>
-                                    ))}
-                                    {selectedDailyReport.manpower.otherLabel && (
-                                        <div className="flex justify-between items-end border-b border-gray-200 border-dashed pb-2 gap-2">
-                                            <span className="break-words flex-1 leading-tight">{selectedDailyReport.manpower.otherLabel}</span>
-                                            <span className="font-black text-base text-gray-900 shrink-0">{selectedDailyReport.manpower.other || 0}</span>
-                                        </div>
-                                    )}
-                                </div>
+                    {/* Content Body (Read-only A4 Layout) */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Manpower */}
+                        <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                            <h3 className="font-bold text-blue-800 mb-3 flex items-center gap-2 text-sm"><Users size={16}/> {t('manpowerReport')}</h3>
+                            <div className="space-y-1 text-xs">
+                                {['juristic', 'security', 'cleaning', 'gardening', 'sweeper'].map(dept => (
+                                    <div key={dept} className="flex justify-between py-1 border-b border-blue-200 last:border-0">
+                                        <span>{t('dept_' + dept)}</span>
+                                        <span className="font-bold">{selectedDailyReport.manpower[dept] || 0}</span>
+                                    </div>
+                                ))}
+                                {selectedDailyReport.manpower.otherLabel && (
+                                    <div className="flex justify-between py-1 border-t border-blue-200 mt-1 gap-2">
+                                        <span className="break-words flex-1 leading-tight">{selectedDailyReport.manpower.otherLabel}</span>
+                                        <span className="font-bold shrink-0">{selectedDailyReport.manpower.other || 0}</span>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
-                        {/* 3. Income (Numbered as 3 to match image) */}
-                        <div className="bg-[#f0fdf4] rounded-xl border border-green-200 overflow-hidden flex flex-col h-full shadow-sm">
-                            <div className="p-4 border-b border-green-200 flex items-center gap-2 bg-[#dcfce7]/50">
-                                <DollarSign size={20} className="text-green-600"/>
-                                <h3 className="font-bold text-green-800 text-lg">3. สรุปรายรับประจำวัน</h3>
-                            </div>
-                            <div className="p-5 flex-1 flex flex-col">
-                                <div className="space-y-4 text-sm text-gray-700">
-                                    {['commonFee', 'lateFee', 'water', 'parking', 'violation'].map(item => (
-                                        <div key={item} className="flex justify-between items-end border-b border-green-200/60 border-dashed pb-2 last:border-0">
-                                            <span>{t('inc_' + item)}</span>
-                                            <span className="font-medium text-gray-900">{Number(selectedDailyReport.income[item] || 0).toLocaleString()}</span>
-                                        </div>
-                                    ))}
-                                    {selectedDailyReport.income.otherLabel && (
-                                        <div className="flex justify-between items-end border-b border-green-200/60 border-dashed pb-2 gap-2">
-                                            <span className="break-words flex-1 leading-tight">{selectedDailyReport.income.otherLabel}</span>
-                                            <span className="font-medium text-gray-900 shrink-0">{Number(selectedDailyReport.income.other || 0).toLocaleString()}</span>
-                                        </div>
-                                    )}
+                        {/* Income */}
+                        <div className="bg-green-50 p-4 rounded-lg border border-green-100">
+                            <h3 className="font-bold text-green-800 mb-3 flex items-center gap-2 text-sm"><DollarSign size={16}/> {t('incomeReport')}</h3>
+                             <div className="space-y-1 text-xs">
+                                {['commonFee', 'lateFee', 'water', 'parking', 'violation'].map(item => (
+                                    <div key={item} className="flex justify-between py-1 border-b border-green-200 last:border-0">
+                                        <span>{t('inc_' + item)}</span>
+                                        <span>{Number(selectedDailyReport.income[item] || 0).toLocaleString()}</span>
+                                    </div>
+                                ))}
+                                {selectedDailyReport.income.otherLabel && (
+                                    <div className="flex justify-between py-1 gap-2">
+                                        <span className="break-words flex-1 leading-tight">{selectedDailyReport.income.otherLabel}</span>
+                                        <span className="shrink-0">{Number(selectedDailyReport.income.other || 0).toLocaleString()}</span>
+                                    </div>
+                                )}
+                                <div className="border-t border-green-300 pt-2 mt-2 flex justify-between font-bold text-green-900">
+                                    <span>{t('totalIncome')}</span>
+                                    <span>฿ {(() => {
+                                        const { commonFee, lateFee, water, parking, violation, other } = selectedDailyReport.income;
+                                        return (Number(commonFee) + Number(lateFee) + Number(water) + Number(parking) + Number(violation) + Number(other)).toLocaleString();
+                                    })()}</span>
                                 </div>
-                            </div>
-                            <div className="p-4 bg-[#dcfce7] flex justify-between items-center font-bold text-green-900 text-base border-t border-green-300">
-                                <span>ผลรวมรายรับทั้งวัน</span>
-                                <span>฿ {(() => {
-                                    const { commonFee, lateFee, water, parking, violation, other } = selectedDailyReport.income;
-                                    return (Number(commonFee) + Number(lateFee) + Number(water) + Number(parking) + Number(violation) + Number(other)).toLocaleString();
-                                })()}</span>
                             </div>
                         </div>
                     </div>
 
-                    {/* Section 2: Performance */}
-                    <div className="bg-[#f8fafc] rounded-xl border border-gray-200 overflow-hidden mb-6 shadow-sm">
-                        <div className="p-4 border-b border-gray-200 flex items-center gap-2 bg-[#f1f5f9]">
-                            <ClipboardList size={20} className="text-gray-700"/>
-                            <h3 className="font-bold text-gray-800 text-lg">2. รายงานผลการดำเนินงาน</h3>
-                        </div>
-                        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Performance */}
+                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                        <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm"><ClipboardList size={16}/> {t('performanceReport')}</h3>
+                        <div className="grid grid-cols-2 gap-4">
                             {['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].map(dept => {
                                 const deptData = selectedDailyReport.performance?.[dept];
                                 if (!deptData || (!deptData.details && (!deptData.images || deptData.images.length === 0))) return null;
                                 return (
-                                    <div key={dept} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col h-full" style={{ pageBreakInside: 'avoid' }}>
-                                        <div className="font-bold text-orange-600 text-base mb-3">{t('dept_' + dept)}</div>
-                                        <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed flex-1">{deptData.details || '-'}</div>
+                                    <div key={dept} className="bg-white p-3 rounded border shadow-sm">
+                                        <div className="font-semibold text-xs text-orange-600 mb-1">{t('dept_' + dept)}</div>
+                                        <div className="text-xs text-gray-700 whitespace-pre-wrap break-words mb-2">{deptData.details || '-'}</div>
                                         {deptData.images && deptData.images.length > 0 && (
-                                            <div className="mt-4 pt-4 border-t border-gray-100">
-                                                <div className="w-full h-48 md:h-56 rounded-lg overflow-hidden border border-gray-200 shadow-sm">
-                                                    <img src={deptData.images[0]} className="w-full h-full object-cover" alt="Performance Note" />
+                                            <div className="mt-2">
+                                                <div className="w-full h-40 rounded-lg overflow-hidden border border-gray-200 shadow-sm">
+                                                    <img src={deptData.images[0]} className="w-full h-full object-cover" />
                                                 </div>
                                             </div>
                                         )}
@@ -18907,73 +18745,140 @@ export default function App() {
                         </div>
                     </div>
 
-                    {/* Section 4: Additional Details */}
+                    {/* Notes */}
                     {selectedDailyReport.note && (
-                        <div className="bg-[#fefce8] rounded-xl border border-[#fef08a] overflow-hidden mb-6 shadow-sm" style={{ pageBreakInside: 'avoid' }}>
-                             <div className="p-4 border-b border-[#fde047] bg-[#fef08a]/40">
-                                 <h3 className="font-bold text-yellow-800 text-lg">4. รายละเอียดอื่นเพิ่มเติม</h3>
-                             </div>
-                             <div className="p-5 text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
-                                 {selectedDailyReport.note}
-                             </div>
+                        <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                             <h3 className="font-bold text-yellow-800 mb-1 text-sm">{t('additionalDetails')}</h3>
+                             <p className="text-xs text-gray-700 whitespace-pre-wrap break-words">{selectedDailyReport.note}</p>
                         </div>
                     )}
 
-                    {/* Section 5: Trend Charts */}
+                    {/* NEW: Actual Auto-fetched Utility Readings for Print View */}
                     {(() => {
-                        const chartData = getPast7DaysUtilityData(selectedDailyReport.date);
-                        const projectMeters = meters.filter(m => m.projectId === selectedProject.id);
-                        const waterMeters = projectMeters.filter(m => m.type === 'Water');
-                        const elecMeters = projectMeters.filter(m => m.type === 'Electricity');
-                        
+                        const reportDate = selectedDailyReport.date;
+                        const projMeters = meters.filter(m => m.projectId === selectedDailyReport.projectId);
+                        const projMeterIds = projMeters.map(m => m.id);
+                        const dayReadings = utilityReadings.filter(r => r.date === reportDate && projMeterIds.includes(r.meterId));
+
+                        if (dayReadings.length === 0) return null;
+
+                        return (
+                            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mt-4" style={{ pageBreakInside: 'avoid' }}>
+                                 <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
+                                     <Zap size={16} className="text-orange-500"/> ข้อมูลการจดมิเตอร์ประจำวัน (Utility Readings)
+                                 </h3>
+                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                                     {dayReadings.map(r => {
+                                         const meter = projMeters.find(m => m.id === r.meterId);
+                                         return (
+                                             <div key={r.id} className="bg-white p-3 border border-gray-200 rounded-lg shadow-sm">
+                                                 <div className="flex items-center gap-1.5 mb-2 border-b pb-2">
+                                                     {meter?.type === 'Water' ? <Droplet size={14} className="text-blue-500"/> : <Zap size={14} className="text-orange-500"/>}
+                                                     <span className="font-bold text-gray-700 truncate">{meter?.name} <span className="text-xs font-normal text-gray-400">({meter?.code})</span></span>
+                                                 </div>
+                                                 <div className="flex justify-between items-end">
+                                                     <span className="text-xs text-gray-500">เลขปัจจุบัน: <br/><strong className="text-gray-800 text-sm">{Number(r.value || 0).toLocaleString()}</strong></span>
+                                                     <span className="font-bold text-red-600 text-lg">+{Number(r.usage || 0).toLocaleString()}</span>
+                                                 </div>
+                                             </div>
+                                         )
+                                     })}
+                                 </div>
+                            </div>
+                        );
+                    })()}
+                    
+                    {/* NEW: Auto-fetched Utility Readings Trend for Print View */}
+                    {(() => {
+                        const reportDate = selectedDailyReport.date;
+                        const projMeters = meters.filter(m => m.projectId === selectedDailyReport.projectId);
+                        const waterMeters = projMeters.filter(m => m.type === 'Water');
+                        const elecMeters = projMeters.filter(m => m.type === 'Electricity');
+
                         if (waterMeters.length === 0 && elecMeters.length === 0) return null;
 
+                        // คำนวณวันที่ย้อนหลัง 7 วัน (นับจากวันที่ของรายงาน) เพื่อทำกราฟแนวโน้ม
+                        const endDateObj = new Date(reportDate);
+                        const startDateObj = new Date(reportDate);
+                        startDateObj.setDate(startDateObj.getDate() - 6);
+                        
+                        const dateRange = [];
+                        for(let d = new Date(startDateObj); d <= endDateObj; d.setDate(d.getDate() + 1)) {
+                            const yyyy = d.getFullYear();
+                            const mm = String(d.getMonth() + 1).padStart(2, '0');
+                            const dd = String(d.getDate()).padStart(2, '0');
+                            dateRange.push(`${yyyy}-${mm}-${dd}`);
+                        }
+
+                        const projMeterIds = projMeters.map(m => m.id);
+                        const trendReadings = utilityReadings.filter(r => projMeterIds.includes(r.meterId) && dateRange.includes(r.date));
+
+                        // ถ้าช่วง 7 วันนี้ไม่มีใครจดมิเตอร์เลย จะไม่แสดงกราฟ
+                        if (trendReadings.length === 0) return null;
+
+                        // จัดกลุ่มข้อมูล Water
+                        const waterData = dateRange.map(dateStr => {
+                            const dObj = new Date(dateStr);
+                            const dataPoint = { date: `${dObj.getDate()}/${dObj.getMonth()+1}` }; // Format วัน/เดือน สั้นๆ
+                            waterMeters.forEach(m => {
+                                const reading = trendReadings.find(r => r.meterId === m.id && r.date === dateStr);
+                                dataPoint[`${m.name}`] = reading ? reading.usage : 0;
+                            });
+                            return dataPoint;
+                        });
+
+                        // จัดกลุ่มข้อมูล Elec
+                        const elecData = dateRange.map(dateStr => {
+                            const dObj = new Date(dateStr);
+                            const dataPoint = { date: `${dObj.getDate()}/${dObj.getMonth()+1}` };
+                            elecMeters.forEach(m => {
+                                const reading = trendReadings.find(r => r.meterId === m.id && r.date === dateStr);
+                                dataPoint[`${m.name}`] = reading ? reading.usage : 0;
+                            });
+                            return dataPoint;
+                        });
+                        
                         const waterColors = ['#3b82f6', '#0ea5e9', '#6366f1', '#06b6d4', '#8b5cf6', '#2563eb'];
                         const elecColors = ['#f97316', '#f59e0b', '#ef4444', '#eab308', '#f43f5e', '#ea580c'];
 
                         return (
-                            <div className="bg-[#f8fafc] rounded-xl border border-gray-200 overflow-hidden mb-6 shadow-sm" style={{ pageBreakInside: 'avoid' }}>
-                                <div className="p-4 border-b border-gray-200 flex items-center gap-2 bg-[#f1f5f9]">
-                                    <BarChart3 size={20} className="text-orange-500"/>
-                                    <h3 className="font-bold text-gray-800 text-lg">5. แนวโน้มการใช้น้ำประปาและไฟฟ้า (7 วันล่าสุด)</h3>
-                                </div>
-                                <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mt-4" style={{ pageBreakInside: 'avoid' }}>
+                                <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
+                                    <BarChart3 size={16} className="text-orange-500"/> แนวโน้มการใช้น้ำประปาและไฟฟ้า (7 วันล่าสุด)
+                                </h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     {waterMeters.length > 0 && (
-                                        <div className="bg-white border border-blue-100 rounded-xl p-4 shadow-sm">
-                                            <h4 className="text-sm font-bold text-blue-600 flex justify-center items-center gap-2 mb-4"><Droplet size={16}/> ปริมาณการใช้น้ำประปา (หน่วย)</h4>
-                                            <div className="h-64">
-                                                <ResponsiveContainer width="100%" height="100%">
-                                                    <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                                        <XAxis dataKey="date" tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} dy={5} />
-                                                        <YAxis tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                                        <RechartsTooltip contentStyle={{ fontSize: '12px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                                        <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '15px' }} />
-                                                        {waterMeters.map((m, idx) => (
-                                                            <Line key={m.id} type="monotone" dataKey={`${m.name} (${m.code})`} stroke={waterColors[idx % waterColors.length]} strokeWidth={2.5} dot={{ r: 4, strokeWidth: 1.5, fill: '#fff' }} activeDot={{ r: 6 }} isAnimationActive={!isExporting} />
-                                                        ))}
-                                                    </LineChart>
-                                                </ResponsiveContainer>
-                                            </div>
+                                        <div className="h-56 bg-white border border-blue-100 rounded-lg p-2 shadow-sm">
+                                            <h4 className="text-[11px] font-bold text-blue-700 text-center mb-2 flex justify-center items-center gap-1"><Droplet size={12}/> ปริมาณการใช้น้ำประปา (หน่วย)</h4>
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <LineChart data={waterData} margin={{ top: 5, right: 10, left: -25, bottom: 0 }}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                                    <XAxis dataKey="date" tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                                    <YAxis tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                                    <RechartsTooltip contentStyle={{ fontSize: '10px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                                    <Legend wrapperStyle={{ fontSize: '9px', paddingTop: '5px' }} />
+                                                    {waterMeters.map((m, idx) => (
+                                                        <Line key={m.id} type="monotone" dataKey={m.name} stroke={waterColors[idx % waterColors.length]} strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false} />
+                                                    ))}
+                                                </LineChart>
+                                            </ResponsiveContainer>
                                         </div>
                                     )}
                                     {elecMeters.length > 0 && (
-                                        <div className="bg-white border border-orange-100 rounded-xl p-4 shadow-sm">
-                                            <h4 className="text-sm font-bold text-orange-600 flex justify-center items-center gap-2 mb-4"><Zap size={16}/> ปริมาณการใช้ไฟฟ้า (หน่วย)</h4>
-                                            <div className="h-64">
-                                                <ResponsiveContainer width="100%" height="100%">
-                                                    <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                                        <XAxis dataKey="date" tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} dy={5} />
-                                                        <YAxis tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                                        <RechartsTooltip contentStyle={{ fontSize: '12px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                                        <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '15px' }} />
-                                                        {elecMeters.map((m, idx) => (
-                                                            <Line key={m.id} type="monotone" dataKey={`${m.name} (${m.code})`} stroke={elecColors[idx % elecColors.length]} strokeWidth={2.5} dot={{ r: 4, strokeWidth: 1.5, fill: '#fff' }} activeDot={{ r: 6 }} isAnimationActive={!isExporting} />
-                                                        ))}
-                                                    </LineChart>
-                                                </ResponsiveContainer>
-                                            </div>
+                                        <div className="h-56 bg-white border border-orange-100 rounded-lg p-2 shadow-sm">
+                                            <h4 className="text-[11px] font-bold text-orange-600 text-center mb-2 flex justify-center items-center gap-1"><Zap size={12}/> ปริมาณการใช้ไฟฟ้า (หน่วย)</h4>
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <LineChart data={elecData} margin={{ top: 5, right: 10, left: -25, bottom: 0 }}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                                    <XAxis dataKey="date" tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                                    <YAxis tick={{fontSize: 9, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                                    <RechartsTooltip contentStyle={{ fontSize: '10px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                                    <Legend wrapperStyle={{ fontSize: '9px', paddingTop: '5px' }} />
+                                                    {elecMeters.map((m, idx) => (
+                                                        <Line key={m.id} type="monotone" dataKey={m.name} stroke={elecColors[idx % elecColors.length]} strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false} />
+                                                    ))}
+                                                </LineChart>
+                                            </ResponsiveContainer>
                                         </div>
                                     )}
                                 </div>
@@ -18981,12 +18886,12 @@ export default function App() {
                         );
                     })()}
                     
-                    {/* Footer Signatures */}
-                    <div className="flex justify-between items-end pt-12 mt-6 border-t border-gray-300" style={{ pageBreakInside: 'avoid' }}>
-                        <div className="text-sm text-gray-400 font-mono">Ref: {selectedDailyReport.id}</div>
-                        <div className="text-center w-48">
-                            <div className="font-bold text-base text-gray-800 border-b border-gray-400 pb-1 mb-1">{selectedDailyReport.reporter || '-'}</div>
-                            <div className="text-sm text-gray-500">ผู้รายงาน</div>
+                    {/* Footer */}
+                    <div className="flex justify-between items-end pt-8 mt-4 border-t">
+                        <div className="text-xs text-gray-400">Ref: {selectedDailyReport.id}</div>
+                        <div className="text-center">
+                            <div className="text-sm font-bold">{selectedDailyReport.reporter}</div>
+                            <div className="text-xs text-gray-500">{t('reporter')}</div>
                         </div>
                     </div>
                 </div>
