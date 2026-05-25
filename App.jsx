@@ -1950,31 +1950,49 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId, setImpo
                 return line.split(regex).map(v => v.trim().replace(/^"|"$/g, ''));
             };
 
-            // ค้นหาแถวที่เป็นหัวตารางจริงๆ โดยสแกนจาก 10 บรรทัดแรก
+            // ค้นหาแถวที่เป็นหัวตารางจริงๆ โดยสแกนจาก 20 บรรทัดแรก
             let headerRowIndex = 0;
             let houseIdx = -1;
             let nameIdx = -1;
             let amountIdx = -1;
+            let startAmountIdx = -1;
+            let daysIdx = -1;
             let headers = [];
 
             const findCol = (hdrs, keywords) => hdrs.findIndex(h => keywords.some(k => h.toLowerCase().includes(k.toLowerCase())));
 
-            for (let i = 0; i < Math.min(10, lines.length); i++) {
+            for (let i = 0; i < Math.min(20, lines.length); i++) {
                 const tempHeaders = parseCSVLine(lines[i]);
                 const hIdx = findCol(tempHeaders, ['บ้านเลขที่', 'แปลง', 'ห้อง', 'unit', 'house', 'ห้องชุด', 'เลขที่']);
-                if (hIdx !== -1) {
+                
+                // ป้องกันการจับผิดบรรทัด ต้องมีคอลัมน์ชื่อหรือยอดเงินประกอบด้วยถึงจะมั่นใจว่าเป็นตาราง
+                const hasName = findCol(tempHeaders, ['ชื่อ', 'เจ้าของ', 'ลูกบ้าน', 'name', 'owner', 'ผู้พักอาศัย']) !== -1;
+                const hasDoc = findCol(tempHeaders, ['เลขที่ใบแจ้งหนี้', 'เอกสาร', 'doc']) !== -1;
+                
+                if (hIdx !== -1 && (hasName || hasDoc || tempHeaders.length > 5)) {
                     headerRowIndex = i;
                     headers = tempHeaders;
                     houseIdx = hIdx;
                     nameIdx = findCol(headers, ['ชื่อ', 'เจ้าของ', 'ลูกบ้าน', 'name', 'owner', 'ผู้พักอาศัย']);
-                    amountIdx = findCol(headers, ['ยอด', 'จำนวนเงิน', 'ค้างชำระ', 'amount', 'total', 'หนี้', 'รวม']);
+                    amountIdx = findCol(headers, ['ยอด', 'จำนวนเงิน', 'ค้างชำระ', 'amount', 'total', 'หนี้สุทธิ', 'หนี้', 'รวม']);
+                    daysIdx = findCol(headers, ['จำนวนวัน', 'days']);
+                    
+                    // ถ้าไม่มีคอลัมน์ยอดรวมชัดเจน (เช่น รายงาน Aging) ลองหาคอลัมน์เริ่มต้นของยอดหนี้
+                    if (amountIdx === -1) {
+                        const agingStartIdx = findCol(headers, ['ยังไม่เกินกำหนด', '1-30', 'เกินกำหนด', '0-30']);
+                        if (agingStartIdx !== -1) {
+                            startAmountIdx = agingStartIdx;
+                        } else if (daysIdx !== -1) {
+                            startAmountIdx = daysIdx + 1;
+                        }
+                    }
                     break;
                 }
             }
             
             if (houseIdx === -1) {
                 if (setImportProgress) setImportProgress({ isImporting: false, percent: 0 });
-                return alert('รูปแบบไฟล์ไม่ถูกต้อง: ไม่พบคอลัมน์ บ้านเลขที่/ห้อง/เลขที่');
+                return alert('รูปแบบไฟล์ไม่ถูกต้อง: ไม่พบคอลัมน์ บ้านเลขที่/ห้อง/เลขที่ (ตรวจพบถึงบรรทัดที่ 20)');
             }
 
             const newData = [];
@@ -1982,38 +2000,53 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId, setImpo
             for (let i = headerRowIndex + 1; i < lines.length; i++) {
                 const values = parseCSVLine(lines[i]);
                 
+                // ป้องกันบรรทัด sub-header เช่น ,,,,,,,,,,1-30,31-60...
+                if (values[houseIdx] === '' && values.some(v => v.includes('1-30') || v.includes('30'))) {
+                    continue;
+                }
+                
                 const houseNo = values[houseIdx] || '';
                 const name = nameIdx !== -1 ? values[nameIdx] : '-';
                 
-                // ถ้าระบุคอลัมน์ยอดเงินไม่ได้ ให้พยายามหาจากคอลัมน์ท้ายๆ ที่เป็นตัวเลข
-                let amountStr = '';
+                let amount = 0;
+                
                 if (amountIdx !== -1) {
-                    amountStr = values[amountIdx];
+                    amount = parseFloat((values[amountIdx] || '0').replace(/,/g, '')) || 0;
+                } else if (startAmountIdx !== -1) {
+                    // รวมยอดทุกคอลัมน์ที่อยู่หลัง startAmountIdx (Aging buckets)
+                    for (let j = startAmountIdx; j < values.length; j++) {
+                        const val = parseFloat((values[j] || '0').replace(/,/g, ''));
+                        if (!isNaN(val)) amount += val;
+                    }
                 } else {
-                    for(let j = values.length - 1; j >= 0; j--) {
+                    // Fallback เดิม
+                    for(let j = values.length - 1; j > houseIdx; j--) {
                         const cleanVal = (values[j] || '').replace(/,/g, '');
                         if (!isNaN(parseFloat(cleanVal)) && cleanVal.trim() !== '') {
-                            amountStr = cleanVal;
+                            amount = parseFloat(cleanVal);
                             break;
                         }
                     }
                 }
                 
-                const amount = parseFloat((amountStr || '0').replace(/,/g, '')) || 0;
+                let overdueDays = 0;
+                if (daysIdx !== -1 && values[daysIdx]) {
+                     overdueDays = parseInt(values[daysIdx].replace(/,/g, ''), 10) || 0;
+                }
                 
                 // กรองข้อมูลขยะ หรือบรรทัดรวมยอดทิ้ง
-                if (houseNo && houseNo !== '' && amount > 0 && !houseNo.toLowerCase().includes('รวม') && !houseNo.toLowerCase().includes('total')) {
-                    // จำลองจำนวนวันที่ค้างชำระจากยอดเงิน (สมมติยอดเดือนละ 1000) เพื่อให้จัดกลุ่มในกราฟได้
-                    const assumedOverdueDays = Math.max(30, Math.floor(amount / 1000) * 30);
+                if (houseNo && houseNo.trim() !== '' && amount > 0 && !houseNo.toLowerCase().includes('รวม') && !houseNo.toLowerCase().includes('total')) {
+                    if (overdueDays <= 0) {
+                         overdueDays = Math.max(30, Math.floor(amount / 1000) * 30);
+                    }
                     
                     newData.push({
-                        // สุ่ม ID ให้ไม่ซ้ำกันอย่างแน่นอน
                         id: Date.now().toString() + i + Math.random().toString(36).substr(2, 5),
                         houseNo,
                         name,
                         amount,
-                        overdueDays: assumedOverdueDays,
-                        invoiceCount: Math.ceil(assumedOverdueDays / 30)
+                        overdueDays: overdueDays,
+                        invoiceCount: 1 // แต่ละบรรทัดคือ 1 invoice, ตอน summary จะรวมเอง
                     });
                 }
             }
