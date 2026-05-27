@@ -4872,6 +4872,11 @@ export default function App() {
   const handleSavePmForm = (e) => {
       e.preventDefault();
       
+      if (!currentPmTask || !currentPmTask.machine) {
+          alert('เกิดข้อผิดพลาด ไม่พบข้อมูลเครื่องจักร');
+          return;
+      }
+
       // Calculate Pass/Fail status
       let passCount = 0;
       let failCount = 0;
@@ -4923,20 +4928,21 @@ export default function App() {
               timingStatus = 'ช้ากว่าแผน';
           }
       }
-      // ------------------------------------
+
+      const planId = currentPmTask.task?.id || currentPmTask.plan?.id || '';
 
       // Create new history record
       const newHistoryRecord = {
           id: generateId(),
-          projectId: selectedProject.id,
-          machineId: currentPmTask.machine.id,
-          machineCode: currentPmTask.machine.code,
-          machineName: currentPmTask.machine.name,
-          pmPlanId: currentPmTask.task.id,
+          projectId: selectedProject?.id || '',
+          machineId: currentPmTask.machine?.id || '',
+          machineCode: currentPmTask.machine?.code || '',
+          machineName: currentPmTask.machine?.name || '',
+          pmPlanId: planId,
           date: currentPmTask.plannedDateString || localDateString,
           executedDate: localDateString,
           executionTimingStatus: timingStatus, // เก็บสถานะการตรงต่อเวลา
-          inspector: `${currentUser?.firstName} ${currentUser?.lastName}`,
+          inspector: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'Unknown',
           status: overallStatus,
           totalItems: Object.keys(pmFormAnswers).length,
           passedItems: passCount,
@@ -4954,7 +4960,8 @@ export default function App() {
 
       // FIX: Use functional update to prevent Stale Closure which causes data loss
       setPmHistoryList(prev => {
-          const nextHistoryList = [newHistoryRecord, ...prev];
+          const safePrev = Array.isArray(prev) ? prev : [];
+          const nextHistoryList = [newHistoryRecord, ...safePrev];
           
           // --- AUTO SYNC TRIGGER (บันทึกข้อมูล PM พร้อมอัปโหลดรูป) ---
           let filesToUpload = [];
@@ -4974,7 +4981,7 @@ export default function App() {
       if (selectedPmStatusDetail && selectedPmStatusDetail.status === 'Not Started') {
           setSelectedPmStatusDetail(prev => ({
               ...prev,
-              tasks: prev.tasks.filter(t => !(t.plan.id === currentPmTask.task.id && t.dateString === currentPmTask.plannedDateString))
+              tasks: prev.tasks.filter(t => !( (t.plan?.id === planId || t.task?.id === planId) && t.dateString === currentPmTask.plannedDateString ))
           }));
       }
 
@@ -5024,7 +5031,8 @@ export default function App() {
 
       // FIX: Use functional update to prevent Stale Closure
       setPmHistoryList(prev => {
-          const nextList = prev.map(h => h.id === record.id ? updatedRecord : h);
+          const safePrev = Array.isArray(prev) ? prev : [];
+          const nextList = safePrev.map(h => h.id === record.id ? updatedRecord : h);
           setTimeout(() => triggerAutoSync('PM_History_ประวัติPM', nextList, []), 100);
           return nextList;
       });
