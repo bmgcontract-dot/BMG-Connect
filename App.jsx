@@ -7689,12 +7689,14 @@ export default function App() {
 
   const handleSaveUser = (e) => {
       e.preventDefault();
-      if (isEditingUser) {
-          setUsers(users.map(u => u.id === newUser.id ? { ...newUser } : u));
-      } else {
-          // แก้ไข: สลับตำแหน่ง ...newUser ไว้ด้านหน้า เพื่อไม่ให้เอา id เดิมมาทับ id ใหม่ (ป้องกันบัค ID ซ้ำในระบบ)
-          setUsers([...users, { ...newUser, id: generateId(), status: 'Active', created_at: new Date().toISOString() }]);
-      }
+      // FIX: Use functional update to prevent Stale Closure which causes data loss when saving user
+      setUsers(prev => {
+          if (isEditingUser) {
+              return prev.map(u => u.id === newUser.id ? { ...newUser } : u);
+          } else {
+              return [{ ...newUser, id: generateId(), status: 'Active', created_at: new Date().toISOString() }, ...prev];
+          }
+      });
       setShowAddUserModal(false);
       alert(t('saveSuccess'));
   };
