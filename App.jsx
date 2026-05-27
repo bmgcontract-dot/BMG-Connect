@@ -4952,21 +4952,23 @@ export default function App() {
           approvals: [] // Track ใครอนุมัติไปแล้วบ้าง
       };
 
-      // FIX: คำนวณค่า nextList ไว้ล่วงหน้า แล้วค่อยสั่ง Update State 
-      const nextHistoryList = [newHistoryRecord, ...pmHistoryList];
-      
-      // Add to history state (putting newest first)
-      setPmHistoryList(nextHistoryList);
+      // FIX: Use functional update to prevent Stale Closure which causes data loss
+      setPmHistoryList(prev => {
+          const nextHistoryList = [newHistoryRecord, ...prev];
+          
+          // --- AUTO SYNC TRIGGER (บันทึกข้อมูล PM พร้อมอัปโหลดรูป) ---
+          let filesToUpload = [];
+          if (newHistoryRecord.images && newHistoryRecord.images.length > 0) {
+              newHistoryRecord.images.forEach((img, idx) => {
+                  filesToUpload.push({ name: `PM_${newHistoryRecord.machineCode}_${newHistoryRecord.id}_${idx}.jpg`, data: img });
+              });
+          }
+          setTimeout(() => {
+              triggerAutoSync('PM_History_ประวัติPM', nextHistoryList, filesToUpload);
+          }, 100);
 
-      // --- AUTO SYNC TRIGGER (บันทึกข้อมูล PM พร้อมอัปโหลดรูป) ---
-      let filesToUpload = [];
-      if (newHistoryRecord.images && newHistoryRecord.images.length > 0) {
-          newHistoryRecord.images.forEach((img, idx) => {
-              filesToUpload.push({ name: `PM_${newHistoryRecord.machineCode}_${newHistoryRecord.id}_${idx}.jpg`, data: img });
-          });
-      }
-      // แยกคำสั่งออกนอก setState เพื่อความเสถียร
-      triggerAutoSync('PM_History_ประวัติPM', nextHistoryList, filesToUpload);
+          return nextHistoryList;
+      });
 
       // อัปเดตรายการในหน้าต่าง Dashboard ทันทีที่บันทึก
       if (selectedPmStatusDetail && selectedPmStatusDetail.status === 'Not Started') {
@@ -5020,12 +5022,13 @@ export default function App() {
           approvals: [...(record.approvals || []), approvalRecord]
       };
 
-      const nextList = pmHistoryList.map(h => h.id === record.id ? updatedRecord : h);
-      setPmHistoryList(nextList);
+      // FIX: Use functional update to prevent Stale Closure
+      setPmHistoryList(prev => {
+          const nextList = prev.map(h => h.id === record.id ? updatedRecord : h);
+          setTimeout(() => triggerAutoSync('PM_History_ประวัติPM', nextList, []), 100);
+          return nextList;
+      });
       setSelectedPmHistory(updatedRecord);
-      
-      // สั่งซิงค์สถานะที่เปลี่ยนไปขึ้น Google Sheets
-      triggerAutoSync('PM_History_ประวัติPM', nextList, []);
 
       // อัปเดตรายการในหน้าต่าง Dashboard ทันทีที่กดอนุมัติ
       if (selectedPmStatusDetail) {
@@ -5922,12 +5925,11 @@ export default function App() {
       e.preventDefault();
       if (newPmPlan.id) {
           // โหมดแก้ไข
-          setPmPlans(pmPlans.map(p => p.id === newPmPlan.id ? { ...newPmPlan } : p));
+          setPmPlans(prev => prev.map(p => p.id === newPmPlan.id ? { ...newPmPlan } : p));
       } else {
           // โหมดเพิ่มใหม่
           const id = generateId();
-          // แก้ไข: สลับตำแหน่ง ...newPmPlan ไว้ด้านหน้า เพื่อไม่ให้ค่า id: null ไปทับ id ที่สุ่มมาใหม่
-          setPmPlans([...pmPlans, { ...newPmPlan, id, projectId: selectedProject.id, status: 'Active' }]);
+          setPmPlans(prev => [{ ...newPmPlan, id, projectId: selectedProject.id, status: 'Active' }, ...prev]);
       }
       setShowAddPmPlanModal(false);
       setNewPmPlan({ id: null, machineId: '', frequency: 'Monthly', scheduleDetails: { dayOfWeek: '1', date: '1', month: '1' } });
