@@ -4877,6 +4877,33 @@ export default function App() {
           return;
       }
 
+      // --- NEW: ตรวจสอบความครบถ้วนของการประเมิน (Manual Validation) ---
+      const checklist = getChecklistForSystem(currentPmTask.machine?.system);
+      let answeredCount = 0;
+      let missingIssue = false;
+
+      checklist.forEach((_, idx) => {
+          const key = `item_${idx}`;
+          const val = pmFormAnswers[key];
+          if (val === 'pass' || val === 'fail' || val === 'na') {
+              answeredCount++;
+          }
+          if (val === 'fail' && (!pmFormIssues[key] || pmFormIssues[key].trim() === '')) {
+              missingIssue = true;
+          }
+      });
+
+      if (answeredCount < checklist.length) {
+          alert(`กรุณาทำเครื่องหมายให้ครบทุกข้อ (ทำแล้ว ${answeredCount}/${checklist.length} ข้อ)`);
+          return;
+      }
+
+      if (missingIssue) {
+          alert('กรุณาระบุรายละเอียดปัญหา สำหรับหัวข้อที่ประเมินว่า "ผิดปกติ" ให้ครบถ้วน');
+          return;
+      }
+      // -----------------------------------------------------------
+
       // Calculate Pass/Fail status
       let passCount = 0;
       let failCount = 0;
@@ -18933,7 +18960,6 @@ export default function App() {
                                                             setPmFormAnswers({...pmFormAnswers, [key]: 'pass'});
                                                             setPmFormIssues({...pmFormIssues, [key]: ''}); // ลบข้อความปัญหาออกถ้ากลับมาเลือก ปกติ
                                                         }} 
-                                                        required
                                                     />
                                                 </label>
                                             </td>
@@ -18945,7 +18971,6 @@ export default function App() {
                                                         className="w-5 h-5 text-red-500 accent-red-600 cursor-pointer" 
                                                         checked={answer === 'fail'} 
                                                         onChange={() => setPmFormAnswers({...pmFormAnswers, [key]: 'fail'})} 
-                                                        required
                                                     />
                                                 </label>
                                             </td>
@@ -18957,7 +18982,6 @@ export default function App() {
                                                         placeholder="ระบุปัญหา..."
                                                         value={pmFormIssues[key] || ''}
                                                         onChange={(e) => setPmFormIssues({...pmFormIssues, [key]: e.target.value})}
-                                                        required
                                                     />
                                                 ) : (
                                                     <label className="cursor-pointer flex justify-center">
@@ -18970,7 +18994,6 @@ export default function App() {
                                                                 setPmFormAnswers({...pmFormAnswers, [key]: 'na'});
                                                                 setPmFormIssues({...pmFormIssues, [key]: ''});
                                                             }} 
-                                                            required={answer !== 'fail'}
                                                         />
                                                     </label>
                                                 )}
