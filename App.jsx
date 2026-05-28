@@ -1233,8 +1233,9 @@ const compressImage = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                const MAX_WIDTH = 1200;
-                const MAX_HEIGHT = 1200;
+                // บีบอัดให้เล็กลงมาก เพื่อป้องกันปัญหา LocalStorage เต็ม และ Firestore 1MB Limit
+                const MAX_WIDTH = 600; 
+                const MAX_HEIGHT = 600;
                 let width = img.width;
                 let height = img.height;
 
@@ -1254,8 +1255,8 @@ const compressImage = (file) => {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
                 
-                // บีบอัดเป็น JPEG Quality 50% (คุณภาพยังพอดูได้ชัดเจน แต่ไฟล์จะเล็กลงมาก)
-                resolve(canvas.toDataURL('image/jpeg', 0.5));
+                // บีบอัดเป็น JPEG Quality 40% (ไฟล์เล็กจิ๋ว แต่ยังพอดูออกชัดเจน)
+                resolve(canvas.toDataURL('image/jpeg', 0.4));
             };
             img.onerror = () => {
                 resolve(event.target.result);
@@ -1784,6 +1785,11 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                 localStorage.setItem(localKey, JSON.stringify(newValue));
             } catch (e) {
                 console.warn(`LocalStorage Quota Exceeded for ${localKey}. Skipping local cache, but will sync to Cloud.`);
+                if (!window.__quotaAlertShown) {
+                    window.__quotaAlertShown = true;
+                    alert('⚠️ แจ้งเตือน: พื้นที่เก็บข้อมูลในเบราว์เซอร์ของท่านใกล้เต็มแล้ว!\n\nข้อมูลรูปภาพที่คุณเพิ่งบันทึกอาจหายไปเมื่อรีเฟรชหน้าเว็บ\nวิธีแก้ไข: กรุณาลบประวัติเบราว์เซอร์ หรือตั้งค่าเชื่อมต่อฐานข้อมูลออนไลน์ (Firebase)');
+                    setTimeout(() => window.__quotaAlertShown = false, 10000);
+                }
             }
         }
 
@@ -4958,6 +4964,10 @@ export default function App() {
 
       const planId = currentPmTask.task?.id || currentPmTask.plan?.id || '';
 
+      // Clean up undefined values which crash Firestore completely
+      const cleanAnswers = JSON.parse(JSON.stringify(pmFormAnswers));
+      const cleanIssues = JSON.parse(JSON.stringify(pmFormIssues));
+
       // Create new history record
       const newHistoryRecord = {
           id: generateId(),
@@ -4968,33 +4978,36 @@ export default function App() {
           pmPlanId: planId,
           date: currentPmTask.plannedDateString || localDateString,
           executedDate: localDateString,
-          executionTimingStatus: timingStatus, // เก็บสถานะการตรงต่อเวลา
+          executionTimingStatus: timingStatus || 'ดำเนินการตามแผน',
           inspector: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'Unknown',
-          status: overallStatus,
-          totalItems: Object.keys(pmFormAnswers).length,
-          passedItems: passCount,
-          failedItems: failCount,
-          naItems: naCount,
-          remark: pmFormRemark,
-          images: pmFormImages, // แนบรูปภาพลงประวัติ
-          answers: { ...pmFormAnswers },
-          issues: { ...pmFormIssues },
+          status: overallStatus || 'Pass',
+          totalItems: Object.keys(cleanAnswers).length || 0,
+          passedItems: passCount || 0,
+          failedItems: failCount || 0,
+          naItems: naCount || 0,
+          remark: pmFormRemark || '',
+          images: pmFormImages || [], // แนบรูปภาพลงประวัติ
+          answers: cleanAnswers,
+          issues: cleanIssues,
           // Approval Fields
-          approvalStatus: initialApprovalStatus,
-          pendingApproverRole: initialApproverRole,
+          approvalStatus: initialApprovalStatus || 'Approved',
+          pendingApproverRole: initialApproverRole || 'None',
           approvals: [] // Track ใครอนุมัติไปแล้วบ้าง
       };
+
+      // ใช้ JSON.parse + stringify เพื่อทำลาย undefined ทั้งหมดอีกชั้น ป้องกัน Firestore 1MB limits rejection
+      const safeHistoryRecord = JSON.parse(JSON.stringify(newHistoryRecord));
 
       // FIX: Use functional update to prevent Stale Closure which causes data loss
       setPmHistoryList(prev => {
           const safePrev = Array.isArray(prev) ? prev : [];
-          const nextHistoryList = [newHistoryRecord, ...safePrev];
+          const nextHistoryList = [safeHistoryRecord, ...safePrev];
           
           // --- AUTO SYNC TRIGGER (บันทึกข้อมูล PM พร้อมอัปโหลดรูป) ---
           let filesToUpload = [];
-          if (newHistoryRecord.images && newHistoryRecord.images.length > 0) {
-              newHistoryRecord.images.forEach((img, idx) => {
-                  filesToUpload.push({ name: `PM_${newHistoryRecord.machineCode}_${newHistoryRecord.id}_${idx}.jpg`, data: img });
+          if (safeHistoryRecord.images && safeHistoryRecord.images.length > 0) {
+              safeHistoryRecord.images.forEach((img, idx) => {
+                  filesToUpload.push({ name: `PM_${safeHistoryRecord.machineCode}_${safeHistoryRecord.id}_${idx}.jpg`, data: img });
               });
           }
           setTimeout(() => {
