@@ -11836,7 +11836,7 @@ export default function App() {
                                           </thead>
                                           <tbody className="divide-y divide-gray-200">
                                               {(() => {
-                                                  // Apply Filters
+                                                  // Apply Filters and Sort by Date
                                                   const filteredPmHistory = pmHistoryList.filter(h => {
                                                       if (h.projectId !== selectedProject.id) return false;
                                                       if (pmHistoryFilterDate && h.executedDate !== pmHistoryFilterDate && h.date !== pmHistoryFilterDate) return false;
@@ -11847,7 +11847,7 @@ export default function App() {
                                                           if (status !== pmHistoryFilterApproval) return false;
                                                       }
                                                       return true;
-                                                  });
+                                                  }).sort((a, b) => new Date(b.executedDate || b.date || 0) - new Date(a.executedDate || a.date || 0));
 
                                                   if (filteredPmHistory.length === 0) {
                                                       return <tr><td colSpan="7" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">ไม่พบประวัติการบันทึก PM ที่ตรงกับเงื่อนไข</td></tr>;
