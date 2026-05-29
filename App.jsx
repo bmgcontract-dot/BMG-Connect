@@ -5049,6 +5049,16 @@ export default function App() {
       }
   };
 
+  // --- NEW: Handle PM Deletion ---
+  const handleDeletePmHistory = (hist) => {
+      setPmHistoryList(prev => {
+          const safePrev = Array.isArray(prev) ? prev : [];
+          const nextList = safePrev.filter(h => h.id !== hist.id);
+          setTimeout(() => triggerAutoSync('PM_History_ประวัติPM', nextList, []), 100);
+          return nextList;
+      });
+  };
+
   // --- NEW: Draggable Bell Handlers ---
   const handleBellPointerDown = (e) => {
       dragRef.current = {
@@ -11902,7 +11912,7 @@ export default function App() {
                                                           <td className={`p-4 text-center ${isExporting ? 'hidden' : ''}`}>
                                                               {hasPerm('proj_pm', 'delete') && (
                                                                   <button 
-                                                                      onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบประวัติ PM ของ ${hist.machineName} ใช่หรือไม่?`, () => setPmHistoryList(pmHistoryList.filter(h => h.id !== hist.id))); }}
+                                                                      onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบประวัติ PM ของ ${hist.machineName} ใช่หรือไม่?`, () => handleDeletePmHistory(hist)); }}
                                                                       className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
                                                                       title="ลบประวัติ"
                                                                   >
