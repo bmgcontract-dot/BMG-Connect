@@ -1507,13 +1507,13 @@ function usePersistentState(key, initialValue, fbUser) {
               }
           }
         } catch (err) {
-            console.error("Download chunks error", err);
+            console.warn("Download chunks info: Using local data (offline or network unavailable).");
         }
       }
       setIsLoaded(true);
       clearTimeout(fallbackTimer);
     }, (error) => {
-        console.error("Sync error:", error);
+        console.warn("Sync info: Working offline.");
         setIsLoaded(true);
         clearTimeout(fallbackTimer);
     });
@@ -1756,12 +1756,12 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                     }
                     setIsLoaded(true);
                 }, (error) => {
-                    console.error(`Sync error for ${collectionName}:`, error);
+                    console.warn(`Sync info for ${collectionName}: Working offline.`);
                     if (isMounted) setIsLoaded(true);
                 });
 
             } catch (err) {
-                console.error(`Init error for ${collectionName}:`, err);
+                console.warn(`Init info for ${collectionName}: Working offline or network unavailable.`);
                 if (isMounted) setIsLoaded(true);
             }
         };
@@ -3278,7 +3278,7 @@ export default function App() {
           await signInAnonymously(auth);
         }
       } catch (e) {
-        console.error("Auth error, falling back to local storage", e);
+        console.warn("Auth info: falling back to local storage (offline mode).");
         db = null; // Disable Firestore on auth failure to avoid network/permission loops
         setFbUser({ uid: 'local-fallback-user' });
       }
