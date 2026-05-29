@@ -1233,9 +1233,8 @@ const compressImage = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                // บีบอัดให้เล็กลงมาก เพื่อป้องกันปัญหา LocalStorage เต็ม และ Firestore 1MB Limit
-                const MAX_WIDTH = 600; 
-                const MAX_HEIGHT = 600;
+                const MAX_WIDTH = 1200;
+                const MAX_HEIGHT = 1200;
                 let width = img.width;
                 let height = img.height;
 
@@ -1255,8 +1254,8 @@ const compressImage = (file) => {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
                 
-                // บีบอัดเป็น JPEG Quality 40% (ไฟล์เล็กจิ๋ว แต่ยังพอดูออกชัดเจน)
-                resolve(canvas.toDataURL('image/jpeg', 0.4));
+                // บีบอัดเป็น JPEG Quality 50% (คุณภาพยังพอดูได้ชัดเจน แต่ไฟล์จะเล็กลงมาก)
+                resolve(canvas.toDataURL('image/jpeg', 0.5));
             };
             img.onerror = () => {
                 resolve(event.target.result);
@@ -1785,11 +1784,6 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                 localStorage.setItem(localKey, JSON.stringify(newValue));
             } catch (e) {
                 console.warn(`LocalStorage Quota Exceeded for ${localKey}. Skipping local cache, but will sync to Cloud.`);
-                if (!window.__quotaAlertShown) {
-                    window.__quotaAlertShown = true;
-                    alert('⚠️ แจ้งเตือน: พื้นที่เก็บข้อมูลในเบราว์เซอร์ของท่านใกล้เต็มแล้ว!\n\nข้อมูลรูปภาพที่คุณเพิ่งบันทึกอาจหายไปเมื่อรีเฟรชหน้าเว็บ\nวิธีแก้ไข: กรุณาลบประวัติเบราว์เซอร์ หรือตั้งค่าเชื่อมต่อฐานข้อมูลออนไลน์ (Firebase)');
-                    setTimeout(() => window.__quotaAlertShown = false, 10000);
-                }
             }
         }
 
@@ -4883,33 +4877,6 @@ export default function App() {
           return;
       }
 
-      // --- NEW: ตรวจสอบความครบถ้วนของการประเมิน (Manual Validation) ---
-      const checklist = getChecklistForSystem(currentPmTask.machine?.system);
-      let answeredCount = 0;
-      let missingIssue = false;
-
-      checklist.forEach((_, idx) => {
-          const key = `item_${idx}`;
-          const val = pmFormAnswers[key];
-          if (val === 'pass' || val === 'fail' || val === 'na') {
-              answeredCount++;
-          }
-          if (val === 'fail' && (!pmFormIssues[key] || pmFormIssues[key].trim() === '')) {
-              missingIssue = true;
-          }
-      });
-
-      if (answeredCount < checklist.length) {
-          alert(`กรุณาทำเครื่องหมายให้ครบทุกข้อ (ทำแล้ว ${answeredCount}/${checklist.length} ข้อ)`);
-          return;
-      }
-
-      if (missingIssue) {
-          alert('กรุณาระบุรายละเอียดปัญหา สำหรับหัวข้อที่ประเมินว่า "ผิดปกติ" ให้ครบถ้วน');
-          return;
-      }
-      // -----------------------------------------------------------
-
       // Calculate Pass/Fail status
       let passCount = 0;
       let failCount = 0;
@@ -4964,10 +4931,6 @@ export default function App() {
 
       const planId = currentPmTask.task?.id || currentPmTask.plan?.id || '';
 
-      // Clean up undefined values which crash Firestore completely
-      const cleanAnswers = JSON.parse(JSON.stringify(pmFormAnswers));
-      const cleanIssues = JSON.parse(JSON.stringify(pmFormIssues));
-
       // Create new history record
       const newHistoryRecord = {
           id: generateId(),
@@ -4978,36 +4941,33 @@ export default function App() {
           pmPlanId: planId,
           date: currentPmTask.plannedDateString || localDateString,
           executedDate: localDateString,
-          executionTimingStatus: timingStatus || 'ดำเนินการตามแผน',
+          executionTimingStatus: timingStatus, // เก็บสถานะการตรงต่อเวลา
           inspector: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'Unknown',
-          status: overallStatus || 'Pass',
-          totalItems: Object.keys(cleanAnswers).length || 0,
-          passedItems: passCount || 0,
-          failedItems: failCount || 0,
-          naItems: naCount || 0,
-          remark: pmFormRemark || '',
-          images: pmFormImages || [], // แนบรูปภาพลงประวัติ
-          answers: cleanAnswers,
-          issues: cleanIssues,
+          status: overallStatus,
+          totalItems: Object.keys(pmFormAnswers).length,
+          passedItems: passCount,
+          failedItems: failCount,
+          naItems: naCount,
+          remark: pmFormRemark,
+          images: pmFormImages, // แนบรูปภาพลงประวัติ
+          answers: { ...pmFormAnswers },
+          issues: { ...pmFormIssues },
           // Approval Fields
-          approvalStatus: initialApprovalStatus || 'Approved',
-          pendingApproverRole: initialApproverRole || 'None',
+          approvalStatus: initialApprovalStatus,
+          pendingApproverRole: initialApproverRole,
           approvals: [] // Track ใครอนุมัติไปแล้วบ้าง
       };
-
-      // ใช้ JSON.parse + stringify เพื่อทำลาย undefined ทั้งหมดอีกชั้น ป้องกัน Firestore 1MB limits rejection
-      const safeHistoryRecord = JSON.parse(JSON.stringify(newHistoryRecord));
 
       // FIX: Use functional update to prevent Stale Closure which causes data loss
       setPmHistoryList(prev => {
           const safePrev = Array.isArray(prev) ? prev : [];
-          const nextHistoryList = [safeHistoryRecord, ...safePrev];
+          const nextHistoryList = [newHistoryRecord, ...safePrev];
           
           // --- AUTO SYNC TRIGGER (บันทึกข้อมูล PM พร้อมอัปโหลดรูป) ---
           let filesToUpload = [];
-          if (safeHistoryRecord.images && safeHistoryRecord.images.length > 0) {
-              safeHistoryRecord.images.forEach((img, idx) => {
-                  filesToUpload.push({ name: `PM_${safeHistoryRecord.machineCode}_${safeHistoryRecord.id}_${idx}.jpg`, data: img });
+          if (newHistoryRecord.images && newHistoryRecord.images.length > 0) {
+              newHistoryRecord.images.forEach((img, idx) => {
+                  filesToUpload.push({ name: `PM_${newHistoryRecord.machineCode}_${newHistoryRecord.id}_${idx}.jpg`, data: img });
               });
           }
           setTimeout(() => {
@@ -11876,7 +11836,7 @@ export default function App() {
                                           </thead>
                                           <tbody className="divide-y divide-gray-200">
                                               {(() => {
-                                                  // Apply Filters and Sort by Date
+                                                  // Apply Filters
                                                   const filteredPmHistory = pmHistoryList.filter(h => {
                                                       if (h.projectId !== selectedProject.id) return false;
                                                       if (pmHistoryFilterDate && h.executedDate !== pmHistoryFilterDate && h.date !== pmHistoryFilterDate) return false;
@@ -11887,7 +11847,7 @@ export default function App() {
                                                           if (status !== pmHistoryFilterApproval) return false;
                                                       }
                                                       return true;
-                                                  }).sort((a, b) => new Date(b.executedDate || b.date || 0) - new Date(a.executedDate || a.date || 0));
+                                                  });
 
                                                   if (filteredPmHistory.length === 0) {
                                                       return <tr><td colSpan="7" className="p-10 text-center text-gray-400 bg-gray-50 border-b border-dashed">ไม่พบประวัติการบันทึก PM ที่ตรงกับเงื่อนไข</td></tr>;
@@ -16911,6 +16871,12 @@ export default function App() {
                     </div>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
+                    {/* ป้ายแสดงสถานะ Cloud */}
+                    <div className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border shadow-sm transition-colors ${db ? 'bg-green-50 text-green-700 border-green-200' : 'bg-orange-50 text-orange-700 border-orange-200'}`} title={db ? "เชื่อมต่อกับฐานข้อมูล Cloud แล้ว (ข้อมูลซิงค์ตรงกันทุกเครื่อง)" : "ทำงานในโหมด Offline (บันทึกข้อมูลลงเครื่องนี้เท่านั้น)"}>
+                        {db ? <Cloud size={14} className="text-green-500" /> : <Cloud size={14} className="text-orange-500 opacity-50" />}
+                        {db ? 'Cloud Online' : 'Local Offline'}
+                    </div>
+
                     <button 
                         onClick={() => window.location.reload()} 
                         className="text-gray-400 hover:text-orange-500 p-1.5 rounded-full bg-gray-50 border border-gray-200 shadow-sm transition-colors"
@@ -18973,6 +18939,7 @@ export default function App() {
                                                             setPmFormAnswers({...pmFormAnswers, [key]: 'pass'});
                                                             setPmFormIssues({...pmFormIssues, [key]: ''}); // ลบข้อความปัญหาออกถ้ากลับมาเลือก ปกติ
                                                         }} 
+                                                        required
                                                     />
                                                 </label>
                                             </td>
@@ -18984,6 +18951,7 @@ export default function App() {
                                                         className="w-5 h-5 text-red-500 accent-red-600 cursor-pointer" 
                                                         checked={answer === 'fail'} 
                                                         onChange={() => setPmFormAnswers({...pmFormAnswers, [key]: 'fail'})} 
+                                                        required
                                                     />
                                                 </label>
                                             </td>
@@ -18995,6 +18963,7 @@ export default function App() {
                                                         placeholder="ระบุปัญหา..."
                                                         value={pmFormIssues[key] || ''}
                                                         onChange={(e) => setPmFormIssues({...pmFormIssues, [key]: e.target.value})}
+                                                        required
                                                     />
                                                 ) : (
                                                     <label className="cursor-pointer flex justify-center">
@@ -19007,6 +18976,7 @@ export default function App() {
                                                                 setPmFormAnswers({...pmFormAnswers, [key]: 'na'});
                                                                 setPmFormIssues({...pmFormIssues, [key]: ''});
                                                             }} 
+                                                            required={answer !== 'fail'}
                                                         />
                                                     </label>
                                                 )}
