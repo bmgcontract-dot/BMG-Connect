@@ -24,8 +24,6 @@ import { getFirestore, doc, setDoc, onSnapshot, getDoc, getDocs, collection, del
 // --- Firebase Initialization ---
 let app, auth, db, appId;
 
-// 1. นำ Config จาก Firebase Console ของคุณมาวางที่นี่ (สำหรับการ Deploy บน GitHub Pages)
-// หากต้องการให้ข้อมูลออนไลน์แชร์กันทุกคน ไม่ว่าจะล็อกอินจากเครื่องไหน ต้องใช้ Firebase
 const MANUAL_FIREBASE_CONFIG = {
   apiKey: "AIzaSyAy03rxniCLFDYT4ztY_Ry2zh0ddzdBoPE",
   authDomain: "bmg-connect-3e99a.firebaseapp.com",
@@ -36,8 +34,6 @@ const MANUAL_FIREBASE_CONFIG = {
   measurementId: "G-4B69L2731M"
 };
 
-// --- NEW: Google Drive / Sheets Configuration ---
-// นำ URL ที่ได้จากการ Deploy Google Apps Script (Web App) ของคุณมาวางที่นี่
 const GOOGLE_SCRIPT_CONFIG = {
   SHEETS_URL: "https://script.google.com/macros/s/AKfycbzmNdR7LVpfUossHkcNH_onBPTG2dw6GuJzh5JilthkMwW-Sdr4s0lFjPKwSsCBTg/exec", 
   DRIVE_URL: "https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec"
@@ -45,14 +41,12 @@ const GOOGLE_SCRIPT_CONFIG = {
 
 try {
   let firebaseConfig = null;
-  
-  // ตรวจสอบว่ารันอยู่ใน Canvas หรือรันผ่าน GitHub Pages
   if (typeof __firebase_config !== 'undefined') {
      firebaseConfig = JSON.parse(__firebase_config);
      appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
   } else if (MANUAL_FIREBASE_CONFIG.apiKey && MANUAL_FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY") {
      firebaseConfig = MANUAL_FIREBASE_CONFIG;
-     appId = "bmg-app-prod"; // ใช้ ID คงที่สำหรับ Production
+     appId = "bmg-app-prod"; 
   }
 
   if (firebaseConfig) {
@@ -60,7 +54,7 @@ try {
       auth = getAuth(app);
       db = getFirestore(app);
   } else {
-      console.warn("ไม่พบ Firebase Config: ระบบจะสลับไปใช้ Local Storage (บันทึกข้อมูลเฉพาะในเครื่องนี้เท่านั้น)");
+      console.warn("ไม่พบ Firebase Config: ระบบจะสลับไปใช้ Local Storage");
   }
 } catch (e) {
   console.error("Firebase init failed", e);
@@ -68,7 +62,7 @@ try {
 
 // --- Configuration & Constants ---
 const THEME = {
-  primary: '#FF4D00', // Red-Orange
+  primary: '#FF4D00', 
   secondary: '#FF7A00',
   bg: '#F3F4F6',
   sidebar: '#1F2937',
@@ -100,7 +94,6 @@ const EMPLOYEE_POSITIONS = [
   "อื่นๆ (ให้ระบุ) / Other (Please specify)"
 ];
 
-// Contract Types & Services
 const CONTRACT_TYPES = {
   INCOME: 'สัญญารับ (Income)',
   EXPENSE: 'สัญญาจ่าย (Expense)',
@@ -215,7 +208,6 @@ const SERVICE_TYPES = {
   ]
 };
 
-// Machine Systems for PM
 const MACHINE_SYSTEMS = [
     'หม้อแปลงไฟฟ้า (Transformer)',
     'ตู้ MDB / DB / Load Center',
@@ -313,9 +305,7 @@ const AUDIT_FORM_TEMPLATE = [
     { title: '11. การจัดทำและนำส่งรายงานประจำวัน (Daily Report)', items: ['จำนวนวันที่มีการนำส่งรายงานประจำวัน (Target: >80%=5, >75%=4, >70%=3, >65%=2, >60%=1, <=60%=0)', 'ความครบถ้วนของข้อมูลในรายงาน (กำลังพล, รายรับ)', 'ความชัดเจนของรายละเอียดผลการปฏิบัติงาน', 'ความสม่ำเสมอและความครบถ้วนของรูปภาพประกอบ'] }
 ];
 
-// Standard Forms Data
 const STANDARD_FORMS = [
-    // หมวดหมู่: งานบริการลูกบ้าน (Resident Services)
     { id: 'f1', category: 'งานบริการลูกบ้าน (Resident Services)', name: 'แบบฟอร์มขออนุญาตนำของเข้าภายในอาคาร/หมู่บ้าน (Move-In Request Form)', format: 'PDF', size: '120 KB', lastUpdated: '2025-01-15', description: 'ใช้สำหรับผู้พักอาศัยที่ต้องการนำทรัพย์สินขนาดใหญ่หรือเฟอร์นิเจอร์เข้ามาภายในอาคาร/หมู่บ้าน ต้องแจ้งล่วงหน้าอย่างน้อย 3 วันทำการ (Used for residents who wish to bring large items or furniture into the premises. Must be submitted at least 3 working days in advance.)' },
     { id: 'f2', category: 'งานบริการลูกบ้าน (Resident Services)', name: 'แบบฟอร์มขออนุญาตนำของออกภายในอาคาร/หมู่บ้าน (Move-Out Request Form)', format: 'PDF', size: '120 KB', lastUpdated: '2025-01-15', description: 'ใช้สำหรับผู้พักอาศัยที่ต้องการนำทรัพย์สินขนาดใหญ่หรือย้ายออก ต้องได้รับอนุมัติเพื่อป้องกันทรัพย์สินสูญหาย (Used for residents who wish to move out or remove large items. Approval is required to prevent property loss.)' },
     { id: 'f3', category: 'งานบริการลูกบ้าน (Resident Services)', name: 'แบบฟอร์มขอรับสติ๊กเกอร์ (Sticker Request Form)', format: 'PDF', size: '100 KB', lastUpdated: '2025-02-01', description: 'ใช้สำหรับลูกบ้านที่ต้องการขอรับสติ๊กเกอร์จอดรถยนต์ หรือรถจักรยานยนต์ประจำปี (Used for residents to request annual parking stickers for cars or motorcycles.)' },
@@ -323,22 +313,16 @@ const STANDARD_FORMS = [
     { id: 'f5', category: 'งานบริการลูกบ้าน (Resident Services)', name: 'แบบฟอร์มขอซื้อคีย์การ์ด/บลูทูธ (Keycard/Bluetooth Purchase Form)', format: 'PDF', size: '95 KB', lastUpdated: '2025-01-10', description: 'ใช้ในกรณีที่ลูกบ้านต้องการซื้อบัตรผ่านเข้า-ออกโครงการเพิ่มเติม หรือทดแทนบัตรเดิมที่ชำรุด/สูญหาย (Used when residents need to purchase additional access cards/Bluetooth devices or replace lost/damaged ones.)' },
     { id: 'f6', category: 'งานบริการลูกบ้าน (Resident Services)', name: 'แบบฟอร์มฝากกุญแจ (Key Deposit Form)', format: 'PDF', size: '85 KB', lastUpdated: '2024-10-05', description: 'แบบฟอร์มยินยอมในการฝากกุญแจห้องพัก/บ้าน ไว้กับนิติบุคคลหรือพนักงานรักษาความปลอดภัย (Consent form to deposit house/room keys with the Juristic Person or security guards.)' },
     { id: 'f7', category: 'งานบริการลูกบ้าน (Resident Services)', name: 'แบบฟอร์มขอรับคืนกุญแจ (Key Return Request Form)', format: 'PDF', size: '85 KB', lastUpdated: '2024-10-05', description: 'แบบฟอร์มลงนามรับกุญแจห้องพัก/บ้านคืน จากนิติบุคคล (Form acknowledging the return of house/room keys from the Juristic Person.)' },
-
-    // หมวดหมู่: งานผู้รับเหมาและซ่อมบำรุง (Contractor & Maintenance)
     { id: 'f8', category: 'งานผู้รับเหมาและซ่อมบำรุง (Contractor & Maint.)', name: 'แบบฟอร์มขออนุญาตตกแต่งต่อเติม (Renovation Request Form)', format: 'PDF', size: '150 KB', lastUpdated: '2025-02-10', description: 'ใช้สำหรับเจ้าของร่วมที่ต้องการต่อเติม หรือซ่อมแซมห้องพัก/บ้าน ต้องแนบแบบแปลนและวางเงินประกัน (Used for co-owners planning to renovate or repair engaging their units. Requires attached floor plans and a security deposit.)' },
     { id: 'f9', category: 'งานผู้รับเหมาและซ่อมบำรุง (Contractor & Maint.)', name: 'แบบฟอร์มขออนุญาตเข้าพื้นที่ทำงาน (Work Permit)', format: 'PDF', size: '140 KB', lastUpdated: '2025-02-10', description: 'ใช้สำหรับผู้รับเหมาภายนอกเพื่อขออนุญาตเข้าพื้นที่ปฏิบัติงาน รวมถึงรายละเอียดผู้ปฏิบัติงาน (Used for external contractors to request area access, including details of the workers.)' },
     { id: 'f10', category: 'งานผู้รับเหมาและซ่อมบำรุง (Contractor & Maint.)', name: 'แบบฟอร์มแจ้งซ่อม (Repair Request Form)', format: 'PDF', size: '130 KB', lastUpdated: '2025-01-20', description: 'ใบแจ้งซ่อมสำหรับทรัพย์สินส่วนกลาง หรือบริการซ่อมแซมภายในพื้นที่ส่วนบุคคล (Form to report issues or request repairs for common property or private units.)' },
     { id: 'f17', category: 'งานผู้รับเหมาและซ่อมบำรุง (Contractor & Maint.)', name: 'แบบฟอร์มขอคืนเงินค้ำประกันตกแต่ง (Renovation Deposit Refund Form)', format: 'PDF', size: '115 KB', lastUpdated: '2026-02-22', description: 'ใช้สำหรับเจ้าของร่วมเพื่อขอรับเงินค้ำประกันความเสียหายคืน หลังจากที่ผู้รับเหมาปฏิบัติงานเสร็จสิ้นและผ่านการตรวจสอบพื้นที่แล้ว (Used to request a refund of the renovation deposit after work completion and inspection.)' },
     { id: 'f22', category: 'งานผู้รับเหมาและซ่อมบำรุง (Contractor & Maint.)', name: 'แบบฟอร์มตรวจสอบงานตกแต่งต่อเติมเพื่อคืนเงินค้ำประกัน (Renovation Inspection Checklist)', format: 'PDF', size: '145 KB', lastUpdated: '2026-05-14', description: 'รายการตรวจสอบพื้นที่ (Checklist):\n[  ] 1. ไม่มีความเสียหายต่อทรัพย์สินส่วนกลาง (พื้น, ผนัง, ฝ้าเพดาน, ลิฟต์ ฯลฯ)\n[  ] 2. ไม่มีการกองทิ้งขยะ หรือเศษวัสดุก่อสร้างในพื้นที่ส่วนกลาง\n[  ] 3. ระบบไฟฟ้าและระบบประปาส่วนกลางไม่ได้รับผลกระทบ\n[  ] 4. พื้นที่ส่วนกลางบริเวณหน้างานและทางเดินได้รับการทำความสะอาดเรียบร้อย\n[  ] 5. ส่งคืนบัตรผู้รับเหมา / บัตรแลกเข้า ครบถ้วน\n[  ] 6. การตกแต่งต่อเติมเป็นไปตามแบบที่ได้รับอนุญาต และไม่กระทบโครงสร้างหลักอาคาร\n\nสรุปผลการตรวจสอบ:\n(   ) ผ่านเกณฑ์ (สามารถดำเนินการคืนเงินค้ำประกันได้)\n(   ) ไม่ผ่านเกณฑ์ (ต้องดำเนินการแก้ไขความเสียหาย/ทำความสะอาดก่อน)' },
     { id: 'f23', category: 'งานผู้รับเหมาและซ่อมบำรุง (Contractor & Maint.)', name: 'แบบฟอร์มยินยอมและรับทราบการตกแต่งต่อเติมของห้อง/บ้านข้างเคียง (Neighboring Unit Consent Form)', format: 'PDF', size: '135 KB', lastUpdated: '2026-05-14', description: 'หนังสือยินยอม:\nข้าพเจ้าเจ้าของห้อง/บ้านเลขที่ .......................... ยินยอมและรับทราบการตกแต่งต่อเติมของห้อง/บ้านเลขที่ ..........................\nโดยได้รับทราบว่าระหว่างการปฏิบัติงานอาจมีผลกระทบเรื่องเสียงดัง หรือฝุ่นละออง ในช่วงเวลาที่นิติบุคคลฯ กำหนด\n\nลงชื่อ ........................................................ ผู้ยินยอม (เจ้าของห้อง/บ้านข้างเคียง)\n\nลงชื่อ ........................................................ ผู้ขอตกแต่งต่อเติม' },
-
-    // หมวดหมู่: งานบริหารและนิติบุคคล (Juristic & Management)
     { id: 'f11', category: 'งานบริหารและนิติบุคคล (Juristic & Mgmt.)', name: 'แบบฟอร์มร้องเรียนทั่วไป (General Complaint Form)', format: 'PDF', size: '105 KB', lastUpdated: '2024-12-01', description: 'ใช้สำหรับรับเรื่องร้องเรียน ข้อเสนอแนะ หรือปัญหาต่างๆ จากลูกบ้านเพื่อให้ฝ่ายบริหารดำเนินการแก้ไข (Used to submit general complaints, suggestions, or report issues to the management team for resolution.)' },
     { id: 'f12', category: 'งานบริหารและนิติบุคคล (Juristic & Mgmt.)', name: 'แบบฟอร์มขอดูกล้องวงจรปิด (CCTV Footage Request Form)', format: 'PDF', size: '160 KB', lastUpdated: '2025-01-25', description: 'ใช้สำหรับคำร้องขอดูกล้องวงจรปิด ต้องมีบันทึกประจำวันจากเจ้าหน้าที่ตำรวจมาแสดงเพื่อประกอบการขอดู (Used to request CCTV footage playback. Requires a police report as supporting evidence.)' },
     { id: 'f13', category: 'งานบริหารและนิติบุคคล (Juristic & Mgmt.)', name: 'แบบฟอร์มขอคัดเอกสารสำคัญนิติบุคคล (Document Request Form)', format: 'PDF', size: '115 KB', lastUpdated: '2024-09-15', description: 'แบบฟอร์มสำหรับลูกบ้านที่ต้องการขอคัดลอกเอกสาร เช่น รายงานการประชุม ใบเสร็จรับเงิน ฯลฯ (Form for residents requesting copies of official documents such as meeting minutes, receipts, etc.)' },
     { id: 'f16', category: 'งานบริหารและนิติบุคคล (Juristic & Mgmt.)', name: 'แบบฟอร์มขอผ่อนชำระค่าส่วนกลาง (Installment Payment Request Form)', format: 'PDF', size: '110 KB', lastUpdated: '2026-02-22', description: 'ใช้สำหรับเจ้าของร่วมที่ต้องการขอผ่อนชำระหนี้ค่าส่วนกลางที่ค้างชำระ โดยต้องระบุยอดหนี้และเงื่อนไขการผ่อนชำระ (Used for co-owners requesting an installment plan for overdue common area fees.)' },
-
-    // หมวดหมู่: งานบุคคลและภายใน (Internal HR / Finance) - คงไว้สำหรับพนักงานนิติฯ
     { id: 'f14', category: 'งานบุคคลและภายใน (Internal)', name: 'ใบลาพักผ่อน / ลากิจ / ลาป่วย (Leave Request)', format: 'PDF', size: '120 KB', lastUpdated: '2025-01-05', description: 'เอกสารขออนุมัติวันลาต่างๆ สำหรับพนักงานและเจ้าหน้าที่ประจำหน่วยงาน (Leave request form for annual, personal, or sick leave for employees and site staff.)' },
     { id: 'f15', category: 'งานบุคคลและภายใน (Internal)', name: 'ใบเบิกเงินสดย่อย (Petty Cash Voucher)', format: 'Excel', size: '45 KB', lastUpdated: '2025-01-05', description: 'เอกสารประกอบการขอเบิกเงินทดรองจ่าย หรือเงินสดย่อยประจำหน่วยงาน (Form for requesting petty cash reimbursement or advance payments for site operations.)' },
     { id: 'f18', category: 'งานบุคคลและภายใน (Internal)', name: 'แบบฟอร์มการส่งมอบงาน ตำแหน่งผู้จัดการอาคาร (Building Manager Handover)', format: 'PDF', size: '120 KB', lastUpdated: '2026-04-16', description: 'เอกสารบันทึกการส่งมอบงาน ทรัพย์สิน เอกสารสำคัญ และหน้าที่ความรับผิดชอบของตำแหน่งผู้จัดการอาคาร' },
@@ -347,7 +331,6 @@ const STANDARD_FORMS = [
     { id: 'f21', category: 'งานบุคคลและภายใน (Internal)', name: 'แบบฟอร์มการส่งมอบงาน ตำแหน่งช่างประจำอาคาร (Technician Handover)', format: 'PDF', size: '110 KB', lastUpdated: '2026-04-16', description: 'เอกสารบันทึกการส่งมอบงาน การเข้ากะ และเครื่องมือช่างพื้นฐาน สำหรับตำแหน่งช่างประจำอาคาร' },
 ];
 
-// Shift Codes
 const SHIFTS = [
   { id: 'M1', label_th: 'M1 - ผลัดเช้า (08.00-17.00)', label_en: 'M1 - Morning (08.00-17.00)', time: '08:00 - 17:00', color: 'bg-green-50 text-green-700 border-green-200' },
   { id: 'M2', label_th: 'M2 - ผลัดเช้า (08.30-17.30)', label_en: 'M2 - Morning (08.30-17.30)', time: '08:30 - 17:30', color: 'bg-green-50 text-green-700 border-green-200' },
@@ -403,7 +386,6 @@ const getDefaultPermissions = () => {
         perms[m.id] = { view: false, save: false, edit: false, approve: false, delete: false, print: false };
         if (m.submenus) {
             m.submenus.forEach(sub => {
-                // แก้ไข: ให้พนักงานมองเห็น (view: true) เมนูย่อยในหน่วยงานเป็นค่าเริ่มต้น
                 perms[sub.id] = { view: true, save: false, edit: false, approve: false, delete: false, print: false };
             });
         }
@@ -425,7 +407,6 @@ const getFullPermissions = () => {
     return perms;
 };
 
-// --- NEW: Helper Function เพื่อป้องกันปัญหา Object Reference ซ้อนทับ และเติมเมนูใหม่ให้อัตโนมัติ ---
 const getMergedPermissions = (templatePerms) => {
     const base = getDefaultPermissions();
     const merged = {};
@@ -456,10 +437,8 @@ const PROJECT_TABS = [
   { id: 'others', label: 'tab_others', icon: Layers, color: 'gray' },
 ];
 
-// --- Translation Dictionary ---
 const TRANSLATIONS = {
   th: {
-    // General
     appTitle: "เบสท์ มิลเลี่ยน",
     appSubtitle: "กรุ๊ป จำกัด",
     systemMgmt: "ระบบบริหารจัดการองค์กร",
@@ -469,8 +448,6 @@ const TRANSLATIONS = {
     poweredBy: "Powered by Best Million Group IT",
     signOut: "ออกจากระบบ",
     myWorkspace: "พื้นที่ทำงานของฉัน",
-
-    // Sidebar
     menu_dashboard: "ภาพรวมองค์กร",
     menu_users: "จัดการผู้ใช้งาน",
     menu_projects: "โครงการ / หน่วยงาน",
@@ -479,8 +456,6 @@ const TRANSLATIONS = {
     menu_contractors: "ค้นหา supplier",
     menu_manual: "คู่มือการใช้งาน",
     menu_settings: "ตั้งค่าระบบ",
-
-    // Dashboard
     corpDashboard: "แดชบอร์ดผู้บริหาร",
     overview: "ภาพรวมประสิทธิภาพขององค์กร",
     exportReport: "ส่งออก CSV",
@@ -491,8 +466,6 @@ const TRANSLATIONS = {
     pmDue: "เครื่องจักรใกล้รอบ PM",
     projPerformance: "ประสิทธิภาพรายโครงการ",
     taskDist: "สถานะงานทั้งหมด",
-
-    // Users
     userMgmt: "การจัดการผู้ใช้งาน",
     addUser: "เพิ่มผู้ใช้",
     printPDF: "พิมพ์/PDF",
@@ -506,8 +479,6 @@ const TRANSLATIONS = {
     col_seq: "ลำดับ",
     col_photo: "รูปภาพ",
     col_empId: "รหัสพนักงาน",
-
-    // User Modal
     newUserTitle: "เพิ่มผู้ใช้งาน / พนักงานใหม่",
     editUserTitle: "แก้ไขข้อมูลผู้ใช้งาน",
     uploadPhoto: "เพิ่มรูปภาพ",
@@ -528,13 +499,10 @@ const TRANSLATIONS = {
     loginInfo: "ข้อมูลเข้าระบบ",
     personalInfo: "ข้อมูลส่วนตัว",
     accessControl: "การเข้าถึงและสิทธิ์",
-
-    // Projects
     projectList: "รายการโครงการและหน่วยงาน",
     newProject: "เพิ่มโครงการ",
     manager: "ผู้จัดการ",
     start: "เริ่มบริหาร",
-    // Project Modal
     newProjectTitle: "เพิ่มโครงการ / หน่วยงานใหม่",
     projLogo: "โลโก้หน่วยงาน",
     uploadLogo: "อัปโหลดโลโก้",
@@ -556,8 +524,6 @@ const TRANSLATIONS = {
     tab_condo: "อาคารชุด",
     tab_village: "หมู่บ้านจัดสรร",
     tab_office: "ออฟฟิศสำนักงาน",
-
-    // Contractors
     contractorList: "ค้นหา Supplier",
     managePartners: "บริหารจัดการผู้ให้บริการภายนอก",
     addNew: "เพิ่มรายชื่อ",
@@ -568,8 +534,6 @@ const TRANSLATIONS = {
     col_category: "หมวดงาน",
     col_contact: "ผู้ติดต่อ",
     col_phoneEmail: "โทร / อีเมล",
-
-    // Audit
     globalAudit: "รายการตรวจสอบภายใน (ทุกโครงการ)",
     auditDesc: "ข้อมูลการ Audit รวมของทุกหน่วยงาน",
     newAudit: "บันทึกผลตรวจ",
@@ -582,8 +546,6 @@ const TRANSLATIONS = {
     col_inspector: "ผู้ตรวจ",
     col_remarks: "หมายเหตุ",
     col_file: "ไฟล์แนบ",
-
-    // Project Detail Tabs
     tab_overview: "ภาพรวม",
     tab_contracts: "สัญญาจ้าง",
     tab_staff: "บุคลากร",
@@ -601,8 +563,6 @@ const TRANSLATIONS = {
     tab_meeting: "ประชุมใหญ่ / กรรมการ",
     tab_inventory: "คลังวัสดุ/สต๊อก",
     tab_others: "อื่นๆ (Others)",
-
-    // Project Detail Content
     projectKPI: "KPI โครงการ",
     recentAlerts: "การแจ้งเตือนล่าสุด",
     activeContracts: "สัญญาว่าจ้างและบริการที่ใช้งานอยู่",
@@ -670,8 +630,6 @@ const TRANSLATIONS = {
     close: "ปิด",
     downloadPDF: "ดาวน์โหลด PDF",
     addMeeting: "เพิ่มกำหนดการประชุม",
-    
-    // PM Tabs
     pm_registry: "ทะเบียนเครื่องจักร",
     pm_plan: "แผนงาน",
     pm_calendar: "ปฏิทิน",
@@ -682,8 +640,6 @@ const TRANSLATIONS = {
     pm_dashboard: "แดชบอร์ด",
     inventory_list: "รายการวัสดุอุปกรณ์",
     inventory_transaction: "ประวัติรับเข้า/เบิกจ่าย",
-    
-    // PM Plan
     pm_plan_title: "แผนงานบำรุงรักษา (PM Plan)",
     addPmPlan: "เพิ่มแผน PM",
     pmTaskName: "ชื่องาน / รายการตรวจเช็ค",
@@ -693,8 +649,6 @@ const TRANSLATIONS = {
     freq_Monthly: "ประจำเดือน (Monthly)",
     freq_Yearly: "ประจำปี (Yearly)",
     col_schedule: "กำหนดการ",
-
-    // Statuses & Common
     active: "ใช้งาน",
     inactive: "ไม่ใช้งาน",
     warning: "แจ้งเตือน",
@@ -719,8 +673,6 @@ const TRANSLATIONS = {
     beforeVat: "(ก่อน VAT)",
     col_contact_person: "ชื่อผู้ติดต่อ",
     col_contact_phone: "เบอร์โทรศัพท์",
-    
-    // Daily Report Translation
     dailyReportTitle: "รายงานประจำวัน",
     manpowerReport: "1. รายงานกำลังพลประจำวัน",
     performanceReport: "2. รายงานผลการดำเนินงาน",
@@ -742,13 +694,10 @@ const TRANSLATIONS = {
     reporter: "ผู้รายงาน",
     uploadImage: "แนบรูปภาพ",
     createDailyReport: "เขียนรายงาน",
-    
-    // Asset Translation
     registerAsset: "เพิ่มทะเบียนทรัพย์สิน",
     assetDetails: "รายละเอียดเพิ่มเติม",
   },
   en: {
-    // ... (Keep existing English translations)
     appTitle: "BEST MILLION",
     appSubtitle: "GROUP CO., LTD.",
     systemMgmt: "System Management",
@@ -1009,7 +958,6 @@ const TRANSLATIONS = {
   }
 };
 
-// --- Mock Data Generator & Initial Data ---
 const generateId = () => Math.random().toString(36).substr(2, 9);
 const INITIAL_USERS = [ { id: 'u1', username: 'admin', password: 'bosskim', firstName: 'Admin', lastName: 'Master', position: 'Super Admin', department: 'Head Office', projectId: null, status: 'Active', created_at: new Date().toISOString(), permissions: getFullPermissions() } ];
 const INITIAL_PROJECTS = [];
@@ -1024,11 +972,9 @@ const INITIAL_MEETINGS = [];
 const INITIAL_ANNOUNCEMENTS = [];
 const INITIAL_DEPOSITS = [];
 
-// NEW: Inventory Constants
 const INVENTORY_CATEGORIES = ['วัสดุสำนักงาน', 'วัสดุทำความสะอาด', 'วัสดุช่าง', 'อุปกรณ์ไฟฟ้า', 'เบ็ดเตล็ด'];
 const INVENTORY_UNITS = ['ชิ้น', 'อัน', 'กล่อง', 'แพ็ค', 'ลัง', 'ขวด', 'แกลลอน', 'ม้วน', 'เมตร', 'ชุด'];
 
-// NEW: Deposit Constants
 const DEPOSIT_TYPES = ['ฝากประจำ', 'สลากออมสิน', 'สลาก ธ.ก.ส.', 'อื่นๆ (ให้ระบุ)'];
 const DEPOSIT_DURATIONS = ['1 เดือน', '2 เดือน', '3 เดือน', '4 เดือน', '5 เดือน', '6 เดือน', '7 เดือน', '8 เดือน', '9 เดือน', '10 เดือน', '11 เดือน', '12 เดือน', '2 ปี', '3 ปี', '4 ปี'];
 const BANK_LIST = [
@@ -1049,7 +995,6 @@ const FEE_STATUS_OPTIONS = [
   'อื่นๆ (ให้ระบุ)'
 ];
 
-// NEW: Custom 3D Bar Shapes
 const ThreeDBar = (props) => {
     const { fill, x, y, width, height } = props;
     const depth = 8;
@@ -1082,7 +1027,6 @@ const ThreeDBarHorizontal = (props) => {
     );
 };
 
-// --- NEW: 3D Medal Component ---
 const ThreeDMedal = ({ rank }) => {
     if (rank > 3) return <span className="font-bold text-gray-500 text-base">{rank}</span>;
 
@@ -1120,21 +1064,14 @@ const ThreeDMedal = ({ rank }) => {
 
     return (
         <div className={`relative flex flex-col items-center justify-center transform transition-transform hover:scale-110 ${style.dropShadow}`} title={`อันดับ ${rank}`}>
-            {/* 3D Ribbon Base */}
             <div className="relative w-6 h-5 -mb-2 z-0 flex justify-center">
-                {/* Left tail */}
                 <div className={`absolute top-0 left-0 w-3 h-full ${style.ribbonOuter} transform -skew-y-[20deg] origin-top-left rounded-bl-sm`} style={{ clipPath: 'polygon(0 0, 100% 0, 100% 100%, 0 80%)' }}></div>
-                {/* Right tail */}
                 <div className={`absolute top-0 right-0 w-3 h-full ${style.ribbonOuter} transform skew-y-[20deg] origin-top-right rounded-br-sm`} style={{ clipPath: 'polygon(0 0, 100% 0, 100% 80%, 0 100%)' }}></div>
-                {/* Center Knot/Body */}
                 <div className={`absolute top-0 w-4 h-full ${style.ribbonInner} z-10 shadow-sm border-x border-black/10`}></div>
             </div>
             
-            {/* 3D Coin Body */}
             <div className={`relative w-8 h-8 rounded-full bg-gradient-to-br ${style.gradient} border-[1.5px] ${style.border} flex items-center justify-center z-10 ${style.innerShadow}`}>
-                {/* Inner Ring */}
                 <div className="absolute inset-[2px] border border-white/30 rounded-full pointer-events-none"></div>
-                {/* Glossy Top Reflection */}
                 <div className="absolute top-0 w-full h-1/2 bg-gradient-to-b from-white/50 to-transparent rounded-t-full pointer-events-none"></div>
                 
                 <span className={`relative z-20 font-black text-[15px] ${style.textColor} tracking-tighter`} style={{ textShadow: '0px 1px 1px rgba(255,255,255,0.7)' }}>
@@ -1200,7 +1137,6 @@ const ChartGradients = () => (
   </svg>
 );
 
-// NEW: Initial data for Company Profile
 const INITIAL_COMPANY_INFO = {
     name: 'BM GROUP',
     subtitle: 'Enterprise ERP',
@@ -1209,7 +1145,6 @@ const INITIAL_COMPANY_INFO = {
     phone: '02-111-2222'
 };
 
-// NEW: Initial data for Utilities
 const INITIAL_METERS = [];
 const INITIAL_READINGS = [];
 
@@ -1223,7 +1158,6 @@ const INITIAL_CONTRACTORS = [];
 const INITIAL_INVENTORY = [];
 const INITIAL_TRANSACTIONS = [];
 
-// --- Helper for Image Processing (ปรับปรุงใหม่: ย่อขนาดและบีบอัดเพื่อป้องกันปัญหาพื้นที่ Local Storage เต็มและช่วยให้บันทึกภาพได้) ---
 const compressImage = (file) => {
     return new Promise((resolve) => {
         const reader = new FileReader();
@@ -1254,7 +1188,6 @@ const compressImage = (file) => {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
                 
-                // บีบอัดเป็น JPEG Quality 50% (คุณภาพยังพอดูได้ชัดเจน แต่ไฟล์จะเล็กลงมาก)
                 resolve(canvas.toDataURL('image/jpeg', 0.5));
             };
             img.onerror = () => {
@@ -1264,16 +1197,13 @@ const compressImage = (file) => {
     });
 };
 
-// --- NEW: Helper for parsing CSV dates (จัดการแก้ไขปัญหาปี พ.ศ. และรูปแบบ ว/ด/ป จาก Excel) ---
 const normalizeImportedDate = (rawStr, isMDY = false) => {
     if (!rawStr || typeof rawStr !== 'string') return '';
     let dStr = rawStr.trim();
     if (!dStr) return '';
     
-    // หากเป็นรูปแบบมาตรฐาน YYYY-MM-DD อยู่แล้ว ให้ส่งกลับได้เลย
     if (/^\d{4}-\d{2}-\d{2}$/.test(dStr)) return dStr;
     
-    // จัดการรูปแบบ DD/MM/YYYY หรือ D/M/YYYY หรือ YYYY/MM/DD
     const parts = dStr.split(/[\/\-]/);
     if (parts.length === 3) {
         let d, m, y;
@@ -1294,15 +1224,12 @@ const normalizeImportedDate = (rawStr, isMDY = false) => {
         
         if (isNaN(d) || isNaN(m) || isNaN(y)) return '';
         
-        // แปลงปี พ.ศ. เป็น ค.ศ. (เช่น 2569 -> 2026)
         if (y > 2400) y -= 543;
-        // จัดการกรณีใส่ปีมาแค่ 2 หลัก
         else if (y < 100) {
-             if (y > 40) y = y + 2500 - 543; // สมมติว่าเป็น พ.ศ. 25xx
-             else y = y + 2000; // สมมติว่าเป็น ค.ศ. 20xx
+             if (y > 40) y = y + 2500 - 543; 
+             else y = y + 2000; 
         }
 
-        // กรณีฉุกเฉิน: ถ้าเดือนเกิน 12 ให้สลับวันกับเดือนอัตโนมัติ
         if (m > 12 && d <= 12) {
              const temp = m;
              m = d;
@@ -1312,16 +1239,13 @@ const normalizeImportedDate = (rawStr, isMDY = false) => {
         return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     }
     
-    // ทางเลือกสุดท้าย: พึ่งพาตัวแปลง Date ของ JavaScript
     const parsed = new Date(dStr);
     return isNaN(parsed.getTime()) ? '' : parsed.toISOString().split('T')[0];
 };
 
-// ... (Components Card, Button, KPICard remain same) ...
 const Card = ({ children, className = "", id, onClick }) => ( <div id={id} className={`bg-white rounded-lg shadow-sm border border-gray-200 ${className}`} onClick={onClick}> {children} </div> );
 const Button = ({ children, onClick, variant = 'primary', size = 'md', className = "", icon: Icon, disabled = false, type = "button" }) => { const baseStyle = "rounded-md font-medium transition-colors flex items-center justify-center gap-2"; const sizeStyles = { sm: "px-2 py-1 text-xs", md: "px-4 py-2 text-sm", lg: "px-6 py-3 text-base" }; const variants = { primary: "bg-orange-600 text-white hover:bg-orange-700 disabled:bg-gray-400", secondary: "bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400", danger: "bg-red-50 text-red-600 hover:bg-red-100", outline: "border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:border-gray-200 disabled:text-gray-300", success: "bg-green-600 text-white hover:bg-green-700" }; return ( <button type={type} onClick={onClick} disabled={disabled} className={`${baseStyle} ${sizeStyles[size]} ${variants[variant]} ${className}`}> {Icon && <Icon size={size === 'sm' ? 14 : 18} />} {children} </button> ); };
 
-// UPDATED: Make KPICard clickable
 const KPICard = ({ title, value, icon: Icon, color, onClick }) => ( 
   <Card className={`p-5 flex items-center gap-4 ${onClick ? 'cursor-pointer hover:shadow-md hover:border-orange-300 transition-all group' : ''}`} onClick={onClick}> 
     <div className={`p-3 rounded-full bg-${color}-100 text-${color}-600 ${onClick ? 'group-hover:scale-110 transition-transform' : ''}`}> 
@@ -1337,7 +1261,6 @@ const KPICard = ({ title, value, icon: Icon, color, onClick }) => (
   </Card> 
 );
 
-// --- IndexedDB for Large Files Storage ---
 const DB_NAME = 'BMG_Files_DB';
 const STORE_NAME = 'files';
 
@@ -1422,7 +1345,54 @@ const getAllFilesLocally = async () => {
     }
 };
 
-// --- 1. Custom Hook สำหรับ State เดี่ยวๆ (Object) ที่ป้องกัน Chunk Error ได้ดีขึ้น ---
+// --- NEW: IndexedDB for App State (Unlimited Offline Storage to fix 5MB limit) ---
+const STATE_DB_NAME = 'BMG_AppState_DB';
+const STATE_STORE_NAME = 'state';
+
+const initStateDB = () => {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(STATE_DB_NAME, 1);
+        request.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains(STATE_STORE_NAME)) {
+                db.createObjectStore(STATE_STORE_NAME);
+            }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+};
+
+const saveStateLocallyIDB = async (key, data) => {
+    try {
+        const db = await initStateDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(STATE_STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STATE_STORE_NAME);
+            store.put(data, key);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+    } catch (e) {
+        console.warn("IDB Save State Error", e);
+    }
+};
+
+const loadStateLocallyIDB = async (key) => {
+    try {
+        const db = await initStateDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(STATE_STORE_NAME, 'readonly');
+            const store = tx.objectStore(STATE_STORE_NAME);
+            const request = store.get(key);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+    } catch (e) {
+        return null;
+    }
+};
+
 function usePersistentState(key, initialValue, fbUser) {
   const [state, setState] = useState(() => {
       if (typeof window !== 'undefined') {
@@ -1455,6 +1425,19 @@ function usePersistentState(key, initialValue, fbUser) {
   useEffect(() => {
       stateRef.current = state;
   }, [state]);
+
+  // NEW: Load from IDB after mount to get full data if localStorage was truncated/empty
+  useEffect(() => {
+      let isMounted = true;
+      const loadIDB = async () => {
+          const idbData = await loadStateLocallyIDB(key);
+          if (idbData && isMounted) {
+              setState(idbData);
+          }
+      };
+      loadIDB();
+      return () => { isMounted = false; };
+  }, [key]);
 
   useEffect(() => {
     if (!db) {
@@ -1550,8 +1533,9 @@ function usePersistentState(key, initialValue, fbUser) {
         
         if (JSON.stringify(stateRef.current) !== JSON.stringify(finalData)) {
             setState(finalData);
+            saveStateLocallyIDB(key, finalData); // Save fetched data to IDB
             if (typeof window !== 'undefined') {
-                localStorage.setItem(key, JSON.stringify(finalData));
+                try { localStorage.setItem(key, JSON.stringify(finalData)); } catch(e){}
             }
         }
         setIsSynced(true);
@@ -1570,8 +1554,10 @@ function usePersistentState(key, initialValue, fbUser) {
       setState(newValue);
       lastLocalUpdateRef.current = Date.now();
       
+      saveStateLocallyIDB(key, newValue);
+
       if (typeof window !== 'undefined') {
-          localStorage.setItem(key, JSON.stringify(newValue));
+          try { localStorage.setItem(key, JSON.stringify(newValue)); } catch(e){}
       }
 
       if (!db || !fbUser || !appId) return;
@@ -1618,15 +1604,26 @@ function useUserPersistentState(key, initialValue, fbUser) {
         return initialValue;
     });
 
+    useEffect(() => {
+        let isMounted = true;
+        const loadIDB = async () => {
+            const idbData = await loadStateLocallyIDB(userSpecificKey);
+            if (idbData && isMounted) {
+                setState(idbData);
+            }
+        };
+        loadIDB();
+        return () => { isMounted = false; };
+    }, [userSpecificKey]);
+
     const setPersistentValue = (newValueOrUpdater) => {
         setState((prevState) => {
             const newValue = typeof newValueOrUpdater === 'function' ? newValueOrUpdater(prevState) : newValueOrUpdater;
+            saveStateLocallyIDB(userSpecificKey, newValue);
             if (typeof window !== 'undefined') {
                 try {
                     localStorage.setItem(userSpecificKey, JSON.stringify(newValue));
-                } catch (e) {
-                    console.warn("LocalStorage Quota Exceeded for", userSpecificKey);
-                }
+                } catch (e) {}
             }
             return newValue;
         });
@@ -1635,7 +1632,6 @@ function useUserPersistentState(key, initialValue, fbUser) {
     return [state, setPersistentValue];
 }
 
-// --- 2. Smart Persistent Collection (ทนทานข้อมูลไม่หาย 100%) ---
 function usePersistentCollection(collectionName, initialValue, fbUser) {
     const localKey = collectionName.startsWith('bmg_') ? collectionName : `bmg_${collectionName}`;
 
@@ -1675,7 +1671,15 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
             setIsLoaded(false);
             
             try {
-                // 1. ตรวจสอบการ Migrate ข้อมูลเก่าจาก Chunks
+                // NEW: Load from IndexedDB first for fast and large offline data
+                const idbData = await loadStateLocallyIDB(localKey);
+                if (idbData && Array.isArray(idbData) && idbData.length > 0) {
+                    if (isMounted) {
+                        setData(idbData);
+                        dataRef.current = idbData;
+                    }
+                }
+
                 const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', localKey);
                 const metaSnap = await getDoc(metaRef);
                 let legacyData = null;
@@ -1696,20 +1700,19 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                     }
                 }
                 
-                // ถ้านำเข้าจาก chunk เก่าได้ ให้เขียนลง Local
                 if (legacyData && Array.isArray(legacyData) && legacyData.length > 0) {
                     if (dataRef.current.length === 0 || legacyData.length > dataRef.current.length) {
                         if (isMounted) {
                             setData(legacyData);
                             dataRef.current = legacyData;
                         }
+                        saveStateLocallyIDB(localKey, legacyData);
                         if (typeof window !== 'undefined') {
                             try { localStorage.setItem(localKey, JSON.stringify(legacyData)); } catch(e) {}
                         }
                     }
                 }
 
-                // 2. นำข้อมูล Local ปัจจุบันอัปโหลดขึ้น Documents บน Firestore
                 if (Array.isArray(dataRef.current) && dataRef.current.length > 0) {
                     const existingDocsSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`));
                     const serverIds = new Set(existingDocsSnap.docs.map(d => d.id));
@@ -1737,17 +1740,16 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                     }
                 }
 
-                // 3. เริ่มฟังสัญญาณซิงค์ข้อมูล Real-time
                 const colRef = collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
                 unsubscribe = onSnapshot(colRef, (snapshot) => {
                     if (!isMounted) return;
                     const serverItems = [];
                     snapshot.forEach(docSnap => serverItems.push(docSnap.data()));
                     
-                    // ป้องกันเอาความว่างเปล่าจาก Server มาลบข้อมูลในเครื่อง (ยกเว้นโดนสั่งลบมาจริงๆ จาก snapshot.docChanges)
                     if (serverItems.length > 0 || snapshot.docChanges().length > 0) {
                         setData(serverItems);
                         dataRef.current = serverItems;
+                        saveStateLocallyIDB(localKey, serverItems);
                         if (typeof window !== 'undefined') {
                             try { localStorage.setItem(localKey, JSON.stringify(serverItems)); } catch(e) {}
                         }
@@ -1779,17 +1781,18 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
         setData(newValue);
         dataRef.current = newValue;
         
+        saveStateLocallyIDB(localKey, newValue);
+
         if (typeof window !== 'undefined') {
             try {
                 localStorage.setItem(localKey, JSON.stringify(newValue));
             } catch (e) {
-                console.warn(`LocalStorage Quota Exceeded for ${localKey}. Skipping local cache, but will sync to Cloud.`);
+                // Silently ignore quota exceeded, IDB handles it
             }
         }
 
         if (!db || !fbUser || !appId) return;
 
-        // โหมดกู้คืนข้อมูลแบบ Batch
         if (isRestore && Array.isArray(newValue)) {
             try {
                 let batch = writeBatch(db);
@@ -1805,7 +1808,6 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
             return;
         }
 
-        // โหมดบันทึกปกติ (เปรียบเทียบแค่ส่วนที่เปลี่ยน Diffing)
         const oldMap = new Map(Array.isArray(oldValue) ? oldValue.map(i => [i.id, i]) : []);
         const newMap = new Map(Array.isArray(newValue) ? newValue.map(i => [i.id, i]) : []);
 
@@ -1838,7 +1840,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                         for (const fileId in itemToSave.files) {
                             safeFiles[fileId] = { ...itemToSave.files[fileId] };
                             if (safeFiles[fileId].data && safeFiles[fileId].data.length > 100000) {
-                                delete safeFiles[fileId].data; // ไม่เซฟภาพฐาน64ใหญ่เกินไปลง Firestore
+                                delete safeFiles[fileId].data; 
                                 safeFiles[fileId].isLocalOnly = true;
                             }
                         }
@@ -1847,11 +1849,11 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
 
                     try {
                         let docStr = JSON.stringify(itemToSave);
-                        if (docStr.length > 850000) { // Limit approaching ~850KB
+                        if (docStr.length > 850000) { 
                             if (itemToSave.performance) {
                                 for (const dept in itemToSave.performance) {
                                     if (itemToSave.performance[dept].images && itemToSave.performance[dept].images.length > 0) {
-                                        itemToSave.performance[dept].images = []; // Clear images
+                                        itemToSave.performance[dept].images = []; 
                                         itemToSave.performance[dept].details = (itemToSave.performance[dept].details || '') + '\n[หมายเหตุ: รูปภาพถูกลบเนื่องจากขนาดไฟล์รวมเกินขีดจำกัด]';
                                     }
                                 }
