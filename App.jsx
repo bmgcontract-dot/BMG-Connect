@@ -1715,28 +1715,32 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
 
                 if (Array.isArray(dataRef.current) && dataRef.current.length > 0) {
                     const existingDocsSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`));
-                    const serverIds = new Set(existingDocsSnap.docs.map(d => d.id));
                     
-                    const toUpload = dataRef.current.filter(item => item && item.id && !serverIds.has(item.id));
-                    
-                    if (toUpload.length > 0) {
-                        let batch = writeBatch(db);
-                        let opCount = 0;
-                        for (const item of toUpload) {
-                            const safeItem = { ...item };
-                            if (safeItem.files) {
-                                for (const k in safeItem.files) {
-                                    if (safeItem.files[k]?.data?.length > 100000) {
-                                        delete safeItem.files[k].data;
-                                        safeItem.files[k].isLocalOnly = true;
+                    // FIX: ป้องกันปัญหา Zombie Data (ข้อมูลที่ถูกลบไปแล้วฟื้นคืนชีพ)
+                    // โดยจะอัปโหลดข้อมูลจาก Local ขึ้น Server ก็ต่อเมื่อ Server ว่างเปล่าเท่านั้น (Initial Seed)
+                    // จะไม่พยายามอัปโหลดรายการที่ขาดหายไปทีละรายการ เพราะนั่นคือรายการที่เพิ่งถูกลบไป
+                    if (existingDocsSnap.empty) {
+                        const toUpload = dataRef.current.filter(item => item && item.id);
+                        
+                        if (toUpload.length > 0) {
+                            let batch = writeBatch(db);
+                            let opCount = 0;
+                            for (const item of toUpload) {
+                                const safeItem = { ...item };
+                                if (safeItem.files) {
+                                    for (const k in safeItem.files) {
+                                        if (safeItem.files[k]?.data?.length > 100000) {
+                                            delete safeItem.files[k].data;
+                                            safeItem.files[k].isLocalOnly = true;
+                                        }
                                     }
                                 }
+                                batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id), safeItem);
+                                opCount++;
+                                if (opCount === 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
                             }
-                            batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id), safeItem);
-                            opCount++;
-                            if (opCount === 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
+                            if (opCount > 0) await batch.commit();
                         }
-                        if (opCount > 0) await batch.commit();
                     }
                 }
 
