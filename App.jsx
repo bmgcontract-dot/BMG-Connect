@@ -3795,6 +3795,21 @@ export default function App() {
       schedulesRef.current = schedules;
   }, [schedules]);
 
+  // NEW: โหลดข้อมูลจาก IndexedDB เพื่อป้องกันปัญหา LocalStorage เต็ม (5MB Limit) ทำให้ข้อมูลหาย
+  useEffect(() => {
+      let isMounted = true;
+      const loadIDB = async () => {
+          const idbData = await loadStateLocallyIDB('bmg_schedules_v2');
+          if (idbData && Object.keys(idbData).length > 0 && isMounted) {
+              // อัปเดตข้อมูลหากใน IDB มีข้อมูลมากกว่าหรือสมบูรณ์กว่า LocalStorage
+              setSchedules(idbData);
+              schedulesRef.current = idbData;
+          }
+      };
+      loadIDB();
+      return () => { isMounted = false; };
+  }, []);
+
   // Sync Schedule Data
   useEffect(() => {
       if (!db || !fbUser || !appId) return;
@@ -3820,11 +3835,29 @@ export default function App() {
                   if (!hasChunkError && fullJson) {
                       try {
                           const parsedData = JSON.parse(fullJson);
+                          
+                          // FIX: ป้องกันข้อมูลหายจากกรณีโหลด Cloud มาเป็นค่าว่าง แต่ในเครื่องมีข้อมูลอยู่
+                          const isParsedEmpty = Object.keys(parsedData || {}).length === 0;
+                          const isCurrentNotEmpty = Object.keys(schedulesRef.current || {}).length > 0;
+                          
+                          if (isParsedEmpty && isCurrentNotEmpty) {
+                              console.warn("Prevented overwriting local schedules with empty cloud data.");
+                              return;
+                          }
+
                           if (JSON.stringify(schedulesRef.current) !== JSON.stringify(parsedData)) {
                               setSchedules(parsedData);
                               schedulesRef.current = parsedData;
+                              
+                              // บันทึกลง IndexedDB เป็นหลัก (ไม่จำกัดขนาด ไม่สูญหายง่าย)
+                              saveStateLocallyIDB('bmg_schedules_v2', parsedData);
+                              
                               if (typeof window !== 'undefined') {
-                                  localStorage.setItem('bmg_schedules_v2', JSON.stringify(parsedData));
+                                  try {
+                                      localStorage.setItem('bmg_schedules_v2', JSON.stringify(parsedData));
+                                  } catch(e) {
+                                      console.warn("LocalStorage Quota Exceeded for schedules. Relying on IndexedDB.");
+                                  }
                               }
                           }
                       } catch (e) {
@@ -3838,7 +3871,7 @@ export default function App() {
       });
 
       return () => unsubscribe();
-  }, [fbUser]);
+  }, [db, fbUser, appId]);
   
   const getLocalMonthStr = () => {
       const d = new Date();
@@ -4516,162 +4549,183 @@ export default function App() {
   const changeMonth = (increment) => { const [year, month] = currentMonth.split('-').map(Number); const date = new Date(year, month - 1 + increment, 1); const newYear = date.getFullYear(); const newMonth = String(date.getMonth() + 1).padStart(2, '0'); setCurrentMonth(`${newYear}-${newMonth}`); }; const getDaysInMonth = (year, month) => { const numDays = new Date(year, month, 0).getDate(); return Array.from({ length: numDays }, (_, i) => i + 1); }; 
   
   const handleSaveSchedule = () => { 
-      if (selectedProject) {
-          const noteKey = `${selectedProject.id}_${currentMonth}`;
-          setScheduleNotes(prev => ({ ...prev, [noteKey]: scheduleNote }));
-          
-          // --- FIX: แยกการเซฟ Schedules ออกมาทำแบบมีระบบป้องกัน ---
-          const scheduleData = schedulesRef.current;
-          
-          if (typeof window !== 'undefined') {
-              localStorage.setItem('bmg_schedules_v2', JSON.stringify(scheduleData));
-          }
-
-          // --- NEW: ส่ง Backup ของ Schedule ขึ้น Google Drive เป็นไฟล์ JSON ด้วย ---
-          if (GOOGLE_SCRIPT_CONFIG.DRIVE_URL && !GOOGLE_SCRIPT_CONFIG.DRIVE_URL.includes('YOUR_')) {
-              try {
-                  // กรองข้อมูลเฉพาะของเดือนนี้และโครงการนี้ เพื่อไม่ให้ไฟล์ใหญ่เกินไป
-                  const currentProjSchedules = {};
-                  Object.keys(scheduleData).forEach(k => {
-                      if (k.includes(currentMonth)) currentProjSchedules[k] = scheduleData[k];
-                  });
-
-                  // แปลง Object เป็น Base64 string ให้เซฟลง Drive ได้
-                  const jsonString = JSON.stringify(currentProjSchedules);
-                  const base64Data = btoa(unescape(encodeURIComponent(jsonString)));
-
-                  fetch(GOOGLE_SCRIPT_CONFIG.DRIVE_URL, {
-                      method: 'POST',
-                      mode: 'no-cors',
-                      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                      body: JSON.stringify({
-                          filename: `Schedule_${selectedProject.code}_${currentMonth}.json`,
-                          mimeType: 'application/json',
-                          data: base64Data,
-                          folderName: `Schedule_Backups_${selectedProject.code}`
-                      })
-                  }).catch(e => console.error("Drive Backup Error", e));
-              } catch (e) {
-                  console.error("Failed to backup schedule to Drive", e);
-              }
-          }
-
-          // --- NEW: ซิงค์ตารางงานเข้า Google Sheets อัตโนมัติ (แยกรายเดือน/รายโครงการ) ---
-          if (GOOGLE_SCRIPT_CONFIG.SHEETS_URL && !GOOGLE_SCRIPT_CONFIG.SHEETS_URL.includes('YOUR_')) {
-              try {
-                  const [year, month] = currentMonth.split('-').map(Number);
-                  const numDays = new Date(year, month, 0).getDate();
-                  const daysInMonth = Array.from({ length: numDays }, (_, i) => i + 1);
-                  
-                  // จัดเรียงพนักงานตามที่แสดงผลในหน้าจอ
-                  const projectStaff = users.filter(u => u.department === selectedProject.name);
-                  const currentOrder = projectStaffOrder[selectedProject.id] || [];
-                  const staffToExport = [...projectStaff].sort((a, b) => {
-                      let idxA = currentOrder.indexOf(a.id);
-                      let idxB = currentOrder.indexOf(b.id);
-                      if (idxA === -1) idxA = 9999;
-                      if (idxB === -1) idxB = 9999;
-                      return idxA - idxB;
-                  });
-
-                  // สร้างรูปแบบข้อมูลให้เป็นตารางสำหรับ Google Sheets
-                  const sheetData = staffToExport.map((user, index) => {
-                      let row = {
-                          'ลำดับ': index + 1,
-                          'รหัสพนักงาน': user.employeeId || '-',
-                          'ชื่อ-สกุล': `${user.firstName} ${user.lastName}`,
-                          'ตำแหน่ง': user.position,
-                          'โครงการ': selectedProject.name,
-                          'ประจำเดือน': currentMonth
-                      };
-                      
-                      daysInMonth.forEach(d => {
-                          const dateString = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                          const planKey = `${user.id}_${dateString}`;
-                          const actKey = `${user.id}_${dateString}_act`;
-                          
-                          row[`${d} (Plan)`] = scheduleData[planKey] || '';
-                          row[`${d} (Act)`] = scheduleData[actKey] !== undefined ? scheduleData[actKey] : (scheduleData[planKey] || '');
-                      });
-                      
-                      row['หมายเหตุ (ตลอดเดือน)'] = scheduleNote || '';
-                      return row;
-                  });
-
-                  // ชื่อชีต: Schedule_รหัสโครงการ_เดือน (เช่น Schedule_C-001_2026-05)
-                  const sheetName = `Schedule_${selectedProject.code}_${currentMonth}`;
-                  triggerAutoSync(sheetName, sheetData, []);
-              } catch(e) {
-                  console.error("Auto-sync schedule to Sheets error", e);
-              }
-          }
-
-          if (db && fbUser && appId) {
-              if (syncScheduleTimeoutRef.current) clearTimeout(syncScheduleTimeoutRef.current);
+      try {
+          if (selectedProject) {
+              const noteKey = `${selectedProject.id}_${currentMonth}`;
+              setScheduleNotes(prev => ({ ...prev, [noteKey]: scheduleNote }));
               
-              // แจ้งผู้ใช้ว่ากำลังบันทึก (เพราะข้อมูลอาจจะใหญ่)
-              setAutoSyncMessage('กำลังบันทึกข้อมูลตารางงาน...');
+              // --- FIX: แยกการเซฟ Schedules ออกมาทำแบบมีระบบป้องกัน ---
+              const scheduleData = schedulesRef.current;
+              
+              // 1. บันทึกลง IndexedDB เป็นหลัก (เพื่อป้องกัน LocalStorage เต็มแล้วแอปค้าง)
+              saveStateLocallyIDB('bmg_schedules_v2', scheduleData);
 
-              syncScheduleTimeoutRef.current = setTimeout(async () => {
+              // 2. ลองบันทึกลง LocalStorage (ดัก Error ไว้ไม่ให้แอปพังถ้าเกิน 5MB)
+              if (typeof window !== 'undefined') {
                   try {
-                      const jsonStr = JSON.stringify(scheduleData);
-                      const CHUNK_SIZE = 250000; // FIX: ลดขนาด Chunk ลงเพื่อป้องกันขีดจำกัด
-                      const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
-                      
-                      for (let i = 0; i < totalChunks; i++) {
-                          const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `bmg_schedules_v2_${i}`);
-                          const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                          await setDoc(chunkRef, { chunk: chunkData });
-                      }
-                      
-                      const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', 'bmg_schedules_v2');
-                      await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
-                      
-                      setAutoSyncMessage('บันทึกตารางงานสำเร็จ');
-                      setTimeout(() => setAutoSyncMessage(''), 3000);
-                  } catch (err) {
-                      console.error(`Firestore Schedule Save Error:`, err);
-                      alert('เกิดข้อผิดพลาดในการบันทึกตารางงาน (กรุณาลองอีกครั้ง)');
-                      setAutoSyncMessage('');
-                  } finally {
-                      syncScheduleTimeoutRef.current = null;
+                      localStorage.setItem('bmg_schedules_v2', JSON.stringify(scheduleData));
+                  } catch (e) {
+                      console.warn("LocalStorage full, schedule saved to IndexedDB instead.");
                   }
-              }, 1000);
-          }
-          
-          // --- NEW: Workflow Logic ---
-          const approvalKey = `${selectedProject.id}_${currentMonth}`;
-          const currentApproval = scheduleApprovals[approvalKey] || {};
-          
-          const isManager = (currentUser?.position || '').includes('ผู้จัดการอาคาร') || (currentUser?.position || '').includes('ผู้จัดการหมู่บ้าน');
-          const isAreaManager = (currentUser?.position || '').includes('ผู้จัดการพื้นที่');
-          const isAdmin = currentUser?.username === 'admin';
-          
-          let nextStatus = 'Pending Manager';
-          
-          // ถ้าเป็น Area Manager หรือ Admin ทำเอง ให้ไปรอ HR อนุมัติเลย
-          if (isAreaManager || isAdmin) {
-              nextStatus = 'Pending HR';
-          } 
-          // ถ้าเป็น Manager ทำเอง ให้ส่งไปรอ Area Manager อนุมัติ
-          else if (isManager) {
-              nextStatus = 'Pending Area Manager';
-          }
-          
-          setScheduleApprovals(prev => ({
-              ...prev,
-              [approvalKey]: {
-                  ...currentApproval,
-                  status: nextStatus,
-                  preparedBy: `${currentUser.firstName} ${currentUser.lastName}`,
-                  preparedByRole: currentUser.position,
-                  managerApprovedBy: (isAreaManager || isAdmin) ? `${currentUser.firstName} ${currentUser.lastName}` : null,
-                  managerApprovedByRole: (isAreaManager || isAdmin) ? currentUser.position : null,
-                  updatedAt: new Date().toISOString()
               }
-          }));
 
-          alert(`บันทึกตารางงานสำเร็จ! ระบบได้ส่งข้อมูลให้ ${nextStatus === 'Pending Area Manager' ? 'ผู้จัดการพื้นที่' : nextStatus === 'Pending HR' ? 'เจ้าหน้าที่ฝ่ายบุคคล (HR)' : 'ผู้จัดการ'} อนุมัติตามลำดับแล้ว`); 
+              // --- NEW: ส่ง Backup ของ Schedule ขึ้น Google Drive เป็นไฟล์ JSON ด้วย ---
+              if (GOOGLE_SCRIPT_CONFIG.DRIVE_URL && !GOOGLE_SCRIPT_CONFIG.DRIVE_URL.includes('YOUR_')) {
+                  try {
+                      // กรองข้อมูลเฉพาะของเดือนนี้และโครงการนี้ เพื่อไม่ให้ไฟล์ใหญ่เกินไป
+                      const currentProjSchedules = {};
+                      Object.keys(scheduleData).forEach(k => {
+                          if (k.includes(currentMonth)) currentProjSchedules[k] = scheduleData[k];
+                      });
+
+                      // แปลง Object เป็น Base64 string ให้เซฟลง Drive ได้
+                      const jsonString = JSON.stringify(currentProjSchedules);
+                      
+                      // FIX: ปรับการเข้ารหัส Base64 สำหรับ String ยาวๆ ที่มีภาษาไทย ป้องกัน Call Stack Exceeded ทำให้ปุ่มค้าง
+                      const textEncoder = new TextEncoder();
+                      const utf8Arr = textEncoder.encode(jsonString);
+                      let binString = "";
+                      for (let i = 0; i < utf8Arr.length; i++) {
+                          binString += String.fromCharCode(utf8Arr[i]);
+                      }
+                      const base64Data = btoa(binString);
+
+                      fetch(GOOGLE_SCRIPT_CONFIG.DRIVE_URL, {
+                          method: 'POST',
+                          mode: 'no-cors',
+                          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                          body: JSON.stringify({
+                              filename: `Schedule_${selectedProject.code}_${currentMonth}.json`,
+                              mimeType: 'application/json',
+                              data: base64Data,
+                              folderName: `Schedule_Backups_${selectedProject.code}`
+                          })
+                      }).catch(e => console.error("Drive Backup Error", e));
+                  } catch (e) {
+                      console.error("Failed to backup schedule to Drive", e);
+                  }
+              }
+
+              // --- NEW: ซิงค์ตารางงานเข้า Google Sheets อัตโนมัติ (แยกรายเดือน/รายโครงการ) ---
+              if (GOOGLE_SCRIPT_CONFIG.SHEETS_URL && !GOOGLE_SCRIPT_CONFIG.SHEETS_URL.includes('YOUR_')) {
+                  try {
+                      const [year, month] = currentMonth.split('-').map(Number);
+                      const numDays = new Date(year, month, 0).getDate();
+                      const daysInMonth = Array.from({ length: numDays }, (_, i) => i + 1);
+                      
+                      // จัดเรียงพนักงานตามที่แสดงผลในหน้าจอ
+                      const projectStaff = users.filter(u => u.department === selectedProject.name);
+                      const currentOrder = projectStaffOrder[selectedProject.id] || [];
+                      const staffToExport = [...projectStaff].sort((a, b) => {
+                          let idxA = currentOrder.indexOf(a.id);
+                          let idxB = currentOrder.indexOf(b.id);
+                          if (idxA === -1) idxA = 9999;
+                          if (idxB === -1) idxB = 9999;
+                          return idxA - idxB;
+                      });
+
+                      // สร้างรูปแบบข้อมูลให้เป็นตารางสำหรับ Google Sheets
+                      const sheetData = staffToExport.map((user, index) => {
+                          let row = {
+                              'ลำดับ': index + 1,
+                              'รหัสพนักงาน': user.employeeId || '-',
+                              'ชื่อ-สกุล': `${user.firstName} ${user.lastName}`,
+                              'ตำแหน่ง': user.position,
+                              'โครงการ': selectedProject.name,
+                              'ประจำเดือน': currentMonth
+                          };
+                          
+                          daysInMonth.forEach(d => {
+                              const dateString = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                              const planKey = `${user.id}_${dateString}`;
+                              const actKey = `${user.id}_${dateString}_act`;
+                              
+                              row[`${d} (Plan)`] = scheduleData[planKey] || '';
+                              row[`${d} (Act)`] = scheduleData[actKey] !== undefined ? scheduleData[actKey] : (scheduleData[planKey] || '');
+                          });
+                          
+                          row['หมายเหตุ (ตลอดเดือน)'] = scheduleNote || '';
+                          return row;
+                      });
+
+                      // ชื่อชีต: Schedule_รหัสโครงการ_เดือน (เช่น Schedule_C-001_2026-05)
+                      const sheetName = `Schedule_${selectedProject.code}_${currentMonth}`;
+                      triggerAutoSync(sheetName, sheetData, []);
+                  } catch(e) {
+                      console.error("Auto-sync schedule to Sheets error", e);
+                  }
+              }
+
+              if (db && fbUser && appId) {
+                  if (syncScheduleTimeoutRef.current) clearTimeout(syncScheduleTimeoutRef.current);
+                  
+                  // แจ้งผู้ใช้ว่ากำลังบันทึก (เพราะข้อมูลอาจจะใหญ่)
+                  setAutoSyncMessage('กำลังบันทึกข้อมูลตารางงาน...');
+
+                  syncScheduleTimeoutRef.current = setTimeout(async () => {
+                      try {
+                          const jsonStr = JSON.stringify(scheduleData);
+                          const CHUNK_SIZE = 250000; // FIX: ลดขนาด Chunk ลงเพื่อป้องกันขีดจำกัด
+                          const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
+                          
+                          for (let i = 0; i < totalChunks; i++) {
+                              const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `bmg_schedules_v2_${i}`);
+                              const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+                              await setDoc(chunkRef, { chunk: chunkData });
+                          }
+                          
+                          const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', 'bmg_schedules_v2');
+                          await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
+                          
+                          setAutoSyncMessage('บันทึกตารางงานสำเร็จ');
+                          setTimeout(() => setAutoSyncMessage(''), 3000);
+                      } catch (err) {
+                          console.error(`Firestore Schedule Save Error:`, err);
+                          alert('เกิดข้อผิดพลาดในการบันทึกตารางงาน (กรุณาลองอีกครั้ง)');
+                          setAutoSyncMessage('');
+                      } finally {
+                          syncScheduleTimeoutRef.current = null;
+                      }
+                  }, 1000);
+              }
+              
+              // --- NEW: Workflow Logic ---
+              const approvalKey = `${selectedProject.id}_${currentMonth}`;
+              const currentApproval = scheduleApprovals[approvalKey] || {};
+              
+              const isManager = (currentUser?.position || '').includes('ผู้จัดการอาคาร') || (currentUser?.position || '').includes('ผู้จัดการหมู่บ้าน');
+              const isAreaManager = (currentUser?.position || '').includes('ผู้จัดการพื้นที่');
+              const isAdmin = currentUser?.username === 'admin';
+              
+              let nextStatus = 'Pending Manager';
+              
+              // ถ้าเป็น Area Manager หรือ Admin ทำเอง ให้ไปรอ HR อนุมัติเลย
+              if (isAreaManager || isAdmin) {
+                  nextStatus = 'Pending HR';
+              } 
+              // ถ้าเป็น Manager ทำเอง ให้ส่งไปรอ Area Manager อนุมัติ
+              else if (isManager) {
+                  nextStatus = 'Pending Area Manager';
+              }
+              
+              setScheduleApprovals(prev => ({
+                  ...prev,
+                  [approvalKey]: {
+                      ...currentApproval,
+                      status: nextStatus,
+                      preparedBy: `${currentUser.firstName} ${currentUser.lastName}`,
+                      preparedByRole: currentUser.position,
+                      managerApprovedBy: (isAreaManager || isAdmin) ? `${currentUser.firstName} ${currentUser.lastName}` : null,
+                      managerApprovedByRole: (isAreaManager || isAdmin) ? currentUser.position : null,
+                      updatedAt: new Date().toISOString()
+                  }
+              }));
+
+              alert(`บันทึกตารางงานสำเร็จ! ระบบได้ส่งข้อมูลให้ ${nextStatus === 'Pending Area Manager' ? 'ผู้จัดการพื้นที่' : nextStatus === 'Pending HR' ? 'เจ้าหน้าที่ฝ่ายบุคคล (HR)' : 'ผู้จัดการ'} อนุมัติตามลำดับแล้ว`); 
+          }
+      } catch (error) {
+          console.error("Critical error in handleSaveSchedule:", error);
+          alert(`เกิดข้อผิดพลาดระหว่างการบันทึก: ${error.message}`);
       }
   }; 
 
@@ -5483,6 +5537,71 @@ export default function App() {
   // ฟังก์ชันพิเศษสำหรับดาวน์โหลดตารางงานเป็นรูปภาพ
   const exportScheduleImage = async () => {
       handleExportImage('print-schedule-area', `Work_Schedule_${selectedProject?.name || 'Project'}_${currentMonth}.jpg`);
+  };
+
+  // ฟังก์ชันพิเศษสำหรับส่งออกตารางงานเป็น CSV
+  const exportScheduleCSV = () => {
+      const [year, month] = currentMonth.split('-').map(Number);
+      const daysInMonth = getDaysInMonth(year, month);
+      const csvData = [];
+
+      // สร้างรายชื่อพนักงานและตารางกะ
+      const projectStaffForSchedule = users.filter(u => u.department === selectedProject.name);
+      const rawOrder = projectStaffOrder[selectedProject.id];
+      const currentOrder = Array.isArray(rawOrder) ? rawOrder : [];
+      const sortedStaff = [...projectStaffForSchedule].sort((a, b) => {
+          let indexA = currentOrder.indexOf(a.id);
+          let indexB = currentOrder.indexOf(b.id);
+          if (indexA === -1) indexA = 9999;
+          if (indexB === -1) indexB = 9999;
+          return indexA - indexB;
+      });
+
+      sortedStaff.forEach((user, index) => {
+          const planRow = {
+              'ลำดับ': index + 1,
+              'รหัสพนักงาน': user.employeeId || '-',
+              'ชื่อ-นามสกุล': `${user.firstName} ${user.lastName}`,
+              'ตำแหน่ง': user.position,
+              'ประเภท': 'PLAN'
+          };
+          const actRow = {
+              'ลำดับ': '',
+              'รหัสพนักงาน': '',
+              'ชื่อ-นามสกุล': '',
+              'ตำแหน่ง': '',
+              'ประเภท': 'ACT'
+          };
+
+          daysInMonth.forEach(d => {
+              const mm = String(month).padStart(2, '0');
+              const dd = String(d).padStart(2, '0');
+              const dateString = `${year}-${mm}-${dd}`;
+              
+              const planKey = `${user.id}_${dateString}`;
+              const actKey = `${user.id}_${dateString}_act`;
+              
+              planRow[`วันที่ ${d}`] = schedules[planKey] || '';
+              actRow[`วันที่ ${d}`] = schedules[actKey] !== undefined ? schedules[actKey] : (schedules[planKey] || '');
+          });
+
+          csvData.push(planRow);
+          csvData.push(actRow);
+      });
+
+      // เพิ่มหมายเหตุตารางงานไว้ด้านล่าง (ถ้ามี)
+      if (scheduleNote) {
+          const emptyRow = {
+              'ลำดับ': '', 'รหัสพนักงาน': '', 'ชื่อ-นามสกุล': '', 'ตำแหน่ง': '', 'ประเภท': ''
+          };
+          daysInMonth.forEach(d => emptyRow[`วันที่ ${d}`] = '');
+          csvData.push({ ...emptyRow }); // บรรทัดว่างคั่น
+          
+          const noteRow = { ...emptyRow, 'ลำดับ': 'หมายเหตุเพิ่มเติม:', 'รหัสพนักงาน': scheduleNote.replace(/\n/g, ' ') };
+          csvData.push(noteRow);
+      }
+
+      exportToCSV(csvData, `Work_Schedule_${selectedProject?.code || 'Project'}_${currentMonth}`);
   };
 
   // New Handlers for Daily Report
@@ -10983,6 +11102,9 @@ export default function App() {
                             <button onClick={() => changeMonth(1)} className={`p-1 hover:bg-white rounded shadow-sm transition ${isExporting ? 'hidden' : ''}`}><ChevronRight size={18}/></button>
                         </div>
                         <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
+                            <Button variant="outline" size="sm" icon={Download} onClick={exportScheduleCSV} disabled={isExporting} className="border-green-500 text-green-600 hover:bg-green-50">
+                                ดาวน์โหลด CSV
+                            </Button>
                             <Button variant="outline" size="sm" icon={isExporting ? Loader2 : ImageIcon} onClick={exportScheduleImage} disabled={isExporting} className="border-blue-500 text-blue-600 hover:bg-blue-50">
                                 {isExporting ? 'กำลังประมวลผล...' : 'ดาวน์โหลดรูปภาพ'}
                             </Button>
