@@ -1803,7 +1803,52 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                 let opCount = 0;
                 for (const item of newValue) {
                     if (!item.id) continue;
-                    batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id), item);
+
+                    const itemToSave = { ...item };
+                    
+                    // ป้องกัน Error 1MB Limit จากไฟล์เอกสาร PDF
+                    if (itemToSave.files) {
+                        const safeFiles = {};
+                        for (const fileId in itemToSave.files) {
+                            safeFiles[fileId] = { ...itemToSave.files[fileId] };
+                            if (safeFiles[fileId].data && safeFiles[fileId].data.length > 100000) {
+                                delete safeFiles[fileId].data; 
+                                safeFiles[fileId].isLocalOnly = true;
+                            }
+                        }
+                        itemToSave.files = safeFiles;
+                    }
+
+                    // ป้องกัน Error 1MB Limit จากรูปภาพที่ใหญ่เกินไปตอน Restore
+                    try {
+                        let docStr = JSON.stringify(itemToSave);
+                        if (docStr.length > 850000) { 
+                            if (itemToSave.performance) {
+                                for (const dept in itemToSave.performance) {
+                                    if (itemToSave.performance[dept].images && itemToSave.performance[dept].images.length > 0) {
+                                        itemToSave.performance[dept].images = []; 
+                                        itemToSave.performance[dept].details = (itemToSave.performance[dept].details || '') + '\n[หมายเหตุ: รูปภาพถูกลบเนื่องจากขนาดไฟล์รวมเกินขีดจำกัดคลาวด์]';
+                                    }
+                                }
+                            }
+                            if (itemToSave.images && itemToSave.images.length > 0) {
+                                itemToSave.images = [];
+                                itemToSave.remark = (itemToSave.remark || '') + '\n[หมายเหตุ: รูปภาพถูกลบเนื่องจากขนาดไฟล์รวมเกินขีดจำกัดคลาวด์]';
+                            }
+                            if (itemToSave.photo) {
+                                itemToSave.photo = null;
+                                if (itemToSave.details !== undefined) {
+                                    itemToSave.details = (itemToSave.details || '') + '\n[หมายเหตุ: รูปภาพถูกลบเนื่องจากขนาดไฟล์ใหญ่เกินขีดจำกัดคลาวด์]';
+                                } else if (itemToSave.remark !== undefined) {
+                                    itemToSave.remark = (itemToSave.remark || '') + '\n[หมายเหตุ: รูปภาพถูกลบเนื่องจากขนาดไฟล์ใหญ่เกินขีดจำกัดคลาวด์]';
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn("Error calculating doc size:", e);
+                    }
+
+                    batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id), itemToSave);
                     opCount++;
                     if (opCount >= 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
                 }
@@ -1865,6 +1910,14 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                             if (itemToSave.images && itemToSave.images.length > 0) {
                                 itemToSave.images = [];
                                 itemToSave.remark = (itemToSave.remark || '') + '\n[หมายเหตุ: รูปภาพถูกลบเนื่องจากขนาดไฟล์รวมเกินขีดจำกัด]';
+                            }
+                            if (itemToSave.photo) {
+                                itemToSave.photo = null;
+                                if (itemToSave.details !== undefined) {
+                                    itemToSave.details = (itemToSave.details || '') + '\n[หมายเหตุ: รูปภาพถูกลบเนื่องจากขนาดไฟล์ใหญ่เกินขีดจำกัดคลาวด์]';
+                                } else if (itemToSave.remark !== undefined) {
+                                    itemToSave.remark = (itemToSave.remark || '') + '\n[หมายเหตุ: รูปภาพถูกลบเนื่องจากขนาดไฟล์ใหญ่เกินขีดจำกัดคลาวด์]';
+                                }
                             }
                         }
                     } catch (e) {
@@ -5714,6 +5767,104 @@ export default function App() {
                   }, 'ยืนยันการนำเข้า', 'info');
               } else {
                   alert('ไม่พบข้อมูลใหม่ หรือข้อมูลวันที่ซ้ำกับที่มีอยู่ในระบบแล้ว (ระบบจะบันทึกได้แค่วันละ 1 ฉบับเท่านั้น)');
+              }
+          } catch (error) {
+              alert('เกิดข้อผิดพลาดในการอ่านไฟล์ CSV โปรดตรวจสอบรูปแบบไฟล์');
+              console.error(error);
+          }
+      };
+      event.target.value = '';
+  };
+
+  // --- NEW: Generic Import Items CSV (Assets, Tools, Machines) ---
+  const handleImportItemsCSV = (event, type) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.readAsArrayBuffer(file);
+      reader.onload = (e) => {
+          try {
+              const buffer = e.target.result;
+              let text = '';
+              try { text = new TextDecoder('utf-8', { fatal: true }).decode(buffer); } 
+              catch (err) { text = new TextDecoder('windows-874').decode(buffer); }
+
+              const lines = text.split(/\r?\n/);
+              if (lines.length < 2) return alert('ไฟล์ CSV ไม่มีข้อมูล หรือมีแค่หัวตาราง');
+              
+              const parseCSVLine = (line) => {
+                  const regex = /,(?=(?:(?:[^"]*"){2})*[^"]*$)/;
+                  return line.split(regex).map(v => v.trim().replace(/^"|"$/g, ''));
+              };
+
+              const headers = parseCSVLine(lines[0]);
+              const newItems = [];
+              
+              for (let i = 1; i < lines.length; i++) {
+                  if (!lines[i].trim()) continue;
+                  const values = parseCSVLine(lines[i]);
+                  const rowObj = {};
+                  headers.forEach((header, index) => rowObj[header] = values[index]);
+                  
+                  const codeKey = Object.keys(rowObj).find(k => k.includes('รหัส') || k.toLowerCase().includes('code'));
+                  const nameKey = Object.keys(rowObj).find(k => k.includes('ชื่อ') || k.toLowerCase().includes('name'));
+                  const qtyKey = Object.keys(rowObj).find(k => k.includes('จำนวน') || k.toLowerCase().includes('qty'));
+                  const locKey = Object.keys(rowObj).find(k => k.includes('สถาน') || k.toLowerCase().includes('location'));
+                  const detKey = Object.keys(rowObj).find(k => k.includes('รายละ') || k.toLowerCase().includes('detail'));
+                  const sysKey = Object.keys(rowObj).find(k => k.includes('ระบบ') || k.toLowerCase().includes('system'));
+
+                  const code = codeKey ? rowObj[codeKey] : '';
+                  const name = nameKey ? rowObj[nameKey] : '';
+                  
+                  if (name) {
+                      const item = {
+                          id: generateId(),
+                          projectId: selectedProject.id,
+                          code: code || `${selectedProject.code}-${type === 'assets' ? 'A' : type === 'tools' ? 'T' : 'M'}-${generateId().substring(0,4).toUpperCase()}`,
+                          name: name,
+                          qty: parseInt(qtyKey ? rowObj[qtyKey] : 1) || 1,
+                          location: locKey ? rowObj[locKey] : '',
+                          photo: null
+                      };
+
+                      if (type === 'machines') {
+                          item.system = sysKey ? rowObj[sysKey] : 'อื่นๆ (Other)';
+                      } else {
+                          item.details = detKey ? rowObj[detKey] : '';
+                      }
+
+                      newItems.push(item);
+                  }
+              }
+              
+              if (newItems.length > 0) {
+                  showConfirm('ยืนยันการนำเข้า', `พบข้อมูล ${newItems.length} รายการ ต้องการเพิ่มเข้าสู่ระบบใช่หรือไม่?`, () => {
+                      if (type === 'assets') {
+                          setAssets(prev => {
+                              const safeNew = newItems.filter(na => !prev.some(pa => pa.code === na.code && pa.projectId === na.projectId));
+                              const nextList = [...safeNew, ...prev];
+                              setTimeout(() => triggerAutoSync('Assets_ทรัพย์สิน', nextList, []), 500);
+                              return nextList;
+                          }, true);
+                      } else if (type === 'tools') {
+                          setTools(prev => {
+                              const safeNew = newItems.filter(na => !prev.some(pa => pa.code === na.code && pa.projectId === na.projectId));
+                              const nextList = [...safeNew, ...prev];
+                              setTimeout(() => triggerAutoSync('Tools_เครื่องมือ', nextList, []), 500);
+                              return nextList;
+                          }, true);
+                      } else if (type === 'machines') {
+                          setMachines(prev => {
+                              const safeNew = newItems.filter(na => !prev.some(pa => pa.code === na.code && pa.projectId === na.projectId));
+                              const nextList = [...safeNew, ...prev];
+                              setTimeout(() => triggerAutoSync('Machines_เครื่องจักร', nextList, []), 500);
+                              return nextList;
+                          }, true);
+                      }
+                      alert('นำเข้าข้อมูลสำเร็จแล้ว!');
+                  }, 'ยืนยันการนำเข้า', 'info');
+              } else {
+                  alert('ไม่พบข้อมูลใหม่ที่ถูกต้อง (โปรดตรวจสอบไฟล์ CSV ว่ามีหัวตาราง "ชื่อทรัพย์สิน")');
               }
           } catch (error) {
               alert('เกิดข้อผิดพลาดในการอ่านไฟล์ CSV โปรดตรวจสอบรูปแบบไฟล์');
@@ -11496,6 +11647,12 @@ export default function App() {
                 <div className="p-4 border-b flex justify-between items-center bg-white">
                     <h3 className="font-bold flex items-center gap-2"><Shield size={20} className="text-orange-500" /> {t('regAssets')}</h3>
                     <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
+                        {hasPerm('proj_assets', 'save') && (
+                            <label className="cursor-pointer flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs rounded-md font-medium transition-colors bg-green-600 text-white hover:bg-green-700 shadow-sm" title="นำเข้า CSV ทะเบียนทรัพย์สิน">
+                                <Upload size={14} /> นำเข้า CSV
+                                <input type="file" accept=".csv" className="hidden" onChange={(e) => handleImportItemsCSV(e, 'assets')} />
+                            </label>
+                        )}
                         <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(assets.filter(a => a.projectId === selectedProject.id), 'asset_list')}>{t('exportCSV')}</Button>
                         <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-assets-area', `Assets_${selectedProject?.code || 'List'}.pdf`, 'landscape')} disabled={isExporting}>
                             {isExporting ? t('downloading') : t('downloadPDF')}
@@ -11576,6 +11733,12 @@ export default function App() {
                 <div className="p-4 border-b flex justify-between items-center bg-white">
                     <h3 className="font-bold flex items-center gap-2"><Wrench size={20} className="text-orange-500" /> {t('toolsRegistry')}</h3>
                     <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
+                        {hasPerm('proj_tools', 'save') && (
+                            <label className="cursor-pointer flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs rounded-md font-medium transition-colors bg-green-600 text-white hover:bg-green-700 shadow-sm" title="นำเข้า CSV เครื่องมือช่าง">
+                                <Upload size={14} /> นำเข้า CSV
+                                <input type="file" accept=".csv" className="hidden" onChange={(e) => handleImportItemsCSV(e, 'tools')} />
+                            </label>
+                        )}
                         <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(tools.filter(t => t.projectId === selectedProject.id), 'tools_list')}>{t('exportCSV')}</Button>
                         <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-tools-area', `Tools_${selectedProject?.code || 'List'}.pdf`, 'landscape')} disabled={isExporting}>
                             {isExporting ? t('downloading') : t('downloadPDF')}
@@ -12056,6 +12219,12 @@ export default function App() {
                         <div className="p-4 border-b flex justify-between items-center">
                             <h3 className="font-bold flex items-center gap-2 text-gray-800">{t('pm_registry_title')}</h3>
                             <div className="flex gap-2">
+                                {hasPerm('proj_pm', 'save') && (
+                                    <label className="cursor-pointer flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs rounded-md font-medium transition-colors bg-green-600 text-white hover:bg-green-700 shadow-sm" title="นำเข้า CSV เครื่องจักร">
+                                        <Upload size={14} /> นำเข้า CSV
+                                        <input type="file" accept=".csv" className="hidden" onChange={(e) => handleImportItemsCSV(e, 'machines')} />
+                                    </label>
+                                )}
                                 <Button variant="outline" size="sm" icon={PrinterIcon}>{t('downloadPDF')}</Button>
                                 {hasPerm('proj_pm', 'save') && <Button size="sm" icon={Plus} onClick={() => { setIsEditingMachine(false); setNewMachine({ code: '', name: '', system: '', qty: 1, location: '', photo: null }); setShowAddMachineModal(true); }} className="bg-red-600 hover:bg-red-700">{t('addMachine')}</Button>}
                             </div>
