@@ -21793,6 +21793,259 @@ export default function App() {
         </div>
       )}
 
+      {/* Add Inventory Modal */}
+      {showAddInventoryModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 relative animate-fade-in max-h-[90vh] flex flex-col">
+            <div className="flex justify-between items-center mb-6 border-b pb-4 shrink-0">
+              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <Package className="text-emerald-500" />
+                {isEditingInventory ? 'แก้ไขรายการวัสดุ' : 'เพิ่มวัสดุใหม่ (New Item)'}
+              </h2>
+              <button onClick={() => setShowAddInventoryModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                <form id="inventoryForm" onSubmit={handleSaveInventoryItem} className="space-y-4 pb-2">
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">รหัสวัสดุ (Code)</label>
+                            <input 
+                                type="text" 
+                                readOnly={!isEditingInventory}
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200 bg-gray-50 text-gray-500 font-mono"
+                                value={newInventoryItem.code}
+                                onChange={e => setNewInventoryItem({...newInventoryItem, code: e.target.value})}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">หมวดหมู่ (Category)</label>
+                            <select 
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200 bg-white"
+                                value={newInventoryItem.category}
+                                onChange={e => setNewInventoryItem({...newInventoryItem, category: e.target.value})}
+                            >
+                                {INVENTORY_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                                <option value="อื่นๆ">อื่นๆ (ระบุเอง)</option>
+                            </select>
+                            {newInventoryItem.category === 'อื่นๆ' && (
+                                <input 
+                                    type="text" 
+                                    required 
+                                    className="mt-2 w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200"
+                                    value={newInventoryItem.customCategory}
+                                    onChange={e => setNewInventoryItem({...newInventoryItem, customCategory: e.target.value})}
+                                    placeholder="ระบุหมวดหมู่"
+                                />
+                            )}
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">ชื่อวัสดุ/อุปกรณ์ (Item Name) <span className="text-red-500">*</span></label>
+                        <input 
+                            type="text" 
+                            required 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200"
+                            value={newInventoryItem.name}
+                            onChange={e => setNewInventoryItem({...newInventoryItem, name: e.target.value})}
+                            placeholder="เช่น กระดาษ A4, หลอดไฟ LED 18W"
+                        />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">จำนวนเริ่มต้น (Initial Qty)</label>
+                            <input 
+                                type="number" 
+                                min="0"
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200"
+                                value={newInventoryItem.quantity}
+                                onChange={e => setNewInventoryItem({...newInventoryItem, quantity: parseInt(e.target.value) || 0})}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">หน่วยนับ (Unit)</label>
+                            <select 
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200 bg-white"
+                                value={newInventoryItem.unit}
+                                onChange={e => setNewInventoryItem({...newInventoryItem, unit: e.target.value})}
+                            >
+                                {INVENTORY_UNITS.map(unit => <option key={unit} value={unit}>{unit}</option>)}
+                                <option value="อื่นๆ">อื่นๆ (ระบุเอง)</option>
+                            </select>
+                            {newInventoryItem.unit === 'อื่นๆ' && (
+                                <input 
+                                    type="text" 
+                                    required 
+                                    className="mt-2 w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200"
+                                    value={newInventoryItem.customUnit}
+                                    onChange={e => setNewInventoryItem({...newInventoryItem, customUnit: e.target.value})}
+                                    placeholder="ระบุหน่วยนับ"
+                                />
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">จุดสั่งซื้อ (Min Threshold)</label>
+                            <input 
+                                type="number" 
+                                min="0"
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-emerald-200 bg-orange-50 text-orange-800"
+                                value={newInventoryItem.minThreshold}
+                                onChange={e => setNewInventoryItem({...newInventoryItem, minThreshold: parseInt(e.target.value) || 0})}
+                                title="ระบบจะแจ้งเตือนเมื่อสต๊อกเหลือเท่ากับหรือน้อยกว่าค่านี้"
+                            />
+                            <p className="text-[10px] text-gray-500 mt-1">เตือนเมื่อเหลือน้อยกว่าหรือเท่ากับ</p>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">สถานที่จัดเก็บ (Location)</label>
+                            <div className="relative">
+                                <MapPin size={16} className="absolute left-2 top-2.5 text-gray-400"/>
+                                <input 
+                                    type="text" 
+                                    className="w-full border rounded-md pl-8 p-2 outline-none focus:ring-2 focus:ring-emerald-200"
+                                    value={newInventoryItem.location}
+                                    onChange={e => setNewInventoryItem({...newInventoryItem, location: e.target.value})}
+                                    placeholder="เช่น ตู้ A, ห้องช่าง"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            
+            <div className="flex justify-end gap-2 pt-4 border-t border-gray-200 mt-4 shrink-0">
+                <Button variant="secondary" onClick={() => setShowAddInventoryModal(false)}>{t('cancel')}</Button>
+                <Button type="button" icon={Save} className="bg-emerald-600 hover:bg-emerald-700" onClick={(e) => {
+                    const form = document.getElementById('inventoryForm');
+                    if (form && form.reportValidity()) {
+                        handleSaveInventoryItem(e);
+                    }
+                }}>{t('save')}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Transaction Modal */}
+      {showTransactionModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 relative animate-fade-in max-h-[90vh] flex flex-col">
+            <div className="flex justify-between items-center mb-6 border-b pb-4 shrink-0">
+              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                {newTransaction.type === 'IN' ? <ArrowDownRight className="text-blue-500" /> : <ArrowUpRight className="text-red-500" />}
+                บันทึกการทำรายการ (Transaction)
+              </h2>
+              <button onClick={() => setShowTransactionModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                <form id="transactionForm" onSubmit={handleSaveTransaction} className="space-y-4 pb-2">
+                    {/* Toggle IN/OUT */}
+                    <div className="flex p-1 bg-gray-100 rounded-lg mb-4">
+                        <button
+                            type="button"
+                            onClick={() => setNewTransaction({...newTransaction, type: 'OUT'})}
+                            className={`flex-1 py-2 text-sm font-medium rounded-md transition-all flex justify-center items-center gap-2 ${newTransaction.type === 'OUT' ? 'bg-white shadow text-red-600' : 'text-gray-500 hover:text-gray-700'}`}
+                        >
+                            <ArrowUpRight size={16} /> เบิกออก (Check-Out)
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setNewTransaction({...newTransaction, type: 'IN'})}
+                            className={`flex-1 py-2 text-sm font-medium rounded-md transition-all flex justify-center items-center gap-2 ${newTransaction.type === 'IN' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                        >
+                            <ArrowDownRight size={16} /> รับเข้า (Check-In)
+                        </button>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">เลือกวัสดุ/อุปกรณ์ <span className="text-red-500">*</span></label>
+                        <select 
+                            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-blue-200 bg-white"
+                            value={newTransaction.itemId}
+                            onChange={e => setNewTransaction({...newTransaction, itemId: e.target.value})}
+                            required
+                        >
+                            <option value="" disabled>-- เลือกรายการ --</option>
+                            {inventoryList.filter(i => i.projectId === selectedProject.id).sort((a,b) => a.name.localeCompare(b.name)).map(item => (
+                                <option key={item.id} value={item.id}>[{item.code}] {item.name} (คงเหลือ: {item.quantity} {item.unit})</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">จำนวน ({newTransaction.type === 'IN' ? 'รับเข้า' : 'เบิกออก'}) <span className="text-red-500">*</span></label>
+                            <input 
+                                type="number" 
+                                min="1"
+                                required
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-blue-200 text-lg font-bold text-center"
+                                value={newTransaction.quantity}
+                                onChange={e => setNewTransaction({...newTransaction, quantity: parseInt(e.target.value) || 1})}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">วันที่ทำรายการ <span className="text-red-500">*</span></label>
+                            <input 
+                                type="date" 
+                                required
+                                className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-blue-200"
+                                value={newTransaction.date}
+                                onChange={e => setNewTransaction({...newTransaction, date: e.target.value})}
+                            />
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">ชื่อผู้ดำเนินการ / ผู้เบิก <span className="text-red-500">*</span></label>
+                        <div className="relative">
+                            <User size={16} className="absolute left-3 top-2.5 text-gray-400"/>
+                            <input 
+                                type="text" 
+                                required
+                                className="w-full border rounded-md pl-9 p-2 outline-none focus:ring-2 focus:ring-blue-200"
+                                value={newTransaction.requesterName}
+                                onChange={e => setNewTransaction({...newTransaction, requesterName: e.target.value})}
+                                placeholder="ชื่อผู้เบิก หรือ รับของเข้า"
+                            />
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">หมายเหตุ / เหตุผลการเบิก</label>
+                        <textarea 
+                            className="w-full border rounded-md p-2 h-20 resize-none outline-none focus:ring-2 focus:ring-blue-200"
+                            value={newTransaction.note}
+                            onChange={e => setNewTransaction({...newTransaction, note: e.target.value})}
+                            placeholder="ระบุสถานที่นำไปใช้ หรืองานที่เกี่ยวข้อง..."
+                        ></textarea>
+                    </div>
+
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mt-4 text-xs text-orange-800 flex gap-2">
+                        <AlertTriangle size={16} className="shrink-0 text-orange-500"/>
+                        <p>เมื่อกดบันทึก ข้อมูลจะเข้าสู่สถานะ <strong>"รอดำเนินการ"</strong> จนกว่าผู้จัดการจะกดอนุมัติ ระบบจึงจะไปตัดหรือเพิ่มยอดในสต๊อกจริง</p>
+                    </div>
+                </form>
+            </div>
+            
+            <div className="flex justify-end gap-2 pt-4 border-t border-gray-200 mt-4 shrink-0">
+                <Button variant="secondary" onClick={() => setShowTransactionModal(false)}>{t('cancel')}</Button>
+                <Button type="button" icon={Save} className="bg-blue-600 hover:bg-blue-700" onClick={(e) => {
+                    const form = document.getElementById('transactionForm');
+                    if (form && form.reportValidity()) {
+                        handleSaveTransaction(e);
+                    }
+                }}>ยืนยันทำรายการ</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Global Confirm / Alert Modal */}
       {confirmModal.isOpen && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[10000] p-4 animate-fade-in">
