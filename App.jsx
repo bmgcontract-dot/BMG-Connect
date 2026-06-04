@@ -975,6 +975,16 @@ const INITIAL_DEPOSITS = [];
 const INVENTORY_CATEGORIES = ['วัสดุสำนักงาน', 'วัสดุทำความสะอาด', 'วัสดุช่าง', 'อุปกรณ์ไฟฟ้า', 'เบ็ดเตล็ด'];
 const INVENTORY_UNITS = ['ชิ้น', 'อัน', 'กล่อง', 'แพ็ค', 'ลัง', 'ขวด', 'แกลลอน', 'ม้วน', 'เมตร', 'ชุด'];
 
+// --- NEW: Helper สำหรับคำนวณเวลาตัดรอบเที่ยงคืน (00:00 น.) ประจำวัน ---
+const getNextCutoffTime = () => {
+    const now = new Date();
+    const cutoff = new Date(now);
+    // ตั้งเวลาตัดรอบคือ เที่ยงคืนตรง (24:00 น. ของวันปัจจุบัน หรือก็คือ 00:00 น. ของวันถัดไป)
+    cutoff.setHours(24, 0, 0, 0); 
+    
+    return cutoff.getTime();
+};
+
 const DEPOSIT_TYPES = ['ฝากประจำ', 'สลากออมสิน', 'สลาก ธ.ก.ส.', 'อื่นๆ (ให้ระบุ)'];
 const DEPOSIT_DURATIONS = ['1 เดือน', '2 เดือน', '3 เดือน', '4 เดือน', '5 เดือน', '6 เดือน', '7 เดือน', '8 เดือน', '9 เดือน', '10 เดือน', '11 เดือน', '12 เดือน', '2 ปี', '3 ปี', '4 ปี'];
 const BANK_LIST = [
@@ -1750,6 +1760,13 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                     const serverItems = [];
                     snapshot.forEach(docSnap => serverItems.push(docSnap.data()));
                     
+                    // FIX: ป้องกันปัญหาการลบข้อมูล Local หาก Server ว่างเปล่าในช่วงแรกที่กำลังซิงค์
+                    if (serverItems.length === 0 && snapshot.docChanges().length === 0 && Array.isArray(dataRef.current) && dataRef.current.length > 0) {
+                        console.warn(`[Sync] Server returned empty for ${collectionName}, keeping local data to prevent wipe.`);
+                        setIsLoaded(true);
+                        return;
+                    }
+
                     if (serverItems.length > 0 || snapshot.docChanges().length > 0) {
                         setData(serverItems);
                         dataRef.current = serverItems;
@@ -1850,7 +1867,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
 
                     batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id), itemToSave);
                     opCount++;
-                    if (opCount >= 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
+                    if (opCount >= 50) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
                 }
                 if (opCount > 0) await batch.commit();
             } catch (e) { console.error("Restore error", e); }
@@ -1926,13 +1943,13 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
 
                     batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id), itemToSave);
                     opCount++;
-                    if (opCount >= 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
+                    if (opCount >= 50) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
                 }
 
                 for (const id of toDelete) {
                     batch.delete(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, id));
                     opCount++;
-                    if (opCount >= 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
+                    if (opCount >= 50) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
                 }
 
                 if (opCount > 0) await batch.commit();
@@ -3352,7 +3369,18 @@ export default function App() {
       if (typeof window !== 'undefined') {
           const savedUser = localStorage.getItem('bmg_current_user');
           if (savedUser) {
-              try { return JSON.parse(savedUser); } catch(e) { return null; }
+              try { 
+                  const parsed = JSON.parse(savedUser); 
+                  
+                  // --- NEW: ตรวจสอบเวลาหมดอายุเซสชัน (22:00 น.) ---
+                  // หากไม่มี Session Expiry (ข้อมูลเวอร์ชันเก่า) หรือเวลาเครื่องเลยกำหนด 22:00 ไปแล้ว ให้บังคับล็อกเอาท์
+                  if (!parsed.sessionExpiry || Date.now() >= parsed.sessionExpiry) {
+                      localStorage.removeItem('bmg_current_user');
+                      return null;
+                  }
+                  
+                  return parsed; 
+              } catch(e) { return null; }
           }
       }
       return null;
@@ -5242,8 +5270,12 @@ export default function App() {
               return;
           }
 
-          // อัปเดตเวลาเข้าใช้งานล่าสุด
-          const updatedUser = { ...user, lastLogin: new Date().toISOString() };
+          // อัปเดตเวลาเข้าใช้งานล่าสุด พร้อมกำหนดเวลาหมดอายุของเซสชันที่ 22:00 น.
+          const updatedUser = { 
+              ...user, 
+              lastLogin: new Date().toISOString(),
+              sessionExpiry: getNextCutoffTime() 
+          };
           
           setCurrentUser(updatedUser);
           // NEW: บันทึกข้อมูลลง LocalStorage เพื่อให้จำค่าตอน Refresh ทันที
@@ -5302,9 +5334,68 @@ export default function App() {
       setActiveMenu('dashboard'); 
       setSelectedProject(null); 
   };
+
+  // --- NEW: ระบบ Auto Logout เมื่อถึงเวลาเที่ยงคืน (00:00 น.) ขณะที่ผู้ใช้ยังเปิดแอปพลิเคชันค้างไว้ ---
+  useEffect(() => {
+      // ตรวจสอบว่ามีผู้ใช้ล็อกอินอยู่ และมีข้อมูลเซสชัน
+      if (!currentUser || !currentUser.sessionExpiry) return;
+
+      const checkSessionExpiry = () => {
+          if (Date.now() >= currentUser.sessionExpiry) {
+              // ทำการออกจากระบบทันที
+              handleLogout();
+              // แจ้งเตือนผู้ใช้งาน (หน่วงเวลาเล็กน้อยเพื่อให้หน้าจอกลับไปสู่โหมดล็อกอินก่อนที่กล่องข้อความจะเด้ง)
+              setTimeout(() => {
+                  alert("หมดเวลาการใช้งานประจำวัน (เลยเวลาเที่ยงคืน 00:00 น.)\n\nระบบได้ทำการออกจากระบบอัตโนมัติ เพื่อให้ผู้ใช้งานทำการ Login เริ่มต้นรอบการทำงานใหม่สำหรับวันพรุ่งนี้ครับ");
+              }, 100);
+          }
+      };
+
+      // ตั้งเวลาเช็คเวลาปัจจุบันเทียบกับเวลาตัดรอบทุกๆ 1 นาที (60000 ms)
+      const intervalId = setInterval(checkSessionExpiry, 60000); 
+      
+      return () => clearInterval(intervalId);
+  }, [currentUser]);
   
   const getKPIs = () => ({ projects: projects.length, employees: users.length, pendingTasks: 0, pmDue: 0 });
-  const exportToCSV = (data, filename) => { if (!data || data.length === 0) return alert('No data to export'); const headers = Object.keys(data[0]); const csvContent = [headers.join(','), ...data.map(row => headers.map(fieldName => `"${row[fieldName] || ''}"`).join(','))].join('\n'); const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' }); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `${filename}.csv`; link.click(); }; 
+  const exportToCSV = (data, filename) => { 
+      if (!data || data.length === 0) return alert('No data to export'); 
+      
+      const cleanData = data.map(row => {
+          const newRow = { ...row };
+          if (newRow.photo) newRow.photo = '[Image omitted]';
+          if (newRow.logo) newRow.logo = '[Image omitted]';
+          if (newRow.images) newRow.images = '[Images omitted]';
+          if (newRow.file) newRow.file = '[File omitted]';
+          if (newRow.files) newRow.files = '[Files omitted]';
+          if (newRow.minutesFile) newRow.minutesFile = '[File omitted]';
+          
+          Object.keys(newRow).forEach(key => {
+              if (typeof newRow[key] === 'object' && newRow[key] !== null) {
+                  newRow[key] = JSON.stringify(newRow[key]);
+              }
+          });
+          return newRow;
+      });
+
+      const headers = Object.keys(cleanData[0]); 
+      const csvContent = [
+          headers.join(','), 
+          ...cleanData.map(row => 
+              headers.map(fieldName => {
+                  let val = String(row[fieldName] || '');
+                  val = val.replace(/"/g, '""'); 
+                  return `"${val}"`;
+              }).join(',')
+          )
+      ].join('\n'); 
+      
+      const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' }); 
+      const link = document.createElement('a'); 
+      link.href = URL.createObjectURL(blob); 
+      link.download = `${filename}.csv`; 
+      link.click(); 
+  }; 
   
   // --- NEW: Helper Functions สำหรับสร้าง หัวกระดาษ และ ท้ายกระดาษ ลงใน PDF ทุกหน้า ---
   const generateHeaderImage = async (proj, comp, orientation) => {
@@ -5810,7 +5901,7 @@ export default function App() {
                   const nameKey = Object.keys(rowObj).find(k => k.includes('ชื่อ') || k.toLowerCase().includes('name'));
                   const qtyKey = Object.keys(rowObj).find(k => k.includes('จำนวน') || k.toLowerCase().includes('qty'));
                   const locKey = Object.keys(rowObj).find(k => k.includes('สถาน') || k.toLowerCase().includes('location'));
-                  const detKey = Object.keys(rowObj).find(k => k.includes('รายละ') || k.toLowerCase().includes('detail'));
+                  const detKey = Object.keys(rowObj).find(k => k.includes('รายละ') || k.toLowerCase().includes('detail') || k.includes('หมายเหตุ') || k.toLowerCase().includes('remark'));
                   const sysKey = Object.keys(rowObj).find(k => k.includes('ระบบ') || k.toLowerCase().includes('system'));
 
                   const code = codeKey ? rowObj[codeKey] : '';
@@ -11677,16 +11768,16 @@ export default function App() {
                         <tbody className="divide-y divide-gray-100 bg-white">
                             {assets.filter(a => a.projectId === selectedProject.id).length > 0 ? (
                                 assets.filter(a => a.projectId === selectedProject.id).map((asset, index) => (
-                                    <tr key={asset.id} className="hover:bg-gray-50">
+                                    <tr key={asset.id} className="hover:bg-gray-50 cursor-pointer group transition-colors" onClick={() => setSelectedAssetView(asset)}>
                                         <td className="p-3 text-center text-gray-500">{index + 1}</td>
                                         <td className="p-3">
                                             <div className="w-12 h-12 bg-gray-100 rounded border flex items-center justify-center overflow-hidden">
-                                                {asset.photo ? <img src={asset.photo} className="w-full h-full object-cover" /> : <ImageIcon size={20} className="text-gray-400"/>}
+                                                {asset.photo && asset.photo !== '[Image omitted]' ? <img src={asset.photo} className="w-full h-full object-cover" /> : <ImageIcon size={20} className="text-gray-400"/>}
                                             </div>
                                         </td>
                                         <td className="p-3 font-mono font-medium text-orange-600">{asset.code}</td>
-                                        <td className="p-3 cursor-pointer group hover:bg-gray-200 transition-colors rounded-md" onClick={() => setSelectedAssetView(asset)}>
-                                            <div className="font-bold text-gray-800 group-hover:text-orange-600 flex items-center gap-1">
+                                        <td className="p-3">
+                                            <div className="font-bold text-gray-800 group-hover:text-orange-600 flex items-center gap-1 transition-colors">
                                                 {asset.name} <Search size={14} className={`text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity ${isExporting ? 'hidden' : ''}`} />
                                             </div>
                                             <div className={`text-[10px] text-gray-400 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${isExporting ? 'hidden' : ''}`}>คลิกเพื่อดูรายละเอียด</div>
@@ -11694,7 +11785,7 @@ export default function App() {
                                         <td className="p-3 text-center font-bold">{asset.qty}</td>
                                         <td className="p-3 text-gray-600">{asset.location}</td>
                                         <td className="p-3 text-gray-500 text-xs max-w-xs truncate">{asset.details || '-'}</td>
-                                        <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`}>
+                                        <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`} onClick={(e) => e.stopPropagation()}>
                                             <div className="flex justify-center items-center gap-1">
                                                 {hasPerm('proj_assets', 'edit') && (
                                                     <button 
@@ -11763,16 +11854,16 @@ export default function App() {
                         <tbody className="divide-y divide-gray-100 bg-white">
                             {tools.filter(t => t.projectId === selectedProject.id).length > 0 ? (
                                 tools.filter(t => t.projectId === selectedProject.id).map((tool, index) => (
-                                    <tr key={tool.id} className="hover:bg-gray-50">
+                                    <tr key={tool.id} className="hover:bg-gray-50 cursor-pointer group transition-colors" onClick={() => setSelectedToolView(tool)}>
                                         <td className="p-3 text-center text-gray-500">{index + 1}</td>
                                         <td className="p-3">
                                             <div className="w-12 h-12 bg-gray-100 rounded border flex items-center justify-center overflow-hidden">
-                                                {tool.photo ? <img src={tool.photo} className="w-full h-full object-cover" /> : <ImageIcon size={20} className="text-gray-400"/>}
+                                                {tool.photo && tool.photo !== '[Image omitted]' ? <img src={tool.photo} className="w-full h-full object-cover" /> : <ImageIcon size={20} className="text-gray-400"/>}
                                             </div>
                                         </td>
                                         <td className="p-3 font-mono font-medium text-orange-600">{tool.code}</td>
-                                        <td className="p-3 cursor-pointer group hover:bg-gray-200 transition-colors rounded-md" onClick={() => setSelectedToolView(tool)}>
-                                            <div className="font-bold text-gray-800 group-hover:text-orange-600 flex items-center gap-1">
+                                        <td className="p-3">
+                                            <div className="font-bold text-gray-800 group-hover:text-orange-600 flex items-center gap-1 transition-colors">
                                                 {tool.name} <Search size={14} className={`text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity ${isExporting ? 'hidden' : ''}`} />
                                             </div>
                                             <div className={`text-[10px] text-gray-400 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${isExporting ? 'hidden' : ''}`}>คลิกเพื่อดูรายละเอียด</div>
@@ -11780,7 +11871,7 @@ export default function App() {
                                         <td className="p-3 text-center font-bold">{tool.qty}</td>
                                         <td className="p-3 text-gray-600">{tool.location}</td>
                                         <td className="p-3 text-gray-500 text-xs max-w-xs truncate">{tool.details || '-'}</td>
-                                        <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`}>
+                                        <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`} onClick={(e) => e.stopPropagation()}>
                                             <div className="flex justify-center items-center gap-1">
                                                 {hasPerm('proj_tools', 'edit') && (
                                                     <button 
@@ -12246,16 +12337,16 @@ export default function App() {
                                 <tbody className="divide-y divide-gray-100">
                                     {machines.filter(m => m.projectId === selectedProject.id).length > 0 ? (
                                         machines.filter(m => m.projectId === selectedProject.id).map((machine, index) => (
-                                            <tr key={machine.id} className="hover:bg-gray-50">
+                                            <tr key={machine.id} className="hover:bg-gray-50 cursor-pointer group transition-colors" onClick={() => setSelectedMachineDetails(machine)}>
                                                 <td className="p-4 text-center text-gray-500 font-medium">{index + 1}</td>
                                                 <td className="p-4 font-mono font-bold text-gray-700">{machine.code}</td>
                                                 <td className="p-4 text-center">
-                                                    <div className="w-10 h-10 bg-gray-100 rounded border flex items-center justify-center mx-auto text-gray-400">
-                                                        {machine.photo ? <img src={machine.photo} className="w-full h-full object-cover" /> : <Settings size={20} />}
+                                                    <div className="w-10 h-10 bg-gray-100 rounded border flex items-center justify-center mx-auto text-gray-400 overflow-hidden">
+                                                        {machine.photo && machine.photo !== '[Image omitted]' ? <img src={machine.photo} className="w-full h-full object-cover" /> : <Settings size={20} />}
                                                     </div>
                                                 </td>
-                                                <td className="p-4 cursor-pointer hover:bg-gray-200 transition-colors group rounded-md" onClick={() => setSelectedMachineDetails(machine)}>
-                                                    <div className="font-bold text-gray-800 group-hover:text-blue-700 flex items-center gap-1">
+                                                <td className="p-4">
+                                                    <div className="font-bold text-gray-800 group-hover:text-blue-700 flex items-center gap-1 transition-colors">
                                                         {machine.name} <Search size={14} className="text-gray-400 group-hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                                                     </div>
                                                     <div className="text-[10px] text-gray-400 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">คลิกเพื่อดูรายละเอียด</div>
@@ -12263,7 +12354,7 @@ export default function App() {
                                                 <td className="p-4 text-gray-600">{machine.system}</td>
                                                 <td className="p-4 text-center font-bold">{machine.qty}</td>
                                                 <td className="p-4 text-gray-600">{machine.location}</td>
-                                                <td className={`p-4 text-center ${isExporting ? 'hidden' : ''}`}>
+                                                <td className={`p-4 text-center ${isExporting ? 'hidden' : ''}`} onClick={(e) => e.stopPropagation()}>
                                                     <div className="flex justify-center items-center gap-1">
                                                         {hasPerm('proj_pm', 'edit') && (
                                                             <button 
