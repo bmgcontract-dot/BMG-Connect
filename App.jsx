@@ -1711,7 +1711,10 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                 }
                 
                 if (legacyData && Array.isArray(legacyData) && legacyData.length > 0) {
-                    if (dataRef.current.length === 0 || legacyData.length > dataRef.current.length) {
+                    // FIX: ป้องกันปัญหา Zombie Data 
+                    // ห้ามดึงข้อมูลเก่ามาทับเพียงเพราะ legacyData.length > dataRef.current.length (เพราะจะทำให้ข้อมูลที่เพิ่งลบไปเด้งกลับมา)
+                    // จะดึงจาก Chunk เก่าก็ต่อเมื่อ Local ไม่มีข้อมูลเลยจริงๆ เท่านั้น
+                    if (dataRef.current.length === 0) {
                         if (isMounted) {
                             setData(legacyData);
                             dataRef.current = legacyData;
