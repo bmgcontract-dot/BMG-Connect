@@ -1690,72 +1690,38 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                     }
                 }
 
-                const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', localKey);
-                const metaSnap = await getDoc(metaRef);
-                let legacyData = null;
-                
-                if (metaSnap.exists()) {
-                    const metaData = metaSnap.data();
-                    if (metaData.totalChunks !== undefined) {
-                        const chunkPromises = [];
-                        for (let i = 0; i < metaData.totalChunks; i++) {
-                            chunkPromises.push(getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `${localKey}_${i}`)));
-                        }
-                        const chunkSnaps = await Promise.all(chunkPromises);
-                        let fullJson = '';
-                        chunkSnaps.forEach(snap => { if (snap.exists()) fullJson += snap.data().chunk; });
-                        if (fullJson) {
-                            try { legacyData = JSON.parse(fullJson); } catch(e) {}
-                        }
-                    }
-                }
-                
-                if (legacyData && Array.isArray(legacyData) && legacyData.length > 0) {
-                    // FIX: ป้องกันปัญหา Zombie Data 
-                    // ห้ามดึงข้อมูลเก่ามาทับเพียงเพราะ legacyData.length > dataRef.current.length (เพราะจะทำให้ข้อมูลที่เพิ่งลบไปเด้งกลับมา)
-                    // จะดึงจาก Chunk เก่าก็ต่อเมื่อ Local ไม่มีข้อมูลเลยจริงๆ เท่านั้น
-                    if (dataRef.current.length === 0) {
-                        if (isMounted) {
-                            setData(legacyData);
-                            dataRef.current = legacyData;
-                        }
-                        saveStateLocallyIDB(localKey, legacyData);
-                        if (typeof window !== 'undefined') {
-                            try { localStorage.setItem(localKey, JSON.stringify(legacyData)); } catch(e) {}
-                        }
-                    }
-                }
-
-                // FIX: เอาการยิง getDocs ไปเช็ค collection ออกชั่วคราวเพื่อลดโหลด และป้องกันบัค Zombie (เมื่อเราสร้างและใช้ onSnapshot)
-                // if (Array.isArray(dataRef.current) && dataRef.current.length > 0) {
-                //     const existingDocsSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`));
-                //     
-                //     if (existingDocsSnap.empty) {
-                // ... โค้ดเดิมที่สั่งเขียน ...
-                //     }
-                // }
-
                 const colRef = collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
                 unsubscribe = onSnapshot(colRef, (snapshot) => {
                     if (!isMounted) return;
                     const serverItems = [];
                     snapshot.forEach(docSnap => serverItems.push(docSnap.data()));
                     
-                    // FIX: ป้องกันปัญหาการลบข้อมูล Local หาก Server ว่างเปล่าในช่วงแรกที่กำลังซิงค์
-                    if (serverItems.length === 0 && snapshot.docChanges().length === 0 && Array.isArray(dataRef.current) && dataRef.current.length > 0) {
-                        console.warn(`[Sync] Server returned empty for ${collectionName}, keeping local data to prevent wipe.`);
-                        setIsLoaded(true);
-                        return;
-                    }
+                    const serverJson = JSON.stringify(serverItems);
+                    const localJson = JSON.stringify(dataRef.current);
 
-                    if (serverItems.length > 0 || snapshot.docChanges().length > 0) {
+                    // Cloud is the absolute source of truth. If it differs, overwrite local data.
+                    // This permanently kills any "Zombie Data" that was kept locally after being deleted on the server.
+                    if (serverJson !== localJson) {
                         setData(serverItems);
                         dataRef.current = serverItems;
                         saveStateLocallyIDB(localKey, serverItems);
                         if (typeof window !== 'undefined') {
-                            try { localStorage.setItem(localKey, JSON.stringify(serverItems)); } catch(e) {}
+                            try { localStorage.setItem(localKey, serverJson); } catch(e) {}
                         }
                     }
+
+                    // Failsafe: Ensure there is always at least an admin user to prevent lockout
+                    if (serverItems.length === 0 && collectionName === 'bmg_users') {
+                        const adminUser = INITIAL_USERS[0];
+                        setData([adminUser]);
+                        dataRef.current = [adminUser];
+                        saveStateLocallyIDB(localKey, [adminUser]);
+                        
+                        let batch = writeBatch(db);
+                        batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, adminUser.id), adminUser);
+                        batch.commit().catch(e => console.error(e));
+                    }
+
                     setIsLoaded(true);
                 }, (error) => {
                     console.warn(`Sync info for ${collectionName}: Working offline.`);
@@ -1934,17 +1900,6 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                 }
 
                 if (opCount > 0) await batch.commit();
-                
-                // NEW/FIX: เมื่อลบข้อมูลให้สั่งเคลียร์ Chunks เก่าใน app_state ด้วย
-                // ป้องกันปัญหาเมื่อโหลดเว็บใหม่แล้วระบบดึง Legacy Chunks กลับมาเป็น Zombie Data
-                if (toDelete.length > 0) {
-                    try {
-                        const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', localKey);
-                        await setDoc(metaRef, { totalChunks: 0, timestamp: Date.now() });
-                    } catch (e) {
-                        console.warn("Cannot reset legacy chunks:", e);
-                    }
-                }
             }
         } catch (e) {
             console.error(`Save error ${collectionName}:`, e);
