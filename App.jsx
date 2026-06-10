@@ -1726,36 +1726,14 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                     }
                 }
 
-                if (Array.isArray(dataRef.current) && dataRef.current.length > 0) {
-                    const existingDocsSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`));
-                    
-                    // FIX: ป้องกันปัญหา Zombie Data (ข้อมูลที่ถูกลบไปแล้วฟื้นคืนชีพ)
-                    // โดยจะอัปโหลดข้อมูลจาก Local ขึ้น Server ก็ต่อเมื่อ Server ว่างเปล่าเท่านั้น (Initial Seed)
-                    // จะไม่พยายามอัปโหลดรายการที่ขาดหายไปทีละรายการ เพราะนั่นคือรายการที่เพิ่งถูกลบไป
-                    if (existingDocsSnap.empty) {
-                        const toUpload = dataRef.current.filter(item => item && item.id);
-                        
-                        if (toUpload.length > 0) {
-                            let batch = writeBatch(db);
-                            let opCount = 0;
-                            for (const item of toUpload) {
-                                const safeItem = { ...item };
-                                if (safeItem.files) {
-                                    for (const k in safeItem.files) {
-                                        if (safeItem.files[k]?.data?.length > 100000) {
-                                            delete safeItem.files[k].data;
-                                            safeItem.files[k].isLocalOnly = true;
-                                        }
-                                    }
-                                }
-                                batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id), safeItem);
-                                opCount++;
-                                if (opCount === 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
-                            }
-                            if (opCount > 0) await batch.commit();
-                        }
-                    }
-                }
+                // FIX: เอาการยิง getDocs ไปเช็ค collection ออกชั่วคราวเพื่อลดโหลด และป้องกันบัค Zombie (เมื่อเราสร้างและใช้ onSnapshot)
+                // if (Array.isArray(dataRef.current) && dataRef.current.length > 0) {
+                //     const existingDocsSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`));
+                //     
+                //     if (existingDocsSnap.empty) {
+                // ... โค้ดเดิมที่สั่งเขียน ...
+                //     }
+                // }
 
                 const colRef = collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
                 unsubscribe = onSnapshot(colRef, (snapshot) => {
@@ -1956,6 +1934,17 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                 }
 
                 if (opCount > 0) await batch.commit();
+                
+                // NEW/FIX: เมื่อลบข้อมูลให้สั่งเคลียร์ Chunks เก่าใน app_state ด้วย
+                // ป้องกันปัญหาเมื่อโหลดเว็บใหม่แล้วระบบดึง Legacy Chunks กลับมาเป็น Zombie Data
+                if (toDelete.length > 0) {
+                    try {
+                        const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', localKey);
+                        await setDoc(metaRef, { totalChunks: 0, timestamp: Date.now() });
+                    } catch (e) {
+                        console.warn("Cannot reset legacy chunks:", e);
+                    }
+                }
             }
         } catch (e) {
             console.error(`Save error ${collectionName}:`, e);
@@ -3397,6 +3386,7 @@ export default function App() {
   const [actionPlanFilter, setActionPlanFilter] = useState('All'); // NEW: State สำหรับตัวกรอง Action Plan
   const [actionPlanSortOrder, setActionPlanSortOrder] = useState('desc'); // NEW: State สำหรับเรียงลำดับ Action Plan
   const [repairFilter, setRepairFilter] = useState('All'); // NEW: State สำหรับตัวกรองแจ้งซ่อม
+  const [repairMonthFilter, setRepairMonthFilter] = useState('All'); // NEW: State สำหรับตัวกรองเดือนแจ้งซ่อม
   const [staffViewMode, setStaffViewMode] = useState('list');
   const [selectedShift, setSelectedShift] = useState(null);
   const [selectedDailyReport, setSelectedDailyReport] = useState(null); // NEW: Track report to view/print
@@ -13757,44 +13747,177 @@ export default function App() {
 
           {projectTab === 'repair' && (
               <div className="space-y-6 animate-fade-in">
-                  {/* NEW: Summary Dashboard for Repairs */}
                   {(() => {
                       const projectRepairs = repairs.filter(r => r.projectId === selectedProject.id);
-                      const totalRepairs = projectRepairs.length;
+                      
+                      // ค้นหาเดือนทั้งหมดที่มีข้อมูลการแจ้งซ่อมในระบบของโครงการนี้
+                      const availableMonths = Array.from(new Set(
+                          projectRepairs
+                              .map(r => r.date ? r.date.substring(0, 7) : null)
+                              .filter(Boolean)
+                      )).sort().reverse();
+
+                      // กรองข้อมูลแจ้งซ่อมตามเดือนที่เลือก
+                      const monthlyRepairs = projectRepairs.filter(r => 
+                          repairMonthFilter === 'All' || (r.date && r.date.startsWith(repairMonthFilter))
+                      );
+
+                      const totalRepairs = monthlyRepairs.length;
                       const statusCounts = { 'รอดำเนินการ': 0, 'ซ่อมแซมเสร็จสิ้น': 0, 'รออะไหล่': 0, 'ต้องจ้างผู้รับเหมาภายนอก': 0 };
-                      projectRepairs.forEach(rep => {
-                          if (statusCounts[rep.inspectionResult] !== undefined) statusCounts[rep.inspectionResult]++;
+                      let totalCost = 0;
+                      
+                      // สรุปข้อมูลแยกตามประเภทงานซ่อมบำรุง
+                      const categoryCounts = { 'Electrical': 0, 'Plumbing': 0, 'Air Conditioning': 0, 'Structural': 0, 'Other': 0 };
+
+                      monthlyRepairs.forEach(rep => {
+                          if (statusCounts[rep.inspectionResult] !== undefined) {
+                              statusCounts[rep.inspectionResult]++;
+                          }
+                          totalCost += parseFloat(rep.cost) || 0;
+
+                          // จัดหมวดหมู่ปัญหา
+                          const type = rep.issueType || '';
+                          if (type.includes('ไฟฟ้า') || type.toLowerCase().includes('elec')) categoryCounts['Electrical']++;
+                          else if (type.includes('ประปา') || type.toLowerCase().includes('plumb')) categoryCounts['Plumbing']++;
+                          else if (type.includes('ปรับอากาศ') || type.includes('แอร์') || type.toLowerCase().includes('air')) categoryCounts['Air Conditioning']++;
+                          else if (type.includes('โครงสร้าง') || type.toLowerCase().includes('struct')) categoryCounts['Structural']++;
+                          else categoryCounts['Other']++;
                       });
 
+                      const successRate = totalRepairs > 0 ? Math.round((statusCounts['ซ่อมแซมเสร็จสิ้น'] / totalRepairs) * 100) : 0;
+
                       return (
-                          <Card className="p-6">
-                              <div className="flex justify-between items-center mb-4">
-                                  <h3 className="font-bold flex items-center gap-2 text-gray-800">
-                                      <BarChart3 size={20} className="text-orange-500" /> สรุปสถานะการแจ้งซ่อม (Repair Status Summary)
-                                  </h3>
-                                  <div className="text-sm font-bold text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
-                                      ทั้งหมด: {totalRepairs} รายการ
+                          <div className="space-y-6">
+                              {/* ส่วนหัวตัวเลือกสำหรับเดือน */}
+                              <Card className="p-4 bg-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                                  <div>
+                                      <h4 className="font-bold text-gray-800 text-sm">ตัวกรองช่วงเวลาและข้อมูลซ่อมบำรุง</h4>
+                                      <p className="text-xs text-gray-500 mt-1">เลือกเดือนที่ต้องการสรุปและวิเคราะห์ผลการแจ้งซ่อม</p>
                                   </div>
+                                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                                      <span className="text-xs font-bold text-gray-600 whitespace-nowrap">ประจำเดือน:</span>
+                                      <select
+                                          className="border border-gray-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-orange-200 outline-none bg-white transition-colors cursor-pointer w-full sm:w-48 font-semibold"
+                                          value={repairMonthFilter}
+                                          onChange={(e) => setRepairMonthFilter(e.target.value)}
+                                      >
+                                          <option value="All">-- แสดงทุกเดือน --</option>
+                                          {availableMonths.map(ym => {
+                                              const [y, m] = ym.split('-');
+                                              const dObj = new Date(parseInt(y), parseInt(m) - 1, 1);
+                                              return (
+                                                  <option key={ym} value={ym}>
+                                                      {dObj.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })}
+                                                  </option>
+                                              );
+                                          })}
+                                      </select>
+                                  </div>
+                              </Card>
+
+                              {/* NEW: Comprehensive Monthly Summary Panel */}
+                              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                  {/* Left: Monthly status summaries */}
+                                  <Card className="p-5 flex flex-col justify-between border-l-4 border-orange-500 bg-white">
+                                      <div>
+                                          <div className="flex justify-between items-center mb-4 border-b pb-2">
+                                              <span className="font-bold text-gray-800 text-sm flex items-center gap-1.5">
+                                                  <BarChart3 size={16} className="text-orange-500" />
+                                                  สรุปงานประจำเดือน
+                                              </span>
+                                              <span className="text-xs bg-orange-100 text-orange-800 px-2 py-0.5 rounded-full font-bold">
+                                                  {repairMonthFilter === 'All' ? 'ทั้งหมด' : 'เดือนที่เลือก'}
+                                              </span>
+                                          </div>
+                                          <div className="grid grid-cols-2 gap-4">
+                                              <div className={`border p-3 rounded-lg text-center cursor-pointer transition-all ${repairFilter === 'รอดำเนินการ' ? 'bg-orange-50 border-orange-400 shadow-sm' : 'bg-white border-gray-200 hover:border-orange-300'}`} onClick={() => setRepairFilter(repairFilter === 'รอดำเนินการ' ? 'All' : 'รอดำเนินการ')}>
+                                                  <div className="text-gray-500 text-xs font-semibold mb-1">รอดำเนินการ</div>
+                                                  <div className="text-2xl font-black text-orange-600">{statusCounts['รอดำเนินการ']}</div>
+                                              </div>
+                                              <div className={`border p-3 rounded-lg text-center cursor-pointer transition-all ${repairFilter === 'รออะไหล่' ? 'bg-yellow-50 border-yellow-400 shadow-sm' : 'bg-white border-gray-200 hover:border-yellow-300'}`} onClick={() => setRepairFilter(repairFilter === 'รออะไหล่' ? 'All' : 'รออะไหล่')}>
+                                                  <div className="text-gray-500 text-xs font-semibold mb-1">รออะไหล่</div>
+                                                  <div className="text-2xl font-black text-yellow-600">{statusCounts['รออะไหล่']}</div>
+                                              </div>
+                                              <div className={`border p-3 rounded-lg text-center cursor-pointer transition-all ${repairFilter === 'ต้องจ้างผู้รับเหมาภายนอก' ? 'bg-purple-50 border-purple-400 shadow-sm' : 'bg-white border-gray-200 hover:border-purple-300'}`} onClick={() => setRepairFilter(repairFilter === 'ต้องจ้างผู้รับเหมาภายนอก' ? 'All' : 'ต้องจ้างผู้รับเหมาภายนอก')}>
+                                                  <div className="text-gray-500 text-xs font-semibold mb-1">ผู้รับเหมาฯ</div>
+                                                  <div className="text-2xl font-black text-purple-600">{statusCounts['ต้องจ้างผู้รับเหมาภายนอก']}</div>
+                                              </div>
+                                              <div className={`border p-3 rounded-lg text-center cursor-pointer transition-all ${repairFilter === 'ซ่อมแซมเสร็จสิ้น' ? 'bg-green-50 border-green-400 shadow-sm' : 'bg-white border-gray-200 hover:border-green-300'}`} onClick={() => setRepairFilter(repairFilter === 'ซ่อมแซมเสร็จสิ้น' ? 'All' : 'ซ่อมแซมเสร็จสิ้น')}>
+                                                  <div className="text-gray-500 text-xs font-semibold mb-1">เสร็จสิ้น</div>
+                                                  <div className="text-2xl font-black text-green-600">{statusCounts['ซ่อมแซมเสร็จสิ้น']}</div>
+                                              </div>
+                                          </div>
+                                      </div>
+                                  </Card>
+
+                                  {/* Middle: Progress Rate & Total Spend */}
+                                  <Card className="p-5 flex flex-col justify-between border-l-4 border-green-500 bg-white">
+                                      <div>
+                                          <div className="flex justify-between items-center mb-4 border-b pb-2">
+                                              <span className="font-bold text-gray-800 text-sm flex items-center gap-1.5">
+                                                  <CheckCircle size={16} className="text-green-500" />
+                                                  ประสิทธิภาพและการเงิน
+                                              </span>
+                                          </div>
+                                          <div className="space-y-4">
+                                              <div>
+                                                  <div className="flex justify-between text-xs font-bold text-gray-600 mb-1.5">
+                                                      <span>อัตราซ่อมเสร็จสิ้น (Success Rate)</span>
+                                                      <span className="text-green-600 font-black">{successRate}%</span>
+                                                  </div>
+                                                  <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
+                                                      <div className="bg-green-500 h-2.5 rounded-full transition-all duration-500" style={{ width: `${successRate}%` }}></div>
+                                                  </div>
+                                              </div>
+                                              <div className="bg-green-50/50 p-3 rounded-lg border border-green-100 flex justify-between items-center shadow-inner mt-2">
+                                                  <div className="flex items-center gap-2">
+                                                      <div className="p-1.5 bg-green-100 rounded text-green-600"><DollarSign size={16}/></div>
+                                                      <span className="text-xs font-bold text-green-800">ค่าซ่อมรวมในเดือนนี้:</span>
+                                                  </div>
+                                                  <div className="text-right">
+                                                      <span className="font-black text-lg text-green-700">{totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                      <span className="text-[10px] text-green-600 font-medium block">บาท</span>
+                                                  </div>
+                                              </div>
+                                          </div>
+                                      </div>
+                                  </Card>
+
+                                  {/* Right: Issue category breakdowns */}
+                                  <Card className="p-5 flex flex-col justify-between border-l-4 border-blue-500 bg-white">
+                                      <div>
+                                          <div className="flex justify-between items-center mb-4 border-b pb-2">
+                                              <span className="font-bold text-gray-800 text-sm flex items-center gap-1.5">
+                                                  <Layers size={16} className="text-blue-500" />
+                                                  ประเด็นที่พบมากที่สุด (Category Breakdown)
+                                              </span>
+                                          </div>
+                                          <div className="space-y-2 text-xs font-medium text-gray-700">
+                                              {[
+                                                  { key: 'Electrical', label: 'ระบบไฟฟ้า (Electrical)', value: categoryCounts['Electrical'], barColor: 'bg-yellow-400' },
+                                                  { key: 'Plumbing', label: 'ระบบประปา (Plumbing)', value: categoryCounts['Plumbing'], barColor: 'bg-blue-400' },
+                                                  { key: 'Air Conditioning', label: 'ระบบแอร์/ปรับอากาศ', value: categoryCounts['Air Conditioning'], barColor: 'bg-cyan-400' },
+                                                  { key: 'Structural', label: 'ระบบโครงสร้าง', value: categoryCounts['Structural'], barColor: 'bg-purple-400' },
+                                                  { key: 'Other', label: 'อื่นๆ (Other)', value: categoryCounts['Other'], barColor: 'bg-gray-400' }
+                                              ].map(cat => {
+                                                  const percent = totalRepairs > 0 ? (cat.value / totalRepairs) * 100 : 0;
+                                                  return (
+                                                      <div key={cat.key}>
+                                                          <div className="flex justify-between text-[10px] mb-0.5">
+                                                              <span className="truncate max-w-[150px]">{cat.label}</span>
+                                                              <span className="font-bold">{cat.value} งาน ({Math.round(percent)}%)</span>
+                                                          </div>
+                                                          <div className="w-full bg-gray-100 rounded-full h-1 overflow-hidden">
+                                                              <div className={`${cat.barColor} h-1 rounded-full`} style={{ width: `${percent}%` }}></div>
+                                                          </div>
+                                                      </div>
+                                                  );
+                                              })}
+                                          </div>
+                                      </div>
+                                  </Card>
                               </div>
-                              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                  <div className={`border p-4 rounded-xl text-center cursor-pointer transition-all ${repairFilter === 'รอดำเนินการ' ? 'bg-orange-50 border-orange-400 shadow-sm' : 'bg-white border-gray-200 hover:border-orange-300'}`} onClick={() => setRepairFilter(repairFilter === 'รอดำเนินการ' ? 'All' : 'รอดำเนินการ')}>
-                                      <div className="text-orange-600 text-sm font-bold mb-1">รอดำเนินการ</div>
-                                      <div className="text-3xl font-black text-orange-700">{statusCounts['รอดำเนินการ']}</div>
-                                  </div>
-                                  <div className={`border p-4 rounded-xl text-center cursor-pointer transition-all ${repairFilter === 'รออะไหล่' ? 'bg-yellow-50 border-yellow-400 shadow-sm' : 'bg-white border-gray-200 hover:border-yellow-300'}`} onClick={() => setRepairFilter(repairFilter === 'รออะไหล่' ? 'All' : 'รออะไหล่')}>
-                                      <div className="text-yellow-600 text-sm font-bold mb-1">รออะไหล่</div>
-                                      <div className="text-3xl font-black text-yellow-700">{statusCounts['รออะไหล่']}</div>
-                                  </div>
-                                  <div className={`border p-4 rounded-xl text-center cursor-pointer transition-all ${repairFilter === 'ต้องจ้างผู้รับเหมาภายนอก' ? 'bg-purple-50 border-purple-400 shadow-sm' : 'bg-white border-gray-200 hover:border-purple-300'}`} onClick={() => setRepairFilter(repairFilter === 'ต้องจ้างผู้รับเหมาภายนอก' ? 'All' : 'ต้องจ้างผู้รับเหมาภายนอก')}>
-                                      <div className="text-purple-600 text-sm font-bold mb-1">จ้างผู้รับเหมาฯ</div>
-                                      <div className="text-3xl font-black text-purple-700">{statusCounts['ต้องจ้างผู้รับเหมาภายนอก']}</div>
-                                  </div>
-                                  <div className={`border p-4 rounded-xl text-center cursor-pointer transition-all ${repairFilter === 'ซ่อมแซมเสร็จสิ้น' ? 'bg-green-50 border-green-400 shadow-sm' : 'bg-white border-gray-200 hover:border-green-300'}`} onClick={() => setRepairFilter(repairFilter === 'ซ่อมแซมเสร็จสิ้น' ? 'All' : 'ซ่อมแซมเสร็จสิ้น')}>
-                                      <div className="text-green-600 text-sm font-bold mb-1">เสร็จสิ้น</div>
-                                      <div className="text-3xl font-black text-green-700">{statusCounts['ซ่อมแซมเสร็จสิ้น']}</div>
-                                  </div>
-                              </div>
-                          </Card>
+                          </div>
                       );
                   })()}
 
@@ -13824,7 +13947,14 @@ export default function App() {
                           </div>
 
                           <div className={`flex gap-2 shrink-0 ${isExporting ? 'hidden' : ''}`}>
-                              <Button variant="outline" size="sm" icon={Download} onClick={() => exportToCSV(repairs.filter(r => r.projectId === selectedProject.id && (repairFilter === 'All' || r.inspectionResult === repairFilter)), 'repair_requests')}>{t('exportCSV')}</Button>
+                              <Button variant="outline" size="sm" icon={Download} onClick={() => {
+                                  const filteredRepairsExport = repairs.filter(r => 
+                                      r.projectId === selectedProject.id && 
+                                      (repairFilter === 'All' || r.inspectionResult === repairFilter) &&
+                                      (repairMonthFilter === 'All' || (r.date && r.date.startsWith(repairMonthFilter)))
+                                  );
+                                  exportToCSV(filteredRepairsExport, 'repair_requests');
+                              }}>{t('exportCSV')}</Button>
                               <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => handleExportPDF('print-repair-area', `Repairs_${selectedProject?.code || 'List'}.pdf`, 'landscape')} disabled={isExporting}>
                                   {isExporting ? t('downloading') : t('downloadPDF')}
                               </Button>
@@ -13849,11 +13979,15 @@ export default function App() {
                               <tbody className="divide-y divide-gray-100 bg-white">
                                   {(() => {
                                       const filteredRepairs = repairs
-                                          .filter(r => r.projectId === selectedProject.id && (repairFilter === 'All' || r.inspectionResult === repairFilter))
+                                          .filter(r => 
+                                              r.projectId === selectedProject.id && 
+                                              (repairFilter === 'All' || r.inspectionResult === repairFilter) &&
+                                              (repairMonthFilter === 'All' || (r.date && r.date.startsWith(repairMonthFilter)))
+                                          )
                                           .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0)); // เรียงลำดับจากวันล่าสุดจากบนลงล่าง
 
                                       if (filteredRepairs.length === 0) {
-                                          return <tr><td colSpan="6" className="p-8 text-center text-gray-400 border-2 border-dashed border-gray-200 m-4 rounded-lg bg-gray-50">ไม่มีข้อมูลการแจ้งซ่อม</td></tr>;
+                                          return <tr><td colSpan="6" className="p-8 text-center text-gray-400 border-2 border-dashed border-gray-200 m-4 rounded-lg bg-gray-50">ไม่มีข้อมูลการแจ้งซ่อมในเงื่อนไขการค้นหาที่เลือก</td></tr>;
                                       }
 
                                       return filteredRepairs.map((rep, index) => (
@@ -13891,7 +14025,7 @@ export default function App() {
                                                       {rep.inspectionResult}
                                                   </span>
                                               </td>
-                                              <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`}>
+                                              <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`} onClick={(e) => e.stopPropagation()}>
                                                   <div className="flex justify-center items-center gap-1">
                                                               {hasPerm('proj_repair', 'edit') && (
                                                           <button 
