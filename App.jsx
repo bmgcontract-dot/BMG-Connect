@@ -9830,7 +9830,7 @@ export default function App() {
                           </thead>
                           <tbody className="divide-y divide-gray-100">
                               {audits.length > 0 ? (
-                                  audits.map(audit => { 
+                                  [...audits].sort((a, b) => new Date(b.date) - new Date(a.date)).map(audit => { 
                                       const project = projects.find(p => p.id === audit.projectId); 
                                       const max = audit.maxScore || 235;
                                       return (
@@ -9851,7 +9851,13 @@ export default function App() {
                                                   {hasPerm('audits', 'delete') && (
                                                       <button 
                                                           className="text-gray-400 hover:text-red-600 transition-colors p-1" 
-                                                          onClick={() => showConfirm('ยืนยันการลบ', 'คุณต้องการลบรายงานผลการตรวจสอบนี้ใช่หรือไม่?', () => setAudits(prev => prev.filter(a => a.id !== audit.id)))}
+                                                          onClick={() => showConfirm('ยืนยันการลบ', 'คุณต้องการลบรายงานผลการตรวจสอบนี้ใช่หรือไม่?', () => {
+                                                              setAudits(prev => {
+                                                                  const nextList = prev.filter(a => a.id !== audit.id);
+                                                                  setTimeout(() => triggerAutoSync('Audits_ประเมินคุณภาพ', nextList, []), 500);
+                                                                  return nextList;
+                                                              });
+                                                          })}
                                                           title="ลบรายงาน"
                                                       >
                                                           <Trash2 size={18} />
@@ -14492,7 +14498,9 @@ export default function App() {
                           </thead>
                           <tbody className="divide-y divide-gray-100 bg-white">
                               {audits.filter(a => a.projectId === selectedProject.id).length > 0 ? (
-                                  audits.filter(a => a.projectId === selectedProject.id).map((audit, index) => {
+                                  audits.filter(a => a.projectId === selectedProject.id)
+                                  .sort((a, b) => new Date(b.date) - new Date(a.date))
+                                  .map((audit, index) => {
                                       const max = audit.maxScore || 235;
                                       return (
                                       <tr key={audit.id} className="hover:bg-gray-50 transition-colors">
@@ -14511,7 +14519,13 @@ export default function App() {
                                           <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`}>
                                               {hasPerm('proj_audit', 'delete') && (
                                                   <button 
-                                                      onClick={() => showConfirm('ยืนยันการลบ', 'คุณต้องการลบรายงานผลการตรวจสอบนี้ใช่หรือไม่?', () => setAudits(prev => prev.filter(a => a.id !== audit.id)))}
+                                                      onClick={() => showConfirm('ยืนยันการลบ', 'คุณต้องการลบรายงานผลการตรวจสอบนี้ใช่หรือไม่?', () => {
+                                                          setAudits(prev => {
+                                                              const nextList = prev.filter(a => a.id !== audit.id);
+                                                              setTimeout(() => triggerAutoSync('Audits_ประเมินคุณภาพ', nextList, []), 500);
+                                                              return nextList;
+                                                          });
+                                                      })}
                                                       className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
                                                       title="ลบรายงาน"
                                                   >
