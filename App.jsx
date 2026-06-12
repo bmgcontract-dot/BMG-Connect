@@ -1168,6 +1168,28 @@ const INITIAL_CONTRACTORS = [];
 const INITIAL_INVENTORY = [];
 const INITIAL_TRANSACTIONS = [];
 
+const checkIfPlanShouldRunOnDate = (plan, dateObj) => {
+    if (!plan || plan.status !== 'Active') return false;
+    const day = dateObj.getDate();
+    const month = dateObj.getMonth(); 
+    const year = dateObj.getFullYear();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    
+    if (plan.frequency === 'Daily') return true;
+    if (plan.frequency === 'Weekly') return dateObj.getDay() === parseInt(plan.scheduleDetails?.dayOfWeek || 0);
+    
+    // ปรับการคำนวณเพื่อรองรับเดือนที่มีไม่ถึง 31 วัน
+    let targetDate = parseInt(plan.scheduleDetails?.date || 1);
+    if (targetDate > daysInMonth) targetDate = daysInMonth;
+
+    if (plan.frequency === 'Monthly') return day === targetDate;
+    if (plan.frequency === 'Yearly') {
+        const targetMonth = parseInt(plan.scheduleDetails?.month || 1) - 1;
+        return day === targetDate && month === targetMonth;
+    }
+    return false;
+};
+
 const compressImage = (file) => {
     return new Promise((resolve) => {
         const reader = new FileReader();
@@ -8635,13 +8657,7 @@ export default function App() {
               const dateString = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 
               pPlans.forEach(plan => {
-                  let shouldRun = false;
-                  if (plan.frequency === 'Daily') shouldRun = true;
-                  if (plan.frequency === 'Weekly') shouldRun = dateObj.getDay() === parseInt(plan.scheduleDetails?.dayOfWeek || 0);
-                  if (plan.frequency === 'Monthly') shouldRun = d === parseInt(plan.scheduleDetails?.date || 1);
-                  if (plan.frequency === 'Yearly') shouldRun = d === parseInt(plan.scheduleDetails?.date || 1) && dateObj.getMonth() === parseInt(plan.scheduleDetails?.month || 1) - 1;
-
-                  if (shouldRun) {
+                  if (checkIfPlanShouldRunOnDate(plan, dateObj)) {
                       totalTasks++;
                       // ตรวจสอบว่ามีการบันทึกประวัติการทำ PM หรือไม่
                       const historyRecord = pmHistoryList.find(h => h.pmPlanId === plan.id && h.date === dateString);
@@ -11887,13 +11903,7 @@ export default function App() {
                           const dateString = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 
                           activePmPlans.forEach(plan => {
-                              let shouldRun = false;
-                              if (plan.frequency === 'Daily') shouldRun = true;
-                              if (plan.frequency === 'Weekly') shouldRun = dateObj.getDay() === parseInt(plan.scheduleDetails?.dayOfWeek || 0);
-                              if (plan.frequency === 'Monthly') shouldRun = d === parseInt(plan.scheduleDetails?.date || 1);
-                              if (plan.frequency === 'Yearly') shouldRun = d === parseInt(plan.scheduleDetails?.date || 1) && dateObj.getMonth() === parseInt(plan.scheduleDetails?.month || 1) - 1;
-
-                              if (shouldRun) {
+                              if (checkIfPlanShouldRunOnDate(plan, dateObj)) {
                                   const machine = machines.find(m => m.id === plan.machineId);
                                   const historyRecord = pmHistoryList.find(h => h.pmPlanId === plan.id && h.date === dateString);
 
@@ -12462,12 +12472,7 @@ export default function App() {
                                                   const dateString = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
                                                   
                                                   const dayTasks = pmPlans.filter(p => p.projectId === selectedProject.id).filter(plan => {
-                                                      if (plan.status !== 'Active') return false;
-                                                      if (plan.frequency === 'Daily') return true;
-                                                      if (plan.frequency === 'Weekly') return date.getDay() === parseInt(plan.scheduleDetails?.dayOfWeek || 0);
-                                                      if (plan.frequency === 'Monthly') return date.getDate() === parseInt(plan.scheduleDetails?.date || 1);
-                                                      if (plan.frequency === 'Yearly') return date.getDate() === parseInt(plan.scheduleDetails?.date || 1) && date.getMonth() === parseInt(plan.scheduleDetails?.month || 1) - 1;
-                                                      return false;
+                                                      return checkIfPlanShouldRunOnDate(plan, date);
                                                   });
 
                                                   dayTasks.forEach(task => {
@@ -12534,12 +12539,7 @@ export default function App() {
 
                                               // Find tasks scheduled for this day
                                               const dayTasks = pmPlans.filter(p => p.projectId === selectedProject.id).filter(plan => {
-                                                  if (plan.status !== 'Active') return false;
-                                                  if (plan.frequency === 'Daily') return true;
-                                                  if (plan.frequency === 'Weekly') return date.getDay() === parseInt(plan.scheduleDetails?.dayOfWeek || 0);
-                                                  if (plan.frequency === 'Monthly') return date.getDate() === parseInt(plan.scheduleDetails?.date || 1);
-                                                  if (plan.frequency === 'Yearly') return date.getDate() === parseInt(plan.scheduleDetails?.date || 1) && date.getMonth() === parseInt(plan.scheduleDetails?.month || 1) - 1;
-                                                  return false;
+                                                  return checkIfPlanShouldRunOnDate(plan, date);
                                               });
 
                                               if (!dayObj.isCurrentMonth) {
@@ -12794,13 +12794,18 @@ export default function App() {
                           
                           let isScheduled = false;
                           if (plan) {
-                              if (['Daily', 'Weekly', 'Monthly'].includes(plan.frequency)) isScheduled = true;
-                              if (plan.frequency === 'Yearly' && parseInt(plan.scheduleDetails?.month) === monthNum) isScheduled = true;
+                              const daysInMonthTarget = new Date(targetY, monthNum, 0).getDate();
+                              for (let d = 1; d <= daysInMonthTarget; d++) {
+                                  if (checkIfPlanShouldRunOnDate(plan, new Date(targetY, monthNum - 1, d))) {
+                                      isScheduled = true;
+                                      break;
+                                  }
+                              }
                           }
 
                           if (!isScheduled) return <td key={monthNum} className="p-1 border border-gray-200 text-center bg-gray-50">-</td>;
 
-                          const histories = historyMap[`${machine.id}_${monthNum}`] || [];
+                          const histories = (historyMap[`${machine.id}_${monthNum}`] || []).filter(h => h.pmPlanId === plan?.id);
                           
                           let status = 'plan'; 
                           if (histories.length > 0) {
@@ -12864,9 +12869,21 @@ export default function App() {
                                                               'ความถี่ (Freq)': plan ? t(`freq_${plan.frequency}`) : '-'
                                                           };
                                                           for(let i=1; i<=12; i++){
-                                                              const histories = historyMap[`${m.id}_${i}`] || [];
+                                                              const histories = (historyMap[`${m.id}_${i}`] || []).filter(h => h.pmPlanId === plan?.id);
                                                               let s = '-';
-                                                              if(plan && (['Daily', 'Weekly', 'Monthly'].includes(plan.frequency) || (plan.frequency === 'Yearly' && parseInt(plan.scheduleDetails?.month) === i))) {
+                                                              
+                                                              let isScheduled = false;
+                                                              if (plan) {
+                                                                  const daysInMonthTarget = new Date(targetY, i, 0).getDate();
+                                                                  for (let d = 1; d <= daysInMonthTarget; d++) {
+                                                                      if (checkIfPlanShouldRunOnDate(plan, new Date(targetY, i - 1, d))) {
+                                                                          isScheduled = true;
+                                                                          break;
+                                                                      }
+                                                                  }
+                                                              }
+
+                                                              if(isScheduled) {
                                                                   s = 'P';
                                                                   if (histories.length > 0) {
                                                                       if (histories.some(h => h.approvalStatus === 'Approved')) s = 'Done';
@@ -12874,6 +12891,8 @@ export default function App() {
                                                                       else s = 'Wait';
                                                                   } else if (targetY < currentY || (targetY === currentY && i < currentM)) {
                                                                       s = 'Missed';
+                                                                  } else if (targetY === currentY && i === currentM) {
+                                                                      s = 'Pending';
                                                                   }
                                                               }
                                                               row[`เดือน ${i}`] = s;
