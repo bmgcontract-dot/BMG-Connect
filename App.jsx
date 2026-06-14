@@ -21691,7 +21691,7 @@ export default function App() {
                                         {/* Cover Image */}
                                         {newAnnouncement.image ? (
                                             <div className="w-full aspect-video bg-gray-200">
-                                                <img src={newAnnouncement.image} className="w-full h-full object-cover" />
+                                                <img src={newAnnouncement.image} className="w-full h-full object-cover" alt="Preview Cover" />
                                             </div>
                                         ) : (
                                             <div className="w-full aspect-video bg-gray-200 flex items-center justify-center text-gray-400 border-b border-gray-300">
@@ -21726,7 +21726,7 @@ export default function App() {
                                                     <div className="grid grid-cols-3 gap-1.5">
                                                         {newAnnouncement.additionalImages.map((img, i) => (
                                                             <div key={i} className="aspect-square bg-gray-100 rounded border border-gray-200 overflow-hidden">
-                                                                <img src={img} className="w-full h-full object-cover" />
+                                                                <img src={img} className="w-full h-full object-cover" alt={`Preview Add ${i}`} />
                                                             </div>
                                                         ))}
                                                     </div>
@@ -21763,7 +21763,7 @@ export default function App() {
                           className="w-full h-48 sm:h-72 bg-gray-100 relative overflow-hidden shrink-0 border-b border-gray-200 cursor-pointer group"
                           onClick={() => setExpandedImage(selectedAnnouncementView.image)}
                       >
-                          <img src={selectedAnnouncementView.image} className="w-full h-full object-contain bg-gray-900" alt="Announcement" />
+                          <img src={selectedAnnouncementView.image} className="w-full h-full object-contain" alt="Announcement" />
                           <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-[1px]">
                               <Search className="text-white" size={32} />
                           </div>
@@ -21815,7 +21815,7 @@ export default function App() {
                                           onClick={() => setExpandedImage(img)} 
                                           className="aspect-square bg-gray-100 rounded-lg border border-gray-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-pointer relative group"
                                       >
-                                          <img src={img} className="w-full h-full object-cover" alt="" />
+                                          <img src={img} className="w-full h-full object-cover" alt={`Add Image ${i}`} />
                                           <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-[1px]">
                                               <Search className="text-white" size={24} />
                                           </div>
@@ -21937,7 +21937,7 @@ export default function App() {
                               className="w-full h-48 sm:h-64 bg-gray-100 rounded-xl mb-6 overflow-hidden border border-gray-200 cursor-pointer group relative"
                               onClick={() => setExpandedImage(activePopupAnnouncement.image)}
                           >
-                              <img src={activePopupAnnouncement.image} className="w-full h-full object-contain bg-gray-900" alt="Announcement Cover" />
+                              <img src={activePopupAnnouncement.image} className="w-full h-full object-contain" alt="Announcement Cover" />
                               <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-[1px]">
                                   <Search className="text-white" size={32} />
                               </div>
