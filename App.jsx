@@ -4102,9 +4102,10 @@ export default function App() {
       const tzOffset = (new Date()).getTimezoneOffset() * 60000;
       const todayStr = (new Date(Date.now() - tzOffset)).toISOString().split('T')[0];
 
-      const accessibleDeptsStr = currentUser?.accessibleDepts || '';
-      const accessibleArray = typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : accessibleDeptsStr;
-      const canAccessAll = accessibleArray.includes('All') || currentUser.username === 'admin';
+      // แก้ไขบัคการอ่าน Array ของสิทธิ์ ป้องกัน Error หากข้อมูลมาในรูปแบบ String หรือ Undefined
+      const accessibleDeptsStr = currentUser?.accessibleDepts;
+      const accessibleArray = Array.isArray(accessibleDeptsStr) ? accessibleDeptsStr : (typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : []);
+      const canAccessAll = accessibleArray.includes('All') || currentUser?.username === 'admin';
 
       const validAnnouncements = announcements.filter(a => {
           if (a.status !== 'Published') return false;
@@ -4117,7 +4118,7 @@ export default function App() {
           if (a.projectId === 'All' || canAccessAll) return true;
           const project = projects.find(p => p.id === a.projectId);
           if (!project) return false;
-          return project.name === currentUser.department || accessibleArray.includes(project.name);
+          return project.name === currentUser?.department || accessibleArray.includes(project.name);
       });
 
       validAnnouncements.sort((a, b) => {
@@ -7430,11 +7431,13 @@ export default function App() {
   };
 
   // --- NEW: Handlers สำหรับประกาศ/ข่าวสาร (Announcements) ---
-  const handleSaveAnnouncement = (e) => {
+  const handleSaveAnnouncement = (e, overrideStatus = null) => {
       if (e && e.preventDefault) e.preventDefault();
       let nextList;
+      const finalStatus = overrideStatus || newAnnouncement.status;
       const dataToSave = { 
           ...newAnnouncement, 
+          status: finalStatus,
           author: newAnnouncement.author || `${currentUser?.firstName} ${currentUser?.lastName}`,
           endDate: newAnnouncement.hasEndDate ? newAnnouncement.endDate : ''
       };
@@ -8620,6 +8623,7 @@ export default function App() {
 
       // NEW: ดึงประกาศล่าสุดสำหรับแสดงใน Dashboard
       const visibleAnnouncementsDashboard = announcements.filter(a => {
+          if (a.status !== 'Published') return false; // แสดงเฉพาะประกาศที่ Publish แล้วเท่านั้น
           const todayLocal = new Date();
           todayLocal.setHours(0,0,0,0);
           const startD = new Date(a.date);
@@ -21640,15 +21644,25 @@ export default function App() {
                                 {/* Action Buttons */}
                                 <div className="grid grid-cols-2 gap-3 pt-6 mt-2">
                                     <button 
-                                        type="submit" 
-                                        onClick={() => setNewAnnouncement({...newAnnouncement, status: 'Draft'})} 
+                                        type="button" 
+                                        onClick={(e) => {
+                                            const form = document.getElementById('announcement-form');
+                                            if (form && form.reportValidity()) {
+                                                handleSaveAnnouncement(e, 'Draft');
+                                            }
+                                        }} 
                                         className="py-2 px-4 text-blue-600 text-sm font-bold rounded-lg border border-blue-600 hover:bg-blue-50 transition-colors w-full bg-white shadow-sm"
                                     >
                                         บันทึกแบบร่าง
                                     </button>
                                     <button 
-                                        type="submit" 
-                                        onClick={() => setNewAnnouncement({...newAnnouncement, status: 'Published'})} 
+                                        type="button" 
+                                        onClick={(e) => {
+                                            const form = document.getElementById('announcement-form');
+                                            if (form && form.reportValidity()) {
+                                                handleSaveAnnouncement(e, 'Published');
+                                            }
+                                        }} 
                                         className="py-2 px-4 text-white text-sm font-bold rounded-lg bg-blue-600 hover:bg-blue-700 transition-colors w-full shadow-md"
                                     >
                                         ตกลง (Publish)
