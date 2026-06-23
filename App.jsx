@@ -10,7 +10,7 @@ import {
   ChevronLeft, ChevronRight, MousePointer2, FileCheck, DollarSign, Camera,
   MapPin, Box, PenTool, Printer as PrinterIcon, History, Folder, Lock,
   Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2, Bell, Megaphone, Radio, Medal, Landmark, RefreshCw, QrCode,
-  Package, Archive, ShoppingCart, ArrowDownRight, ArrowUpRight, FileSpreadsheet, ListChecks, Home, MessageSquare, PieChart as PieChartIcon
+  Package, Archive, ShoppingCart, ArrowDownRight, ArrowUpRight, FileSpreadsheet, ListChecks, Home, MessageSquare, PieChart as PieChartIcon, Eraser
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
@@ -4102,10 +4102,9 @@ export default function App() {
       const tzOffset = (new Date()).getTimezoneOffset() * 60000;
       const todayStr = (new Date(Date.now() - tzOffset)).toISOString().split('T')[0];
 
-      // แก้ไขบัคการอ่าน Array ของสิทธิ์ ป้องกัน Error หากข้อมูลมาในรูปแบบ String หรือ Undefined
-      const accessibleDeptsStr = currentUser?.accessibleDepts;
-      const accessibleArray = Array.isArray(accessibleDeptsStr) ? accessibleDeptsStr : (typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : []);
-      const canAccessAll = accessibleArray.includes('All') || currentUser?.username === 'admin';
+      const accessibleDeptsStr = currentUser?.accessibleDepts || '';
+      const accessibleArray = typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : accessibleDeptsStr;
+      const canAccessAll = accessibleArray.includes('All') || currentUser.username === 'admin';
 
       const validAnnouncements = announcements.filter(a => {
           if (a.status !== 'Published') return false;
@@ -4118,7 +4117,7 @@ export default function App() {
           if (a.projectId === 'All' || canAccessAll) return true;
           const project = projects.find(p => p.id === a.projectId);
           if (!project) return false;
-          return project.name === currentUser?.department || accessibleArray.includes(project.name);
+          return project.name === currentUser.department || accessibleArray.includes(project.name);
       });
 
       validAnnouncements.sort((a, b) => {
@@ -7431,13 +7430,11 @@ export default function App() {
   };
 
   // --- NEW: Handlers สำหรับประกาศ/ข่าวสาร (Announcements) ---
-  const handleSaveAnnouncement = (e, overrideStatus = null) => {
+  const handleSaveAnnouncement = (e) => {
       if (e && e.preventDefault) e.preventDefault();
       let nextList;
-      const finalStatus = overrideStatus || newAnnouncement.status;
       const dataToSave = { 
           ...newAnnouncement, 
-          status: finalStatus,
           author: newAnnouncement.author || `${currentUser?.firstName} ${currentUser?.lastName}`,
           endDate: newAnnouncement.hasEndDate ? newAnnouncement.endDate : ''
       };
@@ -8623,7 +8620,6 @@ export default function App() {
 
       // NEW: ดึงประกาศล่าสุดสำหรับแสดงใน Dashboard
       const visibleAnnouncementsDashboard = announcements.filter(a => {
-          if (a.status !== 'Published') return false; // แสดงเฉพาะประกาศที่ Publish แล้วเท่านั้น
           const todayLocal = new Date();
           todayLocal.setHours(0,0,0,0);
           const startD = new Date(a.date);
@@ -8756,7 +8752,7 @@ export default function App() {
                   <XAxis dataKey="name" angle={-45} textAnchor="end" tick={{fontSize: isFull ? 14 : 11}} interval={0} height={isFull ? 100 : 60} />
                   <YAxis domain={[0, 100]} tick={{fontSize: isFull ? 14 : 12}}/>
                   <RechartsTooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                  <Bar dataKey="avgScore" name="คะแนนเฉลี่ย" shape={<ThreeDBar />}>
+                  <Bar dataKey="avgScore" name="คะแนนเฉลี่ย" shape={<ThreeDBar />} label={{ position: 'top', formatter: (val) => `${val}%`, fill: '#4b5563', fontSize: isFull ? 14 : 11, fontWeight: 'bold', dy: -10 }}>
                       {auditRankData.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.avgScore >= 90 ? 'url(#colorGreen)' : entry.avgScore >= 70 ? 'url(#colorOrange)' : 'url(#colorRed)'} />
                       ))}
@@ -9814,12 +9810,12 @@ export default function App() {
                   <div className="h-80">
                       {auditRankData.length > 0 ? (
                           <ResponsiveContainer width="100%" height="100%">
-                              <BarChart data={auditRankData} margin={{ top: 20, right: 30, left: 0, bottom: 60 }}>
+                              <BarChart data={auditRankData} margin={{ top: 25, right: 30, left: 0, bottom: 60 }}>
                                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
                                   <XAxis dataKey="name" angle={-45} textAnchor="end" tick={{fontSize: 11, fill: '#6b7280'}} interval={0} height={60} axisLine={false} tickLine={false} />
                                   <YAxis domain={[0, 100]} tick={{fontSize: 11, fill: '#6b7280'}} axisLine={false} tickLine={false} />
                                   <RechartsTooltip cursor={{fill: '#f3f4f6'}} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                  <Bar dataKey="avgScore" name="คะแนนเฉลี่ย" radius={[4, 4, 0, 0]}>
+                                  <Bar dataKey="avgScore" name="คะแนนเฉลี่ย" radius={[4, 4, 0, 0]} label={{ position: 'top', formatter: (val) => `${val}%`, fill: '#4b5563', fontSize: 11, fontWeight: 'bold', dy: -5 }}>
                                       {auditRankData.map((entry, index) => (
                                           <Cell key={`cell-${index}`} fill={entry.avgScore >= 90 ? '#10b981' : entry.avgScore >= 70 ? '#f59e0b' : '#ef4444'} />
                                       ))}
@@ -11462,8 +11458,12 @@ export default function App() {
                                                                 className={`w-full h-full min-h-[26px] md:min-h-[28px] flex items-center justify-center text-center text-[8px] xl:text-[9px] p-0.5 m-0 transition-colors ${colorClass} ${!canEditPlan ? 'cursor-not-allowed opacity-70' : 'cursor-pointer hover:bg-blue-100 hover:shadow-inner'}`}
                                                                 onClick={() => {
                                                                     if (canEditPlan) {
-                                                                        setHoSelectedProjects(val ? val.split(', ').filter(Boolean) : []);
-                                                                        setHoScheduleModal({ userId: user.id, userName: `${user.firstName} ${user.lastName}`, dateString, type: 'plan', currentValue: val });
+                                                                        if (selectedShift === 'ERASE') {
+                                                                            updateSchedule(user.id, dateString, '', 'plan');
+                                                                        } else {
+                                                                            setHoSelectedProjects(val ? val.split(', ').filter(Boolean) : []);
+                                                                            setHoScheduleModal({ userId: user.id, userName: `${user.firstName} ${user.lastName}`, dateString, type: 'plan', currentValue: val });
+                                                                        }
                                                                     }
                                                                 }}
                                                                 title={!canEditPlan ? "ตาราง Plan ถูกอนุมัติหรือล็อคแล้ว" : "คลิกเพื่อเลือกหน่วยงาน (เลือกได้หลายที่)"}
@@ -11477,7 +11477,7 @@ export default function App() {
                                                                 value={val}
                                                                 onClick={() => {
                                                                     if (canEditPlan && selectedShift) {
-                                                                        updateSchedule(user.id, dateString, selectedShift, 'plan');
+                                                                        updateSchedule(user.id, dateString, selectedShift === 'ERASE' ? '' : selectedShift, 'plan');
                                                                     }
                                                                 }}
                                                                 onChange={(e) => canEditPlan && updateSchedule(user.id, dateString, e.target.value.toUpperCase(), 'plan')}
@@ -11520,8 +11520,12 @@ export default function App() {
                                                                 className={`w-full h-full min-h-[26px] md:min-h-[28px] flex items-center justify-center text-center text-[8px] xl:text-[9px] p-0.5 m-0 transition-colors ${colorClass} ${!canEditAct ? 'cursor-not-allowed opacity-70' : 'cursor-pointer hover:bg-green-100 hover:shadow-inner'}`}
                                                                 onClick={() => {
                                                                     if (canEditAct) {
-                                                                        setHoSelectedProjects(actVal ? actVal.split(', ').filter(Boolean) : []);
-                                                                        setHoScheduleModal({ userId: user.id, userName: `${user.firstName} ${user.lastName}`, dateString, type: 'act', currentValue: actVal });
+                                                                        if (selectedShift === 'ERASE') {
+                                                                            updateSchedule(user.id, dateString, '', 'act');
+                                                                        } else {
+                                                                            setHoSelectedProjects(actVal ? actVal.split(', ').filter(Boolean) : []);
+                                                                            setHoScheduleModal({ userId: user.id, userName: `${user.firstName} ${user.lastName}`, dateString, type: 'act', currentValue: actVal });
+                                                                        }
                                                                     }
                                                                 }}
                                                                 title={!canEditAct ? "ตารางถูกล็อคแล้วโดยฝ่ายบุคคล" : "คลิกเพื่อเลือกหน่วยงานตามจริง (เลือกได้หลายที่)"}
@@ -11535,7 +11539,7 @@ export default function App() {
                                                                 value={actVal}
                                                                 onClick={() => {
                                                                     if (canEditAct && selectedShift) {
-                                                                        updateSchedule(user.id, dateString, selectedShift, 'act');
+                                                                        updateSchedule(user.id, dateString, selectedShift === 'ERASE' ? '' : selectedShift, 'act');
                                                                     }
                                                                 }}
                                                                 onChange={(e) => canEditAct && updateSchedule(user.id, dateString, e.target.value.toUpperCase(), 'act')}
@@ -11587,6 +11591,18 @@ export default function App() {
                                     </span>
                                 </div>
                             ))}
+                            {/* ยางลบ (Eraser) */}
+                            {!isExporting && (
+                                <div 
+                                    onClick={() => setSelectedShift(selectedShift === 'ERASE' ? null : 'ERASE')}
+                                    className={`flex items-center gap-1.5 transition-all select-none text-xs cursor-pointer hover:bg-gray-200 p-1 rounded ${selectedShift === 'ERASE' ? 'ring-2 ring-red-500 bg-white shadow-md scale-105' : ''}`}
+                                >
+                                    <span className={`inline-block text-center rounded font-bold border bg-red-50 text-red-600 border-red-200 w-8 py-0.5`}>
+                                        <Eraser size={14} className="mx-auto" />
+                                    </span>
+                                    <span className="text-gray-600 truncate">ยางลบ (Erase)</span>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
@@ -21644,25 +21660,15 @@ export default function App() {
                                 {/* Action Buttons */}
                                 <div className="grid grid-cols-2 gap-3 pt-6 mt-2">
                                     <button 
-                                        type="button" 
-                                        onClick={(e) => {
-                                            const form = document.getElementById('announcement-form');
-                                            if (form && form.reportValidity()) {
-                                                handleSaveAnnouncement(e, 'Draft');
-                                            }
-                                        }} 
+                                        type="submit" 
+                                        onClick={() => setNewAnnouncement({...newAnnouncement, status: 'Draft'})} 
                                         className="py-2 px-4 text-blue-600 text-sm font-bold rounded-lg border border-blue-600 hover:bg-blue-50 transition-colors w-full bg-white shadow-sm"
                                     >
                                         บันทึกแบบร่าง
                                     </button>
                                     <button 
-                                        type="button" 
-                                        onClick={(e) => {
-                                            const form = document.getElementById('announcement-form');
-                                            if (form && form.reportValidity()) {
-                                                handleSaveAnnouncement(e, 'Published');
-                                            }
-                                        }} 
+                                        type="submit" 
+                                        onClick={() => setNewAnnouncement({...newAnnouncement, status: 'Published'})} 
                                         className="py-2 px-4 text-white text-sm font-bold rounded-lg bg-blue-600 hover:bg-blue-700 transition-colors w-full shadow-md"
                                     >
                                         ตกลง (Publish)
@@ -21691,7 +21697,7 @@ export default function App() {
                                         {/* Cover Image */}
                                         {newAnnouncement.image ? (
                                             <div className="w-full aspect-video bg-gray-200">
-                                                <img src={newAnnouncement.image} className="w-full h-full object-cover" alt="Preview Cover" />
+                                                <img src={newAnnouncement.image} className="w-full h-full object-cover" />
                                             </div>
                                         ) : (
                                             <div className="w-full aspect-video bg-gray-200 flex items-center justify-center text-gray-400 border-b border-gray-300">
@@ -21726,7 +21732,7 @@ export default function App() {
                                                     <div className="grid grid-cols-3 gap-1.5">
                                                         {newAnnouncement.additionalImages.map((img, i) => (
                                                             <div key={i} className="aspect-square bg-gray-100 rounded border border-gray-200 overflow-hidden">
-                                                                <img src={img} className="w-full h-full object-cover" alt={`Preview Add ${i}`} />
+                                                                <img src={img} className="w-full h-full object-cover" />
                                                             </div>
                                                         ))}
                                                     </div>
@@ -21763,7 +21769,7 @@ export default function App() {
                           className="w-full h-48 sm:h-72 bg-gray-100 relative overflow-hidden shrink-0 border-b border-gray-200 cursor-pointer group"
                           onClick={() => setExpandedImage(selectedAnnouncementView.image)}
                       >
-                          <img src={selectedAnnouncementView.image} className="w-full h-full object-contain" alt="Announcement" />
+                          <img src={selectedAnnouncementView.image} className="w-full h-full object-contain bg-gray-900" alt="Announcement" />
                           <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-[1px]">
                               <Search className="text-white" size={32} />
                           </div>
@@ -21815,7 +21821,7 @@ export default function App() {
                                           onClick={() => setExpandedImage(img)} 
                                           className="aspect-square bg-gray-100 rounded-lg border border-gray-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-pointer relative group"
                                       >
-                                          <img src={img} className="w-full h-full object-cover" alt={`Add Image ${i}`} />
+                                          <img src={img} className="w-full h-full object-cover" alt="" />
                                           <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-[1px]">
                                               <Search className="text-white" size={24} />
                                           </div>
@@ -21937,7 +21943,7 @@ export default function App() {
                               className="w-full h-48 sm:h-64 bg-gray-100 rounded-xl mb-6 overflow-hidden border border-gray-200 cursor-pointer group relative"
                               onClick={() => setExpandedImage(activePopupAnnouncement.image)}
                           >
-                              <img src={activePopupAnnouncement.image} className="w-full h-full object-contain" alt="Announcement Cover" />
+                              <img src={activePopupAnnouncement.image} className="w-full h-full object-contain bg-gray-900" alt="Announcement Cover" />
                               <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-[1px]">
                                   <Search className="text-white" size={32} />
                               </div>
