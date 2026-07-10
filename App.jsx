@@ -3711,9 +3711,13 @@ export default function App() {
   const [selectedAuditReport, setSelectedAuditReport] = useState(null); // NEW: State สำหรับเก็บข้อมูล Audit ที่ถูกคลิกดูรายละเอียด
   const [showAuditRankingModal, setShowAuditRankingModal] = useState(false); // NEW: State สำหรับเปิด/ปิด Modal จัดอันดับคะแนน Audit
   const [auditRankingMonth, setAuditRankingMonth] = useState(() => new Date().toISOString().slice(0, 7)); // NEW: State สำหรับเก็บเดือนที่ดูใน Modal จัดอันดับ Audit
+  const [auditStatsRange, setAuditStatsRange] = useState(6); // NEW: State สำหรับเลือกช่วงเวลาสถิติ Audit
+  const [globalAuditStatsRange, setGlobalAuditStatsRange] = useState(6); // NEW: State สำหรับกรองช่วงเวลา Global Audit
+  const [globalAuditRankMonth, setGlobalAuditRankMonth] = useState('All'); // NEW: State สำหรับกรองเดือนกราฟจัดอันดับ
   const [showReportRankingModal, setShowReportRankingModal] = useState(false); // NEW: State สำหรับเปิด/ปิด Modal จัดอันดับรายงานประจำวัน
   const [reportRankingMonth, setReportRankingMonth] = useState(() => new Date().toISOString().slice(0, 7)); // NEW: State สำหรับเก็บเดือนที่ดูใน Modal จัดอันดับรายงาน
   const [newAudit, setNewAudit] = useState({
+      id: null,
       projectId: '',
       date: new Date().toISOString().split('T')[0],
       inspector: '',
@@ -7347,6 +7351,21 @@ export default function App() {
       return total;
   };
 
+  const handleEditAudit = (audit) => {
+      setNewAudit({
+          id: audit.id,
+          projectId: audit.projectId,
+          date: audit.date,
+          type: audit.category || 'Internal Audit',
+          inspector: audit.inspector,
+          scores: audit.itemScores ? { ...audit.itemScores } : {},
+          remarks: audit.itemRemarks ? { ...audit.itemRemarks } : {},
+          activeItems: audit.activeItems ? { ...audit.activeItems } : {},
+          additionalComments: (audit.remarks && audit.remarks !== 'ตรวจสอบเรียบร้อย') ? audit.remarks : ''
+      });
+      setShowAddAuditModal(true);
+  };
+
   const handleSaveAudit = (e) => {
       e.preventDefault();
       if (!newAudit.projectId) {
@@ -7376,7 +7395,7 @@ export default function App() {
       const maxScore = calculateMaxAuditScore();
       const percentScore = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
       
-      const id = generateId();
+      const id = newAudit.id || generateId();
       const auditToSave = {
           id,
           projectId: newAudit.projectId,
@@ -7393,12 +7412,16 @@ export default function App() {
           activeItems: newAudit.activeItems // บันทึกสถานะเปิดปิดไปด้วย
       };
       
-      const nextList = [auditToSave, ...(Array.isArray(audits) ? audits : [])];
+      const nextList = newAudit.id 
+          ? audits.map(a => a.id === newAudit.id ? auditToSave : a)
+          : [auditToSave, ...(Array.isArray(audits) ? audits : [])];
+          
       setAudits(nextList);
       triggerAutoSync('Audits_ประเมินคุณภาพ', nextList, []);
 
       setShowAddAuditModal(false);
       setNewAudit({
+          id: null,
           projectId: '',
           date: new Date().toISOString().split('T')[0],
           inspector: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : '',
@@ -9754,12 +9777,62 @@ export default function App() {
   };
 
   const GlobalAuditList = () => {
-      // คำนวณคะแนนเฉลี่ยของทุกโครงการสำหรับการแสดงผลในกราฟ
+      // หาวันที่ประเมินทั้งหมดในระบบเพื่อนำไปสร้างตัวเลือก Dropdown
+      const availableAuditMonths = Array.from(new Set(
+          audits.map(a => a.date ? a.date.substring(0, 7) : null).filter(Boolean)
+      )).sort().reverse();
+
+      // 1. คำนวณคะแนนเฉลี่ยของทุกโครงการสำหรับการแสดงผลในกราฟ (All time หรือ ตามเดือนที่เลือก)
       const auditRankData = projects.map(p => {
-          const pAudits = audits.filter(a => a.projectId === p.id);
+          const pAudits = audits.filter(a => 
+              a.projectId === p.id && 
+              (globalAuditRankMonth === 'All' || (a.date && a.date.startsWith(globalAuditRankMonth)))
+          );
           const avg = pAudits.length > 0 ? (pAudits.reduce((sum, a) => sum + a.score, 0) / pAudits.length) : 0;
           return { name: p.name, avgScore: parseFloat(avg.toFixed(1)) };
       }).filter(d => d.avgScore > 0).sort((a, b) => b.avgScore - a.avgScore);
+
+      // 2. คำนวณสถิติภาพรวม
+      const totalAuditsCount = audits.length;
+      const avgScoreGlobal = totalAuditsCount > 0 ? Math.round(audits.reduce((acc, curr) => acc + (curr.score || 0), 0) / totalAuditsCount) : 0;
+      const excellentCount = audits.filter(a => a.score >= 90).length;
+      const needsImprovementCount = audits.filter(a => a.score < 70).length;
+
+      // 3. ข้อมูลกราฟเส้นและหัวตาราง: ดึงย้อนหลังตามจำนวนเดือนที่เลือก (globalAuditStatsRange)
+      const globalTrendData = [];
+      const d = new Date();
+      const displayMonthsKeys = [];
+      
+      for (let i = globalAuditStatsRange - 1; i >= 0; i--) {
+          const targetDate = new Date(d.getFullYear(), d.getMonth() - i, 1);
+          const monthStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
+          const monthNameTh = targetDate.toLocaleDateString('th-TH', { month: 'short', year: '2-digit' });
+          
+          displayMonthsKeys.push(monthStr);
+
+          const monthAudits = audits.filter(a => a.date && a.date.startsWith(monthStr));
+          const avgScore = monthAudits.length > 0 ? (monthAudits.reduce((sum, a) => sum + a.score, 0) / monthAudits.length) : null;
+          
+          globalTrendData.push({
+              month: monthNameTh,
+              score: avgScore !== null ? parseFloat(avgScore.toFixed(1)) : null,
+              hasData: monthAudits.length > 0
+          });
+      }
+
+      // 4. ตารางเปรียบเทียบเดือนต่อเดือน (กรองและเรียงคะแนนเฉลี่ยจากมากไปน้อย ตามช่วงเวลาที่เลือก)
+      const activeProjectsList = projects.map(p => {
+          const pAudits = audits.filter(a => a.projectId === p.id && displayMonthsKeys.some(m => a.date?.startsWith(m)));
+          const avg = pAudits.length > 0 ? (pAudits.reduce((sum, a) => sum + a.score, 0) / pAudits.length) : 0;
+          return { ...p, periodAvg: avg, auditCount: pAudits.length };
+      }).filter(p => p.auditCount > 0).sort((a, b) => b.periodAvg - a.periodAvg);
+      
+      const getMonthNameTh = (yyyymm) => {
+          if (!yyyymm) return '';
+          const [yyyy, mm] = yyyymm.split('-');
+          const monthsTh = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+          return `${monthsTh[parseInt(mm, 10) - 1]} ${parseInt(yyyy, 10) + 543}`;
+      };
 
       return (
           <div id="print-global-audit" className={`space-y-6 animate-fade-in ${isExporting ? 'w-[190mm] min-w-[190mm] max-w-[190mm] mx-auto bg-white box-border' : ''}`}>
@@ -9771,12 +9844,12 @@ export default function App() {
                   </div>
                   <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
                       {hasPerm('audits', 'save') && (
-                          <Button icon={Plus} onClick={() => { setNewAudit(prev => ({...prev, projectId: '', inspector: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : '', scores: {}, remarks: {}, activeItems: {}, additionalComments: ''})); setShowAddAuditModal(true); }}>
+                          <Button icon={Plus} onClick={() => { setNewAudit(prev => ({...prev, id: null, projectId: '', inspector: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : '', scores: {}, remarks: {}, activeItems: {}, additionalComments: ''})); setShowAddAuditModal(true); }}>
                               {t('newAudit')}
                           </Button>
                       )}
                       <Button variant="outline" icon={Download} onClick={() => exportToCSV(audits, 'global_audit_report')}>{t('exportCSV')}</Button>
-                      <Button variant="outline" icon={isExporting ? Loader2 : Printer} onClick={() => {
+                      <Button variant="outline" icon={isExporting ? Loader2 : PrinterIcon} onClick={() => {
                           const container = document.getElementById('print-global-audit');
                           if (container) container.scrollTop = 0;
                           handleExportPDF('print-global-audit', 'Global_Audit_Report.pdf', 'portrait', [22, 10, 20, 10]);
@@ -9786,49 +9859,247 @@ export default function App() {
                   </div>
               </header>
 
-              {/* KPI Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <Card className="p-6 border-l-4 border-green-500">
-                      <div className="text-gray-500 mb-1">{t('auditPass')}</div>
-                      <div className="text-2xl font-bold">{audits.filter(a => a.score >= 90).length} Reports</div>
+              {/* Statistics Dashboard */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4 hover:shadow-md transition-shadow">
+                      <div className="p-3 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center"><ClipboardCheck size={24} /></div>
+                      <div>
+                          <div className="text-sm text-gray-500 font-medium">จำนวนที่ตรวจทั้งหมด</div>
+                          <div className="text-2xl font-bold text-gray-800">{totalAuditsCount} <span className="text-base font-normal text-gray-500">ครั้ง</span></div>
+                      </div>
+                  </div>
+                  <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4 hover:shadow-md transition-shadow">
+                      <div className="p-3 bg-purple-50 text-purple-600 rounded-lg flex items-center justify-center"><BarChart3 size={24} /></div>
+                      <div>
+                          <div className="text-sm text-gray-500 font-medium">คะแนนเฉลี่ยรวม</div>
+                          <div className="text-2xl font-bold text-gray-800">{avgScoreGlobal}%</div>
+                      </div>
+                  </div>
+                  <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4 hover:shadow-md transition-shadow">
+                      <div className="p-3 bg-green-50 text-green-600 rounded-lg flex items-center justify-center"><CheckCircle size={24} /></div>
+                      <div>
+                          <div className="text-sm text-gray-500 font-medium">ดีเยี่ยม (≥90%)</div>
+                          <div className="text-2xl font-bold text-gray-800">{excellentCount} <span className="text-base font-normal text-gray-500">รายการ</span></div>
+                      </div>
+                  </div>
+                  <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4 hover:shadow-md transition-shadow">
+                      <div className="p-3 bg-red-50 text-red-600 rounded-lg flex items-center justify-center"><AlertTriangle size={24} /></div>
+                      <div>
+                          <div className="text-sm text-gray-500 font-medium">ต้องปรับปรุง ({"<"}70%)</div>
+                          <div className="text-2xl font-bold text-gray-800">{needsImprovementCount} <span className="text-base font-normal text-gray-500">รายการ</span></div>
+                      </div>
+                  </div>
+              </div>
+
+              {/* Historical Trend & Comparison Filter */}
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                  <div>
+                      <h3 className="font-bold text-gray-800 flex items-center gap-2 text-base">
+                          <Layers size={20} className="text-purple-600"/> สถิติและตารางเปรียบเทียบผลประเมินย้อนหลัง
+                      </h3>
+                      <p className="text-xs text-gray-500 mt-1">ข้อมูลในกราฟและตารางจะปรับช่วงเวลาและเรียงลำดับคะแนนตามที่คุณเลือก</p>
+                  </div>
+                  <div className="flex items-center gap-2 mt-3 sm:mt-0 bg-purple-50 px-3 py-1.5 rounded-lg border border-purple-200">
+                      <span className="text-xs font-bold text-purple-800">เลือกช่วงเวลา:</span>
+                      <select 
+                          className="text-sm border-none outline-none font-bold text-purple-700 bg-transparent cursor-pointer"
+                          value={globalAuditStatsRange}
+                          onChange={(e) => setGlobalAuditStatsRange(Number(e.target.value))}
+                      >
+                          <option value={3}>3 เดือนล่าสุด</option>
+                          <option value={6}>6 เดือนล่าสุด</option>
+                          <option value={9}>9 เดือนล่าสุด</option>
+                          <option value={12}>12 เดือนล่าสุด</option>
+                      </select>
+                  </div>
+              </div>
+
+              {/* Historical Trend & Comparison */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Line Chart */}
+                  <Card className="p-6 lg:col-span-1 flex flex-col">
+                      <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                          <BarChart3 size={20} className="text-blue-600"/> แนวโน้มคะแนนเฉลี่ย ({globalAuditStatsRange} เดือน)
+                      </h3>
+                      <div className="h-64 flex-1">
+                          <ResponsiveContainer width="100%" height="100%">
+                              <LineChart data={globalTrendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                  <XAxis dataKey="month" tick={{fontSize: 11, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                  <YAxis domain={[0, 100]} tick={{fontSize: 11, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                  <RechartsTooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                  <Line type="monotone" dataKey="score" name="คะแนนเฉลี่ยรวม (%)" stroke="#2563eb" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} connectNulls={true} />
+                              </LineChart>
+                          </ResponsiveContainer>
+                      </div>
                   </Card>
-                  <Card className="p-6 border-l-4 border-yellow-500">
-                      <div className="text-gray-500 mb-1">{t('auditConcern')}</div>
-                      <div className="text-2xl font-bold">{audits.filter(a => a.score >= 70 && a.score < 90).length} Reports</div>
-                  </Card>
-                  <Card className="p-6 border-l-4 border-red-500">
-                      <div className="text-gray-500 mb-1">{t('auditCritical')}</div>
-                      <div className="text-2xl font-bold">{audits.filter(a => a.score < 70).length} Reports</div>
+                  
+                  {/* Comparison Table */}
+                  <Card className="lg:col-span-2 flex flex-col overflow-hidden max-h-[350px]">
+                      <div className="p-4 bg-gray-50 border-b border-gray-200 shrink-0">
+                          <h3 className="font-bold text-gray-800 flex items-center gap-2 text-base">
+                              <Layers size={20} className="text-purple-600" /> ตารางเปรียบเทียบคะแนนแต่ละโครงการย้อนหลัง
+                          </h3>
+                      </div>
+                      <div className="flex-1 overflow-x-auto overflow-y-auto custom-scrollbar p-0">
+                          {displayMonthsKeys.length > 0 && activeProjectsList.length > 0 ? (
+                              <table className="w-full text-left text-sm min-w-max">
+                                  <thead className="bg-white sticky top-0 z-10 shadow-sm">
+                                      <tr className="border-b border-gray-100">
+                                          <th className="p-3 font-bold text-gray-600 bg-white sticky left-0 z-20 border-r border-gray-100">โครงการ / หน่วยงาน</th>
+                                          {displayMonthsKeys.map(month => (
+                                              <th key={month} className="p-3 font-semibold text-gray-500 text-center">{getMonthNameTh(month)}</th>
+                                          ))}
+                                          <th className="p-3 font-bold text-purple-700 bg-purple-50 text-center border-l border-gray-100">เฉลี่ยรวม</th>
+                                          <th className="p-3 font-bold text-gray-600 text-center border-l border-gray-100">แนวโน้ม</th>
+                                      </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-100">
+                                      {activeProjectsList.map(project => {
+                                          const projectAudits = audits.filter(a => a.projectId === project.id);
+                                          let previousScore = null;
+                                          let trendIcon = null;
+
+                                          return (
+                                              <tr key={project.id} className="hover:bg-purple-50/30 transition-colors">
+                                                  <td className="p-3 font-medium text-gray-800 max-w-[200px] truncate bg-white sticky left-0 z-10 border-r border-gray-50" title={project.name}>{project.name}</td>
+                                                  {displayMonthsKeys.map(month => {
+                                                      const auditsInMonth = projectAudits.filter(a => a.date && a.date.startsWith(month));
+                                                      const latestAuditInMonth = auditsInMonth.sort((a,b) => new Date(b.date) - new Date(a.date))[0];
+                                                      const currentScore = latestAuditInMonth ? latestAuditInMonth.score : '-';
+                                                      
+                                                      if (latestAuditInMonth) {
+                                                          if (previousScore !== null) {
+                                                              if (currentScore > previousScore) trendIcon = <span title={`เพิ่มขึ้นจาก ${previousScore}%`} className="text-green-500 flex justify-center"><ArrowUpRight size={16}/></span>;
+                                                              else if (currentScore < previousScore) trendIcon = <span title={`ลดลงจาก ${previousScore}%`} className="text-red-500 flex justify-center"><ArrowDownRight size={16}/></span>;
+                                                              else trendIcon = <span className="text-gray-400 font-bold flex justify-center" title="คงที่">-</span>;
+                                                          }
+                                                          previousScore = currentScore;
+                                                      }
+
+                                                      return (
+                                                          <td key={month} className="p-3 text-center">
+                                                              {latestAuditInMonth ? (
+                                                                  <span className={`px-2 py-1 rounded text-[10px] font-bold ${currentScore >= 90 ? 'bg-green-100 text-green-700' : currentScore >= 70 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                                                                      {currentScore}%
+                                                                  </span>
+                                                              ) : (
+                                                                  <span className="text-gray-300">-</span>
+                                                              )}
+                                                          </td>
+                                                      );
+                                                  })}
+                                                  <td className="p-3 text-center font-bold text-purple-700 bg-purple-50/50 border-l border-gray-50">
+                                                      {project.periodAvg > 0 ? `${project.periodAvg.toFixed(1)}%` : '-'}
+                                                  </td>
+                                                  <td className="p-3 text-center align-middle border-l border-gray-50 bg-white">
+                                                      {trendIcon || <span className="text-gray-300">-</span>}
+                                                  </td>
+                                              </tr>
+                                          );
+                                      })}
+                                  </tbody>
+                              </table>
+                          ) : (
+                              <div className="p-10 text-center text-gray-400">ยังไม่มีข้อมูลการประเมินย้อนหลังเพียงพอในช่วงเวลานี้</div>
+                          )}
+                      </div>
                   </Card>
               </div>
 
-              {/* Audit Ranking Graph */}
-              <Card className="p-6">
-                  <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-                      <BarChart3 size={20} className="text-blue-600"/> ลำดับผลคะแนน Audit รวมทุกหน่วยงาน (จากมากไปน้อย)
-                  </h3>
-                  <div className="h-80">
-                      {auditRankData.length > 0 ? (
-                          <ResponsiveContainer width="100%" height="100%">
-                              <BarChart data={auditRankData} margin={{ top: 25, right: 30, left: 0, bottom: 60 }}>
-                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                  <XAxis dataKey="name" angle={-45} textAnchor="end" tick={{fontSize: 11, fill: '#6b7280'}} interval={0} height={60} axisLine={false} tickLine={false} />
-                                  <YAxis domain={[0, 100]} tick={{fontSize: 11, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                  <RechartsTooltip cursor={{fill: '#f3f4f6'}} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                  <Bar dataKey="avgScore" name="คะแนนเฉลี่ย" radius={[4, 4, 0, 0]} label={{ position: 'top', formatter: (val) => `${val}%`, fill: '#4b5563', fontSize: 11, fontWeight: 'bold', dy: -5 }}>
-                                      {auditRankData.map((entry, index) => (
-                                          <Cell key={`cell-${index}`} fill={entry.avgScore >= 90 ? '#10b981' : entry.avgScore >= 70 ? '#f59e0b' : '#ef4444'} />
-                                      ))}
-                                  </Bar>
-                              </BarChart>
-                          </ResponsiveContainer>
-                      ) : (
-                          <div className="flex items-center justify-center h-full text-gray-400 bg-gray-50 rounded-lg border-2 border-dashed">
-                              ยังไม่มีข้อมูลผลการประเมิน (Audit) ที่คำนวณได้
-                          </div>
-                      )}
+              {/* Audit Ranking Graph & Table */}
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-4 rounded-xl shadow-sm border border-gray-100 mt-6 mb-4">
+                  <div>
+                      <h3 className="font-bold text-gray-800 flex items-center gap-2 text-base">
+                          <BarChart3 size={20} className="text-blue-600"/> กราฟจัดอันดับคะแนน Audit เฉลี่ย
+                      </h3>
+                      <p className="text-xs text-gray-500 mt-1">แสดงผลคะแนนและจัดอันดับตามช่วงเวลาที่เลือก</p>
                   </div>
-              </Card>
+                  <div className="flex items-center gap-2 mt-3 sm:mt-0 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200">
+                      <span className="text-xs font-bold text-blue-800">เลือกเดือน:</span>
+                      <select 
+                          className="text-sm border-none outline-none font-bold text-blue-700 bg-transparent cursor-pointer"
+                          value={globalAuditRankMonth}
+                          onChange={(e) => setGlobalAuditRankMonth(e.target.value)}
+                      >
+                          <option value="All">ตลอดชีพ (All-time)</option>
+                          {availableAuditMonths.map(ym => {
+                              const [y, m] = ym.split('-');
+                              const dObj = new Date(parseInt(y), parseInt(m) - 1, 1);
+                              return (
+                                  <option key={ym} value={ym}>
+                                      {dObj.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })}
+                                  </option>
+                              );
+                          })}
+                      </select>
+                  </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <Card className="p-6 lg:col-span-2">
+                      <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                          <BarChart3 size={20} className="text-blue-600"/> กราฟคะแนน {globalAuditRankMonth === 'All' ? 'รวม (ตลอดชีพ)' : `ประจำเดือน ${new Date(globalAuditRankMonth + '-01').toLocaleDateString('th-TH', { month: 'short', year: 'numeric' })}`}
+                      </h3>
+                      <div className="h-80">
+                          {auditRankData.length > 0 ? (
+                              <ResponsiveContainer width="100%" height="100%">
+                                  <BarChart data={auditRankData} margin={{ top: 25, right: 30, left: 0, bottom: 60 }}>
+                                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                      <XAxis dataKey="name" angle={-45} textAnchor="end" tick={{fontSize: 11, fill: '#6b7280'}} interval={0} height={60} axisLine={false} tickLine={false} />
+                                      <YAxis domain={[0, 100]} tick={{fontSize: 11, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                      <RechartsTooltip cursor={{fill: '#f3f4f6'}} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                      <Bar dataKey="avgScore" name="คะแนนเฉลี่ย" radius={[4, 4, 0, 0]} label={{ position: 'top', formatter: (val) => `${val}%`, fill: '#4b5563', fontSize: 11, fontWeight: 'bold', dy: -5 }}>
+                                          {auditRankData.map((entry, index) => (
+                                              <Cell key={`cell-${index}`} fill={entry.avgScore >= 90 ? '#10b981' : entry.avgScore >= 70 ? '#f59e0b' : '#ef4444'} />
+                                          ))}
+                                      </Bar>
+                                  </BarChart>
+                              </ResponsiveContainer>
+                          ) : (
+                              <div className="flex items-center justify-center h-full text-gray-400 bg-gray-50 rounded-lg border-2 border-dashed">
+                                  ยังไม่มีข้อมูลผลการประเมิน (Audit) ที่คำนวณได้
+                              </div>
+                          )}
+                      </div>
+                  </Card>
+                  
+                  {/* Ranking Table */}
+                  <Card className="flex flex-col overflow-hidden max-h-[415px]">
+                      <div className="p-4 bg-gray-50 border-b border-gray-200 shrink-0">
+                          <h3 className="font-bold text-gray-800 flex items-center gap-2 text-base">
+                              <Medal size={20} className="text-orange-500" /> ตารางจัดอันดับ {globalAuditRankMonth === 'All' ? '(ตลอดชีพ)' : '(เดือนที่เลือก)'}
+                          </h3>
+                      </div>
+                      <div className="flex-1 overflow-y-auto custom-scrollbar p-0">
+                          <table className="w-full text-sm text-left">
+                              <thead className="bg-white text-gray-500 sticky top-0 border-b border-gray-100 shadow-sm z-10 text-xs">
+                                  <tr>
+                                      <th className="p-3 text-center w-16">อันดับ</th>
+                                      <th className="p-3">โครงการ / หน่วยงาน</th>
+                                      <th className="p-3 text-center w-24">คะแนน</th>
+                                  </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-50">
+                                  {auditRankData.map((d, i) => (
+                                      <tr key={i} className="hover:bg-gray-50 transition-colors">
+                                          <td className="p-3 text-center">
+                                              <div className="flex justify-center items-center py-1">
+                                                  <ThreeDMedal rank={i + 1} />
+                                              </div>
+                                          </td>
+                                          <td className="p-3 font-medium text-gray-800">{d.name}</td>
+                                          <td className="p-3 text-center font-bold text-blue-600">{d.avgScore}%</td>
+                                      </tr>
+                                  ))}
+                                  {auditRankData.length === 0 && (
+                                      <tr><td colSpan="3" className="p-6 text-center text-gray-400">ไม่มีข้อมูล</td></tr>
+                                  )}
+                              </tbody>
+                          </table>
+                      </div>
+                  </Card>
+              </div>
 
               {/* Detailed Audit Table */}
               <Card>
@@ -9864,6 +10135,15 @@ export default function App() {
                                                   <button className="text-gray-400 hover:text-blue-600 transition-colors p-1" onClick={() => setSelectedAuditReport(audit)} title="ดูรายงาน">
                                                       <FileText size={18} />
                                                   </button>
+                                                  {hasPerm('audits', 'edit') && (
+                                                      <button 
+                                                          className="text-gray-400 hover:text-orange-600 transition-colors p-1" 
+                                                          onClick={() => handleEditAudit(audit)} 
+                                                          title="แก้ไขรายงาน"
+                                                      >
+                                                          <Edit size={18} />
+                                                      </button>
+                                                  )}
                                                   {hasPerm('audits', 'delete') && (
                                                       <button 
                                                           className="text-gray-400 hover:text-red-600 transition-colors p-1" 
@@ -14473,7 +14753,7 @@ export default function App() {
                               {isExporting ? t('downloading') : t('downloadPDF')}
                           </Button>
                           {hasPerm('proj_audit', 'save') && <Button size="sm" icon={Plus} onClick={() => {
-                              setNewAudit(prev => ({...prev, projectId: selectedProject.id, inspector: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : '', scores: {}, remarks: {}, activeItems: {}, additionalComments: ''}));
+                              setNewAudit(prev => ({...prev, id: null, projectId: selectedProject.id, inspector: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : '', scores: {}, remarks: {}, activeItems: {}, additionalComments: ''}));
                               setShowAddAuditModal(true);
                           }}>เพิ่มผลประเมิน</Button>}
                       </div>
@@ -14482,34 +14762,110 @@ export default function App() {
                   {showAuditStats && !isExporting && (() => {
                       const auditStatsData = [];
                       const d = new Date();
-                      for (let i = 5; i >= 0; i--) {
+                      let previousScore = 0;
+                      const range = auditStatsRange; // ใช้ค่า Range ที่เลือกจาก State
+
+                      for (let i = range; i >= 0; i--) {
                           const targetDate = new Date(d.getFullYear(), d.getMonth() - i, 1);
                           const monthStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
                           const monthNameTh = targetDate.toLocaleDateString('th-TH', { month: 'short', year: '2-digit' });
                           
                           const monthAudits = audits.filter(a => a.projectId === selectedProject.id && a.date.startsWith(monthStr));
                           const avgScore = monthAudits.length > 0 ? (monthAudits.reduce((sum, a) => sum + a.score, 0) / monthAudits.length) : 0;
+                          const currentScore = parseFloat(avgScore.toFixed(1));
 
-                          auditStatsData.push({
-                              month: monthNameTh,
-                              score: parseFloat(avgScore.toFixed(1))
-                          });
+                          if (i < range) {
+                              let trend = 0;
+                              let trendType = 'neutral';
+                              if (monthAudits.length > 0 && previousScore > 0) {
+                                  trend = parseFloat((currentScore - previousScore).toFixed(1));
+                                  if (trend > 0) trendType = 'up';
+                                  else if (trend < 0) trendType = 'down';
+                              }
+
+                              auditStatsData.push({
+                                  month: monthNameTh,
+                                  score: currentScore,
+                                  hasData: monthAudits.length > 0,
+                                  trend: trend,
+                                  trendType: trendType
+                              });
+                          }
+                          if (monthAudits.length > 0) previousScore = currentScore;
+                          else previousScore = 0;
                       }
                       
                       return (
                           <div className="p-6 bg-blue-50/30 border-b border-gray-200 animate-fade-in">
-                              <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><BarChart3 className="text-blue-600"/> สถิติคะแนน Audit เฉลี่ยย้อนหลัง 6 เดือน</h3>
-                              <div className="h-64 bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-                                  <ResponsiveContainer width="100%" height="100%">
-                                      <LineChart data={auditStatsData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                          <XAxis dataKey="month" tick={{fontSize: 12, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                          <YAxis domain={[0, 100]} tick={{fontSize: 12, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                          <RechartsTooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                          <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
-                                          <Line type="monotone" dataKey="score" name="คะแนนเฉลี่ย (%)" stroke="#2563eb" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} />
-                                      </LineChart>
-                                  </ResponsiveContainer>
+                              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
+                                  <h3 className="font-bold text-gray-800 flex items-center gap-2"><BarChart3 className="text-blue-600"/> สถิติและตารางเปรียบเทียบคะแนน Audit ย้อนหลัง</h3>
+                                  <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-gray-200 shadow-sm">
+                                      <span className="text-xs font-bold text-gray-500">ช่วงเวลา:</span>
+                                      <select 
+                                          className="text-sm border-none outline-none font-bold text-blue-700 bg-transparent cursor-pointer"
+                                          value={auditStatsRange}
+                                          onChange={(e) => setAuditStatsRange(Number(e.target.value))}
+                                      >
+                                          <option value={3}>3 เดือนล่าสุด</option>
+                                          <option value={6}>6 เดือนล่าสุด</option>
+                                          <option value={9}>9 เดือนล่าสุด</option>
+                                          <option value={12}>12 เดือนล่าสุด</option>
+                                      </select>
+                                  </div>
+                              </div>
+                              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                  <div className="lg:col-span-2 h-64 bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+                                      <ResponsiveContainer width="100%" height="100%">
+                                          <LineChart data={auditStatsData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                              <XAxis dataKey="month" tick={{fontSize: 12, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                              <YAxis domain={[0, 100]} tick={{fontSize: 12, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                                              <RechartsTooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+                                              <Line type="monotone" dataKey="score" name="คะแนนเฉลี่ย (%)" stroke="#2563eb" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} />
+                                          </LineChart>
+                                      </ResponsiveContainer>
+                                  </div>
+                                  <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-64">
+                                      <div className="p-3 bg-blue-50 border-b border-blue-100 font-bold text-blue-800 text-sm text-center">
+                                          ตารางเปรียบเทียบ (เดือนต่อเดือน)
+                                      </div>
+                                      <div className="flex-1 overflow-y-auto custom-scrollbar">
+                                          <table className="w-full text-sm">
+                                              <thead className="bg-gray-50 text-gray-600 text-xs sticky top-0">
+                                                  <tr>
+                                                      <th className="p-2 text-center border-b">เดือน</th>
+                                                      <th className="p-2 text-center border-b">คะแนนเฉลี่ย</th>
+                                                      <th className="p-2 text-center border-b">เปลี่ยนแปลง</th>
+                                                  </tr>
+                                              </thead>
+                                              <tbody className="divide-y divide-gray-100">
+                                                  {[...auditStatsData].reverse().map((data, idx) => (
+                                                      <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                                                          <td className="p-2 text-center text-gray-700 font-medium">{data.month}</td>
+                                                          <td className="p-2 text-center font-bold text-blue-600">
+                                                              {data.hasData ? `${data.score}%` : '-'}
+                                                          </td>
+                                                          <td className="p-2 text-center">
+                                                              {data.hasData && data.trendType !== 'neutral' ? (
+                                                                  <span className={`inline-flex items-center justify-center w-16 gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                                                                      data.trendType === 'up' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                                                                  }`}>
+                                                                      {data.trendType === 'up' ? <ArrowUpRight size={10}/> : <ArrowDownRight size={10}/>}
+                                                                      {Math.abs(data.trend)}%
+                                                                  </span>
+                                                              ) : data.hasData ? (
+                                                                  <span className="text-gray-400 text-xs">-</span>
+                                                              ) : (
+                                                                  <span className="text-gray-300 text-xs">N/A</span>
+                                                              )}
+                                                          </td>
+                                                      </tr>
+                                                  ))}
+                                              </tbody>
+                                          </table>
+                                      </div>
+                                  </div>
                               </div>
                           </div>
                       );
@@ -14556,21 +14912,32 @@ export default function App() {
                                           <td className="p-3 text-gray-700 flex items-center gap-1 mt-1 break-words whitespace-normal"><User size={14} className={`text-gray-400 shrink-0 ${isExporting ? 'hidden' : ''}`}/> {audit.inspector}</td>
                                           <td className="p-3 text-gray-500 text-xs break-words whitespace-normal">{audit.remarks || '-'}</td>
                                           <td className={`p-3 text-center ${isExporting ? 'hidden' : ''}`}>
-                                              {hasPerm('proj_audit', 'delete') && (
-                                                  <button 
-                                                      onClick={() => showConfirm('ยืนยันการลบ', 'คุณต้องการลบรายงานผลการตรวจสอบนี้ใช่หรือไม่?', () => {
-                                                          setAudits(prev => {
-                                                              const nextList = prev.filter(a => a.id !== audit.id);
-                                                              setTimeout(() => triggerAutoSync('Audits_ประเมินคุณภาพ', nextList, []), 500);
-                                                              return nextList;
-                                                          });
-                                                      })}
-                                                      className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
-                                                      title="ลบรายงาน"
-                                                  >
-                                                      <Trash2 size={16} />
-                                                  </button>
-                                              )}
+                                              <div className="flex items-center justify-center gap-1">
+                                                  {hasPerm('proj_audit', 'edit') && (
+                                                      <button 
+                                                          onClick={() => handleEditAudit(audit)}
+                                                          className="text-gray-400 hover:text-orange-600 p-1.5 rounded-md hover:bg-orange-50 transition-colors"
+                                                          title="แก้ไขรายงาน"
+                                                      >
+                                                          <Edit size={16} />
+                                                      </button>
+                                                  )}
+                                                  {hasPerm('proj_audit', 'delete') && (
+                                                      <button 
+                                                          onClick={() => showConfirm('ยืนยันการลบ', 'คุณต้องการลบรายงานผลการตรวจสอบนี้ใช่หรือไม่?', () => {
+                                                              setAudits(prev => {
+                                                                  const nextList = prev.filter(a => a.id !== audit.id);
+                                                                  setTimeout(() => triggerAutoSync('Audits_ประเมินคุณภาพ', nextList, []), 500);
+                                                                  return nextList;
+                                                              });
+                                                          })}
+                                                          className="text-gray-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors"
+                                                          title="ลบรายงาน"
+                                                      >
+                                                          <Trash2 size={16} />
+                                                      </button>
+                                                  )}
+                                              </div>
                                           </td>
                                       </tr>
                                       );
@@ -20561,7 +20928,7 @@ export default function App() {
             <div className="flex justify-between items-center mb-6 border-b pb-4 sticky top-0 bg-white z-10">
               <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
                 <ClipboardCheck className="text-purple-500" />
-                บันทึกผลการตรวจสอบ (New Audit)
+                {newAudit.id ? 'แก้ไขผลการตรวจสอบ (Edit Audit)' : 'บันทึกผลการตรวจสอบ (New Audit)'}
               </h2>
               <button onClick={() => setShowAddAuditModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><X size={24} /></button>
             </div>
