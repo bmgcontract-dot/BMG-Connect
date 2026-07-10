@@ -6293,28 +6293,62 @@ export default function App() {
 
   const handleSaveRepair = async (e) => {
       e.preventDefault();
-      let savedRepair;
-      let nextList;
-      const existingIndex = repairs.findIndex(r => r.code === newRepair.code);
       
-      if (newRepair.id || existingIndex >= 0) {
-          // Edit existing repair
-          savedRepair = { ...newRepair, id: newRepair.id || repairs[existingIndex].id, updatedAt: new Date().toISOString() };
-          nextList = repairs.map(r => r.code === newRepair.code ? savedRepair : r);
+      let savedRepair;
+      let isNew = !newRepair.id;
+      
+      // 1. เตรียมข้อมูลก่อนเซฟ
+      if (!isNew) {
+          savedRepair = { ...newRepair, updatedAt: new Date().toISOString() };
       } else {
-          // Add new repair
-          const id = generateId();
-          savedRepair = { ...newRepair, id, projectId: selectedProject.id, date: new Date().toISOString().split('T')[0], createdAt: new Date().toISOString() };
-          nextList = [savedRepair, ...repairs]; // แทรกข้อมูลใหม่ไว้บนสุด
+          savedRepair = { 
+              ...newRepair, 
+              id: generateId(), 
+              projectId: selectedProject.id, 
+              date: new Date().toISOString().split('T')[0], 
+              createdAt: new Date().toISOString() 
+          };
       }
 
-      setRepairs(nextList);
+      // 2. ใช้ Functional Update (prev =>) เพื่อป้องกัน State ไม่อัปเดตและป้องกันการทับกันของข้อมูลแบบ 100%
+      setRepairs(prev => {
+          let nextList;
+          
+          if (!isNew) {
+              // โหมดแก้ไข: หาตาม ID ไม่หาตาม Code ป้องกันการทับข้อมูลผิดตัว
+              nextList = prev.map(r => r.id === savedRepair.id ? savedRepair : r);
+          } else {
+              // โหมดเพิ่มใหม่: เช็คความซ้ำซ้อนของ Code (เลขที่แจ้งซ่อม) อีกรอบเพื่อความชัวร์ที่สุด
+              let finalCode = savedRepair.code;
+              const isDuplicate = prev.some(r => r.code === finalCode && r.projectId === selectedProject.id);
+              
+              if (!finalCode || isDuplicate) {
+                  const projectRepairs = prev.filter(r => r.projectId === selectedProject.id);
+                  // คำนวณหาเลขล่าสุดใหม่
+                  const maxCount = Math.max(...projectRepairs.map(r => parseInt((r.code || '').split('-REP-')[1], 10)).filter(n => !isNaN(n)), 0);
+                  finalCode = `${selectedProject.code || 'PRJ'}-REP-${String(maxCount + 1).padStart(3, '0')}`;
+                  savedRepair.code = finalCode;
+              }
+              
+              nextList = [savedRepair, ...prev]; // แทรกข้อมูลใหม่ไว้บนสุด
+          }
 
-      triggerAutoSync('Repairs_แจ้งซ่อม', nextList, []);
+          // ซิงค์ข้อมูลขึ้น Cloud และ Google Sheets ทำงานเบื้องหลัง
+          setTimeout(() => triggerAutoSync('Repairs_แจ้งซ่อม', nextList, []), 100);
+          
+          return nextList;
+      });
 
+      // 3. จัดการ UI
       setShowAddRepairModal(false);
-      setNewRepair({ id: null, code: '', roomNo: '', floor: '', requesterName: '', phone: '', issueType: '', issueTypeOther: '', issueDetails: '', inspectionResult: 'รอดำเนินการ', staffDetails: '', cost: '', staffName: '', requesterSignName: '' });
-      setSelectedRepairView(savedRepair); // เปิดหน้าพรีวิวให้สั่ง Print ทันทีหลังบันทึก
+      setNewRepair({ 
+          id: null, code: '', roomNo: '', floor: '', requesterName: '', phone: '', 
+          issueType: '', issueTypeOther: '', issueDetails: '', 
+          inspectionResult: 'รอดำเนินการ', staffDetails: '', cost: '', staffName: '', requesterSignName: '' 
+      });
+      
+      // เปิดหน้าพรีวิวให้สั่ง Print ทันทีหลังบันทึก (หน่วงเวลาเล็กน้อยให้ State อัปเดตเสร็จ)
+      setTimeout(() => setSelectedRepairView(savedRepair), 100); 
   };
 
   const handleEditRepair = (rep) => {
