@@ -9820,13 +9820,35 @@ export default function App() {
 
       // 1. คำนวณคะแนนเฉลี่ยของทุกโครงการสำหรับการแสดงผลในกราฟ (All time หรือ ตามเดือนที่เลือก)
       const auditRankData = projects.map(p => {
-          const pAudits = audits.filter(a => 
-              a.projectId === p.id && 
-              (globalAuditRankMonth === 'All' || (a.date && a.date.startsWith(globalAuditRankMonth)))
-          );
+          const pAudits = audits.filter(a => {
+              if (a.projectId !== p.id) return false;
+              
+              if (globalAuditRankMonth === 'All') return true;
+              
+              if (globalAuditRankMonth.startsWith('last_')) {
+                  const monthsBack = parseInt(globalAuditRankMonth.split('_')[1], 10);
+                  const d = new Date();
+                  const pastDate = new Date(d.getFullYear(), d.getMonth() - monthsBack + 1, 1);
+                  const pastMonthStr = `${pastDate.getFullYear()}-${String(pastDate.getMonth() + 1).padStart(2, '0')}`;
+                  const currentMonthStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                  const auditMonthStr = a.date ? a.date.substring(0, 7) : '';
+                  return auditMonthStr >= pastMonthStr && auditMonthStr <= currentMonthStr;
+              }
+              
+              return a.date && a.date.startsWith(globalAuditRankMonth);
+          });
           const avg = pAudits.length > 0 ? (pAudits.reduce((sum, a) => sum + a.score, 0) / pAudits.length) : 0;
           return { name: p.name, avgScore: parseFloat(avg.toFixed(1)) };
       }).filter(d => d.avgScore > 0).sort((a, b) => b.avgScore - a.avgScore);
+
+      const getRankTitle = () => {
+          if (globalAuditRankMonth === 'All') return '(ตลอดชีพ)';
+          if (globalAuditRankMonth === 'last_3') return '(เฉลี่ย 3 เดือนย้อนหลัง)';
+          if (globalAuditRankMonth === 'last_6') return '(เฉลี่ย 6 เดือนย้อนหลัง)';
+          if (globalAuditRankMonth === 'last_9') return '(เฉลี่ย 9 เดือนย้อนหลัง)';
+          if (globalAuditRankMonth === 'last_12') return '(เฉลี่ย 12 เดือนย้อนหลัง)';
+          return `(ประจำเดือน ${new Date(globalAuditRankMonth + '-01').toLocaleDateString('th-TH', { month: 'short', year: 'numeric' })})`;
+      };
 
       // 2. คำนวณสถิติภาพรวม
       const totalAuditsCount = audits.length;
@@ -10247,13 +10269,17 @@ export default function App() {
                       <p className="text-xs text-gray-500 mt-1">แสดงผลคะแนนและจัดอันดับตามช่วงเวลาที่เลือก</p>
                   </div>
                   <div className="flex items-center gap-2 mt-3 sm:mt-0 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200">
-                      <span className="text-xs font-bold text-blue-800">เลือกเดือน:</span>
+                      <span className="text-xs font-bold text-blue-800">เลือกช่วงเวลา:</span>
                       <select 
                           className="text-sm border-none outline-none font-bold text-blue-700 bg-transparent cursor-pointer"
                           value={globalAuditRankMonth}
                           onChange={(e) => setGlobalAuditRankMonth(e.target.value)}
                       >
                           <option value="All">ตลอดชีพ (All-time)</option>
+                          <option value="last_3">เฉลี่ย 3 เดือนย้อนหลัง</option>
+                          <option value="last_6">เฉลี่ย 6 เดือนย้อนหลัง</option>
+                          <option value="last_9">เฉลี่ย 9 เดือนย้อนหลัง</option>
+                          <option value="last_12">เฉลี่ย 12 เดือนย้อนหลัง</option>
                           {availableAuditMonths.map(ym => {
                               const [y, m] = ym.split('-');
                               const dObj = new Date(parseInt(y), parseInt(m) - 1, 1);
@@ -10271,7 +10297,7 @@ export default function App() {
                   <Card className="p-6 lg:col-span-2 relative group">
                       <button onClick={() => setFullScreenAuditView('rankChart')} className="absolute top-4 right-4 p-2 text-gray-400 hover:text-blue-600 bg-gray-50 hover:bg-blue-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 z-10" title="ขยายเต็มจอ"><Maximize2 size={16} /></button>
                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-                          <BarChart3 size={20} className="text-blue-600"/> กราฟคะแนน {globalAuditRankMonth === 'All' ? 'รวม (ตลอดชีพ)' : `ประจำเดือน ${new Date(globalAuditRankMonth + '-01').toLocaleDateString('th-TH', { month: 'short', year: 'numeric' })}`}
+                          <BarChart3 size={20} className="text-blue-600"/> กราฟคะแนนรวม {getRankTitle().replace(/[()]/g, '')}
                       </h3>
                       <div className="h-80 cursor-pointer transition-transform hover:scale-[1.02]" onClick={() => setFullScreenAuditView('rankChart')}>
                           {renderRankChart()}
@@ -10283,7 +10309,7 @@ export default function App() {
                       <button onClick={() => setFullScreenAuditView('rankTable')} className="absolute top-3 right-3 p-2 text-gray-400 hover:text-orange-600 bg-white hover:bg-orange-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 z-10 shadow-sm border border-gray-200" title="ขยายเต็มจอ"><Maximize2 size={16} /></button>
                       <div className="p-4 bg-gray-50 border-b border-gray-200 shrink-0">
                           <h3 className="font-bold text-gray-800 flex items-center gap-2 text-base">
-                              <Medal size={20} className="text-orange-500" /> ตารางจัดอันดับ {globalAuditRankMonth === 'All' ? '(ตลอดชีพ)' : '(เดือนที่เลือก)'}
+                              <Medal size={20} className="text-orange-500" /> ตารางจัดอันดับ {getRankTitle()}
                           </h3>
                       </div>
                       <div className="flex-1 overflow-y-auto custom-scrollbar p-0">
@@ -10315,8 +10341,8 @@ export default function App() {
                               <h2 className="text-xl md:text-2xl font-bold flex items-center gap-3 text-gray-800">
                                   {fullScreenAuditView === 'trendChart' && <><BarChart3 className="text-blue-600"/> แนวโน้มคะแนนเฉลี่ย ({globalAuditStatsRange} เดือน)</>}
                                   {fullScreenAuditView === 'comparison' && <><Layers className="text-purple-600"/> เปรียบเทียบคะแนนแต่ละโครงการย้อนหลัง</>}
-                                  {fullScreenAuditView === 'rankChart' && <><BarChart3 className="text-blue-600"/> กราฟจัดอันดับคะแนน Audit เฉลี่ย</>}
-                                  {fullScreenAuditView === 'rankTable' && <><Medal className="text-orange-500"/> ตารางจัดอันดับคะแนน</>}
+                                  {fullScreenAuditView === 'rankChart' && <><BarChart3 className="text-blue-600"/> กราฟจัดอันดับคะแนน Audit เฉลี่ย {getRankTitle()}</>}
+                                  {fullScreenAuditView === 'rankTable' && <><Medal className="text-orange-500"/> ตารางจัดอันดับคะแนน {getRankTitle()}</>}
                                   {fullScreenAuditView === 'auditList' && <><ClipboardCheck className="text-blue-600"/> รายละเอียดข้อมูลการตรวจสอบ (Audit Records)</>}
                               </h2>
                               <button onClick={() => setFullScreenAuditView(null)} className="p-2 hover:bg-red-100 text-gray-500 hover:text-red-600 rounded-full transition-colors"><X size={24} /></button>
