@@ -9935,15 +9935,15 @@ export default function App() {
               return <div className="p-10 text-center text-gray-400">ยังไม่มีข้อมูลการประเมินย้อนหลังเพียงพอในช่วงเวลานี้</div>;
           }
           return (
-              <table className={`w-full text-left text-sm min-w-max ${isFull ? 'text-base' : ''}`}>
-                  <thead className="bg-white sticky top-0 z-10 shadow-sm">
-                      <tr className="border-b border-gray-100">
-                          <th className="p-3 font-bold text-gray-600 bg-white sticky left-0 z-20 border-r border-gray-100">โครงการ / หน่วยงาน</th>
+              <table className={`w-full text-left text-sm min-w-max border-collapse ${isFull ? 'text-base' : ''}`}>
+                  <thead className="bg-white sticky top-0 z-20 shadow-sm">
+                      <tr className="border-b border-gray-200">
+                          <th className="p-3 font-bold text-gray-700 bg-gray-100 sticky left-0 z-30 border-r border-gray-200 shadow-[1px_0_0_0_#e5e7eb]">โครงการ / หน่วยงาน</th>
                           {displayMonthsKeys.map(month => (
-                              <th key={month} className="p-3 font-semibold text-gray-500 text-center">{getMonthNameTh(month)}</th>
+                              <th key={month} className="p-3 font-semibold text-gray-600 bg-gray-50 text-center border-r border-gray-100 last:border-0">{getMonthNameTh(month)}</th>
                           ))}
-                          <th className="p-3 font-bold text-purple-700 bg-purple-50 text-center border-l border-gray-100">เฉลี่ยรวม</th>
-                          <th className="p-3 font-bold text-gray-600 text-center border-l border-gray-100">แนวโน้ม</th>
+                          <th className="p-3 font-bold text-purple-700 bg-purple-100 text-center border-l border-gray-200 shadow-[-1px_0_0_0_#e5e7eb]">เฉลี่ยรวม</th>
+                          <th className="p-3 font-bold text-gray-700 text-center border-l border-gray-200 bg-gray-50">แนวโน้ม</th>
                       </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -9954,7 +9954,7 @@ export default function App() {
 
                           return (
                               <tr key={project.id} className="hover:bg-purple-50/30 transition-colors">
-                                  <td className="p-3 font-medium text-gray-800 max-w-[200px] truncate bg-white sticky left-0 z-10 border-r border-gray-50" title={project.name}>{project.name}</td>
+                                  <td className="p-3 font-medium text-gray-800 max-w-[200px] truncate bg-white sticky left-0 z-10 border-r border-gray-100 shadow-[1px_0_0_0_#f3f4f6]" title={project.name}>{project.name}</td>
                                   {displayMonthsKeys.map(month => {
                                       const auditsInMonth = projectAudits.filter(a => a.date && a.date.startsWith(month));
                                       const latestAuditInMonth = auditsInMonth.sort((a,b) => new Date(b.date) - new Date(a.date))[0];
@@ -10315,11 +10315,19 @@ export default function App() {
                               </h2>
                               <button onClick={() => setFullScreenAudit(null)} className="p-2 hover:bg-red-100 text-gray-500 hover:text-red-600 rounded-full transition-colors"><X size={24} /></button>
                           </div>
-                          <div className={`flex-1 p-6 md:p-10 min-h-0 bg-white flex flex-col justify-center ${fullScreenAudit.includes('Table') ? 'overflow-auto custom-scrollbar' : ''}`}>
+                          <div className={`flex-1 p-4 md:p-6 min-h-0 bg-white flex flex-col ${fullScreenAudit.includes('Table') ? 'justify-start' : 'justify-center p-6 md:p-10'}`}>
                               {fullScreenAudit === 'trendChart' && renderTrendChart(true)}
-                              {fullScreenAudit === 'compareTable' && renderCompareTable(true)}
+                              {fullScreenAudit === 'compareTable' && (
+                                  <div className="w-full h-full overflow-auto custom-scrollbar border border-gray-200 rounded-xl shadow-inner bg-white">
+                                      {renderCompareTable(true)}
+                                  </div>
+                              )}
                               {fullScreenAudit === 'rankChart' && renderRankChart(true)}
-                              {fullScreenAudit === 'rankTable' && renderRankTable(true)}
+                              {fullScreenAudit === 'rankTable' && (
+                                  <div className="w-full h-full overflow-auto custom-scrollbar border border-gray-200 rounded-xl shadow-inner bg-white">
+                                      {renderRankTable(true)}
+                                  </div>
+                              )}
                           </div>
                       </div>
                   </div>
