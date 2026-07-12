@@ -3979,6 +3979,7 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false); // NEW: Mobile Menu State
   const [isSidebarOpen, setIsSidebarOpen] = useUserPersistentState('bmg_sidebar_open', true, fbUser); // NEW: Sidebar Desktop State (แยกอิสระรายบุคคล)
   const [fullScreenChart, setFullScreenChart] = useState(null); // แก้ไข: ย้าย State สำหรับจัดการ Full Screen Chart ขึ้นมาไว้ตรงนี้
+  const [fullScreenAudit, setFullScreenAudit] = useState(null); // NEW: ขยายเต็มจอสำหรับหน้า Global Audit
   const [showNotificationModal, setShowNotificationModal] = useState(false); // NEW: State สำหรับแสดง Modal แจ้งเตือน
 
   // --- NEW: Draggable Bell State ---
@@ -9915,6 +9916,129 @@ export default function App() {
           return `${monthsTh[parseInt(mm, 10) - 1]} ${parseInt(yyyy, 10) + 543}`;
       };
 
+      // --- Render Helpers ---
+      const renderTrendChart = (isFull = false) => (
+          <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={globalTrendData} margin={{ top: 10, right: 10, left: -20, bottom: isFull ? 40 : 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                  <XAxis dataKey="month" tick={{fontSize: isFull ? 14 : 11, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                  <YAxis domain={[0, 100]} tick={{fontSize: isFull ? 14 : 11, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                  <RechartsTooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                  <Legend wrapperStyle={{ fontSize: isFull ? '16px' : '12px', paddingTop: '10px' }} />
+                  <Line type="monotone" dataKey="score" name="คะแนนเฉลี่ยรวม (%)" stroke="#2563eb" strokeWidth={isFull ? 4 : 3} dot={{ r: isFull ? 6 : 4, strokeWidth: 2 }} activeDot={{ r: isFull ? 8 : 6 }} connectNulls={true} />
+              </LineChart>
+          </ResponsiveContainer>
+      );
+
+      const renderCompareTable = (isFull = false) => {
+          if (displayMonthsKeys.length === 0 || activeProjectsList.length === 0) {
+              return <div className="p-10 text-center text-gray-400">ยังไม่มีข้อมูลการประเมินย้อนหลังเพียงพอในช่วงเวลานี้</div>;
+          }
+          return (
+              <table className={`w-full text-left text-sm min-w-max ${isFull ? 'text-base' : ''}`}>
+                  <thead className="bg-white sticky top-0 z-10 shadow-sm">
+                      <tr className="border-b border-gray-100">
+                          <th className="p-3 font-bold text-gray-600 bg-white sticky left-0 z-20 border-r border-gray-100">โครงการ / หน่วยงาน</th>
+                          {displayMonthsKeys.map(month => (
+                              <th key={month} className="p-3 font-semibold text-gray-500 text-center">{getMonthNameTh(month)}</th>
+                          ))}
+                          <th className="p-3 font-bold text-purple-700 bg-purple-50 text-center border-l border-gray-100">เฉลี่ยรวม</th>
+                          <th className="p-3 font-bold text-gray-600 text-center border-l border-gray-100">แนวโน้ม</th>
+                      </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                      {activeProjectsList.map(project => {
+                          const projectAudits = audits.filter(a => a.projectId === project.id);
+                          let previousScore = null;
+                          let trendIcon = null;
+
+                          return (
+                              <tr key={project.id} className="hover:bg-purple-50/30 transition-colors">
+                                  <td className="p-3 font-medium text-gray-800 max-w-[200px] truncate bg-white sticky left-0 z-10 border-r border-gray-50" title={project.name}>{project.name}</td>
+                                  {displayMonthsKeys.map(month => {
+                                      const auditsInMonth = projectAudits.filter(a => a.date && a.date.startsWith(month));
+                                      const latestAuditInMonth = auditsInMonth.sort((a,b) => new Date(b.date) - new Date(a.date))[0];
+                                      const currentScore = latestAuditInMonth ? latestAuditInMonth.score : '-';
+                                      
+                                      if (latestAuditInMonth) {
+                                          if (previousScore !== null) {
+                                              if (currentScore > previousScore) trendIcon = <span title={`เพิ่มขึ้นจาก ${previousScore}%`} className="text-green-500 flex justify-center"><ArrowUpRight size={isFull ? 20 : 16}/></span>;
+                                              else if (currentScore < previousScore) trendIcon = <span title={`ลดลงจาก ${previousScore}%`} className="text-red-500 flex justify-center"><ArrowDownRight size={isFull ? 20 : 16}/></span>;
+                                              else trendIcon = <span className="text-gray-400 font-bold flex justify-center" title="คงที่">-</span>;
+                                          }
+                                          previousScore = currentScore;
+                                      }
+
+                                      return (
+                                          <td key={month} className="p-3 text-center">
+                                              {latestAuditInMonth ? (
+                                                  <span className={`px-2 py-1 rounded text-[10px] font-bold ${isFull ? 'text-xs px-3 py-1.5' : ''} ${currentScore >= 90 ? 'bg-green-100 text-green-700' : currentScore >= 70 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                                                      {currentScore}%
+                                                  </span>
+                                              ) : (
+                                                  <span className="text-gray-300">-</span>
+                                              )}
+                                          </td>
+                                      );
+                                  })}
+                                  <td className={`p-3 text-center font-bold text-purple-700 bg-purple-50/50 border-l border-gray-50 ${isFull ? 'text-lg' : ''}`}>
+                                      {project.periodAvg > 0 ? `${project.periodAvg.toFixed(1)}%` : '-'}
+                                  </td>
+                                  <td className="p-3 text-center align-middle border-l border-gray-50 bg-white">
+                                      {trendIcon || <span className="text-gray-300">-</span>}
+                                  </td>
+                              </tr>
+                          );
+                      })}
+                  </tbody>
+              </table>
+          );
+      };
+
+      const renderRankChart = (isFull = false) => (
+          <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={auditRankData} margin={{ top: 25, right: 30, left: 0, bottom: isFull ? 80 : 60 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                  <XAxis dataKey="name" angle={-45} textAnchor="end" tick={{fontSize: isFull ? 14 : 11, fill: '#6b7280'}} interval={0} height={isFull ? 80 : 60} axisLine={false} tickLine={false} />
+                  <YAxis domain={[0, 100]} tick={{fontSize: isFull ? 14 : 11, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                  <RechartsTooltip cursor={{fill: '#f3f4f6'}} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                  <Bar dataKey="avgScore" name="คะแนนเฉลี่ย" radius={[4, 4, 0, 0]} label={{ position: 'top', formatter: (val) => `${val}%`, fill: '#4b5563', fontSize: isFull ? 14 : 11, fontWeight: 'bold', dy: -5 }}>
+                      {auditRankData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.avgScore >= 90 ? '#10b981' : entry.avgScore >= 70 ? '#f59e0b' : '#ef4444'} />
+                      ))}
+                  </Bar>
+              </BarChart>
+          </ResponsiveContainer>
+      );
+
+      const renderRankTable = (isFull = false) => (
+          <table className={`w-full text-left text-sm ${isFull ? 'text-base' : ''}`}>
+              <thead className="bg-white text-gray-500 sticky top-0 border-b border-gray-100 shadow-sm z-10 text-xs">
+                  <tr>
+                      <th className={`p-3 text-center w-20 ${isFull ? 'text-sm' : ''}`}>อันดับ</th>
+                      <th className={`p-3 ${isFull ? 'text-sm' : ''}`}>โครงการ / หน่วยงาน</th>
+                      <th className={`p-3 text-center w-32 ${isFull ? 'text-sm' : ''}`}>คะแนน</th>
+                  </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                  {auditRankData.map((d, i) => (
+                      <tr key={i} className="hover:bg-gray-50 transition-colors">
+                          <td className="p-3 text-center">
+                              <div className="flex justify-center items-center py-1">
+                                  <ThreeDMedal rank={i + 1} />
+                              </div>
+                          </td>
+                          <td className="p-3 font-medium text-gray-800">{d.name}</td>
+                          <td className={`p-3 text-center font-bold text-blue-600 ${isFull ? 'text-xl' : ''}`}>{d.avgScore}%</td>
+                      </tr>
+                  ))}
+                  {auditRankData.length === 0 && (
+                      <tr><td colSpan="3" className="p-6 text-center text-gray-400">ไม่มีข้อมูล</td></tr>
+                  )}
+              </tbody>
+          </table>
+      );
+
       return (
           <div id="print-global-audit" className={`space-y-6 animate-fade-in ${isExporting ? 'w-[190mm] min-w-[190mm] max-w-[190mm] mx-auto bg-white box-border' : ''}`}>
               <ReportHeader />
@@ -9998,92 +10122,30 @@ export default function App() {
               {/* Historical Trend & Comparison */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   {/* Line Chart */}
-                  <Card className="p-6 lg:col-span-1 flex flex-col">
+                  <Card className="p-6 lg:col-span-1 flex flex-col relative group">
+                      <button onClick={() => setFullScreenAudit('trendChart')} className="absolute top-4 right-4 p-2 text-gray-400 hover:text-blue-600 bg-gray-50 hover:bg-blue-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 z-10" title="ขยายเต็มจอ">
+                          <Maximize2 size={16} />
+                      </button>
                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
                           <BarChart3 size={20} className="text-blue-600"/> แนวโน้มคะแนนเฉลี่ย ({globalAuditStatsRange} เดือน)
                       </h3>
-                      <div className="h-64 flex-1">
-                          <ResponsiveContainer width="100%" height="100%">
-                              <LineChart data={globalTrendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                  <XAxis dataKey="month" tick={{fontSize: 11, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                  <YAxis domain={[0, 100]} tick={{fontSize: 11, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                  <RechartsTooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                  <Line type="monotone" dataKey="score" name="คะแนนเฉลี่ยรวม (%)" stroke="#2563eb" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} connectNulls={true} />
-                              </LineChart>
-                          </ResponsiveContainer>
+                      <div className="h-64 flex-1 cursor-pointer transition-transform hover:scale-[1.02]" onClick={() => setFullScreenAudit('trendChart')}>
+                          {renderTrendChart()}
                       </div>
                   </Card>
                   
                   {/* Comparison Table */}
-                  <Card className="lg:col-span-2 flex flex-col overflow-hidden max-h-[350px]">
-                      <div className="p-4 bg-gray-50 border-b border-gray-200 shrink-0">
+                  <Card className="lg:col-span-2 flex flex-col overflow-hidden max-h-[350px] relative group">
+                      <button onClick={() => setFullScreenAudit('compareTable')} className="absolute top-4 right-4 p-2 text-gray-400 hover:text-purple-600 bg-gray-50 hover:bg-purple-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 z-10" title="ขยายเต็มจอ">
+                          <Maximize2 size={16} />
+                      </button>
+                      <div className="p-4 bg-gray-50 border-b border-gray-200 shrink-0 cursor-pointer" onClick={() => setFullScreenAudit('compareTable')}>
                           <h3 className="font-bold text-gray-800 flex items-center gap-2 text-base">
                               <Layers size={20} className="text-purple-600" /> ตารางเปรียบเทียบคะแนนแต่ละโครงการย้อนหลัง
                           </h3>
                       </div>
                       <div className="flex-1 overflow-x-auto overflow-y-auto custom-scrollbar p-0">
-                          {displayMonthsKeys.length > 0 && activeProjectsList.length > 0 ? (
-                              <table className="w-full text-left text-sm min-w-max">
-                                  <thead className="bg-white sticky top-0 z-10 shadow-sm">
-                                      <tr className="border-b border-gray-100">
-                                          <th className="p-3 font-bold text-gray-600 bg-white sticky left-0 z-20 border-r border-gray-100">โครงการ / หน่วยงาน</th>
-                                          {displayMonthsKeys.map(month => (
-                                              <th key={month} className="p-3 font-semibold text-gray-500 text-center">{getMonthNameTh(month)}</th>
-                                          ))}
-                                          <th className="p-3 font-bold text-purple-700 bg-purple-50 text-center border-l border-gray-100">เฉลี่ยรวม</th>
-                                          <th className="p-3 font-bold text-gray-600 text-center border-l border-gray-100">แนวโน้ม</th>
-                                      </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-gray-100">
-                                      {activeProjectsList.map(project => {
-                                          const projectAudits = audits.filter(a => a.projectId === project.id);
-                                          let previousScore = null;
-                                          let trendIcon = null;
-
-                                          return (
-                                              <tr key={project.id} className="hover:bg-purple-50/30 transition-colors">
-                                                  <td className="p-3 font-medium text-gray-800 max-w-[200px] truncate bg-white sticky left-0 z-10 border-r border-gray-50" title={project.name}>{project.name}</td>
-                                                  {displayMonthsKeys.map(month => {
-                                                      const auditsInMonth = projectAudits.filter(a => a.date && a.date.startsWith(month));
-                                                      const latestAuditInMonth = auditsInMonth.sort((a,b) => new Date(b.date) - new Date(a.date))[0];
-                                                      const currentScore = latestAuditInMonth ? latestAuditInMonth.score : '-';
-                                                      
-                                                      if (latestAuditInMonth) {
-                                                          if (previousScore !== null) {
-                                                              if (currentScore > previousScore) trendIcon = <span title={`เพิ่มขึ้นจาก ${previousScore}%`} className="text-green-500 flex justify-center"><ArrowUpRight size={16}/></span>;
-                                                              else if (currentScore < previousScore) trendIcon = <span title={`ลดลงจาก ${previousScore}%`} className="text-red-500 flex justify-center"><ArrowDownRight size={16}/></span>;
-                                                              else trendIcon = <span className="text-gray-400 font-bold flex justify-center" title="คงที่">-</span>;
-                                                          }
-                                                          previousScore = currentScore;
-                                                      }
-
-                                                      return (
-                                                          <td key={month} className="p-3 text-center">
-                                                              {latestAuditInMonth ? (
-                                                                  <span className={`px-2 py-1 rounded text-[10px] font-bold ${currentScore >= 90 ? 'bg-green-100 text-green-700' : currentScore >= 70 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
-                                                                      {currentScore}%
-                                                                  </span>
-                                                              ) : (
-                                                                  <span className="text-gray-300">-</span>
-                                                              )}
-                                                          </td>
-                                                      );
-                                                  })}
-                                                  <td className="p-3 text-center font-bold text-purple-700 bg-purple-50/50 border-l border-gray-50">
-                                                      {project.periodAvg > 0 ? `${project.periodAvg.toFixed(1)}%` : '-'}
-                                                  </td>
-                                                  <td className="p-3 text-center align-middle border-l border-gray-50 bg-white">
-                                                      {trendIcon || <span className="text-gray-300">-</span>}
-                                                  </td>
-                                              </tr>
-                                          );
-                                      })}
-                                  </tbody>
-                              </table>
-                          ) : (
-                              <div className="p-10 text-center text-gray-400">ยังไม่มีข้อมูลการประเมินย้อนหลังเพียงพอในช่วงเวลานี้</div>
-                          )}
+                          {renderCompareTable()}
                       </div>
                   </Card>
               </div>
@@ -10122,7 +10184,10 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  <Card className="p-6 lg:col-span-2">
+                  <Card className="p-6 lg:col-span-2 relative group">
+                      <button onClick={() => setFullScreenAudit('rankChart')} className="absolute top-4 right-4 p-2 text-gray-400 hover:text-blue-600 bg-gray-50 hover:bg-blue-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 z-10" title="ขยายเต็มจอ">
+                          <Maximize2 size={16} />
+                      </button>
                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
                           <BarChart3 size={20} className="text-blue-600"/> กราฟคะแนน {
                               globalAuditRankMonth === 'All' ? 'รวม (ตลอดชีพ)' : 
@@ -10133,21 +10198,9 @@ export default function App() {
                               `ประจำเดือน ${new Date(globalAuditRankMonth + '-01').toLocaleDateString('th-TH', { month: 'short', year: 'numeric' })}`
                           }
                       </h3>
-                      <div className="h-80">
+                      <div className="h-80 cursor-pointer transition-transform hover:scale-[1.02]" onClick={() => setFullScreenAudit('rankChart')}>
                           {auditRankData.length > 0 ? (
-                              <ResponsiveContainer width="100%" height="100%">
-                                  <BarChart data={auditRankData} margin={{ top: 25, right: 30, left: 0, bottom: 60 }}>
-                                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                      <XAxis dataKey="name" angle={-45} textAnchor="end" tick={{fontSize: 11, fill: '#6b7280'}} interval={0} height={60} axisLine={false} tickLine={false} />
-                                      <YAxis domain={[0, 100]} tick={{fontSize: 11, fill: '#6b7280'}} axisLine={false} tickLine={false} />
-                                      <RechartsTooltip cursor={{fill: '#f3f4f6'}} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                      <Bar dataKey="avgScore" name="คะแนนเฉลี่ย" radius={[4, 4, 0, 0]} label={{ position: 'top', formatter: (val) => `${val}%`, fill: '#4b5563', fontSize: 11, fontWeight: 'bold', dy: -5 }}>
-                                          {auditRankData.map((entry, index) => (
-                                              <Cell key={`cell-${index}`} fill={entry.avgScore >= 90 ? '#10b981' : entry.avgScore >= 70 ? '#f59e0b' : '#ef4444'} />
-                                          ))}
-                                      </Bar>
-                                  </BarChart>
-                              </ResponsiveContainer>
+                              renderRankChart()
                           ) : (
                               <div className="flex items-center justify-center h-full text-gray-400 bg-gray-50 rounded-lg border-2 border-dashed">
                                   ยังไม่มีข้อมูลผลการประเมิน (Audit) ที่คำนวณได้
@@ -10157,8 +10210,11 @@ export default function App() {
                   </Card>
                   
                   {/* Ranking Table */}
-                  <Card className="flex flex-col overflow-hidden max-h-[415px]">
-                      <div className="p-4 bg-gray-50 border-b border-gray-200 shrink-0">
+                  <Card className="flex flex-col overflow-hidden max-h-[415px] relative group">
+                      <button onClick={() => setFullScreenAudit('rankTable')} className="absolute top-4 right-4 p-2 text-gray-400 hover:text-orange-600 bg-gray-50 hover:bg-orange-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 z-10" title="ขยายเต็มจอ">
+                          <Maximize2 size={16} />
+                      </button>
+                      <div className="p-4 bg-gray-50 border-b border-gray-200 shrink-0 cursor-pointer" onClick={() => setFullScreenAudit('rankTable')}>
                           <h3 className="font-bold text-gray-800 flex items-center gap-2 text-base">
                               <Medal size={20} className="text-orange-500" /> ตารางจัดอันดับ {
                                   globalAuditRankMonth === 'All' ? '(ตลอดชีพ)' : 
@@ -10171,31 +10227,7 @@ export default function App() {
                           </h3>
                       </div>
                       <div className="flex-1 overflow-y-auto custom-scrollbar p-0">
-                          <table className="w-full text-sm text-left">
-                              <thead className="bg-white text-gray-500 sticky top-0 border-b border-gray-100 shadow-sm z-10 text-xs">
-                                  <tr>
-                                      <th className="p-3 text-center w-16">อันดับ</th>
-                                      <th className="p-3">โครงการ / หน่วยงาน</th>
-                                      <th className="p-3 text-center w-24">คะแนน</th>
-                                  </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-50">
-                                  {auditRankData.map((d, i) => (
-                                      <tr key={i} className="hover:bg-gray-50 transition-colors">
-                                          <td className="p-3 text-center">
-                                              <div className="flex justify-center items-center py-1">
-                                                  <ThreeDMedal rank={i + 1} />
-                                              </div>
-                                          </td>
-                                          <td className="p-3 font-medium text-gray-800">{d.name}</td>
-                                          <td className="p-3 text-center font-bold text-blue-600">{d.avgScore}%</td>
-                                      </tr>
-                                  ))}
-                                  {auditRankData.length === 0 && (
-                                      <tr><td colSpan="3" className="p-6 text-center text-gray-400">ไม่มีข้อมูล</td></tr>
-                                  )}
-                              </tbody>
-                          </table>
+                          {renderRankTable()}
                       </div>
                   </Card>
               </div>
@@ -10269,6 +10301,29 @@ export default function App() {
                       </table>
                   </div>
               </Card>
+
+              {/* Full Screen Audit Chart/Table Modal */}
+              {fullScreenAudit && (
+                  <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 md:p-8 backdrop-blur-sm animate-fade-in" onClick={() => setFullScreenAudit(null)}>
+                      <div className="bg-white rounded-2xl w-full h-full max-w-7xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-gray-700" onClick={e => e.stopPropagation()}>
+                          <div className="p-4 md:p-6 border-b flex justify-between items-center bg-gray-50 shrink-0">
+                              <h2 className="text-xl md:text-2xl font-bold flex items-center gap-3 text-gray-800">
+                                  {fullScreenAudit === 'trendChart' && <><BarChart3 className="text-blue-600"/> แนวโน้มคะแนนเฉลี่ย ({globalAuditStatsRange} เดือน)</>}
+                                  {fullScreenAudit === 'compareTable' && <><Layers className="text-purple-600"/> ตารางเปรียบเทียบคะแนนแต่ละโครงการย้อนหลัง</>}
+                                  {fullScreenAudit === 'rankChart' && <><BarChart3 className="text-blue-600"/> กราฟจัดอันดับคะแนน Audit เฉลี่ย</>}
+                                  {fullScreenAudit === 'rankTable' && <><Medal className="text-orange-500"/> ตารางจัดอันดับคะแนน</>}
+                              </h2>
+                              <button onClick={() => setFullScreenAudit(null)} className="p-2 hover:bg-red-100 text-gray-500 hover:text-red-600 rounded-full transition-colors"><X size={24} /></button>
+                          </div>
+                          <div className={`flex-1 p-6 md:p-10 min-h-0 bg-white flex flex-col justify-center ${fullScreenAudit.includes('Table') ? 'overflow-auto custom-scrollbar' : ''}`}>
+                              {fullScreenAudit === 'trendChart' && renderTrendChart(true)}
+                              {fullScreenAudit === 'compareTable' && renderCompareTable(true)}
+                              {fullScreenAudit === 'rankChart' && renderRankChart(true)}
+                              {fullScreenAudit === 'rankTable' && renderRankTable(true)}
+                          </div>
+                      </div>
+                  </div>
+              )}
           </div>
       );
   };
