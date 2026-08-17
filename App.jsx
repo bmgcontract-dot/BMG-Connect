@@ -1664,7 +1664,6 @@ function useUserPersistentState(key, initialValue, fbUser) {
     return [state, setPersistentValue];
 }
 
-// ค้นหาฟังก์ชัน usePersistentCollection ในไฟล์เดิมแล้ววางทับด้วยโค้ดนี้
 function usePersistentCollection(collectionName, initialValue, fbUser) {
     const localKey = collectionName.startsWith('bmg_') ? collectionName : `bmg_${collectionName}`;
 
@@ -1674,8 +1673,13 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
             if (local) {
                 try { 
                     const parsed = JSON.parse(local);
+                    if (Array.isArray(initialValue) && !Array.isArray(parsed)) {
+                        return (parsed && typeof parsed === 'object') ? Object.values(parsed) : [...initialValue];
+                    }
                     return Array.isArray(parsed) ? parsed : initialValue;
-                } catch(e) { return initialValue; }
+                } catch(e) { 
+                    return initialValue; 
+                }
             }
         }
         return initialValue;
@@ -1683,7 +1687,6 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
 
     const dataRef = useRef(data);
     const [isLoaded, setIsLoaded] = useState(false);
-    const [isSynced, setIsSynced] = useState(false);
 
     useEffect(() => { dataRef.current = data; }, [data]);
 
@@ -1697,8 +1700,10 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
         let isMounted = true;
         
         const initData = async () => {
+            setIsLoaded(false);
+            
             try {
-                // 1. โหลดจาก IndexedDB (รวดเร็ว ไม่ติด Limit 5MB) มาแสดงผลก่อน
+                // NEW: Load from IndexedDB first for fast and large offline data
                 const idbData = await loadStateLocallyIDB(localKey);
                 if (idbData && Array.isArray(idbData) && idbData.length > 0) {
                     if (isMounted) {
@@ -1707,7 +1712,6 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                     }
                 }
 
-                // 2. Subscribe จาก Firestore (Source of Truth)
                 const colRef = collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
                 unsubscribe = onSnapshot(colRef, (snapshot) => {
                     if (!isMounted) return;
@@ -1717,41 +1721,41 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                     const serverJson = JSON.stringify(serverItems);
                     const localJson = JSON.stringify(dataRef.current);
 
-                    // ถ้า Cloud ไม่ตรงกับ Local ให้ยึด Cloud เป็นหลักเสมอ (แก้ปัญหาผีหลอก/ข้อมูลเก่าทับข้อมูลใหม่)
+                    // Cloud is the absolute source of truth. If it differs, overwrite local data.
+                    // This permanently kills any "Zombie Data" that was kept locally after being deleted on the server.
                     if (serverJson !== localJson) {
                         setData(serverItems);
                         dataRef.current = serverItems;
-                        // อัปเดต Cache
                         saveStateLocallyIDB(localKey, serverItems);
                         if (typeof window !== 'undefined') {
                             try { localStorage.setItem(localKey, serverJson); } catch(e) {}
                         }
                     }
+
+                    // Failsafe: Ensure there is always at least an admin user to prevent lockout
+                    if (serverItems.length === 0 && collectionName === 'bmg_users') {
+                        const adminUser = INITIAL_USERS[0];
+                        setData([adminUser]);
+                        dataRef.current = [adminUser];
+                        saveStateLocallyIDB(localKey, [adminUser]);
+                        
+                        let batch = writeBatch(db);
+                        batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, adminUser.id), adminUser);
+                        batch.commit().catch(e => console.error(e));
+                    }
+
                     setIsLoaded(true);
-                    setIsSynced(true);
                 }, (error) => {
                     console.warn(`Sync info for ${collectionName}: Working offline.`);
                     if (isMounted) setIsLoaded(true);
                 });
 
             } catch (err) {
-                console.warn(`Init info offline: ${err.message}`);
+                console.warn(`Init info for ${collectionName}: Working offline or network unavailable.`);
                 if (isMounted) setIsLoaded(true);
             }
         };
 
-        initData();
-        return () => { isMounted = false; unsubscribe(); };
-    }, [db, appId, fbUser, collectionName, localKey]);
-
-    // ฟังก์ชัน Save ไม่แก้โครงสร้างเดิม แต่เพิ่ม Try/Catch ที่แน่นหนาขึ้น
-    const setPersistentValue = async (newValueOrUpdater, isRestore = false) => {
-        // ... (ใช้ logic การหา toSet และ toDelete แบบเดิมที่มี writeBatch ของคุณ แต่ต้อง return ค่า Promise ออกไปเพื่อให้ Handler รู้ว่าเสร็จแล้ว)
-        // โค้ดส่วนนี้ยาว ให้คงของเดิมไว้ แต่เพิ่มการ return success state
-    };
-
-    return [data, setPersistentValue, isLoaded, isSynced];
-}
         initData();
 
         return () => {
