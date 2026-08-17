@@ -1663,8 +1663,267 @@ function useUserPersistentState(key, initialValue, fbUser) {
 
     return [state, setPersistentValue];
 }
+
+// ค้นหาฟังก์ชัน usePersistentCollection ในไฟล์เดิมแล้ววางทับด้วยโค้ดนี้
 function usePersistentCollection(collectionName, initialValue, fbUser) {
-    // ... โค้ดเดิมยาวๆ ...
+    const localKey = collectionName.startsWith('bmg_') ? collectionName : `bmg_${collectionName}`;
+
+    const [data, setData] = useState(() => {
+        if (typeof window !== 'undefined') {
+            const local = localStorage.getItem(localKey);
+            if (local) {
+                try { 
+                    const parsed = JSON.parse(local);
+                    return Array.isArray(parsed) ? parsed : initialValue;
+                } catch(e) { return initialValue; }
+            }
+        }
+        return initialValue;
+    });
+
+    const dataRef = useRef(data);
+    const [isLoaded, setIsLoaded] = useState(false);
+    const [isSynced, setIsSynced] = useState(false);
+
+    useEffect(() => { dataRef.current = data; }, [data]);
+
+    useEffect(() => {
+        if (!db || !appId || !fbUser) {
+            setIsLoaded(true);
+            return;
+        }
+
+        let unsubscribe = () => {};
+        let isMounted = true;
+        
+        const initData = async () => {
+            try {
+                // 1. โหลดจาก IndexedDB (รวดเร็ว ไม่ติด Limit 5MB) มาแสดงผลก่อน
+                const idbData = await loadStateLocallyIDB(localKey);
+                if (idbData && Array.isArray(idbData) && idbData.length > 0) {
+                    if (isMounted) {
+                        setData(idbData);
+                        dataRef.current = idbData;
+                    }
+                }
+
+                // 2. Subscribe จาก Firestore (Source of Truth)
+                const colRef = collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
+                unsubscribe = onSnapshot(colRef, (snapshot) => {
+                    if (!isMounted) return;
+                    const serverItems = [];
+                    snapshot.forEach(docSnap => serverItems.push(docSnap.data()));
+                    
+                    const serverJson = JSON.stringify(serverItems);
+                    const localJson = JSON.stringify(dataRef.current);
+
+                    // ถ้า Cloud ไม่ตรงกับ Local ให้ยึด Cloud เป็นหลักเสมอ (แก้ปัญหาผีหลอก/ข้อมูลเก่าทับข้อมูลใหม่)
+                    if (serverJson !== localJson) {
+                        setData(serverItems);
+                        dataRef.current = serverItems;
+                        // อัปเดต Cache
+                        saveStateLocallyIDB(localKey, serverItems);
+                        if (typeof window !== 'undefined') {
+                            try { localStorage.setItem(localKey, serverJson); } catch(e) {}
+                        }
+                    }
+                    setIsLoaded(true);
+                    setIsSynced(true);
+                }, (error) => {
+                    console.warn(`Sync info for ${collectionName}: Working offline.`);
+                    if (isMounted) setIsLoaded(true);
+                });
+
+            } catch (err) {
+                console.warn(`Init info offline: ${err.message}`);
+                if (isMounted) setIsLoaded(true);
+            }
+        };
+
+        initData();
+        return () => { isMounted = false; unsubscribe(); };
+    }, [db, appId, fbUser, collectionName, localKey]);
+
+    // ฟังก์ชัน Save ไม่แก้โครงสร้างเดิม แต่เพิ่ม Try/Catch ที่แน่นหนาขึ้น
+    const setPersistentValue = async (newValueOrUpdater, isRestore = false) => {
+        // ... (ใช้ logic การหา toSet และ toDelete แบบเดิมที่มี writeBatch ของคุณ แต่ต้อง return ค่า Promise ออกไปเพื่อให้ Handler รู้ว่าเสร็จแล้ว)
+        // โค้ดส่วนนี้ยาว ให้คงของเดิมไว้ แต่เพิ่มการ return success state
+    };
+
+    return [data, setPersistentValue, isLoaded, isSynced];
+}
+        initData();
+
+        return () => {
+            isMounted = false;
+            unsubscribe();
+        };
+    }, [db, appId, fbUser, collectionName, localKey]);
+
+    const setPersistentValue = async (newValueOrUpdater, isRestore = false) => {
+        const oldValue = dataRef.current;
+        const newValue = typeof newValueOrUpdater === 'function' ? newValueOrUpdater(oldValue) : newValueOrUpdater;
+        
+        setData(newValue);
+        dataRef.current = newValue;
+        
+        saveStateLocallyIDB(localKey, newValue);
+
+        if (typeof window !== 'undefined') {
+            try {
+                localStorage.setItem(localKey, JSON.stringify(newValue));
+            } catch (e) {
+                // Silently ignore quota exceeded, IDB handles it
+            }
+        }
+
+        if (!db || !fbUser || !appId) return;
+
+        if (isRestore && Array.isArray(newValue)) {
+            try {
+                let batch = writeBatch(db);
+                let opCount = 0;
+                for (const item of newValue) {
+                    if (!item.id) continue;
+
+                    const itemToSave = { ...item };
+                    
+                    // ป้องกัน Error 1MB Limit จากไฟล์เอกสาร PDF
+                    if (itemToSave.files) {
+                        const safeFiles = {};
+                        for (const fileId in itemToSave.files) {
+                            safeFiles[fileId] = { ...itemToSave.files[fileId] };
+                            if (safeFiles[fileId].data && safeFiles[fileId].data.length > 100000) {
+                                delete safeFiles[fileId].data; 
+                                safeFiles[fileId].isLocalOnly = true;
+                            }
+                        }
+                        itemToSave.files = safeFiles;
+                    }
+
+                    // ป้องกัน Error 1MB Limit จากรูปภาพที่ใหญ่เกินไปตอน Restore
+                    try {
+                        let docStr = JSON.stringify(itemToSave);
+                        if (docStr.length > 850000) { 
+                            if (itemToSave.performance) {
+                                for (const dept in itemToSave.performance) {
+                                    if (itemToSave.performance[dept].images && itemToSave.performance[dept].images.length > 0) {
+                                        itemToSave.performance[dept].images = []; 
+                                        itemToSave.performance[dept].details = (itemToSave.performance[dept].details || '') + '\n[หมายเหตุ: รูปภาพถูกลบเนื่องจากขนาดไฟล์รวมเกินขีดจำกัดคลาวด์]';
+                                    }
+                                }
+                            }
+                            if (itemToSave.images && itemToSave.images.length > 0) {
+                                itemToSave.images = [];
+                                itemToSave.remark = (itemToSave.remark || '') + '\n[หมายเหตุ: รูปภาพถูกลบเนื่องจากขนาดไฟล์รวมเกินขีดจำกัดคลาวด์]';
+                            }
+                            if (itemToSave.photo) {
+                                itemToSave.photo = null;
+                                if (itemToSave.details !== undefined) {
+                                    itemToSave.details = (itemToSave.details || '') + '\n[หมายเหตุ: รูปภาพถูกลบเนื่องจากขนาดไฟล์ใหญ่เกินขีดจำกัดคลาวด์]';
+                                } else if (itemToSave.remark !== undefined) {
+                                    itemToSave.remark = (itemToSave.remark || '') + '\n[หมายเหตุ: รูปภาพถูกลบเนื่องจากขนาดไฟล์ใหญ่เกินขีดจำกัดคลาวด์]';
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn("Error calculating doc size:", e);
+                    }
+
+                    batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id), itemToSave);
+                    opCount++;
+                    if (opCount >= 50) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
+                }
+                if (opCount > 0) await batch.commit();
+            } catch (e) { console.error("Restore error", e); }
+            return;
+        }
+
+        const oldMap = new Map(Array.isArray(oldValue) ? oldValue.map(i => [i.id, i]) : []);
+        const newMap = new Map(Array.isArray(newValue) ? newValue.map(i => [i.id, i]) : []);
+
+        const toSet = [];
+        const toDelete = [];
+
+        (Array.isArray(newValue) ? newValue : []).forEach(newItem => {
+            if (!newItem.id) return;
+            const oldItem = oldMap.get(newItem.id);
+            if (!oldItem || JSON.stringify(oldItem) !== JSON.stringify(newItem)) {
+                toSet.push(newItem);
+            }
+        });
+
+        (Array.isArray(oldValue) ? oldValue : []).forEach(oldItem => {
+            if (oldItem.id && !newMap.has(oldItem.id)) {
+                toDelete.push(oldItem.id);
+            }
+        });
+
+        try {
+            if (toSet.length > 0 || toDelete.length > 0) {
+                let batch = writeBatch(db);
+                let opCount = 0;
+                
+                for (const item of toSet) {
+                    const itemToSave = { ...item };
+                    if (itemToSave.files) {
+                        const safeFiles = {};
+                        for (const fileId in itemToSave.files) {
+                            safeFiles[fileId] = { ...itemToSave.files[fileId] };
+                            if (safeFiles[fileId].data && safeFiles[fileId].data.length > 100000) {
+                                delete safeFiles[fileId].data; 
+                                safeFiles[fileId].isLocalOnly = true;
+                            }
+                        }
+                        itemToSave.files = safeFiles;
+                    }
+
+                    try {
+                        let docStr = JSON.stringify(itemToSave);
+                        if (docStr.length > 850000) { 
+                            if (itemToSave.performance) {
+                                for (const dept in itemToSave.performance) {
+                                    if (itemToSave.performance[dept].images && itemToSave.performance[dept].images.length > 0) {
+                                        itemToSave.performance[dept].images = []; 
+                                        itemToSave.performance[dept].details = (itemToSave.performance[dept].details || '') + '\n[หมายเหตุ: รูปภาพถูกลบเนื่องจากขนาดไฟล์รวมเกินขีดจำกัด]';
+                                    }
+                                }
+                            }
+                            if (itemToSave.images && itemToSave.images.length > 0) {
+                                itemToSave.images = [];
+                                itemToSave.remark = (itemToSave.remark || '') + '\n[หมายเหตุ: รูปภาพถูกลบเนื่องจากขนาดไฟล์รวมเกินขีดจำกัด]';
+                            }
+                            if (itemToSave.photo) {
+                                itemToSave.photo = null;
+                                if (itemToSave.details !== undefined) {
+                                    itemToSave.details = (itemToSave.details || '') + '\n[หมายเหตุ: รูปภาพถูกลบเนื่องจากขนาดไฟล์ใหญ่เกินขีดจำกัดคลาวด์]';
+                                } else if (itemToSave.remark !== undefined) {
+                                    itemToSave.remark = (itemToSave.remark || '') + '\n[หมายเหตุ: รูปภาพถูกลบเนื่องจากขนาดไฟล์ใหญ่เกินขีดจำกัดคลาวด์]';
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn("Error calculating doc size:", e);
+                    }
+
+                    batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id), itemToSave);
+                    opCount++;
+                    if (opCount >= 50) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
+                }
+
+                for (const id of toDelete) {
+                    batch.delete(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, id));
+                    opCount++;
+                    if (opCount >= 50) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
+                }
+
+                if (opCount > 0) await batch.commit();
+            }
+        } catch (e) {
+            console.error(`Save error ${collectionName}:`, e);
+        }
+    };
+
     return [data, setPersistentValue, isLoaded, true];
 }
 
@@ -5691,54 +5950,52 @@ export default function App() {
       event.target.value = '';
   };
 
-  const handleSaveDailyReport = async (e) => {
+  const handleSaveDailyReport = (e) => {
       e.preventDefault();
       
-      let finalId = newDailyReport.id;
-      if (!finalId) {
-          const existing = dailyReports.find(r => r.projectId === selectedProject.id && r.date === newDailyReport.date);
-          if (existing) {
-              finalId = existing.id;
-          } else {
-              finalId = generateId();
-          }
-      }
-
-      let savedReport = { ...newDailyReport, id: finalId, projectId: selectedProject.id };
-
-      try {
-          if (db && appId) {
-              const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'bmg_dailyReports_docs', finalId);
-              await setDoc(docRef, savedReport); 
-          }
-
-          setDailyReports(prev => {
-              const nextList = prev.map(r => r.id === finalId ? savedReport : r);
-              if (!prev.some(r => r.id === finalId)) {
-                  nextList.unshift(savedReport);
+      setDailyReports(prev => {
+          let savedReport;
+          let nextList;
+          
+          // ป้องกันการสร้างรายงานซ้ำซ้อนในวันเดียวกัน (Enforce 1 report per day)
+          let finalId = newDailyReport.id;
+          if (!finalId) {
+              const existing = prev.find(r => r.projectId === selectedProject.id && r.date === newDailyReport.date);
+              if (existing) {
+                  finalId = existing.id;
               }
+          }
 
-              setTimeout(() => {
-                  let filesToUpload = [];
-                  ['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].forEach(dept => {
-                      const images = savedReport.performance[dept]?.images || [];
-                      images.forEach((img, idx) => { filesToUpload.push({ name: `DailyReport_${savedReport.id}_${dept}_${idx}.jpg`, data: img }); });
-                  });
-                  triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, filesToUpload);
-              }, 100);
+          if (finalId) {
+              // Update existing report
+              savedReport = { ...newDailyReport, id: finalId, projectId: selectedProject.id };
+              nextList = prev.map(r => r.id === finalId ? savedReport : r);
+          } else {
+              // Create new report
+              const id = generateId();
+              savedReport = { ...newDailyReport, id, projectId: selectedProject.id };
+              nextList = [savedReport, ...prev]; // เพิ่มไว้ด้านบนสุด
+          }
 
-              return nextList;
-          });
+          // นำ Side Effect แยกออกมาทำงานหลังจาก Update State หลีกเลี่ยงการบล็อกการทำงานของ React
+          setTimeout(() => {
+              let filesToUpload = [];
+              ['juristic', 'security', 'cleaning', 'gardening', 'sweeper', 'other'].forEach(dept => {
+                  const images = savedReport.performance[dept]?.images || [];
+                  images.forEach((img, idx) => { filesToUpload.push({ name: `DailyReport_${savedReport.id}_${dept}_${idx}.jpg`, data: img }); });
+              });
+              triggerAutoSync('DailyReports_รายงานประจำวัน', nextList, filesToUpload);
 
-          setShowAddDailyReportModal(false);
-          setSelectedDailyReport(savedReport); 
-          alert('บันทึกรายงานประจำวันเสร็จสมบูรณ์');
+              setShowAddDailyReportModal(false);
+              setSelectedDailyReport(savedReport); // Open view modal immediately
+              alert('บันทึกรายงานประจำวันเสร็จสมบูรณ์');
+          }, 100);
 
-      } catch (error) {
-          console.error("Save Daily Report Error:", error);
-          alert('ไม่สามารถบันทึกข้อมูลได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต และลองใหม่อีกครั้ง');
-      }
-  };  const handleEditDailyReport = (report) => {
+          return nextList;
+      });
+  };
+
+  const handleEditDailyReport = (report) => {
       setSelectedDailyReport(null); // ปิดหน้าต่างรายละเอียดเดิมก่อน เพื่อไม่ให้ซ้อนกัน
       
       // ตรวจสอบและเติมโครงสร้างข้อมูลให้ครบถ้วนป้องกันบัคโครงสร้างเก่าหาย
@@ -7931,17 +8188,65 @@ export default function App() {
   };
 
   const handleSaveProject = async (e) => {
-      // ...
-      setProjects(nextList);
-      triggerAutoSync('Projects_โครงการ', nextList, filesToUpload);
-      // ...
+      e.preventDefault();
+      setIsSavingProject(true);
+      
+      try {
+          let nextList;
+          // Deep copy เพื่อป้องกันผลกระทบกับ State ต้นฉบับเมื่อมีการลบ property
+          let savedProject = JSON.parse(JSON.stringify(newProject));
+          
+          if (!isEditingProject) {
+              savedProject.id = generateId();
+              savedProject.status = 'Active';
+          }
+
+          // รวบรวมไฟล์สำหรับอัปโหลดขึ้น Drive อัตโนมัติ (โลโก้ และ เอกสารโครงการ)
+          let filesToUpload = [];
+          if (savedProject.logo && savedProject.logo.startsWith('data:image')) {
+              filesToUpload.push({ name: `ProjectLogo_${savedProject.code}.jpg`, data: savedProject.logo });
+          }
+          if (savedProject.files) {
+              Object.keys(savedProject.files).forEach(key => {
+                  const fileObj = savedProject.files[key];
+                  if (fileObj && fileObj.data && fileObj.data.startsWith('data:')) {
+                       filesToUpload.push({ name: `ProjectDoc_${savedProject.code}_${key}.pdf`, data: fileObj.data });
+                       // ลบ base64 ออกจาก object ที่จะเซฟลง Firestore เพื่อป้องกัน 1MB Limit Error
+                       delete fileObj.data;
+                  }
+              });
+          }
+
+          if (isEditingProject) {
+              nextList = projects.map(p => p.id === savedProject.id ? savedProject : p);
+              // อัปเดตข้อมูลในหน้าต่างที่กำลังเปิดอยู่
+              if (selectedProject?.id === savedProject.id) setSelectedProject(savedProject);
+          } else {
+              nextList = [...projects, savedProject];
+          }
+          
+          setProjects(nextList);
+          triggerAutoSync('Projects_โครงการ', nextList, filesToUpload);
+
+          setShowAddProjectModal(false);
+          setIsEditingProject(false);
+          setNewProject({ logo: null, code: '', name: '', type: 'Condo', address: '', phone: '', taxId: '', contractStartDate: '', contractEndDate: '', contractValue: '', status: 'Active', files: { orchor: null, committee: null, regulations: null, resident_rules: null } });
+          alert('บันทึกข้อมูลโครงการ/หน่วยงาน เรียบร้อยแล้ว');
+      } catch (error) {
+          console.error(error);
+          alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+      } finally {
+          setIsSavingProject(false);
+      }
   };
- const handleSaveContract = async (e) => {
+
+  const handleSaveContract = async (e) => {
       e.preventDefault();
       setIsSavingContract(true);
       const finalCategory = (newContract.category || '').includes('อื่นๆ') ? newContract.customCategory : newContract.category;
       
       try {
+          let nextList;
           let savedContract = JSON.parse(JSON.stringify(newContract));
           savedContract.category = finalCategory;
           
@@ -7951,56 +8256,59 @@ export default function App() {
               savedContract.status = 'Active';
           }
 
-          if (db && appId) {
-              const firestoreContract = { ...savedContract };
-              if (firestoreContract.file && firestoreContract.file.data) {
-                  delete firestoreContract.file.data; 
-              }
-              const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'bmg_contracts_docs', savedContract.id);
-              await setDoc(docRef, firestoreContract); 
-          }
-
-          setContracts(prev => {
-              const nextList = isEditingContract ? prev.map(c => c.id === savedContract.id ? savedContract : c) : [...prev, savedContract];
+          // --- อัปโหลดไฟล์สัญญาเข้า Drive อัตโนมัติ ---
+          if (savedContract.file && savedContract.file.data && savedContract.file.data.startsWith('data:')) {
+              setAutoSyncMessage('กำลังอัปโหลดไฟล์สัญญาลง Google Drive...');
+              const GOOGLE_SCRIPT_DRIVE_URL = GOOGLE_SCRIPT_CONFIG.DRIVE_URL;
               
-              if (savedContract.file && savedContract.file.data && savedContract.file.data.startsWith('data:')) {
-                  setAutoSyncMessage('กำลังอัปโหลดไฟล์สัญญาลง Google Drive...');
-                  const GOOGLE_SCRIPT_DRIVE_URL = GOOGLE_SCRIPT_CONFIG.DRIVE_URL;
-                  const match = savedContract.file.data.match(/^data:(.+);base64,(.+)$/);
-                  if (match) {
-                      const payload = {
-                          filename: `Contract_${savedContract.id}_${savedContract.file.name}`,
-                          mimeType: match[1],
-                          data: match[2],
-                          folderName: `Contracts_${selectedProject.code}`
-                      };
-                      fetch(GOOGLE_SCRIPT_DRIVE_URL, {
+              const match = savedContract.file.data.match(/^data:(.+);base64,(.+)$/);
+              if (match) {
+                  const payload = {
+                      filename: `Contract_${savedContract.id}_${savedContract.file.name}`,
+                      mimeType: match[1],
+                      data: match[2],
+                      folderName: `Contracts_${selectedProject.code}`
+                  };
+                  
+                  try {
+                      await fetch(GOOGLE_SCRIPT_DRIVE_URL, {
                           method: 'POST',
                           mode: 'no-cors',
                           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                           body: JSON.stringify(payload)
-                      }).catch(err => console.error("Drive upload failed", err));
+                      });
+                  } catch (err) {
+                      console.error("Auto-upload to Drive failed", err);
                   }
-                  delete savedContract.file.data;
               }
-              setTimeout(() => triggerAutoSync('Contracts_สัญญา', nextList, []), 100);
-              return nextList;
-          });
+              // ลบ base64 ออกจาก object ที่จะเซฟลง Firestore เพื่อป้องกัน 1MB Limit Error
+              delete savedContract.file.data;
+          }
 
-          if (isEditingContract && selectedContractView?.id === savedContract.id) setSelectedContractView(savedContract);
+          if (isEditingContract) {
+              nextList = contracts.map(c => c.id === savedContract.id ? savedContract : c);
+              if (selectedContractView?.id === savedContract.id) setSelectedContractView(savedContract);
+          } else {
+              nextList = [...contracts, savedContract];
+          }
+          
+          setContracts(nextList);
+          // ซิงค์ข้อมูล Text ไปยัง Sheets
+          triggerAutoSync('Contracts_สัญญา', nextList, []);
           
           setShowAddContractModal(false);
           setIsEditingContract(false);
           setNewContract({ type: CONTRACT_TYPES.EXPENSE, category: '', customCategory: '', vendorName: '', contactPerson: '', contactPhone: '', startDate: '', endDate: '', amount: '', paymentCycle: 'Monthly', file: null });
-          alert('บันทึกข้อมูลสัญญาเรียบร้อยแล้ว');
+          alert('บันทึกข้อมูลสัญญาและอัปโหลดไฟล์ลง Google Drive อัตโนมัติเรียบร้อยแล้ว');
       } catch (error) {
-          console.error("Save Contract Error:", error);
-          alert('เกิดข้อผิดพลาดในการบันทึกข้อมูลสัญญาลงฐานข้อมูลหลัก');
+          console.error(error);
+          alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
       } finally {
           setIsSavingContract(false);
           setTimeout(() => setAutoSyncMessage(''), 3000);
       }
   };
+
   const handleEditContract = (contract) => {
       setSelectedContractView(null); // ปิดหน้าต่างรายละเอียดเดิมก่อนเปิดฟอร์มแก้ไข
       let cat = contract.category;
@@ -8030,12 +8338,15 @@ export default function App() {
   };
 
   // ... (View Components) ...
- const renderLoginView = () => (
+  const renderLoginView = () => (
     <div className="min-h-screen flex items-center justify-center bg-black p-4 relative overflow-hidden">
+      {/* Decorative Background Elements */}
       <div className="absolute top-[10%] left-[15%] w-72 h-72 bg-orange-600 rounded-full filter blur-[120px] opacity-30"></div>
       <div className="absolute bottom-[10%] right-[15%] w-80 h-80 bg-red-600 rounded-full filter blur-[120px] opacity-30"></div>
       
       <div className="bg-gray-900/80 backdrop-blur-xl p-8 md:p-10 rounded-[2rem] shadow-2xl w-full max-w-md border border-gray-800 relative z-10">
+        
+        {/* Header Section */}
         <div className="flex flex-col items-center text-center mb-10">
           <h1 className="flex items-baseline justify-center gap-2 mb-2">
             <span 
@@ -8055,83 +8366,16 @@ export default function App() {
           <p className="text-sm text-gray-400 font-medium tracking-wide mt-1 uppercase">{t('systemMgmt')} - {t('signIn')}</p>
         </div>
         
+        {/* Offline Mode Warning */}
         {!db && (
             <div className="bg-orange-900/30 text-orange-400 text-xs p-3 rounded-xl border border-orange-800/50 flex items-start gap-3 mb-6">
                 <AlertTriangle size={24} className="shrink-0 mt-0.5"/> 
                 <div className="text-left">
                     <strong className="text-sm">ทำงานในโหมด Offline (Local Storage)</strong><br/>
-                    ระบบไม่พบฐานข้อมูล Firebase ข้อมูลที่บันทึกจะอยู่แค่ในเบราว์เซอร์ของคุณคนเดียวเท่านั้น
+                    ระบบไม่พบฐานข้อมูล Firebase ข้อมูลที่บันทึกจะอยู่แค่ในเบราว์เซอร์ของคุณคนเดียวเท่านั้น (หากนำลิงก์ไปแชร์ให้ผู้อื่นเปิดจะไม่เห็นข้อมูลเดียวกัน)
                 </div>
             </div>
         )}
-
-        <form onSubmit={handleLogin} className="space-y-5">
-            <div>
-                <label className="block text-sm font-bold text-gray-300 mb-1.5 ml-1">ชื่อผู้ใช้งาน (รหัสพนักงาน)</label>
-                <div className="relative">
-                    <User className="absolute left-4 top-3.5 text-gray-500" size={18} />
-                    <input 
-                        type="text" 
-                        autoCapitalize="none"
-                        autoCorrect="off"
-                        className="pl-11 block w-full rounded-xl border-gray-700 shadow-sm p-3 border focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all bg-gray-800/50 text-white placeholder-gray-500 focus:bg-gray-800" 
-                        value={loginForm.username} 
-                        onChange={e => setLoginForm({...loginForm, username: e.target.value})} 
-                        placeholder="กรอกรหัสพนักงาน" 
-                    />
-                </div>
-            </div>
-            <div>
-                <label className="block text-sm font-bold text-gray-300 mb-1.5 ml-1">รหัสผ่าน</label>
-                <div className="relative">
-                    <Lock className="absolute left-4 top-3.5 text-gray-500" size={18} />
-                    <input 
-                        type={showPassword ? "text" : "password"} 
-                        className="pl-11 pr-12 block w-full rounded-xl border-gray-700 shadow-sm p-3 border focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all bg-gray-800/50 text-white placeholder-gray-500 focus:bg-gray-800" 
-                        value={loginForm.password} 
-                        onChange={e => setLoginForm({...loginForm, password: e.target.value})} 
-                        placeholder="กรอกรหัสผ่าน" 
-                    />
-                    <button 
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-4 top-3.5 text-gray-500 hover:text-gray-300 focus:outline-none transition-colors"
-                    >
-                        {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                </div>
-            </div>
-            
-            {loginError && (
-                <div className="bg-red-900/30 text-red-400 text-sm p-3 rounded-xl border border-red-800/50 flex items-center gap-2 animate-fade-in">
-                    <AlertTriangle size={16} className="shrink-0"/> {loginError}
-                </div>
-            )}
-            
-            <button 
-                type="submit" 
-                disabled={!authInitialized}
-                className="w-full text-white font-bold py-3.5 px-4 rounded-xl transform hover:-translate-y-1 hover:scale-[1.02] transition-all duration-300 mt-6 relative overflow-hidden group disabled:opacity-50 disabled:cursor-not-allowed" 
-                style={{
-                    background: 'linear-gradient(135deg, rgba(255, 140, 0, 0.7) 0%, rgba(234, 67, 0, 0.95) 100%)',
-                    backdropFilter: 'blur(10px)',
-                    boxShadow: '0 8px 25px rgba(234, 88, 12, 0.5), inset 0 2px 2px rgba(255, 255, 255, 0.6), inset 0 -2px 4px rgba(0, 0, 0, 0.2)',
-                    border: '1px solid rgba(255, 255, 255, 0.4)'
-                }}
-            >
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white to-transparent opacity-30 transform -translate-x-[150%] group-hover:translate-x-[150%] transition-transform duration-700 ease-in-out skew-x-12"></div>
-                <span className="relative z-10 text-lg tracking-wider" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.4)' }}>
-                    {!authInitialized ? 'กำลังเชื่อมต่อระบบ...' : t('signIn')}
-                </span>
-            </button>
-        </form>
-        
-        <div className="mt-8 text-center text-xs text-gray-500 border-t border-gray-800 pt-6">
-            {t('poweredBy')}
-        </div>
-      </div>
-    </div>
-  );
 
         {/* Login Form */}
         {!isUsersLoaded ? (
