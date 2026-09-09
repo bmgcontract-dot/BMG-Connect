@@ -1664,7 +1664,7 @@ function useUserPersistentState(key, initialValue, fbUser) {
     return [state, setPersistentValue];
 }
 
-function usePersistentCollection(collectionName, initialValue, fbUser) {
+function usePersistentCollection(collectionName, initialValue, fbUser, enabled = true) {
     const localKey = collectionName.startsWith('bmg_') ? collectionName : `bmg_${collectionName}`;
 
     const [data, setData] = useState(() => {
@@ -1696,12 +1696,31 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
             return;
         }
 
+        // PERF: Lazy subscription — only open the real-time Firestore listener when this
+        // collection is actually needed (its feature/page is active). Until then we still
+        // serve cached data from IndexedDB/localStorage, so the UI is never blank, but we
+        // avoid opening ~29 onSnapshot connections all at once on login.
+        if (!enabled) {
+            let cancelled = false;
+            (async () => {
+                try {
+                    const idbData = await loadStateLocallyIDB(localKey);
+                    if (!cancelled && idbData && Array.isArray(idbData) && idbData.length > 0) {
+                        setData(idbData);
+                        dataRef.current = idbData;
+                    }
+                } catch (e) { /* offline: keep current cached data */ }
+                if (!cancelled) setIsLoaded(true);
+            })();
+            return () => { cancelled = true; };
+        }
+
         let unsubscribe = () => {};
         let isMounted = true;
-        
+
         const initData = async () => {
             setIsLoaded(false);
-            
+
             try {
                 // NEW: Load from IndexedDB first for fast and large offline data
                 const idbData = await loadStateLocallyIDB(localKey);
@@ -1762,7 +1781,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
             isMounted = false;
             unsubscribe();
         };
-    }, [db, appId, fbUser, collectionName, localKey]);
+    }, [db, appId, fbUser, collectionName, localKey, enabled]);
 
     const setPersistentValue = async (newValueOrUpdater, isRestore = false) => {
         const oldValue = dataRef.current;
@@ -3689,7 +3708,7 @@ export default function App() {
 
   // --- NEW: Meeting Gantt Plans State ---
   const INITIAL_GANTT_PLANS = [];
-  const [meetingGanttPlans, setMeetingGanttPlans] = usePersistentCollection('bmg_meeting_gantt_plans', INITIAL_GANTT_PLANS, fbUser);
+  const [meetingGanttPlans, setMeetingGanttPlans] = usePersistentCollection('bmg_meeting_gantt_plans', INITIAL_GANTT_PLANS, fbUser, activeMenu === 'projects' && projectTab === 'meeting');
   const [editingGanttPlan, setEditingGanttPlan] = useState(null);
   const [ganttPaintMode, setGanttPaintMode] = useState(null); // 'add', 'remove', null
   const [ganttSelectedColor, setGanttSelectedColor] = useState('bg-orange-500');
@@ -3752,31 +3771,70 @@ export default function App() {
 
   // อัปเกรดเป็น usePersistentCollection สำหรับข้อมูลที่เป็น Array (รายการ) ป้องกันข้อมูลสูญหาย/ทับกัน
   // โดยใช้ชื่อ Collection คงเดิมทั้งหมด เพื่อให้ระบบกู้ข้อมูลเก่าขึ้นมาเซฟเป็น Document ให้อัตโนมัติ!
-  const [users, setUsers, isUsersLoaded, isUsersSynced] = usePersistentCollection('bmg_users', INITIAL_USERS, fbUser); 
-  const [projects, setProjects] = usePersistentCollection('bmg_projects', INITIAL_PROJECTS, fbUser);
-  const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, fbUser);
-  const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, fbUser);
-  const [dailyReports, setDailyReports] = usePersistentCollection('bmg_dailyReports', INITIAL_DAILY_REPORTS, fbUser);
-  const [repairs, setRepairs] = usePersistentCollection('bmg_repairs', INITIAL_REPAIRS, fbUser);
-  const [contractors, setContractors] = usePersistentCollection('bmg_contractors', INITIAL_CONTRACTORS, fbUser);
-  const [assets, setAssets] = usePersistentCollection('bmg_assets', INITIAL_ASSETS, fbUser);
-  const [tools, setTools] = usePersistentCollection('bmg_tools', INITIAL_TOOLS, fbUser);
-  const [machines, setMachines] = usePersistentCollection('bmg_machines', INITIAL_MACHINES, fbUser);
-  const [pmPlans, setPmPlans] = usePersistentCollection('bmg_pmPlans', INITIAL_PM_PLANS, fbUser);
-  const [pmHistoryList, setPmHistoryList] = usePersistentCollection('bmg_pmHistoryList', INITIAL_PM_HISTORY, fbUser);
-  const [meters, setMeters] = usePersistentCollection('bmg_meters', INITIAL_METERS, fbUser);
-  const [utilityReadings, setUtilityReadings] = usePersistentCollection('bmg_utilityReadings', INITIAL_READINGS, fbUser);
-  const [actionPlans, setActionPlans] = usePersistentCollection('bmg_actionPlans', INITIAL_ACTION_PLANS, fbUser);
-  const [othersData, setOthersData] = usePersistentCollection('bmg_othersData', INITIAL_OTHERS, fbUser);
-  const [formsList, setFormsList] = usePersistentCollection('bmg_forms_list', STANDARD_FORMS, fbUser);
-  const [meetingsList, setMeetingsList] = usePersistentCollection('bmg_meetings', INITIAL_MEETINGS, fbUser);
-  const [announcements, setAnnouncements] = usePersistentCollection('bmg_announcements', INITIAL_ANNOUNCEMENTS, fbUser);
-  const [deposits, setDeposits] = usePersistentCollection('bmg_deposits', INITIAL_DEPOSITS, fbUser);
-  const [inventoryList, setInventoryList] = usePersistentCollection('bmg_inventory', INITIAL_INVENTORY, fbUser);
-  const [inventoryTransactions, setInventoryTransactions] = usePersistentCollection('bmg_inventory_transactions', INITIAL_TRANSACTIONS, fbUser);
+  //
+  // PERF (Phase 2): แทนที่จะเปิด Firestore listener ทั้ง 29 ตัวพร้อมกันตอน login เราเปิดเฉพาะ
+  // collection ที่ "หน้า/ฟีเจอร์ปัจจุบันต้องใช้จริง" ด้วยธง enabled ที่คำนวณจาก activeMenu/projectTab
+  // collection อื่นยังใช้ข้อมูล cache (IndexedDB/localStorage) ไปก่อน และจะเปิด listener เมื่อผู้ใช้
+  // เข้าหน้านั้นจริง (และ unsubscribe อัตโนมัติเมื่อออกจากหน้า) — ลดการเชื่อมต่อพร้อมกันตอนเข้าระบบมาก
+  const onProjects = activeMenu === 'projects';
+  const pTab = onProjects ? projectTab : null;
+  const onDashboard = activeMenu === 'dashboard';
+  const enabledMap = useMemo(() => ({
+    // Always-on: จำเป็นตั้งแต่ login / ใช้ข้ามทุกหน้า (เลือกโครงการ, ป็อปอัปประกาศ)
+    users: true,
+    projects: true,
+    announcements: true,
+    // Dashboard เป็นหน้า landing ที่รวมสถิติข้ามหลาย collection — ต้องเปิด listener กลุ่มนี้
+    // ตอนอยู่หน้า dashboard เพื่อให้กราฟ/ตัวเลขถูกต้อง (ไม่ใช่ข้อมูล cache เก่า/ว่าง)
+    audits: onDashboard || activeMenu === 'audits' || pTab === 'audit',
+    contracts: onDashboard || pTab === 'contracts' || pTab === 'overview',
+    dailyReports: onDashboard || pTab === 'daily' || pTab === 'overview',
+    actionPlans: onDashboard || pTab === 'action',
+    pmPlans: onDashboard || pTab === 'pm',
+    pmHistoryList: onDashboard || pTab === 'pm',
+    // Lazy ล้วน: เปิดเมื่อเข้าหน้า/แท็บที่เกี่ยวข้องเท่านั้น
+    repairs: pTab === 'repair' || pTab === 'overview',
+    contractors: pTab === 'contractors',
+    assets: pTab === 'assets',
+    tools: pTab === 'tools',
+    machines: pTab === 'pm',
+    meters: pTab === 'utilities',
+    utilityReadings: pTab === 'utilities',
+    othersData: pTab === 'others',
+    formsList: pTab === 'forms',
+    meetings: pTab === 'meeting',
+    deposits: pTab === 'centralfee',
+    inventory: pTab === 'inventory',
+    inventoryTransactions: pTab === 'inventory',
+    meetingChildren: pTab === 'meeting',
+    projectEvents: pTab === 'schedule',
+  }), [activeMenu, pTab, onDashboard]);
+
+  const [users, setUsers, isUsersLoaded, isUsersSynced] = usePersistentCollection('bmg_users', INITIAL_USERS, fbUser, enabledMap.users);
+  const [projects, setProjects] = usePersistentCollection('bmg_projects', INITIAL_PROJECTS, fbUser, enabledMap.projects);
+  const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, fbUser, enabledMap.contracts);
+  const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, fbUser, enabledMap.audits);
+  const [dailyReports, setDailyReports] = usePersistentCollection('bmg_dailyReports', INITIAL_DAILY_REPORTS, fbUser, enabledMap.dailyReports);
+  const [repairs, setRepairs] = usePersistentCollection('bmg_repairs', INITIAL_REPAIRS, fbUser, enabledMap.repairs);
+  const [contractors, setContractors] = usePersistentCollection('bmg_contractors', INITIAL_CONTRACTORS, fbUser, enabledMap.contractors);
+  const [assets, setAssets] = usePersistentCollection('bmg_assets', INITIAL_ASSETS, fbUser, enabledMap.assets);
+  const [tools, setTools] = usePersistentCollection('bmg_tools', INITIAL_TOOLS, fbUser, enabledMap.tools);
+  const [machines, setMachines] = usePersistentCollection('bmg_machines', INITIAL_MACHINES, fbUser, enabledMap.machines);
+  const [pmPlans, setPmPlans] = usePersistentCollection('bmg_pmPlans', INITIAL_PM_PLANS, fbUser, enabledMap.pmPlans);
+  const [pmHistoryList, setPmHistoryList] = usePersistentCollection('bmg_pmHistoryList', INITIAL_PM_HISTORY, fbUser, enabledMap.pmHistoryList);
+  const [meters, setMeters] = usePersistentCollection('bmg_meters', INITIAL_METERS, fbUser, enabledMap.meters);
+  const [utilityReadings, setUtilityReadings] = usePersistentCollection('bmg_utilityReadings', INITIAL_READINGS, fbUser, enabledMap.utilityReadings);
+  const [actionPlans, setActionPlans] = usePersistentCollection('bmg_actionPlans', INITIAL_ACTION_PLANS, fbUser, enabledMap.actionPlans);
+  const [othersData, setOthersData] = usePersistentCollection('bmg_othersData', INITIAL_OTHERS, fbUser, enabledMap.othersData);
+  const [formsList, setFormsList] = usePersistentCollection('bmg_forms_list', STANDARD_FORMS, fbUser, enabledMap.formsList);
+  const [meetingsList, setMeetingsList] = usePersistentCollection('bmg_meetings', INITIAL_MEETINGS, fbUser, enabledMap.meetings);
+  const [announcements, setAnnouncements] = usePersistentCollection('bmg_announcements', INITIAL_ANNOUNCEMENTS, fbUser, enabledMap.announcements);
+  const [deposits, setDeposits] = usePersistentCollection('bmg_deposits', INITIAL_DEPOSITS, fbUser, enabledMap.deposits);
+  const [inventoryList, setInventoryList] = usePersistentCollection('bmg_inventory', INITIAL_INVENTORY, fbUser, enabledMap.inventory);
+  const [inventoryTransactions, setInventoryTransactions] = usePersistentCollection('bmg_inventory_transactions', INITIAL_TRANSACTIONS, fbUser, enabledMap.inventoryTransactions);
 
   // --- NEW: Meeting Invitations State ---
-  const [meetingInvitations, setMeetingInvitations] = usePersistentCollection('bmg_meeting_invitations', [], fbUser);
+  const [meetingInvitations, setMeetingInvitations] = usePersistentCollection('bmg_meeting_invitations', [], fbUser, enabledMap.meetingChildren);
   const [showAddInvitationModal, setShowAddInvitationModal] = useState(false);
   const [selectedInvitationView, setSelectedInvitationView] = useState(null); // NEW: State สำหรับเก็บข้อมูลหนังสือเชิญที่ถูกเลือกดู
   const [newInvitation, setNewInvitation] = useState({
@@ -3790,7 +3848,7 @@ export default function App() {
   });
 
   // --- NEW: Meeting Proxies State ---
-  const [meetingProxies, setMeetingProxies] = usePersistentCollection('bmg_meeting_proxies', [], fbUser);
+  const [meetingProxies, setMeetingProxies] = usePersistentCollection('bmg_meeting_proxies', [], fbUser, enabledMap.meetingChildren);
   const [showAddProxyModal, setShowAddProxyModal] = useState(false);
   const [selectedProxyView, setSelectedProxyView] = useState(null);
   const [newProxy, setNewProxy] = useState({
@@ -3805,7 +3863,7 @@ export default function App() {
   });
 
   // --- NEW: Meetings Tab ---
-  const [meetingBallots, setMeetingBallots] = usePersistentCollection('bmg_meeting_ballots', [], fbUser);
+  const [meetingBallots, setMeetingBallots] = usePersistentCollection('bmg_meeting_ballots', [], fbUser, enabledMap.meetingChildren);
   const [showAddBallotModal, setShowAddBallotModal] = useState(false);
   const [selectedBallotView, setSelectedBallotView] = useState(null);
   const [newBallot, setNewBallot] = useState({
@@ -3821,14 +3879,14 @@ export default function App() {
 
   // --- NEW: Extended Meeting States ---
   const [selectedMeetingManageId, setSelectedMeetingManageId] = useState('');
-  const [meetingAttendances, setMeetingAttendances] = usePersistentCollection('bmg_meeting_attendances', [], fbUser);
-  const [meetingAgendas, setMeetingAgendas] = usePersistentCollection('bmg_meeting_agendas', [], fbUser);
+  const [meetingAttendances, setMeetingAttendances] = usePersistentCollection('bmg_meeting_attendances', [], fbUser, enabledMap.meetingChildren);
+  const [meetingAgendas, setMeetingAgendas] = usePersistentCollection('bmg_meeting_agendas', [], fbUser, enabledMap.meetingChildren);
   const [landDocsChecklist, setLandDocsChecklist] = usePersistentState('bmg_meeting_land_docs', {}, fbUser);
   const [newAttendance, setNewAttendance] = useState({ unitNo: '', ownerName: '', attendeeName: '', type: 'เจ้าของร่วม', weight: 1 });
   const [newAgendaTitle, setNewAgendaTitle] = useState('');
 
   // --- NEW: Project Events (Calendar) State ---
-  const [projectEvents, setProjectEvents] = usePersistentCollection('bmg_project_events', [], fbUser);
+  const [projectEvents, setProjectEvents] = usePersistentCollection('bmg_project_events', [], fbUser, enabledMap.projectEvents);
   const [showAddEventModal, setShowAddEventModal] = useState(false);
   const [currentEventMonth, setCurrentEventMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [selectedEventDate, setSelectedEventDate] = useState(() => new Date().toISOString().split('T')[0]);
