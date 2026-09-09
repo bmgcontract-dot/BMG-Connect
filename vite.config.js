@@ -11,16 +11,11 @@ export default defineConfig({
           if (id.includes('/firebase/') || id.includes('/@firebase/')) {
             return 'firebase'
           }
-          if (
-            id.includes('/recharts/') ||
-            id.includes('/recharts-scale/') ||
-            id.includes('/react-smooth/') ||
-            id.includes('/lodash/') ||
-            id.includes('/decimal.js-light/') ||
-            /\/d3-[^/]+\//.test(id)
-          ) {
-            return 'charts'
-          }
+          // NOTE: recharts + its d3/lodash deps are intentionally NOT assigned a
+          // manual chunk here. They are pulled in via React.lazy (ChartKit.jsx),
+          // so Rollup emits them as an on-demand async chunk that is only fetched
+          // when a chart first renders. Naming them here would make Vite eagerly
+          // modulepreload the chunk on initial load and defeat the lazy split.
           if (
             id.includes('/react/') ||
             id.includes('/react-dom/') ||

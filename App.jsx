@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { 
   Users, Building2, BarChart3, Settings, LogOut, 
   Plus, Search, FileText, Download, Trash2, Edit, 
@@ -12,10 +12,25 @@ import {
   Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2, Bell, Megaphone, Radio, Medal, Landmark, RefreshCw, QrCode,
   Package, Archive, ShoppingCart, ArrowDownRight, ArrowUpRight, FileSpreadsheet, ListChecks, Home, MessageSquare, PieChart as PieChartIcon, Eraser
 } from 'lucide-react';
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
-  PieChart, Pie, Cell, LineChart, Line
-} from 'recharts';
+// PERF (Phase 3): recharts is code-split into a lazy chunk (see ChartKit.jsx).
+// Each primitive is a React.lazy component; the recharts bundle (~830KB with d3/lodash)
+// downloads on demand the first time any chart renders, not in the initial bundle.
+const lazyChart = (name) => lazy(() =>
+  import('./ChartKit.jsx').then((m) => ({ default: m[name] }))
+);
+const BarChart = lazyChart('BarChart');
+const Bar = lazyChart('Bar');
+const XAxis = lazyChart('XAxis');
+const YAxis = lazyChart('YAxis');
+const CartesianGrid = lazyChart('CartesianGrid');
+const RechartsTooltip = lazyChart('Tooltip');
+const Legend = lazyChart('Legend');
+const ResponsiveContainer = lazyChart('ResponsiveContainer');
+const PieChart = lazyChart('PieChart');
+const Pie = lazyChart('Pie');
+const Cell = lazyChart('Cell');
+const LineChart = lazyChart('LineChart');
+const Line = lazyChart('Line');
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
@@ -17676,6 +17691,10 @@ export default function App() {
   if (!currentUser) return renderLoginView();
 
   return (
+    // PERF (Phase 3): top-level Suspense boundary so lazily-loaded recharts charts
+    // work anywhere they render — main content AND overlay/print/fullscreen modals
+    // (e.g. daily-report print view) that sit outside the #print-area container.
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen text-gray-400 gap-2"><Loader2 size={22} className="animate-spin" /><span className="text-sm">กำลังโหลด...</span></div>}>
     <div className={`flex min-h-screen font-sans transition-colors duration-300 w-full overflow-x-hidden ${!isExporting ? (theme === 'dark' ? 'dark-theme' : theme === 'sweet' ? 'sweet-theme' : theme === 'crimson' ? 'crimson-theme' : theme === 'sunset' ? 'sunset-theme' : 'bg-gray-100 text-gray-900') : 'bg-gray-100 text-gray-900'}`}>
       {/* ซ่อนลูกศรขึ้น-ลง ของ input type="number" ทั้งระบบ และเพิ่ม Dark Mode Styles */}
       <style>{`
@@ -23333,5 +23352,6 @@ export default function App() {
           );
       })()}
     </div>
+    </Suspense>
   );
 }
