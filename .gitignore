@@ -1,0 +1,17 @@
+node_modules/
+dist/
+
+# Local environment and Firebase credentials
+.env
+.env.*
+!.env.example
+service-account*.json
+*firebase-adminsdk*.json
+
+# Production exports and migration output may contain personal data
+backups/
+migration-output/
+
+# Local tooling
+.DS_Store
+*.log
