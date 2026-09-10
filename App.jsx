@@ -1752,6 +1752,8 @@ function usePersistentCollection(collectionName, initialValue, fbUser, enabled =
                     }
                 }
 
+                if (!isMounted) return;
+
                 const colRef = collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
                 let listenTarget = colRef;
                 if (dateScope) {
@@ -3459,6 +3461,10 @@ export default function App() {
       return null;
   });
   
+  // Keep login data available; defer business-data subscriptions until app login.
+  const isLoggedIn = Boolean(currentUser);
+  const businessFbUser = isLoggedIn ? fbUser : null;
+
   const [activeMenu, setActiveMenu] = useState('dashboard');
   const [selectedProject, setSelectedProject] = useState(null);
   const [projectTab, setProjectTab] = useState('overview');
@@ -3494,8 +3500,8 @@ export default function App() {
   // ----------------------------------------------
   const [isEditingUser, setIsEditingUser] = useState(false);
   const [scheduleNote, setScheduleNote] = useState(''); // NEW: State สำหรับเก็บ Note ในตารางงาน
-  const [scheduleNotes, setScheduleNotes] = usePersistentState('bmg_scheduleNotes', {}, fbUser); // NEW: Persistent state for schedule notes
-  const [scheduleApprovals, setScheduleApprovals] = usePersistentState('bmg_scheduleApprovals', {}, fbUser); // NEW: State สำหรับเก็บสถานะการอนุมัติตารางงาน
+  const [scheduleNotes, setScheduleNotes] = usePersistentState('bmg_scheduleNotes', {}, businessFbUser); // NEW: Persistent state for schedule notes
+  const [scheduleApprovals, setScheduleApprovals] = usePersistentState('bmg_scheduleApprovals', {}, businessFbUser); // NEW: State สำหรับเก็บสถานะการอนุมัติตารางงาน
   const [hoScheduleModal, setHoScheduleModal] = useState(null); // NEW: Modal สำหรับเลือกหน่วยงานหลายแห่ง
   const [hoSelectedProjects, setHoSelectedProjects] = useState([]); // NEW: รายการหน่วยงานที่ถูกเลือก
   const [selectedKpiDetail, setSelectedKpiDetail] = useState(null); // NEW: State สำหรับเปิด Modal รายละเอียด KPI
@@ -3516,7 +3522,7 @@ export default function App() {
   const [projectViewMode, setProjectViewMode] = useState('grid');
 
   // Company Info State
-  const [companyInfo, setCompanyInfo] = usePersistentState('bmg_companyInfo', INITIAL_COMPANY_INFO, fbUser);
+  const [companyInfo, setCompanyInfo] = usePersistentState('bmg_companyInfo', INITIAL_COMPANY_INFO, businessFbUser);
   const [showEditCompanyModal, setShowEditCompanyModal] = useState(false);
   const [editCompanyForm, setEditCompanyForm] = useState({ ...INITIAL_COMPANY_INFO });
 
@@ -3779,7 +3785,7 @@ export default function App() {
 
   // --- NEW: Meeting Gantt Plans State ---
   const INITIAL_GANTT_PLANS = [];
-  const [meetingGanttPlans, setMeetingGanttPlans] = usePersistentCollection('bmg_meeting_gantt_plans', INITIAL_GANTT_PLANS, fbUser, activeMenu === 'projects' && projectTab === 'meeting');
+  const [meetingGanttPlans, setMeetingGanttPlans] = usePersistentCollection('bmg_meeting_gantt_plans', INITIAL_GANTT_PLANS, fbUser, isLoggedIn && activeMenu === 'projects' && projectTab === 'meeting');
   const [editingGanttPlan, setEditingGanttPlan] = useState(null);
   const [ganttPaintMode, setGanttPaintMode] = useState(null); // 'add', 'remove', null
   const [ganttSelectedColor, setGanttSelectedColor] = useState('bg-orange-500');
@@ -3847,17 +3853,17 @@ export default function App() {
   // collection ที่ "หน้า/ฟีเจอร์ปัจจุบันต้องใช้จริง" ด้วยธง enabled ที่คำนวณจาก activeMenu/projectTab
   // collection อื่นยังใช้ข้อมูล cache (IndexedDB/localStorage) ไปก่อน และจะเปิด listener เมื่อผู้ใช้
   // เข้าหน้านั้นจริง (และ unsubscribe อัตโนมัติเมื่อออกจากหน้า) — ลดการเชื่อมต่อพร้อมกันตอนเข้าระบบมาก
-  const onProjects = activeMenu === 'projects';
+  const onProjects = isLoggedIn && activeMenu === 'projects';
   const pTab = onProjects ? projectTab : null;
-  const onDashboard = activeMenu === 'dashboard';
+  const onDashboard = isLoggedIn && activeMenu === 'dashboard';
   const enabledMap = useMemo(() => ({
-    // Always-on: จำเป็นตั้งแต่ login / ใช้ข้ามทุกหน้า (เลือกโครงการ, ป็อปอัปประกาศ)
+    // Users authenticate app login; projects resolve the assigned landing page.
     users: true,
     projects: true,
-    announcements: true,
+    announcements: isLoggedIn,
     // Dashboard เป็นหน้า landing ที่รวมสถิติข้ามหลาย collection — ต้องเปิด listener กลุ่มนี้
     // ตอนอยู่หน้า dashboard เพื่อให้กราฟ/ตัวเลขถูกต้อง (ไม่ใช่ข้อมูล cache เก่า/ว่าง)
-    audits: onDashboard || activeMenu === 'audits' || pTab === 'audit',
+    audits: onDashboard || (isLoggedIn && activeMenu === 'audits') || pTab === 'audit',
     contracts: onDashboard || pTab === 'contracts' || pTab === 'overview',
     dailyReports: onDashboard || pTab === 'daily' || pTab === 'overview',
     actionPlans: onDashboard || pTab === 'action',
@@ -3879,7 +3885,7 @@ export default function App() {
     inventoryTransactions: pTab === 'inventory',
     meetingChildren: pTab === 'meeting',
     projectEvents: pTab === 'schedule',
-  }), [activeMenu, pTab, onDashboard]);
+  }), [activeMenu, pTab, onDashboard, isLoggedIn]);
 
   const [users, setUsers, isUsersLoaded, isUsersSynced] = usePersistentCollection('bmg_users', INITIAL_USERS, fbUser, enabledMap.users);
   const [projects, setProjects] = usePersistentCollection('bmg_projects', INITIAL_PROJECTS, fbUser, enabledMap.projects);
@@ -3952,7 +3958,7 @@ export default function App() {
   const [selectedMeetingManageId, setSelectedMeetingManageId] = useState('');
   const [meetingAttendances, setMeetingAttendances] = usePersistentCollection('bmg_meeting_attendances', [], fbUser, enabledMap.meetingChildren);
   const [meetingAgendas, setMeetingAgendas] = usePersistentCollection('bmg_meeting_agendas', [], fbUser, enabledMap.meetingChildren);
-  const [landDocsChecklist, setLandDocsChecklist] = usePersistentState('bmg_meeting_land_docs', {}, fbUser);
+  const [landDocsChecklist, setLandDocsChecklist] = usePersistentState('bmg_meeting_land_docs', {}, businessFbUser);
   const [newAttendance, setNewAttendance] = useState({ unitNo: '', ownerName: '', attendeeName: '', type: 'เจ้าของร่วม', weight: 1 });
   const [newAgendaTitle, setNewAgendaTitle] = useState('');
 
@@ -3966,14 +3972,14 @@ export default function App() {
   // incomplete. fetchOlderMonth no-ops (and is safe to call) for months already
   // covered by the live window or already fetched.
   useEffect(() => {
-      if (newAudit?.date) fetchOlderDailyReportsMonth(newAudit.date.substring(0, 7));
-  }, [newAudit?.date]);
+      if (isLoggedIn && fbUser && newAudit?.date) fetchOlderDailyReportsMonth(newAudit.date.substring(0, 7));
+  }, [newAudit?.date, isLoggedIn, fbUser]);
   useEffect(() => {
-      if (reportRankingMonth) fetchOlderDailyReportsMonth(reportRankingMonth);
-  }, [reportRankingMonth]);
+      if (isLoggedIn && fbUser && reportRankingMonth) fetchOlderDailyReportsMonth(reportRankingMonth);
+  }, [reportRankingMonth, isLoggedIn, fbUser]);
   useEffect(() => {
-      if (pmHistoryFilterDate) fetchOlderPmHistoryMonth(pmHistoryFilterDate.substring(0, 7));
-  }, [pmHistoryFilterDate]);
+      if (isLoggedIn && fbUser && pmHistoryFilterDate) fetchOlderPmHistoryMonth(pmHistoryFilterDate.substring(0, 7));
+  }, [pmHistoryFilterDate, isLoggedIn, fbUser]);
   const [showAddEventModal, setShowAddEventModal] = useState(false);
   const [currentEventMonth, setCurrentEventMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [selectedEventDate, setSelectedEventDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -4024,9 +4030,9 @@ export default function App() {
       return () => { isMounted = false; };
   }, []);
 
-  // Sync Schedule Data
+  // Sync schedules only after app login; stop listening again on logout.
   useEffect(() => {
-      if (!db || !fbUser || !appId) return;
+      if (!isLoggedIn || !db || !fbUser || !appId) return;
 
       const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', 'bmg_schedules_v2');
       
@@ -4085,7 +4091,7 @@ export default function App() {
       });
 
       return () => unsubscribe();
-  }, [db, fbUser, appId]);
+  }, [db, fbUser, appId, isLoggedIn]);
   
   const getLocalMonthStr = () => {
       const d = new Date();
@@ -4094,7 +4100,7 @@ export default function App() {
   const [currentMonth, setCurrentMonth] = useState(getLocalMonthStr());
   const [pmMonth, setPmMonth] = useState(getLocalMonthStr());
 
-  const [projectStaffOrder, setProjectStaffOrder] = usePersistentState('bmg_projectStaffOrder', {}, fbUser); // NEW: State สำหรับเก็บลำดับพนักงานในตารางงาน
+  const [projectStaffOrder, setProjectStaffOrder] = usePersistentState('bmg_projectStaffOrder', {}, businessFbUser); // NEW: State สำหรับเก็บลำดับพนักงานในตารางงาน
   const dragItem = useRef(null); // NEW: Ref สำหรับจดจำ index ที่ถูกลาก
   const dragOverItem = useRef(null); // NEW: Ref สำหรับจดจำ index เป้าหมายที่จะวาง
 
@@ -4111,7 +4117,7 @@ export default function App() {
   const [theme, setTheme] = useUserPersistentState('bmg_theme', 'light', fbUser);
 
   // NEW: Role Permissions State
-  const [rolePermissions, setRolePermissions] = usePersistentState('bmg_rolePermissions', {}, fbUser);
+  const [rolePermissions, setRolePermissions] = usePersistentState('bmg_rolePermissions', {}, businessFbUser);
   const [showRolePermModal, setShowRolePermModal] = useState(false);
   const [editingRole, setEditingRole] = useState(EMPLOYEE_POSITIONS[0]);
   const [editingRolePerms, setEditingRolePerms] = useState(getDefaultPermissions());
