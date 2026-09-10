@@ -19,7 +19,7 @@ import {
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot, getDoc, getDocs, collection, deleteDoc, writeBatch } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, onSnapshot, getDoc, getDocs, collection, deleteDoc, writeBatch, query, where } from 'firebase/firestore';
 
 // --- Firebase Initialization ---
 let app, auth, db, appId;
@@ -59,6 +59,13 @@ try {
 } catch (e) {
   console.error("Firebase init failed", e);
 }
+
+// PERF (Phase 5): dateScope configs for usePersistentCollection — see its definition
+// for why these two collections need a scoped live listener (base64 images inflate
+// document size, and unscoped onSnapshot on the full collection was timing out with
+// Firestore "deadline-exceeded" once enough documents accumulated).
+const DAILY_REPORTS_DATE_SCOPE = { field: 'date', recentMonths: 1 };
+const PM_HISTORY_DATE_SCOPE = { field: 'date', recentMonths: 1 };
 
 // --- Configuration & Constants ---
 const THEME = {
@@ -1664,8 +1671,22 @@ function useUserPersistentState(key, initialValue, fbUser) {
     return [state, setPersistentValue];
 }
 
-function usePersistentCollection(collectionName, initialValue, fbUser, enabled = true) {
+// PERF (Phase 5): Optional date-scoped mode for fast-growing collections whose
+// documents embed base64 images (bmg_dailyReports, bmg_pmHistoryList). Loading
+// the FULL collection via onSnapshot was timing out (Firestore "deadline-exceeded")
+// once enough documents accumulated with multi-MB image payloads.
+//
+// dateScope = { field: 'date', recentMonths: 1 } switches the live listener to only
+// watch documents from the last N months (where(field >= cutoff)), and changes the
+// merge strategy from "cloud fully replaces local" to "union by id" — so historical
+// documents that fall outside the live window are NOT treated as deleted and are not
+// wiped from the local IndexedDB/localStorage cache. Older months are fetched on
+// demand via fetchOlderMonth(monthStr) (one-time getDocs, cached per month so
+// re-visiting the same month doesn't re-query) — used by audit/report views that
+// look at an arbitrary past month, so those keep seeing complete, correct data.
+function usePersistentCollection(collectionName, initialValue, fbUser, enabled = true, dateScope = null) {
     const localKey = collectionName.startsWith('bmg_') ? collectionName : `bmg_${collectionName}`;
+    const fetchedMonthsRef = useRef(new Set());
 
     const [data, setData] = useState(() => {
         if (typeof window !== 'undefined') {
@@ -1732,20 +1753,40 @@ function usePersistentCollection(collectionName, initialValue, fbUser, enabled =
                 }
 
                 const colRef = collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
-                unsubscribe = onSnapshot(colRef, (snapshot) => {
+                let listenTarget = colRef;
+                if (dateScope) {
+                    const cutoff = new Date();
+                    cutoff.setMonth(cutoff.getMonth() - (dateScope.recentMonths - 1));
+                    cutoff.setDate(1);
+                    const cutoffStr = cutoff.toISOString().split('T')[0];
+                    listenTarget = query(colRef, where(dateScope.field, '>=', cutoffStr));
+                }
+                unsubscribe = onSnapshot(listenTarget, (snapshot) => {
                     if (!isMounted) return;
                     const serverItems = [];
                     snapshot.forEach(docSnap => serverItems.push(docSnap.data()));
-                    
-                    const serverJson = JSON.stringify(serverItems);
+
+                    let nextItems;
+                    if (dateScope) {
+                        // Union by id: the live window only covers recent months, so anything
+                        // outside it (older cached/fetched docs) must be kept, not treated as deleted.
+                        const byId = new Map((dataRef.current || []).map(it => [it.id, it]));
+                        serverItems.forEach(it => byId.set(it.id, it));
+                        nextItems = Array.from(byId.values());
+                    } else {
+                        nextItems = serverItems;
+                    }
+
+                    const serverJson = JSON.stringify(nextItems);
                     const localJson = JSON.stringify(dataRef.current);
 
-                    // Cloud is the absolute source of truth. If it differs, overwrite local data.
-                    // This permanently kills any "Zombie Data" that was kept locally after being deleted on the server.
+                    // Cloud is the source of truth for the watched window. If it differs, update.
+                    // (Unscoped collections: this fully replaces local data, killing any "Zombie Data"
+                    // kept locally after being deleted on the server, as before.)
                     if (serverJson !== localJson) {
-                        setData(serverItems);
-                        dataRef.current = serverItems;
-                        saveStateLocallyIDB(localKey, serverItems);
+                        setData(nextItems);
+                        dataRef.current = nextItems;
+                        saveStateLocallyIDB(localKey, nextItems);
                         if (typeof window !== 'undefined') {
                             try { localStorage.setItem(localKey, serverJson); } catch(e) {}
                         }
@@ -1765,7 +1806,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser, enabled =
 
                     setIsLoaded(true);
                 }, (error) => {
-                    console.warn(`Sync info for ${collectionName}: Working offline.`);
+                    console.warn(`Sync info for ${collectionName}: Working offline.`, error?.code, error?.message);
                     if (isMounted) setIsLoaded(true);
                 });
 
@@ -1781,7 +1822,37 @@ function usePersistentCollection(collectionName, initialValue, fbUser, enabled =
             isMounted = false;
             unsubscribe();
         };
-    }, [db, appId, fbUser, collectionName, localKey, enabled]);
+    }, [db, appId, fbUser, collectionName, localKey, enabled, dateScope?.field, dateScope?.recentMonths]);
+
+    // PERF (Phase 5): One-time fetch for a specific past month, only relevant when
+    // dateScope is set. Cached per month (fetchedMonthsRef) so switching back and
+    // forth between months (e.g. an audit form, a report picker) doesn't re-query.
+    // Results are merged into `data` by id, same union semantics as the live listener.
+    const fetchOlderMonth = async (monthStr) => {
+        if (!dateScope || !db || !appId || fetchedMonthsRef.current.has(monthStr)) return;
+        fetchedMonthsRef.current.add(monthStr);
+        try {
+            const start = `${monthStr}-01`;
+            const [y, m] = monthStr.split('-').map(Number);
+            const endDate = new Date(y, m, 1); // first day of next month
+            const end = endDate.toISOString().split('T')[0];
+            const colRef = collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
+            const q = query(colRef, where(dateScope.field, '>=', start), where(dateScope.field, '<', end));
+            const snap = await getDocs(q);
+            const monthItems = [];
+            snap.forEach(docSnap => monthItems.push(docSnap.data()));
+            if (monthItems.length === 0) return;
+            const byId = new Map((dataRef.current || []).map(it => [it.id, it]));
+            monthItems.forEach(it => byId.set(it.id, it));
+            const merged = Array.from(byId.values());
+            setData(merged);
+            dataRef.current = merged;
+            saveStateLocallyIDB(localKey, merged);
+        } catch (e) {
+            fetchedMonthsRef.current.delete(monthStr); // allow retry on failure
+            console.warn(`fetchOlderMonth failed for ${collectionName} ${monthStr}:`, e?.code || e);
+        }
+    };
 
     const setPersistentValue = async (newValueOrUpdater, isRestore = false) => {
         const oldValue = dataRef.current;
@@ -1947,7 +2018,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser, enabled =
         }
     };
 
-    return [data, setPersistentValue, isLoaded, true];
+    return [data, setPersistentValue, isLoaded, true, fetchOlderMonth];
 }
 
 const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
@@ -3814,14 +3885,14 @@ export default function App() {
   const [projects, setProjects] = usePersistentCollection('bmg_projects', INITIAL_PROJECTS, fbUser, enabledMap.projects);
   const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, fbUser, enabledMap.contracts);
   const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, fbUser, enabledMap.audits);
-  const [dailyReports, setDailyReports] = usePersistentCollection('bmg_dailyReports', INITIAL_DAILY_REPORTS, fbUser, enabledMap.dailyReports);
+  const [dailyReports, setDailyReports, , , fetchOlderDailyReportsMonth] = usePersistentCollection('bmg_dailyReports', INITIAL_DAILY_REPORTS, fbUser, enabledMap.dailyReports, DAILY_REPORTS_DATE_SCOPE);
   const [repairs, setRepairs] = usePersistentCollection('bmg_repairs', INITIAL_REPAIRS, fbUser, enabledMap.repairs);
   const [contractors, setContractors] = usePersistentCollection('bmg_contractors', INITIAL_CONTRACTORS, fbUser, enabledMap.contractors);
   const [assets, setAssets] = usePersistentCollection('bmg_assets', INITIAL_ASSETS, fbUser, enabledMap.assets);
   const [tools, setTools] = usePersistentCollection('bmg_tools', INITIAL_TOOLS, fbUser, enabledMap.tools);
   const [machines, setMachines] = usePersistentCollection('bmg_machines', INITIAL_MACHINES, fbUser, enabledMap.machines);
   const [pmPlans, setPmPlans] = usePersistentCollection('bmg_pmPlans', INITIAL_PM_PLANS, fbUser, enabledMap.pmPlans);
-  const [pmHistoryList, setPmHistoryList] = usePersistentCollection('bmg_pmHistoryList', INITIAL_PM_HISTORY, fbUser, enabledMap.pmHistoryList);
+  const [pmHistoryList, setPmHistoryList, , , fetchOlderPmHistoryMonth] = usePersistentCollection('bmg_pmHistoryList', INITIAL_PM_HISTORY, fbUser, enabledMap.pmHistoryList, PM_HISTORY_DATE_SCOPE);
   const [meters, setMeters] = usePersistentCollection('bmg_meters', INITIAL_METERS, fbUser, enabledMap.meters);
   const [utilityReadings, setUtilityReadings] = usePersistentCollection('bmg_utilityReadings', INITIAL_READINGS, fbUser, enabledMap.utilityReadings);
   const [actionPlans, setActionPlans] = usePersistentCollection('bmg_actionPlans', INITIAL_ACTION_PLANS, fbUser, enabledMap.actionPlans);
@@ -3887,6 +3958,22 @@ export default function App() {
 
   // --- NEW: Project Events (Calendar) State ---
   const [projectEvents, setProjectEvents] = usePersistentCollection('bmg_project_events', [], fbUser, enabledMap.projectEvents);
+
+  // PERF (Phase 5): bmg_dailyReports/bmg_pmHistoryList only keep the last N months
+  // live via onSnapshot (see DAILY_REPORTS_DATE_SCOPE / PM_HISTORY_DATE_SCOPE). Views
+  // that let a user pick an arbitrary past month (audit form auto-calc, report/PM
+  // month rankings) must explicitly fetch that month once so the data isn't silently
+  // incomplete. fetchOlderMonth no-ops (and is safe to call) for months already
+  // covered by the live window or already fetched.
+  useEffect(() => {
+      if (newAudit?.date) fetchOlderDailyReportsMonth(newAudit.date.substring(0, 7));
+  }, [newAudit?.date]);
+  useEffect(() => {
+      if (reportRankingMonth) fetchOlderDailyReportsMonth(reportRankingMonth);
+  }, [reportRankingMonth]);
+  useEffect(() => {
+      if (pmHistoryFilterDate) fetchOlderPmHistoryMonth(pmHistoryFilterDate.substring(0, 7));
+  }, [pmHistoryFilterDate]);
   const [showAddEventModal, setShowAddEventModal] = useState(false);
   const [currentEventMonth, setCurrentEventMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [selectedEventDate, setSelectedEventDate] = useState(() => new Date().toISOString().split('T')[0]);
