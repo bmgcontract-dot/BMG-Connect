@@ -19,7 +19,7 @@ import {
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot, getDoc, getDocs, collection, deleteDoc, writeBatch } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, onSnapshot, getDoc, getDocs, collection, deleteDoc, writeBatch, query, where } from 'firebase/firestore';
 
 // --- Firebase Initialization ---
 let app, auth, db, appId;
@@ -59,6 +59,13 @@ try {
 } catch (e) {
   console.error("Firebase init failed", e);
 }
+
+// PERF (Phase 5): dateScope configs for usePersistentCollection — see its definition
+// for why these two collections need a scoped live listener (base64 images inflate
+// document size, and unscoped onSnapshot on the full collection was timing out with
+// Firestore "deadline-exceeded" once enough documents accumulated).
+const DAILY_REPORTS_DATE_SCOPE = { field: 'date', recentMonths: 1 };
+const PM_HISTORY_DATE_SCOPE = { field: 'date', recentMonths: 1 };
 
 // --- Configuration & Constants ---
 const THEME = {
@@ -1664,8 +1671,22 @@ function useUserPersistentState(key, initialValue, fbUser) {
     return [state, setPersistentValue];
 }
 
-function usePersistentCollection(collectionName, initialValue, fbUser) {
+// PERF (Phase 5): Optional date-scoped mode for fast-growing collections whose
+// documents embed base64 images (bmg_dailyReports, bmg_pmHistoryList). Loading
+// the FULL collection via onSnapshot was timing out (Firestore "deadline-exceeded")
+// once enough documents accumulated with multi-MB image payloads.
+//
+// dateScope = { field: 'date', recentMonths: 1 } switches the live listener to only
+// watch documents from the last N months (where(field >= cutoff)), and changes the
+// merge strategy from "cloud fully replaces local" to "union by id" — so historical
+// documents that fall outside the live window are NOT treated as deleted and are not
+// wiped from the local IndexedDB/localStorage cache. Older months are fetched on
+// demand via fetchOlderMonth(monthStr) (one-time getDocs, cached per month so
+// re-visiting the same month doesn't re-query) — used by audit/report views that
+// look at an arbitrary past month, so those keep seeing complete, correct data.
+function usePersistentCollection(collectionName, initialValue, fbUser, enabled = true, dateScope = null) {
     const localKey = collectionName.startsWith('bmg_') ? collectionName : `bmg_${collectionName}`;
+    const fetchedMonthsRef = useRef(new Set());
 
     const [data, setData] = useState(() => {
         if (typeof window !== 'undefined') {
@@ -1696,12 +1717,31 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
             return;
         }
 
+        // PERF: Lazy subscription — only open the real-time Firestore listener when this
+        // collection is actually needed (its feature/page is active). Until then we still
+        // serve cached data from IndexedDB/localStorage, so the UI is never blank, but we
+        // avoid opening ~29 onSnapshot connections all at once on login.
+        if (!enabled) {
+            let cancelled = false;
+            (async () => {
+                try {
+                    const idbData = await loadStateLocallyIDB(localKey);
+                    if (!cancelled && idbData && Array.isArray(idbData) && idbData.length > 0) {
+                        setData(idbData);
+                        dataRef.current = idbData;
+                    }
+                } catch (e) { /* offline: keep current cached data */ }
+                if (!cancelled) setIsLoaded(true);
+            })();
+            return () => { cancelled = true; };
+        }
+
         let unsubscribe = () => {};
         let isMounted = true;
-        
+
         const initData = async () => {
             setIsLoaded(false);
-            
+
             try {
                 // NEW: Load from IndexedDB first for fast and large offline data
                 const idbData = await loadStateLocallyIDB(localKey);
@@ -1712,21 +1752,43 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                     }
                 }
 
+                if (!isMounted) return;
+
                 const colRef = collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
-                unsubscribe = onSnapshot(colRef, (snapshot) => {
+                let listenTarget = colRef;
+                if (dateScope) {
+                    const cutoff = new Date();
+                    cutoff.setMonth(cutoff.getMonth() - (dateScope.recentMonths - 1));
+                    cutoff.setDate(1);
+                    const cutoffStr = cutoff.toISOString().split('T')[0];
+                    listenTarget = query(colRef, where(dateScope.field, '>=', cutoffStr));
+                }
+                unsubscribe = onSnapshot(listenTarget, (snapshot) => {
                     if (!isMounted) return;
                     const serverItems = [];
                     snapshot.forEach(docSnap => serverItems.push(docSnap.data()));
-                    
-                    const serverJson = JSON.stringify(serverItems);
+
+                    let nextItems;
+                    if (dateScope) {
+                        // Union by id: the live window only covers recent months, so anything
+                        // outside it (older cached/fetched docs) must be kept, not treated as deleted.
+                        const byId = new Map((dataRef.current || []).map(it => [it.id, it]));
+                        serverItems.forEach(it => byId.set(it.id, it));
+                        nextItems = Array.from(byId.values());
+                    } else {
+                        nextItems = serverItems;
+                    }
+
+                    const serverJson = JSON.stringify(nextItems);
                     const localJson = JSON.stringify(dataRef.current);
 
-                    // Cloud is the absolute source of truth. If it differs, overwrite local data.
-                    // This permanently kills any "Zombie Data" that was kept locally after being deleted on the server.
+                    // Cloud is the source of truth for the watched window. If it differs, update.
+                    // (Unscoped collections: this fully replaces local data, killing any "Zombie Data"
+                    // kept locally after being deleted on the server, as before.)
                     if (serverJson !== localJson) {
-                        setData(serverItems);
-                        dataRef.current = serverItems;
-                        saveStateLocallyIDB(localKey, serverItems);
+                        setData(nextItems);
+                        dataRef.current = nextItems;
+                        saveStateLocallyIDB(localKey, nextItems);
                         if (typeof window !== 'undefined') {
                             try { localStorage.setItem(localKey, serverJson); } catch(e) {}
                         }
@@ -1746,7 +1808,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
 
                     setIsLoaded(true);
                 }, (error) => {
-                    console.warn(`Sync info for ${collectionName}: Working offline.`);
+                    console.warn(`Sync info for ${collectionName}: Working offline.`, error?.code, error?.message);
                     if (isMounted) setIsLoaded(true);
                 });
 
@@ -1762,7 +1824,37 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
             isMounted = false;
             unsubscribe();
         };
-    }, [db, appId, fbUser, collectionName, localKey]);
+    }, [db, appId, fbUser, collectionName, localKey, enabled, dateScope?.field, dateScope?.recentMonths]);
+
+    // PERF (Phase 5): One-time fetch for a specific past month, only relevant when
+    // dateScope is set. Cached per month (fetchedMonthsRef) so switching back and
+    // forth between months (e.g. an audit form, a report picker) doesn't re-query.
+    // Results are merged into `data` by id, same union semantics as the live listener.
+    const fetchOlderMonth = async (monthStr) => {
+        if (!dateScope || !db || !appId || fetchedMonthsRef.current.has(monthStr)) return;
+        fetchedMonthsRef.current.add(monthStr);
+        try {
+            const start = `${monthStr}-01`;
+            const [y, m] = monthStr.split('-').map(Number);
+            const endDate = new Date(y, m, 1); // first day of next month
+            const end = endDate.toISOString().split('T')[0];
+            const colRef = collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
+            const q = query(colRef, where(dateScope.field, '>=', start), where(dateScope.field, '<', end));
+            const snap = await getDocs(q);
+            const monthItems = [];
+            snap.forEach(docSnap => monthItems.push(docSnap.data()));
+            if (monthItems.length === 0) return;
+            const byId = new Map((dataRef.current || []).map(it => [it.id, it]));
+            monthItems.forEach(it => byId.set(it.id, it));
+            const merged = Array.from(byId.values());
+            setData(merged);
+            dataRef.current = merged;
+            saveStateLocallyIDB(localKey, merged);
+        } catch (e) {
+            fetchedMonthsRef.current.delete(monthStr); // allow retry on failure
+            console.warn(`fetchOlderMonth failed for ${collectionName} ${monthStr}:`, e?.code || e);
+        }
+    };
 
     const setPersistentValue = async (newValueOrUpdater, isRestore = false) => {
         const oldValue = dataRef.current;
@@ -1928,7 +2020,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
         }
     };
 
-    return [data, setPersistentValue, isLoaded, true];
+    return [data, setPersistentValue, isLoaded, true, fetchOlderMonth];
 }
 
 const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
@@ -3369,6 +3461,10 @@ export default function App() {
       return null;
   });
   
+  // Keep login data available; defer business-data subscriptions until app login.
+  const isLoggedIn = Boolean(currentUser);
+  const businessFbUser = isLoggedIn ? fbUser : null;
+
   const [activeMenu, setActiveMenu] = useState('dashboard');
   const [selectedProject, setSelectedProject] = useState(null);
   const [projectTab, setProjectTab] = useState('overview');
@@ -3404,8 +3500,8 @@ export default function App() {
   // ----------------------------------------------
   const [isEditingUser, setIsEditingUser] = useState(false);
   const [scheduleNote, setScheduleNote] = useState(''); // NEW: State สำหรับเก็บ Note ในตารางงาน
-  const [scheduleNotes, setScheduleNotes] = usePersistentState('bmg_scheduleNotes', {}, fbUser); // NEW: Persistent state for schedule notes
-  const [scheduleApprovals, setScheduleApprovals] = usePersistentState('bmg_scheduleApprovals', {}, fbUser); // NEW: State สำหรับเก็บสถานะการอนุมัติตารางงาน
+  const [scheduleNotes, setScheduleNotes] = usePersistentState('bmg_scheduleNotes', {}, businessFbUser); // NEW: Persistent state for schedule notes
+  const [scheduleApprovals, setScheduleApprovals] = usePersistentState('bmg_scheduleApprovals', {}, businessFbUser); // NEW: State สำหรับเก็บสถานะการอนุมัติตารางงาน
   const [hoScheduleModal, setHoScheduleModal] = useState(null); // NEW: Modal สำหรับเลือกหน่วยงานหลายแห่ง
   const [hoSelectedProjects, setHoSelectedProjects] = useState([]); // NEW: รายการหน่วยงานที่ถูกเลือก
   const [selectedKpiDetail, setSelectedKpiDetail] = useState(null); // NEW: State สำหรับเปิด Modal รายละเอียด KPI
@@ -3426,7 +3522,7 @@ export default function App() {
   const [projectViewMode, setProjectViewMode] = useState('grid');
 
   // Company Info State
-  const [companyInfo, setCompanyInfo] = usePersistentState('bmg_companyInfo', INITIAL_COMPANY_INFO, fbUser);
+  const [companyInfo, setCompanyInfo] = usePersistentState('bmg_companyInfo', INITIAL_COMPANY_INFO, businessFbUser);
   const [showEditCompanyModal, setShowEditCompanyModal] = useState(false);
   const [editCompanyForm, setEditCompanyForm] = useState({ ...INITIAL_COMPANY_INFO });
 
@@ -3689,7 +3785,7 @@ export default function App() {
 
   // --- NEW: Meeting Gantt Plans State ---
   const INITIAL_GANTT_PLANS = [];
-  const [meetingGanttPlans, setMeetingGanttPlans] = usePersistentCollection('bmg_meeting_gantt_plans', INITIAL_GANTT_PLANS, fbUser);
+  const [meetingGanttPlans, setMeetingGanttPlans] = usePersistentCollection('bmg_meeting_gantt_plans', INITIAL_GANTT_PLANS, fbUser, isLoggedIn && activeMenu === 'projects' && projectTab === 'meeting');
   const [editingGanttPlan, setEditingGanttPlan] = useState(null);
   const [ganttPaintMode, setGanttPaintMode] = useState(null); // 'add', 'remove', null
   const [ganttSelectedColor, setGanttSelectedColor] = useState('bg-orange-500');
@@ -3752,31 +3848,70 @@ export default function App() {
 
   // อัปเกรดเป็น usePersistentCollection สำหรับข้อมูลที่เป็น Array (รายการ) ป้องกันข้อมูลสูญหาย/ทับกัน
   // โดยใช้ชื่อ Collection คงเดิมทั้งหมด เพื่อให้ระบบกู้ข้อมูลเก่าขึ้นมาเซฟเป็น Document ให้อัตโนมัติ!
-  const [users, setUsers, isUsersLoaded, isUsersSynced] = usePersistentCollection('bmg_users', INITIAL_USERS, fbUser); 
-  const [projects, setProjects] = usePersistentCollection('bmg_projects', INITIAL_PROJECTS, fbUser);
-  const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, fbUser);
-  const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, fbUser);
-  const [dailyReports, setDailyReports] = usePersistentCollection('bmg_dailyReports', INITIAL_DAILY_REPORTS, fbUser);
-  const [repairs, setRepairs] = usePersistentCollection('bmg_repairs', INITIAL_REPAIRS, fbUser);
-  const [contractors, setContractors] = usePersistentCollection('bmg_contractors', INITIAL_CONTRACTORS, fbUser);
-  const [assets, setAssets] = usePersistentCollection('bmg_assets', INITIAL_ASSETS, fbUser);
-  const [tools, setTools] = usePersistentCollection('bmg_tools', INITIAL_TOOLS, fbUser);
-  const [machines, setMachines] = usePersistentCollection('bmg_machines', INITIAL_MACHINES, fbUser);
-  const [pmPlans, setPmPlans] = usePersistentCollection('bmg_pmPlans', INITIAL_PM_PLANS, fbUser);
-  const [pmHistoryList, setPmHistoryList] = usePersistentCollection('bmg_pmHistoryList', INITIAL_PM_HISTORY, fbUser);
-  const [meters, setMeters] = usePersistentCollection('bmg_meters', INITIAL_METERS, fbUser);
-  const [utilityReadings, setUtilityReadings] = usePersistentCollection('bmg_utilityReadings', INITIAL_READINGS, fbUser);
-  const [actionPlans, setActionPlans] = usePersistentCollection('bmg_actionPlans', INITIAL_ACTION_PLANS, fbUser);
-  const [othersData, setOthersData] = usePersistentCollection('bmg_othersData', INITIAL_OTHERS, fbUser);
-  const [formsList, setFormsList] = usePersistentCollection('bmg_forms_list', STANDARD_FORMS, fbUser);
-  const [meetingsList, setMeetingsList] = usePersistentCollection('bmg_meetings', INITIAL_MEETINGS, fbUser);
-  const [announcements, setAnnouncements] = usePersistentCollection('bmg_announcements', INITIAL_ANNOUNCEMENTS, fbUser);
-  const [deposits, setDeposits] = usePersistentCollection('bmg_deposits', INITIAL_DEPOSITS, fbUser);
-  const [inventoryList, setInventoryList] = usePersistentCollection('bmg_inventory', INITIAL_INVENTORY, fbUser);
-  const [inventoryTransactions, setInventoryTransactions] = usePersistentCollection('bmg_inventory_transactions', INITIAL_TRANSACTIONS, fbUser);
+  //
+  // PERF (Phase 2): แทนที่จะเปิด Firestore listener ทั้ง 29 ตัวพร้อมกันตอน login เราเปิดเฉพาะ
+  // collection ที่ "หน้า/ฟีเจอร์ปัจจุบันต้องใช้จริง" ด้วยธง enabled ที่คำนวณจาก activeMenu/projectTab
+  // collection อื่นยังใช้ข้อมูล cache (IndexedDB/localStorage) ไปก่อน และจะเปิด listener เมื่อผู้ใช้
+  // เข้าหน้านั้นจริง (และ unsubscribe อัตโนมัติเมื่อออกจากหน้า) — ลดการเชื่อมต่อพร้อมกันตอนเข้าระบบมาก
+  const onProjects = isLoggedIn && activeMenu === 'projects';
+  const pTab = onProjects ? projectTab : null;
+  const onDashboard = isLoggedIn && activeMenu === 'dashboard';
+  const enabledMap = useMemo(() => ({
+    // Users authenticate app login; projects resolve the assigned landing page.
+    users: true,
+    projects: true,
+    announcements: isLoggedIn,
+    // Dashboard เป็นหน้า landing ที่รวมสถิติข้ามหลาย collection — ต้องเปิด listener กลุ่มนี้
+    // ตอนอยู่หน้า dashboard เพื่อให้กราฟ/ตัวเลขถูกต้อง (ไม่ใช่ข้อมูล cache เก่า/ว่าง)
+    audits: onDashboard || (isLoggedIn && activeMenu === 'audits') || pTab === 'audit',
+    contracts: onDashboard || pTab === 'contracts' || pTab === 'overview',
+    dailyReports: onDashboard || pTab === 'daily' || pTab === 'overview',
+    actionPlans: onDashboard || pTab === 'action',
+    pmPlans: onDashboard || pTab === 'pm',
+    pmHistoryList: onDashboard || pTab === 'pm',
+    // Lazy ล้วน: เปิดเมื่อเข้าหน้า/แท็บที่เกี่ยวข้องเท่านั้น
+    repairs: pTab === 'repair' || pTab === 'overview',
+    contractors: pTab === 'contractors',
+    assets: pTab === 'assets',
+    tools: pTab === 'tools',
+    machines: pTab === 'pm',
+    meters: pTab === 'utilities',
+    utilityReadings: pTab === 'utilities',
+    othersData: pTab === 'others',
+    formsList: pTab === 'forms',
+    meetings: pTab === 'meeting',
+    deposits: pTab === 'centralfee',
+    inventory: pTab === 'inventory',
+    inventoryTransactions: pTab === 'inventory',
+    meetingChildren: pTab === 'meeting',
+    projectEvents: pTab === 'schedule',
+  }), [activeMenu, pTab, onDashboard, isLoggedIn]);
+
+  const [users, setUsers, isUsersLoaded, isUsersSynced] = usePersistentCollection('bmg_users', INITIAL_USERS, fbUser, enabledMap.users);
+  const [projects, setProjects] = usePersistentCollection('bmg_projects', INITIAL_PROJECTS, fbUser, enabledMap.projects);
+  const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, fbUser, enabledMap.contracts);
+  const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, fbUser, enabledMap.audits);
+  const [dailyReports, setDailyReports, , , fetchOlderDailyReportsMonth] = usePersistentCollection('bmg_dailyReports', INITIAL_DAILY_REPORTS, fbUser, enabledMap.dailyReports, DAILY_REPORTS_DATE_SCOPE);
+  const [repairs, setRepairs] = usePersistentCollection('bmg_repairs', INITIAL_REPAIRS, fbUser, enabledMap.repairs);
+  const [contractors, setContractors] = usePersistentCollection('bmg_contractors', INITIAL_CONTRACTORS, fbUser, enabledMap.contractors);
+  const [assets, setAssets] = usePersistentCollection('bmg_assets', INITIAL_ASSETS, fbUser, enabledMap.assets);
+  const [tools, setTools] = usePersistentCollection('bmg_tools', INITIAL_TOOLS, fbUser, enabledMap.tools);
+  const [machines, setMachines] = usePersistentCollection('bmg_machines', INITIAL_MACHINES, fbUser, enabledMap.machines);
+  const [pmPlans, setPmPlans] = usePersistentCollection('bmg_pmPlans', INITIAL_PM_PLANS, fbUser, enabledMap.pmPlans);
+  const [pmHistoryList, setPmHistoryList, , , fetchOlderPmHistoryMonth] = usePersistentCollection('bmg_pmHistoryList', INITIAL_PM_HISTORY, fbUser, enabledMap.pmHistoryList, PM_HISTORY_DATE_SCOPE);
+  const [meters, setMeters] = usePersistentCollection('bmg_meters', INITIAL_METERS, fbUser, enabledMap.meters);
+  const [utilityReadings, setUtilityReadings] = usePersistentCollection('bmg_utilityReadings', INITIAL_READINGS, fbUser, enabledMap.utilityReadings);
+  const [actionPlans, setActionPlans] = usePersistentCollection('bmg_actionPlans', INITIAL_ACTION_PLANS, fbUser, enabledMap.actionPlans);
+  const [othersData, setOthersData] = usePersistentCollection('bmg_othersData', INITIAL_OTHERS, fbUser, enabledMap.othersData);
+  const [formsList, setFormsList] = usePersistentCollection('bmg_forms_list', STANDARD_FORMS, fbUser, enabledMap.formsList);
+  const [meetingsList, setMeetingsList] = usePersistentCollection('bmg_meetings', INITIAL_MEETINGS, fbUser, enabledMap.meetings);
+  const [announcements, setAnnouncements] = usePersistentCollection('bmg_announcements', INITIAL_ANNOUNCEMENTS, fbUser, enabledMap.announcements);
+  const [deposits, setDeposits] = usePersistentCollection('bmg_deposits', INITIAL_DEPOSITS, fbUser, enabledMap.deposits);
+  const [inventoryList, setInventoryList] = usePersistentCollection('bmg_inventory', INITIAL_INVENTORY, fbUser, enabledMap.inventory);
+  const [inventoryTransactions, setInventoryTransactions] = usePersistentCollection('bmg_inventory_transactions', INITIAL_TRANSACTIONS, fbUser, enabledMap.inventoryTransactions);
 
   // --- NEW: Meeting Invitations State ---
-  const [meetingInvitations, setMeetingInvitations] = usePersistentCollection('bmg_meeting_invitations', [], fbUser);
+  const [meetingInvitations, setMeetingInvitations] = usePersistentCollection('bmg_meeting_invitations', [], fbUser, enabledMap.meetingChildren);
   const [showAddInvitationModal, setShowAddInvitationModal] = useState(false);
   const [selectedInvitationView, setSelectedInvitationView] = useState(null); // NEW: State สำหรับเก็บข้อมูลหนังสือเชิญที่ถูกเลือกดู
   const [newInvitation, setNewInvitation] = useState({
@@ -3790,7 +3925,7 @@ export default function App() {
   });
 
   // --- NEW: Meeting Proxies State ---
-  const [meetingProxies, setMeetingProxies] = usePersistentCollection('bmg_meeting_proxies', [], fbUser);
+  const [meetingProxies, setMeetingProxies] = usePersistentCollection('bmg_meeting_proxies', [], fbUser, enabledMap.meetingChildren);
   const [showAddProxyModal, setShowAddProxyModal] = useState(false);
   const [selectedProxyView, setSelectedProxyView] = useState(null);
   const [newProxy, setNewProxy] = useState({
@@ -3805,7 +3940,7 @@ export default function App() {
   });
 
   // --- NEW: Meetings Tab ---
-  const [meetingBallots, setMeetingBallots] = usePersistentCollection('bmg_meeting_ballots', [], fbUser);
+  const [meetingBallots, setMeetingBallots] = usePersistentCollection('bmg_meeting_ballots', [], fbUser, enabledMap.meetingChildren);
   const [showAddBallotModal, setShowAddBallotModal] = useState(false);
   const [selectedBallotView, setSelectedBallotView] = useState(null);
   const [newBallot, setNewBallot] = useState({
@@ -3821,14 +3956,30 @@ export default function App() {
 
   // --- NEW: Extended Meeting States ---
   const [selectedMeetingManageId, setSelectedMeetingManageId] = useState('');
-  const [meetingAttendances, setMeetingAttendances] = usePersistentCollection('bmg_meeting_attendances', [], fbUser);
-  const [meetingAgendas, setMeetingAgendas] = usePersistentCollection('bmg_meeting_agendas', [], fbUser);
-  const [landDocsChecklist, setLandDocsChecklist] = usePersistentState('bmg_meeting_land_docs', {}, fbUser);
+  const [meetingAttendances, setMeetingAttendances] = usePersistentCollection('bmg_meeting_attendances', [], fbUser, enabledMap.meetingChildren);
+  const [meetingAgendas, setMeetingAgendas] = usePersistentCollection('bmg_meeting_agendas', [], fbUser, enabledMap.meetingChildren);
+  const [landDocsChecklist, setLandDocsChecklist] = usePersistentState('bmg_meeting_land_docs', {}, businessFbUser);
   const [newAttendance, setNewAttendance] = useState({ unitNo: '', ownerName: '', attendeeName: '', type: 'เจ้าของร่วม', weight: 1 });
   const [newAgendaTitle, setNewAgendaTitle] = useState('');
 
   // --- NEW: Project Events (Calendar) State ---
-  const [projectEvents, setProjectEvents] = usePersistentCollection('bmg_project_events', [], fbUser);
+  const [projectEvents, setProjectEvents] = usePersistentCollection('bmg_project_events', [], fbUser, enabledMap.projectEvents);
+
+  // PERF (Phase 5): bmg_dailyReports/bmg_pmHistoryList only keep the last N months
+  // live via onSnapshot (see DAILY_REPORTS_DATE_SCOPE / PM_HISTORY_DATE_SCOPE). Views
+  // that let a user pick an arbitrary past month (audit form auto-calc, report/PM
+  // month rankings) must explicitly fetch that month once so the data isn't silently
+  // incomplete. fetchOlderMonth no-ops (and is safe to call) for months already
+  // covered by the live window or already fetched.
+  useEffect(() => {
+      if (isLoggedIn && fbUser && newAudit?.date) fetchOlderDailyReportsMonth(newAudit.date.substring(0, 7));
+  }, [newAudit?.date, isLoggedIn, fbUser]);
+  useEffect(() => {
+      if (isLoggedIn && fbUser && reportRankingMonth) fetchOlderDailyReportsMonth(reportRankingMonth);
+  }, [reportRankingMonth, isLoggedIn, fbUser]);
+  useEffect(() => {
+      if (isLoggedIn && fbUser && pmHistoryFilterDate) fetchOlderPmHistoryMonth(pmHistoryFilterDate.substring(0, 7));
+  }, [pmHistoryFilterDate, isLoggedIn, fbUser]);
   const [showAddEventModal, setShowAddEventModal] = useState(false);
   const [currentEventMonth, setCurrentEventMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [selectedEventDate, setSelectedEventDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -3879,9 +4030,9 @@ export default function App() {
       return () => { isMounted = false; };
   }, []);
 
-  // Sync Schedule Data
+  // Sync schedules only after app login; stop listening again on logout.
   useEffect(() => {
-      if (!db || !fbUser || !appId) return;
+      if (!isLoggedIn || !db || !fbUser || !appId) return;
 
       const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', 'bmg_schedules_v2');
       
@@ -3940,7 +4091,7 @@ export default function App() {
       });
 
       return () => unsubscribe();
-  }, [db, fbUser, appId]);
+  }, [db, fbUser, appId, isLoggedIn]);
   
   const getLocalMonthStr = () => {
       const d = new Date();
@@ -3949,7 +4100,7 @@ export default function App() {
   const [currentMonth, setCurrentMonth] = useState(getLocalMonthStr());
   const [pmMonth, setPmMonth] = useState(getLocalMonthStr());
 
-  const [projectStaffOrder, setProjectStaffOrder] = usePersistentState('bmg_projectStaffOrder', {}, fbUser); // NEW: State สำหรับเก็บลำดับพนักงานในตารางงาน
+  const [projectStaffOrder, setProjectStaffOrder] = usePersistentState('bmg_projectStaffOrder', {}, businessFbUser); // NEW: State สำหรับเก็บลำดับพนักงานในตารางงาน
   const dragItem = useRef(null); // NEW: Ref สำหรับจดจำ index ที่ถูกลาก
   const dragOverItem = useRef(null); // NEW: Ref สำหรับจดจำ index เป้าหมายที่จะวาง
 
@@ -3966,7 +4117,7 @@ export default function App() {
   const [theme, setTheme] = useUserPersistentState('bmg_theme', 'light', fbUser);
 
   // NEW: Role Permissions State
-  const [rolePermissions, setRolePermissions] = usePersistentState('bmg_rolePermissions', {}, fbUser);
+  const [rolePermissions, setRolePermissions] = usePersistentState('bmg_rolePermissions', {}, businessFbUser);
   const [showRolePermModal, setShowRolePermModal] = useState(false);
   const [editingRole, setEditingRole] = useState(EMPLOYEE_POSITIONS[0]);
   const [editingRolePerms, setEditingRolePerms] = useState(getDefaultPermissions());
