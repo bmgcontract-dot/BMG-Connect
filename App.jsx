@@ -3368,6 +3368,11 @@ export default function App() {
       }
       return null;
   });
+
+  // Only the user and project lists are needed to complete app login.
+  // Other cloud subscriptions start after login and stop again on logout.
+  const isLoggedIn = Boolean(currentUser);
+  const businessFbUser = isLoggedIn ? fbUser : null;
   
   const [activeMenu, setActiveMenu] = useState('dashboard');
   const [selectedProject, setSelectedProject] = useState(null);
@@ -3404,8 +3409,8 @@ export default function App() {
   // ----------------------------------------------
   const [isEditingUser, setIsEditingUser] = useState(false);
   const [scheduleNote, setScheduleNote] = useState(''); // NEW: State สำหรับเก็บ Note ในตารางงาน
-  const [scheduleNotes, setScheduleNotes] = usePersistentState('bmg_scheduleNotes', {}, fbUser); // NEW: Persistent state for schedule notes
-  const [scheduleApprovals, setScheduleApprovals] = usePersistentState('bmg_scheduleApprovals', {}, fbUser); // NEW: State สำหรับเก็บสถานะการอนุมัติตารางงาน
+  const [scheduleNotes, setScheduleNotes] = usePersistentState('bmg_scheduleNotes', {}, businessFbUser); // NEW: Persistent state for schedule notes
+  const [scheduleApprovals, setScheduleApprovals] = usePersistentState('bmg_scheduleApprovals', {}, businessFbUser); // NEW: State สำหรับเก็บสถานะการอนุมัติตารางงาน
   const [hoScheduleModal, setHoScheduleModal] = useState(null); // NEW: Modal สำหรับเลือกหน่วยงานหลายแห่ง
   const [hoSelectedProjects, setHoSelectedProjects] = useState([]); // NEW: รายการหน่วยงานที่ถูกเลือก
   const [selectedKpiDetail, setSelectedKpiDetail] = useState(null); // NEW: State สำหรับเปิด Modal รายละเอียด KPI
@@ -3426,7 +3431,7 @@ export default function App() {
   const [projectViewMode, setProjectViewMode] = useState('grid');
 
   // Company Info State
-  const [companyInfo, setCompanyInfo] = usePersistentState('bmg_companyInfo', INITIAL_COMPANY_INFO, fbUser);
+  const [companyInfo, setCompanyInfo] = usePersistentState('bmg_companyInfo', INITIAL_COMPANY_INFO, businessFbUser);
   const [showEditCompanyModal, setShowEditCompanyModal] = useState(false);
   const [editCompanyForm, setEditCompanyForm] = useState({ ...INITIAL_COMPANY_INFO });
 
@@ -3689,7 +3694,7 @@ export default function App() {
 
   // --- NEW: Meeting Gantt Plans State ---
   const INITIAL_GANTT_PLANS = [];
-  const [meetingGanttPlans, setMeetingGanttPlans] = usePersistentCollection('bmg_meeting_gantt_plans', INITIAL_GANTT_PLANS, fbUser);
+  const [meetingGanttPlans, setMeetingGanttPlans] = usePersistentCollection('bmg_meeting_gantt_plans', INITIAL_GANTT_PLANS, businessFbUser);
   const [editingGanttPlan, setEditingGanttPlan] = useState(null);
   const [ganttPaintMode, setGanttPaintMode] = useState(null); // 'add', 'remove', null
   const [ganttSelectedColor, setGanttSelectedColor] = useState('bg-orange-500');
@@ -3754,29 +3759,29 @@ export default function App() {
   // โดยใช้ชื่อ Collection คงเดิมทั้งหมด เพื่อให้ระบบกู้ข้อมูลเก่าขึ้นมาเซฟเป็น Document ให้อัตโนมัติ!
   const [users, setUsers, isUsersLoaded, isUsersSynced] = usePersistentCollection('bmg_users', INITIAL_USERS, fbUser); 
   const [projects, setProjects] = usePersistentCollection('bmg_projects', INITIAL_PROJECTS, fbUser);
-  const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, fbUser);
-  const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, fbUser);
-  const [dailyReports, setDailyReports] = usePersistentCollection('bmg_dailyReports', INITIAL_DAILY_REPORTS, fbUser);
-  const [repairs, setRepairs] = usePersistentCollection('bmg_repairs', INITIAL_REPAIRS, fbUser);
-  const [contractors, setContractors] = usePersistentCollection('bmg_contractors', INITIAL_CONTRACTORS, fbUser);
-  const [assets, setAssets] = usePersistentCollection('bmg_assets', INITIAL_ASSETS, fbUser);
-  const [tools, setTools] = usePersistentCollection('bmg_tools', INITIAL_TOOLS, fbUser);
-  const [machines, setMachines] = usePersistentCollection('bmg_machines', INITIAL_MACHINES, fbUser);
-  const [pmPlans, setPmPlans] = usePersistentCollection('bmg_pmPlans', INITIAL_PM_PLANS, fbUser);
-  const [pmHistoryList, setPmHistoryList] = usePersistentCollection('bmg_pmHistoryList', INITIAL_PM_HISTORY, fbUser);
-  const [meters, setMeters] = usePersistentCollection('bmg_meters', INITIAL_METERS, fbUser);
-  const [utilityReadings, setUtilityReadings] = usePersistentCollection('bmg_utilityReadings', INITIAL_READINGS, fbUser);
-  const [actionPlans, setActionPlans] = usePersistentCollection('bmg_actionPlans', INITIAL_ACTION_PLANS, fbUser);
-  const [othersData, setOthersData] = usePersistentCollection('bmg_othersData', INITIAL_OTHERS, fbUser);
-  const [formsList, setFormsList] = usePersistentCollection('bmg_forms_list', STANDARD_FORMS, fbUser);
-  const [meetingsList, setMeetingsList] = usePersistentCollection('bmg_meetings', INITIAL_MEETINGS, fbUser);
-  const [announcements, setAnnouncements] = usePersistentCollection('bmg_announcements', INITIAL_ANNOUNCEMENTS, fbUser);
-  const [deposits, setDeposits] = usePersistentCollection('bmg_deposits', INITIAL_DEPOSITS, fbUser);
-  const [inventoryList, setInventoryList] = usePersistentCollection('bmg_inventory', INITIAL_INVENTORY, fbUser);
-  const [inventoryTransactions, setInventoryTransactions] = usePersistentCollection('bmg_inventory_transactions', INITIAL_TRANSACTIONS, fbUser);
+  const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, businessFbUser);
+  const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, businessFbUser);
+  const [dailyReports, setDailyReports] = usePersistentCollection('bmg_dailyReports', INITIAL_DAILY_REPORTS, businessFbUser);
+  const [repairs, setRepairs] = usePersistentCollection('bmg_repairs', INITIAL_REPAIRS, businessFbUser);
+  const [contractors, setContractors] = usePersistentCollection('bmg_contractors', INITIAL_CONTRACTORS, businessFbUser);
+  const [assets, setAssets] = usePersistentCollection('bmg_assets', INITIAL_ASSETS, businessFbUser);
+  const [tools, setTools] = usePersistentCollection('bmg_tools', INITIAL_TOOLS, businessFbUser);
+  const [machines, setMachines] = usePersistentCollection('bmg_machines', INITIAL_MACHINES, businessFbUser);
+  const [pmPlans, setPmPlans] = usePersistentCollection('bmg_pmPlans', INITIAL_PM_PLANS, businessFbUser);
+  const [pmHistoryList, setPmHistoryList] = usePersistentCollection('bmg_pmHistoryList', INITIAL_PM_HISTORY, businessFbUser);
+  const [meters, setMeters] = usePersistentCollection('bmg_meters', INITIAL_METERS, businessFbUser);
+  const [utilityReadings, setUtilityReadings] = usePersistentCollection('bmg_utilityReadings', INITIAL_READINGS, businessFbUser);
+  const [actionPlans, setActionPlans] = usePersistentCollection('bmg_actionPlans', INITIAL_ACTION_PLANS, businessFbUser);
+  const [othersData, setOthersData] = usePersistentCollection('bmg_othersData', INITIAL_OTHERS, businessFbUser);
+  const [formsList, setFormsList] = usePersistentCollection('bmg_forms_list', STANDARD_FORMS, businessFbUser);
+  const [meetingsList, setMeetingsList] = usePersistentCollection('bmg_meetings', INITIAL_MEETINGS, businessFbUser);
+  const [announcements, setAnnouncements] = usePersistentCollection('bmg_announcements', INITIAL_ANNOUNCEMENTS, businessFbUser);
+  const [deposits, setDeposits] = usePersistentCollection('bmg_deposits', INITIAL_DEPOSITS, businessFbUser);
+  const [inventoryList, setInventoryList] = usePersistentCollection('bmg_inventory', INITIAL_INVENTORY, businessFbUser);
+  const [inventoryTransactions, setInventoryTransactions] = usePersistentCollection('bmg_inventory_transactions', INITIAL_TRANSACTIONS, businessFbUser);
 
   // --- NEW: Meeting Invitations State ---
-  const [meetingInvitations, setMeetingInvitations] = usePersistentCollection('bmg_meeting_invitations', [], fbUser);
+  const [meetingInvitations, setMeetingInvitations] = usePersistentCollection('bmg_meeting_invitations', [], businessFbUser);
   const [showAddInvitationModal, setShowAddInvitationModal] = useState(false);
   const [selectedInvitationView, setSelectedInvitationView] = useState(null); // NEW: State สำหรับเก็บข้อมูลหนังสือเชิญที่ถูกเลือกดู
   const [newInvitation, setNewInvitation] = useState({
@@ -3790,7 +3795,7 @@ export default function App() {
   });
 
   // --- NEW: Meeting Proxies State ---
-  const [meetingProxies, setMeetingProxies] = usePersistentCollection('bmg_meeting_proxies', [], fbUser);
+  const [meetingProxies, setMeetingProxies] = usePersistentCollection('bmg_meeting_proxies', [], businessFbUser);
   const [showAddProxyModal, setShowAddProxyModal] = useState(false);
   const [selectedProxyView, setSelectedProxyView] = useState(null);
   const [newProxy, setNewProxy] = useState({
@@ -3805,7 +3810,7 @@ export default function App() {
   });
 
   // --- NEW: Meetings Tab ---
-  const [meetingBallots, setMeetingBallots] = usePersistentCollection('bmg_meeting_ballots', [], fbUser);
+  const [meetingBallots, setMeetingBallots] = usePersistentCollection('bmg_meeting_ballots', [], businessFbUser);
   const [showAddBallotModal, setShowAddBallotModal] = useState(false);
   const [selectedBallotView, setSelectedBallotView] = useState(null);
   const [newBallot, setNewBallot] = useState({
@@ -3821,14 +3826,14 @@ export default function App() {
 
   // --- NEW: Extended Meeting States ---
   const [selectedMeetingManageId, setSelectedMeetingManageId] = useState('');
-  const [meetingAttendances, setMeetingAttendances] = usePersistentCollection('bmg_meeting_attendances', [], fbUser);
-  const [meetingAgendas, setMeetingAgendas] = usePersistentCollection('bmg_meeting_agendas', [], fbUser);
-  const [landDocsChecklist, setLandDocsChecklist] = usePersistentState('bmg_meeting_land_docs', {}, fbUser);
+  const [meetingAttendances, setMeetingAttendances] = usePersistentCollection('bmg_meeting_attendances', [], businessFbUser);
+  const [meetingAgendas, setMeetingAgendas] = usePersistentCollection('bmg_meeting_agendas', [], businessFbUser);
+  const [landDocsChecklist, setLandDocsChecklist] = usePersistentState('bmg_meeting_land_docs', {}, businessFbUser);
   const [newAttendance, setNewAttendance] = useState({ unitNo: '', ownerName: '', attendeeName: '', type: 'เจ้าของร่วม', weight: 1 });
   const [newAgendaTitle, setNewAgendaTitle] = useState('');
 
   // --- NEW: Project Events (Calendar) State ---
-  const [projectEvents, setProjectEvents] = usePersistentCollection('bmg_project_events', [], fbUser);
+  const [projectEvents, setProjectEvents] = usePersistentCollection('bmg_project_events', [], businessFbUser);
   const [showAddEventModal, setShowAddEventModal] = useState(false);
   const [currentEventMonth, setCurrentEventMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [selectedEventDate, setSelectedEventDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -3879,9 +3884,9 @@ export default function App() {
       return () => { isMounted = false; };
   }, []);
 
-  // Sync Schedule Data
+  // Defer schedule cloud sync until app login.
   useEffect(() => {
-      if (!db || !fbUser || !appId) return;
+      if (!isLoggedIn || !db || !fbUser || !appId) return;
 
       const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', 'bmg_schedules_v2');
       
@@ -3940,7 +3945,7 @@ export default function App() {
       });
 
       return () => unsubscribe();
-  }, [db, fbUser, appId]);
+  }, [db, fbUser, appId, isLoggedIn]);
   
   const getLocalMonthStr = () => {
       const d = new Date();
@@ -3949,7 +3954,7 @@ export default function App() {
   const [currentMonth, setCurrentMonth] = useState(getLocalMonthStr());
   const [pmMonth, setPmMonth] = useState(getLocalMonthStr());
 
-  const [projectStaffOrder, setProjectStaffOrder] = usePersistentState('bmg_projectStaffOrder', {}, fbUser); // NEW: State สำหรับเก็บลำดับพนักงานในตารางงาน
+  const [projectStaffOrder, setProjectStaffOrder] = usePersistentState('bmg_projectStaffOrder', {}, businessFbUser); // NEW: State สำหรับเก็บลำดับพนักงานในตารางงาน
   const dragItem = useRef(null); // NEW: Ref สำหรับจดจำ index ที่ถูกลาก
   const dragOverItem = useRef(null); // NEW: Ref สำหรับจดจำ index เป้าหมายที่จะวาง
 
@@ -3966,7 +3971,7 @@ export default function App() {
   const [theme, setTheme] = useUserPersistentState('bmg_theme', 'light', fbUser);
 
   // NEW: Role Permissions State
-  const [rolePermissions, setRolePermissions] = usePersistentState('bmg_rolePermissions', {}, fbUser);
+  const [rolePermissions, setRolePermissions] = usePersistentState('bmg_rolePermissions', {}, businessFbUser);
   const [showRolePermModal, setShowRolePermModal] = useState(false);
   const [editingRole, setEditingRole] = useState(EMPLOYEE_POSITIONS[0]);
   const [editingRolePerms, setEditingRolePerms] = useState(getDefaultPermissions());
