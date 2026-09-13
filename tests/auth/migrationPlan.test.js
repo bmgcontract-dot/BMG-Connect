@@ -43,6 +43,7 @@ test('blocks migration when normalized usernames collide', () => {
 test('keeps the configured canonical record when duplicate usernames are equivalent', () => {
   const plan = buildUserMigrationPlan([
     { id: 'old', username: 'Admin', password: 'same' },
+    { id: 'older', username: ' admin ', password: 'same' },
     { id: 'u1', username: ' admin ', password: 'same' },
   ], { canonicalLegacyIds: { admin: 'u1' } });
 

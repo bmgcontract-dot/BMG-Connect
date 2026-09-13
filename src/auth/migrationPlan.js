@@ -34,7 +34,7 @@ export function buildUserMigrationPlan(users, { authDomain, canonicalLegacyIds =
       if (seenUsernames.has(username)) {
         const conflict = seenUsernames.get(username);
         const conflictIsCanonical = canonicalLegacyIds[username] === conflict.legacyId;
-        if (!isCanonicalDuplicate && !conflictIsCanonical) {
+        if (!canonicalLegacyId && !isCanonicalDuplicate && !conflictIsCanonical) {
           issues.push({
             index,
             legacyId,
