@@ -10,6 +10,7 @@ const PROJECT_ID = process.env.BMG_FIREBASE_PROJECT_ID || 'bmg-connect-3e99a';
 const APP_ID = process.env.BMG_FIRESTORE_APP_ID || 'bmg-app-prod';
 const AUTH_DOMAIN = process.env.BMG_INTERNAL_AUTH_DOMAIN || 'auth.bmg-connect.local';
 const SHOULD_APPLY = process.argv.includes('--apply');
+const CANONICAL_LEGACY_IDS = JSON.parse(process.env.BMG_CANONICAL_LEGACY_IDS_JSON || '{}');
 
 function credentialFromEnvironment() {
   const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
@@ -51,7 +52,10 @@ async function run() {
     .collection('bmg_users_docs')
     .get();
   const legacyUsers = legacySnapshot.docs.map(snapshot => snapshot.data());
-  const plan = buildUserMigrationPlan(legacyUsers, { authDomain: AUTH_DOMAIN });
+  const plan = buildUserMigrationPlan(legacyUsers, {
+    authDomain: AUTH_DOMAIN,
+    canonicalLegacyIds: CANONICAL_LEGACY_IDS,
+  });
 
   console.log(JSON.stringify({
     mode: SHOULD_APPLY ? 'apply' : 'dry-run',

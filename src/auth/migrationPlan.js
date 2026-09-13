@@ -10,7 +10,7 @@ function stableAuthUid(legacyId) {
   return `bmg-${digest.slice(0, 24)}`;
 }
 
-export function buildUserMigrationPlan(users, { authDomain } = {}) {
+export function buildUserMigrationPlan(users, { authDomain, canonicalLegacyIds = {} } = {}) {
   const sourceUsers = Array.isArray(users) ? users : [];
   const seenUsernames = new Map();
   const issues = [];
@@ -27,16 +27,22 @@ export function buildUserMigrationPlan(users, { authDomain } = {}) {
       issues.push({ index, code: 'missing-password' });
     }
 
+    const canonicalLegacyId = username ? canonicalLegacyIds[username] : undefined;
+    const isCanonicalDuplicate = Boolean(canonicalLegacyId && legacyId === canonicalLegacyId);
+
     if (username) {
       if (seenUsernames.has(username)) {
         const conflict = seenUsernames.get(username);
-        issues.push({
-          index,
-          legacyId,
-          code: 'duplicate-username',
-          conflictsWithIndex: conflict.index,
-          conflictsWithLegacyId: conflict.legacyId,
-        });
+        const conflictIsCanonical = canonicalLegacyIds[username] === conflict.legacyId;
+        if (!isCanonicalDuplicate && !conflictIsCanonical) {
+          issues.push({
+            index,
+            legacyId,
+            code: 'duplicate-username',
+            conflictsWithIndex: conflict.index,
+            conflictsWithLegacyId: conflict.legacyId,
+          });
+        }
       } else {
         seenUsernames.set(username, { index, legacyId });
       }
@@ -45,6 +51,8 @@ export function buildUserMigrationPlan(users, { authDomain } = {}) {
     if (!legacyId || !username || typeof password !== 'string' || !password) return;
 
     const authUid = stableAuthUid(legacyId);
+    if (canonicalLegacyId && legacyId !== canonicalLegacyId) return;
+
     records.push({
       authUid,
       authEmail: usernameToAuthEmail(username, authDomain),
