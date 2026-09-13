@@ -20,6 +20,9 @@ import {
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot, getDoc, getDocs, collection, deleteDoc, writeBatch } from 'firebase/firestore';
+import { createFirebaseBusinessAuth } from './src/auth/firebaseAuthAdapter.js';
+import { createAdminUserClient } from './src/auth/adminUserClient.js';
+import { sanitizeUsersForExport, stripUserSecrets } from './src/auth/identity.js';
 
 // --- Firebase Initialization ---
 let app, auth, db, appId;
@@ -38,6 +41,9 @@ const GOOGLE_SCRIPT_CONFIG = {
   SHEETS_URL: "https://script.google.com/macros/s/AKfycbzmNdR7LVpfUossHkcNH_onBPTG2dw6GuJzh5JilthkMwW-Sdr4s0lFjPKwSsCBTg/exec", 
   DRIVE_URL: "https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec"
 };
+
+const USE_FIREBASE_BUSINESS_AUTH = import.meta.env.VITE_AUTH_MODE === 'firebase';
+const INTERNAL_AUTH_DOMAIN = import.meta.env.VITE_INTERNAL_AUTH_DOMAIN || 'auth.bmg-connect.local';
 
 try {
   let firebaseConfig = null;
@@ -959,7 +965,7 @@ const TRANSLATIONS = {
 };
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
-const INITIAL_USERS = [ { id: 'u1', username: 'admin', password: 'bosskim', firstName: 'Admin', lastName: 'Master', position: 'Super Admin', department: 'Head Office', projectId: null, status: 'Active', created_at: new Date().toISOString(), permissions: getFullPermissions() } ];
+const INITIAL_USERS = [];
 const INITIAL_PROJECTS = [];
 const INITIAL_CONTRACTS = [];
 const INITIAL_ASSETS = []; 
@@ -1664,8 +1670,19 @@ function useUserPersistentState(key, initialValue, fbUser) {
     return [state, setPersistentValue];
 }
 
-function usePersistentCollection(collectionName, initialValue, fbUser) {
-    const localKey = collectionName.startsWith('bmg_') ? collectionName : `bmg_${collectionName}`;
+function usePersistentCollection(collectionName, initialValue, fbUser, options = {}) {
+    const rootCollection = options.rootCollection === true;
+    const readOnly = options.readOnly === true;
+    const documentIdField = options.documentIdField || 'id';
+    const localKey = options.localKey || (collectionName.startsWith('bmg_') ? collectionName : `bmg_${collectionName}`);
+
+    const getCollectionReference = () => rootCollection
+        ? collection(db, collectionName)
+        : collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
+
+    const getDocumentReference = (id) => rootCollection
+        ? doc(db, collectionName, id)
+        : doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, id);
 
     const [data, setData] = useState(() => {
         if (typeof window !== 'undefined') {
@@ -1712,7 +1729,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                     }
                 }
 
-                const colRef = collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
+                const colRef = getCollectionReference();
                 unsubscribe = onSnapshot(colRef, (snapshot) => {
                     if (!isMounted) return;
                     const serverItems = [];
@@ -1730,18 +1747,6 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                         if (typeof window !== 'undefined') {
                             try { localStorage.setItem(localKey, serverJson); } catch(e) {}
                         }
-                    }
-
-                    // Failsafe: Ensure there is always at least an admin user to prevent lockout
-                    if (serverItems.length === 0 && collectionName === 'bmg_users') {
-                        const adminUser = INITIAL_USERS[0];
-                        setData([adminUser]);
-                        dataRef.current = [adminUser];
-                        saveStateLocallyIDB(localKey, [adminUser]);
-                        
-                        let batch = writeBatch(db);
-                        batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, adminUser.id), adminUser);
-                        batch.commit().catch(e => console.error(e));
                     }
 
                     setIsLoaded(true);
@@ -1762,7 +1767,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
             isMounted = false;
             unsubscribe();
         };
-    }, [db, appId, fbUser, collectionName, localKey]);
+    }, [db, appId, fbUser, collectionName, localKey, rootCollection]);
 
     const setPersistentValue = async (newValueOrUpdater, isRestore = false) => {
         const oldValue = dataRef.current;
@@ -1781,14 +1786,15 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
             }
         }
 
-        if (!db || !fbUser || !appId) return;
+        if (readOnly || !db || !fbUser || !appId) return;
 
         if (isRestore && Array.isArray(newValue)) {
             try {
                 let batch = writeBatch(db);
                 let opCount = 0;
                 for (const item of newValue) {
-                    if (!item.id) continue;
+                    const documentId = item[documentIdField];
+                    if (!documentId) continue;
 
                     const itemToSave = { ...item };
                     
@@ -1834,7 +1840,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                         console.warn("Error calculating doc size:", e);
                     }
 
-                    batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id), itemToSave);
+                    batch.set(getDocumentReference(documentId), itemToSave);
                     opCount++;
                     if (opCount >= 50) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
                 }
@@ -1843,23 +1849,25 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
             return;
         }
 
-        const oldMap = new Map(Array.isArray(oldValue) ? oldValue.map(i => [i.id, i]) : []);
-        const newMap = new Map(Array.isArray(newValue) ? newValue.map(i => [i.id, i]) : []);
+        const oldMap = new Map(Array.isArray(oldValue) ? oldValue.map(i => [i[documentIdField], i]) : []);
+        const newMap = new Map(Array.isArray(newValue) ? newValue.map(i => [i[documentIdField], i]) : []);
 
         const toSet = [];
         const toDelete = [];
 
         (Array.isArray(newValue) ? newValue : []).forEach(newItem => {
-            if (!newItem.id) return;
-            const oldItem = oldMap.get(newItem.id);
+            const documentId = newItem[documentIdField];
+            if (!documentId) return;
+            const oldItem = oldMap.get(documentId);
             if (!oldItem || JSON.stringify(oldItem) !== JSON.stringify(newItem)) {
                 toSet.push(newItem);
             }
         });
 
         (Array.isArray(oldValue) ? oldValue : []).forEach(oldItem => {
-            if (oldItem.id && !newMap.has(oldItem.id)) {
-                toDelete.push(oldItem.id);
+            const documentId = oldItem[documentIdField];
+            if (documentId && !newMap.has(documentId)) {
+                toDelete.push(documentId);
             }
         });
 
@@ -1910,13 +1918,13 @@ function usePersistentCollection(collectionName, initialValue, fbUser) {
                         console.warn("Error calculating doc size:", e);
                     }
 
-                    batch.set(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, item.id), itemToSave);
+                    batch.set(getDocumentReference(item[documentIdField]), itemToSave);
                     opCount++;
                     if (opCount >= 50) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
                 }
 
                 for (const id of toDelete) {
-                    batch.delete(doc(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`, id));
+                    batch.delete(getDocumentReference(id));
                     opCount++;
                     if (opCount >= 50) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
                 }
@@ -3319,14 +3327,76 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
 // --- Main Application ---
 
 export default function App() {
+  // Legacy sessions remain available only while VITE_AUTH_MODE is not "firebase".
+  // Firebase mode always restores the trusted profile from Firestore via Auth UID.
+  const [currentUser, setCurrentUser] = useState(() => {
+      if (USE_FIREBASE_BUSINESS_AUTH) return null;
+      if (typeof window !== 'undefined') {
+          const savedUser = localStorage.getItem('bmg_current_user');
+          if (savedUser) {
+              try {
+                  const parsed = JSON.parse(savedUser);
+
+                  // --- NEW: ตรวจสอบเวลาหมดอายุเซสชัน (22:00 น.) ---
+                  // หากไม่มี Session Expiry (ข้อมูลเวอร์ชันเก่า) หรือเวลาเครื่องเลยกำหนด 22:00 ไปแล้ว ให้บังคับล็อกเอาท์
+                  if (!parsed.sessionExpiry || Date.now() >= parsed.sessionExpiry) {
+                      localStorage.removeItem('bmg_current_user');
+                      return null;
+                  }
+
+                  return parsed;
+              } catch(e) { return null; }
+          }
+      }
+      return null;
+  });
   const [fbUser, setFbUser] = useState(null);
+  const firebaseBusinessAuth = useMemo(() => createFirebaseBusinessAuth({
+      auth,
+      db,
+      authDomain: INTERNAL_AUTH_DOMAIN,
+      getSessionExpiry: getNextCutoffTime,
+  }), []);
+  const adminUserClient = useMemo(() => createAdminUserClient(auth), []);
 
   useEffect(() => {
     if (!auth) {
-        // ถ้าระบบไม่ได้ต่อ Firebase (auth ไม่มี) ให้เซ็ต user จำลอง เพื่อให้ App ใช้งานต่อได้ด้วย LocalStorage
+        if (USE_FIREBASE_BUSINESS_AUTH) {
+            setFbUser(null);
+            return;
+        }
         setFbUser({ uid: 'local-fallback-user' });
         return;
     }
+
+    if (USE_FIREBASE_BUSINESS_AUTH) {
+        let isMounted = true;
+        const unsubscribe = onAuthStateChanged(auth, async (user) => {
+            if (!isMounted) return;
+            setFbUser(user);
+            if (!user) {
+                setCurrentUser(null);
+                localStorage.removeItem('bmg_current_user');
+                return;
+            }
+
+            try {
+                const restoredUser = await firebaseBusinessAuth.restore(user);
+                if (!isMounted) return;
+                setCurrentUser(restoredUser);
+                localStorage.setItem('bmg_current_user', JSON.stringify(restoredUser));
+            } catch (error) {
+                console.warn('Unable to restore Firebase business profile.', error?.code || error);
+                if (isMounted) setCurrentUser(null);
+                await firebaseBusinessAuth.signOut().catch(() => {});
+            }
+        });
+        return () => {
+            isMounted = false;
+            unsubscribe();
+        };
+    }
+
     const initAuth = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -3336,7 +3406,7 @@ export default function App() {
         }
       } catch (e) {
         console.warn("Auth info: falling back to local storage (offline mode).");
-        db = null; // Disable Firestore on auth failure to avoid network/permission loops
+        db = null;
         setFbUser({ uid: 'local-fallback-user' });
       }
     };
@@ -3345,29 +3415,7 @@ export default function App() {
         if (user) setFbUser(user);
     });
     return () => unsubscribe();
-  }, []);
-
-  // --- NEW: แก้ไขให้ State อ่านค่าจาก LocalStorage เพื่อจำการล็อกอิน ---
-  const [currentUser, setCurrentUser] = useState(() => {
-      if (typeof window !== 'undefined') {
-          const savedUser = localStorage.getItem('bmg_current_user');
-          if (savedUser) {
-              try { 
-                  const parsed = JSON.parse(savedUser); 
-                  
-                  // --- NEW: ตรวจสอบเวลาหมดอายุเซสชัน (22:00 น.) ---
-                  // หากไม่มี Session Expiry (ข้อมูลเวอร์ชันเก่า) หรือเวลาเครื่องเลยกำหนด 22:00 ไปแล้ว ให้บังคับล็อกเอาท์
-                  if (!parsed.sessionExpiry || Date.now() >= parsed.sessionExpiry) {
-                      localStorage.removeItem('bmg_current_user');
-                      return null;
-                  }
-                  
-                  return parsed; 
-              } catch(e) { return null; }
-          }
-      }
-      return null;
-  });
+  }, [firebaseBusinessAuth]);
 
   // Only the user and project lists are needed to complete app login.
   // Other cloud subscriptions start after login and stop again on logout.
@@ -3757,7 +3805,14 @@ export default function App() {
 
   // อัปเกรดเป็น usePersistentCollection สำหรับข้อมูลที่เป็น Array (รายการ) ป้องกันข้อมูลสูญหาย/ทับกัน
   // โดยใช้ชื่อ Collection คงเดิมทั้งหมด เพื่อให้ระบบกู้ข้อมูลเก่าขึ้นมาเซฟเป็น Document ให้อัตโนมัติ!
-  const [users, setUsers, isUsersLoaded, isUsersSynced] = usePersistentCollection('bmg_users', INITIAL_USERS, fbUser); 
+  const [users, setUsers, isUsersLoaded, isUsersSynced] = usePersistentCollection(
+      USE_FIREBASE_BUSINESS_AUTH ? 'users' : 'bmg_users',
+      USE_FIREBASE_BUSINESS_AUTH ? [] : INITIAL_USERS,
+      fbUser,
+      USE_FIREBASE_BUSINESS_AUTH
+          ? { rootCollection: true, documentIdField: 'authUid', localKey: 'bmg_user_profiles_v2', readOnly: true }
+          : {},
+  );
   const [projects, setProjects] = usePersistentCollection('bmg_projects', INITIAL_PROJECTS, fbUser);
   const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, businessFbUser);
   const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, businessFbUser);
@@ -4050,14 +4105,23 @@ export default function App() {
   useEffect(() => {
       if (currentUser && Array.isArray(users) && users.length > 0) {
           const freshUser = users.find(u => u.id === currentUser.id);
-          if (freshUser && JSON.stringify(freshUser) !== JSON.stringify(currentUser)) {
+          if (freshUser) {
+              const refreshedSessionUser = USE_FIREBASE_BUSINESS_AUTH
+                  ? {
+                      ...stripUserSecrets(freshUser),
+                      authUid: currentUser.authUid || freshUser.authUid,
+                      lastLogin: currentUser.lastLogin,
+                      sessionExpiry: currentUser.sessionExpiry,
+                  }
+                  : freshUser;
+              if (JSON.stringify(refreshedSessionUser) === JSON.stringify(currentUser)) return;
               // ตรวจสอบว่าไม่ได้เปลี่ยนแค่ lastLogin (ป้องกัน Infinite Loop ในกรณีที่เซ็ต lastLogin)
-              const tempFresh = {...freshUser, lastLogin: ''};
+              const tempFresh = {...refreshedSessionUser, lastLogin: ''};
               const tempCurrent = {...currentUser, lastLogin: ''};
               if (JSON.stringify(tempFresh) !== JSON.stringify(tempCurrent)) {
-                 setCurrentUser(freshUser);
+                 setCurrentUser(refreshedSessionUser);
                  try {
-                     localStorage.setItem('bmg_current_user', JSON.stringify(freshUser));
+                     localStorage.setItem('bmg_current_user', JSON.stringify(refreshedSessionUser));
                  } catch (err) {
                      console.warn("Storage quota exceeded: ไม่สามารถอัปเดต Session ชั่วคราวได้ แต่ระบบยังทำงานต่อได้", err);
                  }
@@ -4182,6 +4246,7 @@ export default function App() {
           try {
               const sanitizedData = dataList.map(item => {
                   const cleanItem = { ...item };
+                  delete cleanItem.password;
                   if (cleanItem.photo) cleanItem.photo = 'Base64 Image';
                   if (cleanItem.logo) cleanItem.logo = 'Base64 Image';
                   if (cleanItem.images) cleanItem.images = 'Photos attached';
@@ -5223,7 +5288,7 @@ export default function App() {
       }
   };
 
-  const handleLogin = (e) => { 
+  const handleLogin = async (e) => {
       e.preventDefault(); 
       
       // ปรับปรุง: ตัดช่องว่างซ้ายขวา และแปลงเป็นตัวพิมพ์เล็กทั้งหมด ป้องกันปัญหาพิมพ์เล็ก-ใหญ่บนมือถือ
@@ -5232,6 +5297,53 @@ export default function App() {
 
       if (!inputUsername || !inputPassword) {
           setLoginError('กรุณากรอกชื่อผู้ใช้งานและรหัสผ่าน');
+          return;
+      }
+
+      if (USE_FIREBASE_BUSINESS_AUTH) {
+          if (!firebaseBusinessAuth) {
+              setLoginError('ไม่สามารถเชื่อมต่อ Firebase Authentication ได้ กรุณาลองใหม่อีกครั้ง');
+              return;
+          }
+
+          try {
+              const { firebaseUser, currentUser: authenticatedUser } = await firebaseBusinessAuth.signIn(
+                  inputUsername,
+                  inputPassword,
+              );
+              setFbUser(firebaseUser);
+              setCurrentUser(authenticatedUser);
+              localStorage.setItem('bmg_current_user', JSON.stringify(authenticatedUser));
+              setNewDailyReport(prev => ({
+                  ...prev,
+                  reporter: `${authenticatedUser.firstName} ${authenticatedUser.lastName}`,
+              }));
+              setLoginError('');
+
+              if (authenticatedUser.department && authenticatedUser.department !== 'Head Office') {
+                  const assignedProject = (projects || []).find(p => p.name === authenticatedUser.department);
+                  if (assignedProject) {
+                      setSelectedProject(assignedProject);
+                      setActiveMenu('projects');
+                      setProjectTab('overview');
+                  } else {
+                      setSelectedProject(null);
+                      setActiveMenu('dashboard');
+                  }
+              } else {
+                  setSelectedProject(null);
+                  setActiveMenu('dashboard');
+              }
+          } catch (error) {
+              const messages = {
+                  'invalid-credentials': 'ชื่อผู้ใช้งาน หรือ รหัสผ่านไม่ถูกต้อง',
+                  'account-inactive': 'บัญชีผู้ใช้งานนี้ถูกระงับ กรุณาติดต่อผู้ดูแลระบบ',
+                  'profile-not-found': 'ไม่พบข้อมูลโปรไฟล์ผู้ใช้งาน กรุณาติดต่อผู้ดูแลระบบ',
+                  'too-many-attempts': 'มีการเข้าสู่ระบบผิดหลายครั้ง กรุณารอสักครู่แล้วลองใหม่',
+                  'network-error': 'ไม่สามารถเชื่อมต่อระบบยืนยันตัวตน กรุณาตรวจสอบอินเทอร์เน็ต',
+              };
+              setLoginError(messages[error?.code] || 'ระบบยืนยันตัวตนขัดข้อง กรุณาลองใหม่อีกครั้ง');
+          }
           return;
       }
 
@@ -5244,19 +5356,6 @@ export default function App() {
           u.password === inputPassword
       ); 
       
-      // 2. Fallback ฉุกเฉินสำหรับ Admin ป้องกันบัญชีหายหรือเข้าไม่ได้จากปัญหา Database
-      if (!user && inputUsername === 'admin' && inputPassword === 'bosskim') {
-          // หากมีบัญชี admin ในระบบอยู่แล้ว (แต่ลืมรหัสผ่าน) ให้กู้สิทธิ์คืน
-          const existingAdmin = userList.find(u => (u.username || '').trim().toLowerCase() === 'admin');
-          if (existingAdmin) {
-              user = { ...existingAdmin, permissions: getFullPermissions() };
-          } else {
-              // ถ้าไม่มีบัญชี admin เลย ให้สร้างใหม่ฉุกเฉิน
-              user = JSON.parse(JSON.stringify(INITIAL_USERS[0])); 
-              setUsers([...userList, user]);
-          }
-      }
-
       if (user) { 
           // ปรับปรุง: ตรวจสอบสถานะการระงับใช้งาน
           if (user.status !== 'Active') {
@@ -5318,7 +5417,12 @@ export default function App() {
       } 
   };
   
-  const handleLogout = () => { 
+  const handleLogout = async () => {
+      if (USE_FIREBASE_BUSINESS_AUTH && firebaseBusinessAuth) {
+          await firebaseBusinessAuth.signOut().catch((error) => {
+              console.warn('Firebase sign out failed.', error);
+          });
+      }
       setCurrentUser(null); 
       // NEW: ลบข้อมูลออกจาก LocalStorage
       if (typeof window !== 'undefined') {
@@ -5357,6 +5461,7 @@ export default function App() {
       
       const cleanData = data.map(row => {
           const newRow = { ...row };
+          delete newRow.password;
           if (newRow.photo) newRow.photo = '[Image omitted]';
           if (newRow.logo) newRow.logo = '[Image omitted]';
           if (newRow.images) newRow.images = '[Images omitted]';
@@ -7587,7 +7692,7 @@ export default function App() {
           const dataToBackup = {};
           if (backupModules.companyInfo) dataToBackup.companyInfo = companyInfo;
           if (backupModules.users) {
-              dataToBackup.users = users;
+              dataToBackup.users = sanitizeUsersForExport(users);
               dataToBackup.rolePermissions = rolePermissions;
           }
           if (backupModules.projects) dataToBackup.projects = projects;
@@ -7874,7 +7979,7 @@ export default function App() {
       try {
           // เลือกเฉพาะข้อมูลที่เป็นตารางเพื่อส่งไป Google Sheets
           const payload = {
-              'Users_พนักงาน': users,
+              'Users_พนักงาน': sanitizeUsersForExport(users),
               'Projects_โครงการ': projects,
               'Contracts_สัญญา': contracts,
               'Contractors_ผู้รับเหมา': contractors,
@@ -8121,8 +8226,29 @@ export default function App() {
       }));
   };
 
-  const handleSaveUser = (e) => {
+  const handleSaveUser = async (e) => {
       e.preventDefault();
+      if (USE_FIREBASE_BUSINESS_AUTH) {
+          try {
+              const safeInput = stripUserSecrets(newUser);
+              const result = isEditingUser
+                  ? await adminUserClient.update(safeInput, newUser.password || undefined)
+                  : await adminUserClient.create(safeInput, newUser.password);
+              setUsers(prev => isEditingUser
+                  ? prev.map(user => user.authUid === result.profile.authUid ? result.profile : user)
+                  : [result.profile, ...prev]);
+              setShowAddUserModal(false);
+              alert(t('saveSuccess'));
+          } catch (error) {
+              const messages = {
+                  'password-minimum-6': 'รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร',
+                  'username-already-exists': 'ชื่อผู้ใช้งานนี้มีอยู่ในระบบแล้ว',
+                  'admin-required': 'เฉพาะผู้ดูแลระบบสูงสุดเท่านั้นที่จัดการบัญชี Firebase Authentication ได้',
+              };
+              alert(messages[error?.code] || 'ไม่สามารถบันทึกบัญชี Firebase Authentication ได้');
+          }
+          return;
+      }
       // FIX: Use functional update to prevent Stale Closure which causes data loss when saving user
       setUsers(prev => {
           if (isEditingUser) {
@@ -8133,6 +8259,21 @@ export default function App() {
       });
       setShowAddUserModal(false);
       alert(t('saveSuccess'));
+  };
+
+  const handleDeleteUser = async (user) => {
+      if (!USE_FIREBASE_BUSINESS_AUTH) {
+          setUsers(prev => prev.filter(item => item.id !== user.id));
+          return;
+      }
+      try {
+          await adminUserClient.remove(user.authUid);
+          setUsers(prev => prev.filter(item => item.authUid !== user.authUid));
+      } catch (error) {
+          alert(error?.code === 'cannot-delete-current-user'
+              ? 'ไม่สามารถลบบัญชีที่กำลังใช้งานอยู่ได้'
+              : 'ไม่สามารถลบบัญชี Firebase Authentication ได้');
+      }
   };
 
   const handleEditUser = (user) => {
@@ -9271,6 +9412,11 @@ export default function App() {
 
       // --- NEW: ฟังก์ชันสำหรับนำเข้าไฟล์ CSV ข้อมูลพนักงาน (รองรับภาษาไทยจาก Excel) ---
       const handleImportUsersCSV = (event) => {
+          if (USE_FIREBASE_BUSINESS_AUTH) {
+              event.target.value = '';
+              alert('การนำเข้าผู้ใช้แบบ CSV ถูกปิดชั่วคราวในโหมด Firebase Authentication เพื่อป้องกันการสร้างโปรไฟล์ที่ไม่มีบัญชี Auth');
+              return;
+          }
           const file = event.target.files[0];
           if (!file) return;
           const reader = new FileReader();
@@ -9312,8 +9458,8 @@ export default function App() {
                           userObj[header] = values[index];
                       });
                       
-                      // เช็คเฉพาะฟิลด์บังคับ คือ username และ firstName
-                      if (userObj.username && userObj.firstName) {
+                      // Legacy CSV import requires an explicit password; Firebase mode uses the Admin endpoint instead.
+                      if (userObj.username && userObj.firstName && userObj.password) {
                           const finalUsername = userObj.username;
                           newUsers.push({
                               id: generateId(),
@@ -9324,7 +9470,7 @@ export default function App() {
                               department: userObj.department || 'Head Office',
                               phone: userObj.phone || '',
                               username: finalUsername, // บังคับให้ชื่อผู้ใช้งานเป็นค่าเดียวกับรหัสพนักงาน
-                              password: userObj.password || '1234', // รหัสผ่านตั้งต้นถ้าไม่ได้ใส่มา
+                              password: userObj.password || '',
                               status: 'Active',
                               created_at: new Date().toISOString(),
                               accessibleDepts: [],
@@ -9384,7 +9530,7 @@ export default function App() {
                                       accessibleDepts: [], 
                                       phone: '', 
                                       username: '', 
-                                      password: '', 
+                                      password: '',
                                       photo: null, 
                                       permissions: getMergedPermissions(rolePermissions[EMPLOYEE_POSITIONS[0]]) 
                                   });
@@ -9515,7 +9661,7 @@ export default function App() {
                                       </td>
                                       <td className={`p-4 text-center space-x-1 ${isExporting ? 'hidden' : ''}`}>
                                           {hasPerm('users', 'edit') && <button className="text-gray-400 hover:text-blue-600 transition-colors p-1.5 rounded-md hover:bg-blue-50" onClick={(e) => { e.stopPropagation(); handleEditUser(user); }} title="แก้ไขข้อมูล"><Edit size={16} /></button>}
-                                          {hasPerm('users', 'delete') && <button className="text-gray-400 hover:text-red-600 transition-colors p-1.5 rounded-md hover:bg-red-50" onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบผู้ใช้งาน ${user.firstName} ${user.lastName} ใช่หรือไม่?`, () => setUsers(prev => prev.filter(u => u.id !== user.id))); }} title="ลบข้อมูล"><Trash2 size={16} /></button>}
+                                          {hasPerm('users', 'delete') && <button className="text-gray-400 hover:text-red-600 transition-colors p-1.5 rounded-md hover:bg-red-50" onClick={(e) => { e.stopPropagation(); showConfirm('ยืนยันการลบ', `คุณต้องการลบผู้ใช้งาน ${user.firstName} ${user.lastName} ใช่หรือไม่?`, () => handleDeleteUser(user)); }} title="ลบข้อมูล"><Trash2 size={16} /></button>}
                                       </td>
                                   </tr>
                               )) : (
@@ -18050,8 +18196,18 @@ export default function App() {
                                     <input type="text" required className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200" value={newUser.username} onChange={e => setNewUser({...newUser, username: e.target.value})} />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">{t('password')} <span className="text-red-500">*</span></label>
-                                    <input type="text" required className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200" value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} />
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">
+                                        {t('password')} {!isEditingUser && <span className="text-red-500">*</span>}
+                                    </label>
+                                    <input
+                                        type="password"
+                                        required={!isEditingUser}
+                                        minLength={USE_FIREBASE_BUSINESS_AUTH ? 6 : undefined}
+                                        placeholder={USE_FIREBASE_BUSINESS_AUTH && isEditingUser ? 'เว้นว่างหากไม่ต้องการเปลี่ยนรหัสผ่าน' : ''}
+                                        className="w-full border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-orange-200"
+                                        value={newUser.password}
+                                        onChange={e => setNewUser({...newUser, password: e.target.value})}
+                                    />
                                 </div>
                             </div>
                         </div>
