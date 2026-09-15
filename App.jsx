@@ -26,7 +26,7 @@ import { sanitizeUsersForExport, stripUserSecrets } from './src/auth/identity.js
 import { startLegacyFirebaseSession } from './src/auth/firebaseSession.js';
 import { resolveAuthMode } from './src/auth/authMode.js';
 import { createFirestoreSubscriptionPolicy } from './src/firebase/subscriptionPolicy.js';
-import { createMonthScope, reconcileCollectionSnapshot } from './src/firebase/collectionSnapshot.js';
+import { createMonthScope, reconcileCollectionSnapshot, shouldApplyCollectionSnapshot } from './src/firebase/collectionSnapshot.js';
 
 // --- Firebase Initialization ---
 let app, auth, db, appId;
@@ -1677,6 +1677,7 @@ function useUserPersistentState(key, initialValue, fbUser) {
 function usePersistentCollection(collectionName, initialValue, fbUser, options = {}) {
     const rootCollection = options.rootCollection === true;
     const readOnly = options.readOnly === true;
+    const requireServerSnapshot = options.requireServerSnapshot === true;
     const documentIdField = options.documentIdField || 'id';
     const dateScopeField = options.dateScope?.field;
     const dateScopeStart = options.dateScope?.start;
@@ -1745,8 +1746,12 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
                         where(dateScopeField, '<', dateScopeEnd),
                     )
                     : colRef;
-                unsubscribe = onSnapshot(listenTarget, (snapshot) => {
+                const handleSnapshot = (snapshot) => {
                     if (!isMounted) return;
+                    if (!shouldApplyCollectionSnapshot({
+                        requireServerSnapshot,
+                        fromCache: snapshot.metadata.fromCache,
+                    })) return;
                     const serverItems = [];
                     snapshot.forEach(docSnap => serverItems.push(docSnap.data()));
 
@@ -1770,10 +1775,19 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
                     }
 
                     setIsLoaded(true);
-                }, (error) => {
+                };
+                const handleSnapshotError = (error) => {
                     console.warn(`Sync info for ${collectionName}: Working offline.`);
                     if (isMounted) setIsLoaded(true);
-                });
+                };
+                unsubscribe = requireServerSnapshot
+                    ? onSnapshot(
+                        listenTarget,
+                        { includeMetadataChanges: true },
+                        handleSnapshot,
+                        handleSnapshotError,
+                    )
+                    : onSnapshot(listenTarget, handleSnapshot, handleSnapshotError);
 
             } catch (err) {
                 console.warn(`Init info for ${collectionName}: Working offline or network unavailable.`);
@@ -1787,7 +1801,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
             isMounted = false;
             unsubscribe();
         };
-    }, [db, appId, fbUser, collectionName, localKey, rootCollection, dateScopeField, dateScopeStart, dateScopeEnd, documentIdField]);
+    }, [db, appId, fbUser, collectionName, localKey, rootCollection, requireServerSnapshot, dateScopeField, dateScopeStart, dateScopeEnd, documentIdField]);
 
     const setPersistentValue = async (newValueOrUpdater, isRestore = false) => {
         const oldValue = dataRef.current;
@@ -3835,7 +3849,7 @@ export default function App() {
       USE_FIREBASE_BUSINESS_AUTH ? [] : INITIAL_USERS,
       subscriptionPolicy.userFor(USE_FIREBASE_BUSINESS_AUTH ? 'users' : 'bmg_users'),
       USE_FIREBASE_BUSINESS_AUTH
-          ? { rootCollection: true, documentIdField: 'authUid', localKey: 'bmg_user_profiles_v2', readOnly: true }
+          ? { rootCollection: true, documentIdField: 'authUid', localKey: 'bmg_user_profiles_v2', readOnly: true, requireServerSnapshot: true }
           : {},
   );
   const dashboardDailyReportScope = useMemo(

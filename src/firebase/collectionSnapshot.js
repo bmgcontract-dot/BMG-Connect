@@ -17,6 +17,13 @@ export function createMonthScope(field, yearMonth) {
   };
 }
 
+export function shouldApplyCollectionSnapshot({
+  requireServerSnapshot = false,
+  fromCache = false,
+} = {}) {
+  return !requireServerSnapshot || !fromCache;
+}
+
 export function reconcileCollectionSnapshot({
   currentItems,
   serverItems,

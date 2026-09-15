@@ -31,7 +31,7 @@ Environment variable names ที่มีอยู่ในโปรเจก�
 - [x] review สองแกน Standards/Spec; แก้ runtime crash, strict Auth UID gate และ schedule listener regression แล้ว
 - [x] local login page render และ browser console ไม่มี error ใน session ใหม่
 - [x] เปิด local preview แล้ว Firebase Authentication total ยังคง 917 บัญชี ไม่เกิด user ใหม่
-- [x] รอบแรก `npm test` ผ่าน 21/21; หลังพบปัญหา Preview เพิ่ม regression tests แล้วผ่าน 25/25, Firebase-default build, explicit-legacy build และ `git diff --check` ผ่าน
+- [x] รอบแรก `npm test` ผ่าน 21/21; หลังพบปัญหา Preview เพิ่ม regression tests แล้วผ่าน 25/25 และหลังพบ partial user-cache snapshot ผ่าน 26/26; Firebase-default build, explicit-legacy build และ `git diff --check` ผ่าน
 - [x] commit เฉพาะ source, tests, script และเอกสารของ release นี้ที่ `ded9609566e0beb6ccabb840630b7d5c0ad1859a`; ไม่ได้ใช้ `git add .`
 - [x] push เฉพาะ branch `codex/phase-1-baseline`; ยังไม่ merge เข้า `main`
 - [x] ยืนยันจาก Vercel ว่า Preview และ Production ตั้ง `VITE_AUTH_MODE=firebase` โดยไม่เปิดเผยค่า secret/config อื่น
@@ -78,6 +78,16 @@ Preview ใช้ Firebase Production จริง การทดสอบเ�
 - การปิด announcement overlay บน Preview บันทึกเฉพาะ dismissed IDs ใน `localStorage` ของ Preview origin ไม่ได้เขียนข้อมูล cloud
 - ยังไม่ทดสอบ role อื่น, Admin create/edit/disable และ Firestore Usage delta เพราะ Preview เชื่อม Firebase Production และไม่มีข้อมูล/บัญชีทดสอบที่ได้รับอนุมัติ
 
+### Second Admin session and Usage findings
+
+- ผู้ใช้เปิด `bmg-connect-6b24.vercel.app` ในครั้งแรก ซึ่งเป็น Vercel project คนละตัวกับ Fixed Preview จึงหยุดทดสอบทันทีและย้ายไป URL ที่ถูกต้องโดยไม่แก้ข้อมูล
+- หลัง login ใหม่บน Fixed Preview พบ Dashboard และ Users แสดงผู้ใช้เพียง 1 คนชั่วคราว ก่อน server snapshot โหลดครบเป็น 62 คน
+- Firestore console ยืนยันว่า root collection `users` มีโปรไฟล์หลายรายการและหน้าแอปแสดงครบ 62 รายการเมื่อ server snapshot มาถึง
+- สาเหตุคือ Firebase Auth profile `getDoc` เติม cache ด้วยเอกสาร Admin หนึ่งรายการก่อน collection listener เปิด ทำให้ cache snapshot แรกถูกแสดงเสมือนข้อมูลครบ
+- เพิ่ม regression test และตัวเลือก `requireServerSnapshot` ให้ root `users` listener ไม่ยอมรับ partial cache snapshot; ใช้ `includeMetadataChanges` เพื่อรอ authoritative server snapshot แล้วค่อยปลด loading state
+- Firestore Usage ช่วง 24 ชั่วโมง วันที่ 14–15 กันยายน 2026 แสดง reads 2.5M, writes 1.4K, snapshot listeners peak 791 และ active connections peak 26 ตัวเลขนี้รวม Firebase console และทุก deployment จึงยังใช้วัดผลเฉพาะ Preview ไม่ได้ แต่เป็นสัญญาณให้เร่งแยก traffic และลด listeners
+- Firestore Rules ปัจจุบันตรวจยืนยันอีกครั้งว่าเป็น public: `allow read, write: if true;` จึงเป็น Production security blocker
+
 ## Release procedure
 
 1. สร้าง Preview จาก branch ที่ commit แล้ว และตรวจ build logs
@@ -118,3 +128,4 @@ Release นี้ไม่เปลี่ยน schema, Rules หรือข้
 - Query Insights และ budget alerts
 - ปิด Anonymous provider และลบบัญชีเก่า
 - เพิ่ม auth-loading screen ระหว่าง `onAuthStateChanged` restore เพื่อไม่ให้หน้า Login กระพริบชั่วครู่หลัง refresh
+- เพิ่ม loading/error state ที่แยก cache snapshot จาก authoritative server snapshot สำหรับ collection สำคัญอื่น หากพบรูปแบบเดียวกับ `users`

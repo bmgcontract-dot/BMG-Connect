@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   createMonthScope,
   reconcileCollectionSnapshot,
+  shouldApplyCollectionSnapshot,
 } from '../../src/firebase/collectionSnapshot.js';
 
 test('createMonthScope returns deterministic start and exclusive end boundaries', () => {
@@ -66,5 +67,29 @@ test('scoped reconciliation avoids duplicate IDs when an undated cached item is 
       scope: { field: 'date', start: '2026-09-01', endExclusive: '2026-10-01' },
     }),
     [{ id: 'same', date: '2026-09-10', value: 'server' }],
+  );
+});
+
+test('server-authoritative collections ignore partial Firestore cache snapshots', () => {
+  assert.equal(
+    shouldApplyCollectionSnapshot({
+      requireServerSnapshot: true,
+      fromCache: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldApplyCollectionSnapshot({
+      requireServerSnapshot: true,
+      fromCache: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldApplyCollectionSnapshot({
+      requireServerSnapshot: false,
+      fromCache: true,
+    }),
+    true,
   );
 });
