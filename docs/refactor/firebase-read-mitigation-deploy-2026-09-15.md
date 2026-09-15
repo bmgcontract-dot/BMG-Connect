@@ -35,11 +35,11 @@ Environment variable names ที่มีอยู่ในโปรเจก�
 - [x] commit เฉพาะ source, tests, script และเอกสารของ release นี้ที่ `ded9609566e0beb6ccabb840630b7d5c0ad1859a`; ไม่ได้ใช้ `git add .`
 - [x] push เฉพาะ branch `codex/phase-1-baseline`; ยังไม่ merge เข้า `main`
 - [x] ยืนยันจาก Vercel ว่า Preview และ Production ตั้ง `VITE_AUTH_MODE=firebase` โดยไม่เปิดเผยค่า secret/config อื่น
-- [ ] smoke test บัญชีตัวแทน: Super Admin, ผู้ใช้หลายโครงการ, ผู้จัดการโครงการ และพนักงานจำกัดสิทธิ์
-- [ ] ทดสอบ login, logout, refresh/session restore, เมนูที่อนุญาต/ห้าม, project scope และการเปิดแต่ละแท็บ
+- [ ] smoke test บัญชีตัวแทน: Super Admin ผ่านแล้ว; ผู้ใช้หลายโครงการ, ผู้จัดการโครงการ และพนักงานจำกัดสิทธิ์ยังรอทดสอบ
+- [ ] login, logout, refresh/session restore และเมนู/แท็บที่ Super Admin เข้าถึงผ่านแล้ว; เมนูที่ห้ามและ project scope ของ role อื่นยังรอทดสอบ
 - [ ] ทดสอบ Admin create/edit/disable ด้วยบัญชีทดสอบที่ตกลงไว้เท่านั้น แล้วล้างข้อมูลทดสอบตามอนุมัติ
-- [ ] ตรวจ Preview console/runtime logs ไม่มี error และตรวจ Firebase Usage ว่า listener/read ไม่เพิ่มผิดปกติ
-- [ ] บันทึก Preview URL, commit SHA, ผู้ทดสอบ, เวลา และผลทุก gate
+- [ ] Preview console/runtime logs ไม่มี error และ Auth total ไม่เพิ่ม; ยังต้องเก็บ Firebase Usage delta ในช่วงควบคุมเพื่อยืนยันว่า reads ไม่เพิ่มผิดปกติ
+- [x] บันทึก Preview URL, commit SHA, ผู้ทดสอบ, เวลา และผล gate ที่ดำเนินการแล้ว
 - [ ] เจ้าของระบบอนุมัติ Production promotion หลังอ่านผลทดสอบ
 
 Preview ใช้ Firebase Production จริง การทดสอบเขียนจึงมีผลต่อข้อมูลจริง ห้ามสร้าง/แก้/ลบข้อมูลธุรกิจเพื่อ smoke test
@@ -59,6 +59,24 @@ Preview ใช้ Firebase Production จริง การทดสอบเ�
 - Dashboard เปลี่ยนเดือนอันดับรายงานได้ตามเดิม โดย query เฉพาะเดือนที่เลือกแทนการสะสมข้อมูลตั้งแต่เดือนนั้นถึงปัจจุบัน
 - regression tests ครอบคลุม payload ที่ serialize ไม่ได้, ขอบเขตต้นเดือน/สิ้นเดือน, การแทนที่/ลบข้อมูลในช่วง query, การเก็บข้อมูลนอกช่วง และการป้องกัน ID ซ้ำ
 - ยังไม่มีการเขียนข้อมูล เพราะ Preview ใช้ Firebase Production และยังไม่ได้ระบุข้อมูลทดสอบที่อนุญาต
+
+### Fixed Preview evidence
+
+- Vercel deployment: `J3AY2MrmUvjdPZrWju2nhk3LaMdK`
+- Preview URL: `https://bmg-connect-pe9x9rv4x-bmgcontract-6324s-projects.vercel.app`
+- source commit: `7fd129cf3e7025b04cc9ac5c64b869fac3915f98`
+- build: `Ready` ใน 22 วินาที ไม่มี build error
+- ผู้ทดสอบ: เจ้าของระบบล็อกอินด้วยบัญชี Super Admin; Codex ดำเนินการ smoke test แบบอ่านอย่างเดียว วันที่ 15 กันยายน 2026 เวลาประมาณ 15:31–16:01 น. (Asia/Bangkok)
+- login ผ่าน; Dashboard โหลด 25 โครงการ / 62 พนักงาน / Audit เฉลี่ย 82.0% / Action Plan ค้าง 237 รายการ โดยไม่พบ `RangeError`
+- เปิด Users (62 รายการ), Projects (25 โครงการ), Audit, Announcements, Manual และ Settings สำเร็จ
+- เปิดภาพรวมโครงการตัวอย่างและแท็บ central fee, contracts, staff, schedule, assets, tools, repair, utilities, action plan, audit, forms, supplier, meetings, inventory, others, Daily Report และ PM สำเร็จ
+- refresh/session restore ผ่าน: ระหว่าง Firebase restore มีหน้า Login ปรากฏชั่วครู่ก่อนกลับ Dashboard; ควรเพิ่ม auth-loading screen เพื่อลดความสับสน แต่ไม่พบการหลุด session
+- logout ผ่านและกลับหน้า Login; ไม่มีการส่งฟอร์มสร้าง/แก้ไข/ลบข้อมูล
+- browser console พบเฉพาะ Tailwind CDN warning เดิม; Vercel runtime logs ของ deployment นี้ในช่วงทดสอบเป็น Warning 0, Error 0, Fatal 0
+- Firebase Authentication total ก่อนและหลัง smoke test ยังคง 917 บัญชี จึงไม่พบบัญชี anonymous ใหม่จาก release นี้
+- ระหว่าง navigation มีการเปิด modal สร้าง Audit โดยไม่ตั้งใจหนึ่งครั้ง แต่ปิดทันทีโดยไม่แก้ field และไม่กดบันทึก จึงไม่มี write
+- การปิด announcement overlay บน Preview บันทึกเฉพาะ dismissed IDs ใน `localStorage` ของ Preview origin ไม่ได้เขียนข้อมูล cloud
+- ยังไม่ทดสอบ role อื่น, Admin create/edit/disable และ Firestore Usage delta เพราะ Preview เชื่อม Firebase Production และไม่มีข้อมูล/บัญชีทดสอบที่ได้รับอนุมัติ
 
 ## Release procedure
 
@@ -99,3 +117,4 @@ Release นี้ไม่เปลี่ยน schema, Rules หรือข้
 - Firebase Emulator Rules tests
 - Query Insights และ budget alerts
 - ปิด Anonymous provider และลบบัญชีเก่า
+- เพิ่ม auth-loading screen ระหว่าง `onAuthStateChanged` restore เพื่อไม่ให้หน้า Login กระพริบชั่วครู่หลัง refresh
