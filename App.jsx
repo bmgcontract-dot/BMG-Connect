@@ -35,6 +35,7 @@ import { resolveAuthMode } from './src/auth/authMode.js';
 import { createFirestoreSubscriptionPolicy } from './src/firebase/subscriptionPolicy.js';
 import { createMonthScope, reconcileCollectionSnapshot, shouldApplyCollectionSnapshot } from './src/firebase/collectionSnapshot.js';
 import { createNewUserDraft } from './src/users/userDraft.js';
+import { resolvePostAuthDestination } from './src/auth/postAuthDestination.js';
 
 // --- Firebase Initialization ---
 let app, auth, db, appId;
@@ -3875,7 +3876,21 @@ export default function App() {
   const dailyReportScope = activeMenu === 'dashboard'
       ? dashboardDailyReportScope
       : currentMonthScope;
-  const [projects, setProjects] = usePersistentCollection('bmg_projects', INITIAL_PROJECTS, subscriptionPolicy.userFor('bmg_projects'));
+  const [projects, setProjects, isProjectsLoaded] = usePersistentCollection('bmg_projects', INITIAL_PROJECTS, subscriptionPolicy.userFor('bmg_projects'));
+  const postAuthDestination = useMemo(() => resolvePostAuthDestination({
+      user: currentUser,
+      projects,
+      projectsLoaded: isProjectsLoaded,
+  }), [currentUser, projects, isProjectsLoaded]);
+
+  useEffect(() => {
+      if (postAuthDestination.kind !== 'assigned-project') return;
+      if (selectedProject?.id === postAuthDestination.project.id) return;
+
+      setSelectedProject(postAuthDestination.project);
+      setActiveMenu('projects');
+      setProjectTab('overview');
+  }, [postAuthDestination.kind, postAuthDestination.project, selectedProject?.id]);
   const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, subscriptionPolicy.userFor('bmg_contracts'));
   const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, subscriptionPolicy.userFor('bmg_audits'));
   const [dailyReports, setDailyReports] = usePersistentCollection(
@@ -5392,21 +5407,6 @@ export default function App() {
                   reporter: `${authenticatedUser.firstName} ${authenticatedUser.lastName}`,
               }));
               setLoginError('');
-
-              if (authenticatedUser.department && authenticatedUser.department !== 'Head Office') {
-                  const assignedProject = (projects || []).find(p => p.name === authenticatedUser.department);
-                  if (assignedProject) {
-                      setSelectedProject(assignedProject);
-                      setActiveMenu('projects');
-                      setProjectTab('overview');
-                  } else {
-                      setSelectedProject(null);
-                      setActiveMenu('dashboard');
-                  }
-              } else {
-                  setSelectedProject(null);
-                  setActiveMenu('dashboard');
-              }
           } catch (error) {
               const messages = {
                   'invalid-credentials': 'ชื่อผู้ใช้งาน หรือ รหัสผ่านไม่ถูกต้อง',
@@ -5462,24 +5462,6 @@ export default function App() {
               setUsers(updatedUsers);
           }
           
-          // ตรวจสอบหน่วยงานประจำของผู้ใช้
-          if (updatedUser.department && updatedUser.department !== 'Head Office') {
-              // ค้นหาข้อมูลโปรเจกต์จากชื่อ department
-              const assignedProject = (projects || []).find(p => p.name === updatedUser.department);
-              if (assignedProject) {
-                  setSelectedProject(assignedProject); // เปิดหน้าโครงการนั้นทันที
-                  setActiveMenu('projects');
-                  setProjectTab('overview');
-              } else {
-                  // กรณีไม่พบชื่อโครงการให้กลับไปหน้าหลัก
-                  setSelectedProject(null);
-                  setActiveMenu('dashboard');
-              }
-          } else {
-              // หากเป็น Head Office หรือไม่ได้ระบุ ให้ไปที่หน้า Dashboard หลัก
-              setSelectedProject(null);
-              setActiveMenu('dashboard');
-          }
       } else { 
           // เพิ่มการตรวจสอบ: ถ้ารายชื่อพนักงานในเครื่องยังมีแค่แอดมินคนเดียว แสดงว่าเน็ตอาจจะช้าและโหลดข้อมูลยังไม่เสร็จ
           if (userList.length <= 1) {
@@ -17835,6 +17817,14 @@ export default function App() {
 
   if (!currentUser) return renderLoginView();
 
+  const isAssignedProjectBlocked = postAuthDestination.kind === 'assigned-project-pending'
+      || postAuthDestination.kind === 'assigned-project-unavailable'
+      || (
+          postAuthDestination.kind === 'assigned-project'
+          && selectedProject?.id !== postAuthDestination.project.id
+      );
+  const assignedProjectUnavailable = postAuthDestination.kind === 'assigned-project-unavailable';
+
   return (
     <div className={`flex min-h-screen font-sans transition-colors duration-300 w-full overflow-x-hidden ${!isExporting ? (theme === 'dark' ? 'dark-theme' : theme === 'sweet' ? 'sweet-theme' : theme === 'crimson' ? 'crimson-theme' : theme === 'sunset' ? 'sunset-theme' : 'bg-gray-100 text-gray-900') : 'bg-gray-100 text-gray-900'}`}>
       {/* ซ่อนลูกศรขึ้น-ลง ของ input type="number" ทั้งระบบ และเพิ่ม Dark Mode Styles */}
@@ -18176,7 +18166,21 @@ export default function App() {
         )}
 
         <div id="print-area" className={`${isExporting ? 'w-full max-w-none px-[10mm]' : 'max-w-7xl mx-auto w-full p-4 md:p-6 lg:p-8 h-full flex flex-col'}`}>
-          {selectedProject ? ProjectDetail() : (
+          {isAssignedProjectBlocked ? (
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-8 text-center max-w-2xl mx-auto mt-8">
+              {assignedProjectUnavailable
+                ? <AlertTriangle className="mx-auto mb-4 text-amber-500" size={36} />
+                : <Loader2 className="mx-auto mb-4 text-orange-500 animate-spin" size={36} />}
+              <h2 className="text-lg font-bold text-gray-800">
+                {assignedProjectUnavailable ? 'ไม่พบข้อมูลโครงการที่สังกัด' : 'กำลังโหลดโครงการที่คุณสังกัด'}
+              </h2>
+              <p className="text-sm text-gray-500 mt-2">
+                {assignedProjectUnavailable
+                  ? `บัญชีนี้ถูกกำหนดให้สังกัด ${postAuthDestination.department} แต่ไม่พบโครงการนี้ กรุณาติดต่อผู้ดูแลระบบ`
+                  : 'ระบบจะเปิดหน้าโครงการให้อัตโนมัติเมื่อข้อมูลพร้อม'}
+              </p>
+            </div>
+          ) : selectedProject ? ProjectDetail() : (
             <>
               {activeMenu === 'dashboard' && DashboardView()}
               {activeMenu === 'users' && UserManagement()}
