@@ -31,7 +31,7 @@ Environment variable names ที่มีอยู่ในโปรเจก�
 - [x] review สองแกน Standards/Spec; แก้ runtime crash, strict Auth UID gate และ schedule listener regression แล้ว
 - [x] local login page render และ browser console ไม่มี error ใน session ใหม่
 - [x] เปิด local preview แล้ว Firebase Authentication total ยังคง 917 บัญชี ไม่เกิด user ใหม่
-- [x] รอบแรก `npm test` ผ่าน 21/21; หลังพบปัญหา Preview เพิ่ม regression tests แล้วผ่าน 25/25 และหลังพบ partial user-cache snapshot ผ่าน 26/26; Firebase-default build, explicit-legacy build และ `git diff --check` ผ่าน
+- [x] รอบแรก `npm test` ผ่าน 21/21; หลังพบปัญหา Preview เพิ่ม regression tests แล้วผ่าน 25/25, หลังพบ partial user-cache snapshot ผ่าน 26/26 และหลังเพิ่ม durable Auth persistence ผ่าน 28/28; Firebase-default build, explicit-legacy build และ `git diff --check` ผ่าน
 - [x] commit เฉพาะ source, tests, script และเอกสารของ release นี้ที่ `ded9609566e0beb6ccabb840630b7d5c0ad1859a`; ไม่ได้ใช้ `git add .`
 - [x] push เฉพาะ branch `codex/phase-1-baseline`; ยังไม่ merge เข้า `main`
 - [x] ยืนยันจาก Vercel ว่า Preview และ Production ตั้ง `VITE_AUTH_MODE=firebase` โดยไม่เปิดเผยค่า secret/config อื่น
@@ -87,6 +87,21 @@ Preview ใช้ Firebase Production จริง การทดสอบเ�
 - เพิ่ม regression test และตัวเลือก `requireServerSnapshot` ให้ root `users` listener ไม่ยอมรับ partial cache snapshot; ใช้ `includeMetadataChanges` เพื่อรอ authoritative server snapshot แล้วค่อยปลด loading state
 - Firestore Usage ช่วง 24 ชั่วโมง วันที่ 14–15 กันยายน 2026 แสดง reads 2.5M, writes 1.4K, snapshot listeners peak 791 และ active connections peak 26 ตัวเลขนี้รวม Firebase console และทุก deployment จึงยังใช้วัดผลเฉพาะ Preview ไม่ได้ แต่เป็นสัญญาณให้เร่งแยก traffic และลด listeners
 - Firestore Rules ปัจจุบันตรวจยืนยันอีกครั้งว่าเป็น public: `allow read, write: if true;` จึงเป็น Production security blocker
+
+### Durable-session Preview evidence
+
+- Vercel deployment: `BnR6Yw5KzaLauggi1qDf9ER8EwFM`
+- Preview URL: `https://bmg-connect-7x9l5anzm-bmgcontract-6324s-projects.vercel.app`
+- source commit: `04689df107a70fb5124b2ff2a541ff2123e22f8c`
+- build: `Ready` ใน 23 วินาที ไม่มี build error
+- เปลี่ยน Firebase Auth initialization ให้กำหนด durable persistence ชัดเจน: IndexedDB เป็นตัวเลือกแรกและ browser local storage เป็น fallback
+- ผู้ทดสอบล็อกอิน Super Admin สำเร็จ; Dashboard โหลด 25 โครงการ / 62 พนักงาน / Audit เฉลี่ย 82.0%
+- refresh สองรอบติดต่อกัน restore session สำเร็จภายในประมาณ 3 วินาทีโดยไม่ต้องกรอกรหัสผ่านใหม่ และทั้งสองรอบกลับมาพร้อมข้อมูล 25 โครงการ / 62 พนักงาน
+- browser console error 0; พบเฉพาะ Tailwind CDN warning เดิม
+- Vercel runtime logs ช่วงทดสอบ: Warning 0, Error 0, Fatal 0
+- Firebase Authentication หลัง login และ refresh สองรอบยังคง 917 บัญชี ไม่พบบัญชี anonymous เพิ่ม
+- ระหว่างรอ `onAuthStateChanged` ยังเห็นหน้า Login ชั่วครู่ จัดเป็น UX follow-up ไม่ใช่ session loss
+- ไม่มีการสร้าง แก้ไข หรือลบข้อมูลธุรกิจในการทดสอบนี้
 
 ## Release procedure
 
