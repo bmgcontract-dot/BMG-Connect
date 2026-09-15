@@ -125,6 +125,8 @@ Preview ใช้ Firebase Production จริง การทดสอบเ�
 - ไม่ใช้ทางเลือก downgrade Firebase Admin 13.10.0 เพราะ production audit เพิ่มเป็นช่องโหว่ระดับปานกลาง 8 รายการ; คง Firebase Admin 14.4.0 แล้ว override เฉพาะ `jose` เป็น 5.10.0 ซึ่งมีทั้ง CommonJS และ ESM exports เพื่อให้ `jwks-rsa` 4.1.0 โหลดบน Vercel ได้
 - dependency gate ของแนวทาง override: Firebase Admin 14.4.0 → jwks-rsa 4.1.0 → jose 5.10.0, test 31/31 และ build ผ่าน; production audit เหลือ 2 moderate จาก gaxios 6.7.1 → uuid 9.0.1 ซึ่งไม่ได้เกิดจาก jose override และยังต้องติดตามแยก
 - ขั้นถัดไปต้องสร้าง Preview ใหม่ แล้วยืนยัน Resources เป็น Node 22 และ GET `/api/admin-users` เปลี่ยนจาก `500 FUNCTION_INVOCATION_FAILED` เป็น handler-level `405 method-not-allowed` ก่อนทดสอบการสร้างบัญชีอีกครั้ง
+- runtime probe บน Preview deployment `88g95nt58Q6tfvfSKwQr4voBSeU3` (source `dcba713`) ถึง function จริงแล้ว: Vercel Runtime Logs แสดง `GET /api/health-probe` สถานะ `405`, Warning 0, Error 0, Fatal 0 เมื่อ 15 กันยายน 2026 เวลา 19:02 น. (Asia/Bangkok) จึงยืนยันว่า Firebase Admin dependency graph โหลดสำเร็จและ request เข้าถึง handler-level method guard แล้ว
+- probe endpoint, rewrite และลิงก์ทดสอบเป็นของชั่วคราว ลบออกก่อนสร้าง clean Preview; การตรวจนี้เป็น GET เท่านั้นและไม่สร้าง Auth user หรือ Firestore profile
 - หาก Node 22 ยังเกิด `ERR_REQUIRE_ESM` ให้ rollback เฉพาะ Preview ไป deployment `BnR6Yw5KzaLauggi1qDf9ER8EwFM` และพิจารณาตรึง dependency/ปรับ ESM bundling ใน Preview ใหม่; ห้าม promote Production
 
 ## Release procedure
