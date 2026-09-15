@@ -8,6 +8,10 @@ test('Vercel admin-user function uses the supported Node 22 runtime', async () =
   );
 
   assert.equal(packageJson.engines?.node, '22.x');
+  assert.equal(
+    packageJson.optionalDependencies?.['@rollup/rollup-linux-x64-gnu'],
+    '^4.63.1',
+  );
 });
 
 test('admin-user function and Firebase Admin dependencies load in ESM mode', async () => {

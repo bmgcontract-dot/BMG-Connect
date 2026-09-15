@@ -120,6 +120,7 @@ Preview ใช้ Firebase Production จริง การทดสอบเ�
 - เพราะล้มก่อนเข้า handler จึงไม่มีการสร้าง Auth user และไม่มีการเขียน Firestore profile; ค้นหา internal email ของ `bmg-test-limited-260915` ใน Firebase Authentication แล้วไม่พบบัญชี
 - เพิ่ม regression check ให้ admin-user function โหลดแบบ ESM และล็อก Vercel runtime เป็น Node `22.x` ซึ่ง Firebase Admin v14 รองรับ
 - local gate หลังแก้: test 30/30 และ production build ผ่าน; lint ยังรันไม่ได้เพราะ repository ไม่มี `eslint` dependency แม้มี script เดิม
+- Preview แรกที่ commit `080f9f5` build ไม่ผ่านเพราะ lockfile เดิมบันทึกเฉพาะ Rollup binary ของ macOS และการเปลี่ยน Node ทำให้ Vercel ข้าม cache; เพิ่ม `@rollup/rollup-linux-x64-gnu@4.63.1` เป็น optional dependency ให้ตรงกับ Rollup ที่ Vite ใช้ แล้วรัน test/build ซ้ำผ่าน
 - ขั้นถัดไปต้องสร้าง Preview ใหม่ แล้วยืนยัน Resources เป็น Node 22 และ GET `/api/admin-users` เปลี่ยนจาก `500 FUNCTION_INVOCATION_FAILED` เป็น handler-level `405 method-not-allowed` ก่อนทดสอบการสร้างบัญชีอีกครั้ง
 - หาก Node 22 ยังเกิด `ERR_REQUIRE_ESM` ให้ rollback เฉพาะ Preview ไป deployment `BnR6Yw5KzaLauggi1qDf9ER8EwFM` และพิจารณาตรึง dependency/ปรับ ESM bundling ใน Preview ใหม่; ห้าม promote Production
 
