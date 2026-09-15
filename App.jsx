@@ -36,6 +36,7 @@ import { createFirestoreSubscriptionPolicy } from './src/firebase/subscriptionPo
 import { createMonthScope, reconcileCollectionSnapshot, shouldApplyCollectionSnapshot } from './src/firebase/collectionSnapshot.js';
 import { createNewUserDraft } from './src/users/userDraft.js';
 import { resolvePostAuthDestination } from './src/auth/postAuthDestination.js';
+import { hasUserPermission } from './src/auth/permissions.js';
 
 // --- Firebase Initialization ---
 let app, auth, db, appId;
@@ -4607,24 +4608,7 @@ export default function App() {
 
   // ฟังก์ชันตรวจสอบสิทธิ์การเข้าถึง (Permission Checker)
   const hasPerm = (menuId, action = 'view') => {
-      if (!currentUser) return false;
-      if (currentUser.username === 'admin' || currentUser.position === 'Super Admin') return true; // Admin เข้าถึงได้ทุกอย่าง
-      
-      const perms = currentUser.permissions || {};
-      
-      // Backward Compatibility: ถ้าเป็นเมนูย่อยของหน่วยงาน และไม่มีข้อมูลสิทธิ์เดิมในระบบ ให้ถือว่าดูได้ไปก่อน (ป้องกันเมนูหาย)
-      if (menuId.startsWith('proj_') && action === 'view' && (!perms[menuId] || perms[menuId].view === undefined)) {
-          return true;
-      }
-      
-      // FIX: บังคับให้เห็นเมนู "โครงการ" ทันที หากมีการระบุ "หน่วยงานที่เข้าถึงได้" ไว้ (ป้องกัน Admin ลืมติ๊กสิทธิ์)
-      if (menuId === 'projects' && action === 'view') {
-          const depts = currentUser.accessibleDepts;
-          const deptsArray = Array.isArray(depts) ? depts : (typeof depts === 'string' ? depts.split(', ').filter(Boolean) : []);
-          if (deptsArray.length > 0) return true;
-      }
-      
-      return !!perms[menuId]?.[action];
+      return hasUserPermission(currentUser, menuId, action);
   };
 
   // NEW: ฟังก์ชันตรวจสอบว่าผู้ใช้สามารถเข้าถึงได้หลายโครงการหรือไม่
@@ -10894,18 +10878,22 @@ export default function App() {
                       แก้ไขข้อมูลโครงการ
                   </Button>
               )}
-              <Button variant="outline" onClick={() => exportToCSV([selectedProject], 'project_detail')}>{t('exportInfo')}</Button>
-              <Button variant="outline" icon={isExporting ? Loader2 : Printer} onClick={() => {
-                  let orientation = 'portrait';
-                  let filename = 'Project_Overview.pdf';
-                  if (projectTab === 'staff' && staffViewMode === 'chart') {
-                      orientation = 'landscape';
-                      filename = `Organization_Chart_${selectedProject.code}.pdf`;
-                  } else if (projectTab === 'staff') {
-                      filename = `Staff_List_${selectedProject.code}.pdf`;
-                  }
-                  handleExportPDF('print-area', filename, orientation);
-              }} disabled={isExporting}>{isExporting ? t('downloading') : t('printPDF')}</Button>
+              {hasPerm(`proj_${projectTab}`, 'print') && (
+                  <>
+                      <Button variant="outline" onClick={() => exportToCSV([selectedProject], 'project_detail')}>{t('exportInfo')}</Button>
+                      <Button variant="outline" icon={isExporting ? Loader2 : Printer} onClick={() => {
+                          let orientation = 'portrait';
+                          let filename = 'Project_Overview.pdf';
+                          if (projectTab === 'staff' && staffViewMode === 'chart') {
+                              orientation = 'landscape';
+                              filename = `Organization_Chart_${selectedProject.code}.pdf`;
+                          } else if (projectTab === 'staff') {
+                              filename = `Staff_List_${selectedProject.code}.pdf`;
+                          }
+                          handleExportPDF('print-area', filename, orientation);
+                      }} disabled={isExporting}>{isExporting ? t('downloading') : t('printPDF')}</Button>
+                  </>
+              )}
           </div>
         </div>
         
