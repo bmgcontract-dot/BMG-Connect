@@ -36,7 +36,7 @@ import { createFirestoreSubscriptionPolicy } from './src/firebase/subscriptionPo
 import { createMonthScope, reconcileCollectionSnapshot, shouldApplyCollectionSnapshot } from './src/firebase/collectionSnapshot.js';
 import { createNewUserDraft } from './src/users/userDraft.js';
 import { resolvePostAuthDestination } from './src/auth/postAuthDestination.js';
-import { hasUserPermission } from './src/auth/permissions.js';
+import { filterAccessibleProjects, hasUserPermission } from './src/auth/permissions.js';
 
 // --- Firebase Initialization ---
 let app, auth, db, appId;
@@ -3883,6 +3883,10 @@ export default function App() {
       projects,
       projectsLoaded: isProjectsLoaded,
   }), [currentUser, projects, isProjectsLoaded]);
+  const accessibleProjects = useMemo(() => filterAccessibleProjects({
+      user: currentUser,
+      projects,
+  }), [currentUser, projects]);
 
   useEffect(() => {
       if (postAuthDestination.kind !== 'assigned-project') return;
@@ -8836,13 +8840,7 @@ export default function App() {
       const pendingApprovalCount = pendingItems.length;
 
       // ดึงข้อมูลโครงการเฉพาะที่ผู้ใช้มีสิทธิ์เข้าถึง สำหรับแสดงผลแดชบอร์ดให้สอดคล้องกับสิทธิ์
-      const visibleProjectsDashboard = projects.filter(p => {
-          if (currentUser?.username === 'admin') return true;
-          const accessibleDeptsStr = currentUser?.accessibleDepts;
-          const accessibleArray = Array.isArray(accessibleDeptsStr) ? accessibleDeptsStr : (typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : []);
-          if (accessibleArray.includes('All')) return true;
-          return p.name === currentUser?.department || accessibleArray.includes(p.name);
-      });
+      const visibleProjectsDashboard = accessibleProjects;
 
       // 1. โครงการทั้งหมด แยกตามประเภท
       const projectTypesCount = PROJECT_TYPES.map(type => {
@@ -10946,7 +10944,7 @@ export default function App() {
                       const missingReportDays = Math.max(0, daysPassedInMonth - uniqueReportDays);
 
                       // คำนวณอันดับการส่งรายงานเทียบกับทุกโครงการ
-                      const reportRankDataAll = projects.map(p => {
+                      const reportRankDataAll = accessibleProjects.map(p => {
                           const pReports = dailyReports.filter(r => r.projectId === p.id && r.date.startsWith(currentMonthStr));
                           const uniqueDays = new Set(pReports.map(r => r.date)).size;
                           return { id: p.id, name: p.name, submittedDays: uniqueDays };
@@ -10954,7 +10952,7 @@ export default function App() {
 
                       const reportRankIndex = reportRankDataAll.findIndex(p => p.id === selectedProject.id);
                       const reportRankStr = reportRankIndex >= 0 ? reportRankIndex + 1 : '-';
-                      const totalProjectsForReportRank = projects.length;
+                      const totalProjectsForReportRank = accessibleProjects.length;
 
                       // --- 4. PM Status Summary ---
                       const activePmPlans = pmPlans.filter(p => p.projectId === selectedProject.id && p.status === 'Active');
@@ -10983,7 +10981,7 @@ export default function App() {
                       const avgScore = projAudits.length > 0 ? (projAudits.reduce((sum, a) => sum + a.score, 0) / projAudits.length).toFixed(1) : 0;
                       
                       // Calculate rank across all projects
-                      const projectAvgScores = projects.map(p => {
+                      const projectAvgScores = accessibleProjects.map(p => {
                           const pAudits = audits.filter(a => a.projectId === p.id);
                           const avg = pAudits.length > 0 ? (pAudits.reduce((sum, a) => sum + a.score, 0) / pAudits.length) : 0;
                           return { id: p.id, avg };
@@ -21690,7 +21688,7 @@ export default function App() {
                         <tbody className="divide-y divide-gray-100">
                             {(() => {
                                 const targetMonthStr = auditRankingMonth || new Date().toISOString().slice(0, 7);
-                                const rankData = projects.map(p => {
+                                const rankData = accessibleProjects.map(p => {
                                     const pAudits = audits.filter(a => a.projectId === p.id && a.date && a.date.startsWith(targetMonthStr));
                                     const avg = pAudits.length > 0 ? (pAudits.reduce((sum, a) => sum + a.score, 0) / pAudits.length) : 0;
                                     return { id: p.id, name: p.name, avgScore: parseFloat(avg.toFixed(1)) };
@@ -21782,7 +21780,7 @@ export default function App() {
                                     passedDays = today.getDate();
                                 }
 
-                                const rankData = projects.map(p => {
+                                const rankData = accessibleProjects.map(p => {
                                     const pReports = dailyReports.filter(r => r.projectId === p.id && r.date && r.date.startsWith(targetMonthStr));
                                     const uniqueDays = new Set(pReports.map(r => r.date)).size;
                                     const percentage = passedDays > 0 ? Math.round((uniqueDays / passedDays) * 100) : 0;

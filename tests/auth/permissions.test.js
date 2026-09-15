@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { hasUserPermission } from '../../src/auth/permissions.js';
+import { filterAccessibleProjects, hasUserPermission } from '../../src/auth/permissions.js';
 
 test('a restricted project user cannot print when the project-tab permission is false', () => {
   const user = {
@@ -34,4 +34,29 @@ test('legacy project-tab profiles keep view access but do not gain print access'
 
   assert.equal(hasUserPermission(user, 'proj_overview', 'view'), true);
   assert.equal(hasUserPermission(user, 'proj_overview', 'print'), false);
+});
+
+test('a restricted user can rank only the assigned project', () => {
+  const projects = [
+    { id: 'assigned', name: 'โครงการทดสอบ' },
+    { id: 'hidden', name: 'โครงการอื่น' },
+  ];
+
+  assert.deepEqual(filterAccessibleProjects({
+    user: { department: 'โครงการทดสอบ', accessibleDepts: [] },
+    projects,
+  }), [projects[0]]);
+});
+
+test('multi-project users can rank only their explicitly accessible projects', () => {
+  const projects = [
+    { id: 'home', name: 'Home' },
+    { id: 'allowed', name: 'Allowed' },
+    { id: 'hidden', name: 'Hidden' },
+  ];
+
+  assert.deepEqual(filterAccessibleProjects({
+    user: { department: 'Home', accessibleDepts: ['Allowed'] },
+    projects,
+  }), [projects[0], projects[1]]);
 });
