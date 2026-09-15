@@ -103,6 +103,16 @@ Preview ใช้ Firebase Production จริง การทดสอบเ�
 - ระหว่างรอ `onAuthStateChanged` ยังเห็นหน้า Login ชั่วครู่ จัดเป็น UX follow-up ไม่ใช่ session loss
 - ไม่มีการสร้าง แก้ไข หรือลบข้อมูลธุรกิจในการทดสอบนี้
 
+### Restricted-role test preparation
+
+- ได้รับอนุมัติให้สร้างข้อมูลทดสอบใน Firebase ที่ Preview และ Production ใช้ร่วมกัน เพื่อทดสอบสิทธิ์พนักงานแบบจำกัดขอบเขต
+- พบข้อบกพร่องสำคัญในฟอร์มเพิ่มโครงการ: หน้าจอแจ้งว่าบันทึกสำเร็จก่อนรอผลเขียน Firestore; รายการ `โครงการทดสอบ` ปรากฏจาก IndexedDB ชั่วคราว แต่หายเมื่อ server snapshot กลับมา และตรวจ Firestore โดยตรงได้ 25 โครงการ / 0 รายการที่ชื่อ `โครงการทดสอบ` หรือรหัส `O-002`
+- เพื่อไม่กดซ้ำจนเกิดข้อมูลซ้ำ ได้ตรวจชื่อและรหัสก่อนสร้าง แล้วสร้างเอกสารทดสอบเพียงรายการเดียวใน collection เดียวกับแอป พร้อมอ่านกลับยืนยันค่าหลักครบถ้วน
+- ทรัพยากรทดสอบที่สร้างแล้ว: document ID `tst260915`, code `O-002`, name `โครงการทดสอบ`, type `Office Building`, status `Active`, contract `2026-09-15` ถึง `2027-09-14`
+- rollback ของข้อมูลทดสอบ: ลบเฉพาะเอกสาร `artifacts/bmg-app-prod/public/data/bmg_projects_docs/tst260915` หลังได้รับคำยืนยัน ณ เวลาที่ลบ; ห้ามลบทั้ง collection
+- บัญชีพนักงานทดสอบยังไม่ถูกสร้าง ขั้นเตรียมกำหนดให้สังกัดเฉพาะ `โครงการทดสอบ`, ไม่มี `accessibleDepts`, ตำแหน่ง `ช่างประจำอาคาร (Technician)` และให้สิทธิ์ดูเฉพาะ Dashboard/Projects/Project Overview โดยไม่มี save/edit/approve/delete/print
+- ก่อนกดสร้างบัญชีจริงต้องขอคำยืนยันอีกครั้ง เพราะจะสร้างทั้ง Firebase Authentication account และ Firestore profile; หลังสร้างต้องตรวจ Auth count, anonymous count, profile scope และ login/refresh/logout ด้วยบัญชีจำกัดสิทธิ์
+
 ## Release procedure
 
 1. สร้าง Preview จาก branch ที่ commit แล้ว และตรวจ build logs
