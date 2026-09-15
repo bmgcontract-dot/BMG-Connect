@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/health-probe",
+      "destination": "/api/health-probe"
+    }
+  ]
+}
