@@ -127,6 +127,12 @@ Preview ใช้ Firebase Production จริง การทดสอบเ�
 - ขั้นถัดไปต้องสร้าง Preview ใหม่ แล้วยืนยัน Resources เป็น Node 22 และ GET `/api/admin-users` เปลี่ยนจาก `500 FUNCTION_INVOCATION_FAILED` เป็น handler-level `405 method-not-allowed` ก่อนทดสอบการสร้างบัญชีอีกครั้ง
 - runtime probe บน Preview deployment `88g95nt58Q6tfvfSKwQr4voBSeU3` (source `dcba713`) ถึง function จริงแล้ว: Vercel Runtime Logs แสดง `GET /api/health-probe` สถานะ `405`, Warning 0, Error 0, Fatal 0 เมื่อ 15 กันยายน 2026 เวลา 19:02 น. (Asia/Bangkok) จึงยืนยันว่า Firebase Admin dependency graph โหลดสำเร็จและ request เข้าถึง handler-level method guard แล้ว
 - probe endpoint, rewrite และลิงก์ทดสอบเป็นของชั่วคราว ลบออกก่อนสร้าง clean Preview; การตรวจนี้เป็น GET เท่านั้นและไม่สร้าง Auth user หรือ Firestore profile
+- clean Preview deployment `TVGXzCgwReZwHYVTyi13GnowhGzX` (source `5c6ea21`) build Ready ใน 21 วินาที; หน้า login และ Admin session โหลดได้, browser console ไม่มี error และมีเฉพาะ Tailwind CDN warning เดิม
+- สร้างบัญชีทดสอบ `bmg-test-limited-260915` หนึ่งครั้งสำเร็จ: Firebase Authentication มีเพียง 1 record, UID `ga3jDpeuGDZyRVpevSQmQ5yERRD2`, และ Auth total เพิ่มจาก 920 เป็น 921 ตามบัญชี Email ที่สร้าง
+- บัญชีถูกสร้างเป็น `Disabled` เพราะ new-user draft ไม่กำหนด `status` ขณะที่ Admin API ตั้งใจ default-safe ด้วย `disabled: inputProfile.status !== 'Active'`; หน้า BMG จึงแสดงสถานะ `-` และยังล็อกอินไม่ได้
+- รายการบัญชีเคยแสดงซ้ำชั่วคราวสองแถวจาก cache reconciliation แต่หลัง authoritative server snapshot เหลือ `TEST-260915` เพียงแถวเดียว; Firebase Auth ยืนยันว่ามีบัญชีจริงหนึ่งบัญชี
+- เพิ่ม public `createNewUserDraft` seam พร้อม regression test แบบ Red → Green เพื่อให้ทุกจุดเปิดฟอร์มเพิ่มผู้ใช้ส่ง `status: 'Active'`; ก่อนเปิดใช้งานบัญชีเดิมต้องให้ clean Preview ผ่าน test/build และขอคำยืนยัน ณ เวลาที่ PATCH สถานะบัญชี
+- ระหว่างการตรวจพบ Auth total เพิ่มจาก baseline 917 เป็น 920 ก่อนสร้างบัญชีทดสอบ โดยหน้า Firebase แสดง anonymous records ใหม่วันที่ 15 กันยายน 2026 จำนวนอย่างน้อย 3 รายการ; clean Preview ที่ล็อกอิน Admin ไม่ได้สร้าง anonymous user แต่ยังต้องสืบหา traffic จาก Production/Preview เก่าหรือ client อื่นแยกต่างหาก
 - หาก Node 22 ยังเกิด `ERR_REQUIRE_ESM` ให้ rollback เฉพาะ Preview ไป deployment `BnR6Yw5KzaLauggi1qDf9ER8EwFM` และพิจารณาตรึง dependency/ปรับ ESM bundling ใน Preview ใหม่; ห้าม promote Production
 
 ## Release procedure

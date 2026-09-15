@@ -34,6 +34,7 @@ import { startLegacyFirebaseSession } from './src/auth/firebaseSession.js';
 import { resolveAuthMode } from './src/auth/authMode.js';
 import { createFirestoreSubscriptionPolicy } from './src/firebase/subscriptionPolicy.js';
 import { createMonthScope, reconcileCollectionSnapshot, shouldApplyCollectionSnapshot } from './src/firebase/collectionSnapshot.js';
+import { createNewUserDraft } from './src/users/userDraft.js';
 
 // --- Firebase Initialization ---
 let app, auth, db, appId;
@@ -3847,7 +3848,10 @@ export default function App() {
   });
 
   const [showAddUserModal, setShowAddUserModal] = useState(false);
-  const [newUser, setNewUser] = useState({ employeeId: '', firstName: '', lastName: '', position: EMPLOYEE_POSITIONS[0], otherPosition: '', department: '', accessibleDepts: [], phone: '', username: '', password: '', photo: null, permissions: getDefaultPermissions() });
+  const [newUser, setNewUser] = useState(() => createNewUserDraft({
+      position: EMPLOYEE_POSITIONS[0],
+      permissions: getDefaultPermissions(),
+  }));
 
   const [showAddProjectModal, setShowAddProjectModal] = useState(false);
   const [isEditingProject, setIsEditingProject] = useState(false);
@@ -8547,7 +8551,11 @@ export default function App() {
 
   const handleAddStaffToProject = () => {
       setIsEditingUser(false);
-      setNewUser({ employeeId: '', firstName: '', lastName: '', position: EMPLOYEE_POSITIONS[0], otherPosition: '', department: selectedProject.name, accessibleDepts: [], phone: '', username: '', password: '', photo: null, permissions: getDefaultPermissions() });
+      setNewUser(createNewUserDraft({
+          position: EMPLOYEE_POSITIONS[0],
+          department: selectedProject.name,
+          permissions: getDefaultPermissions(),
+      }));
       setShowAddUserModal(true);
   };
 
@@ -9589,20 +9597,10 @@ export default function App() {
                               <Button icon={Plus} onClick={() => { 
                                   setIsEditingUser(false); 
                                   // แก้ไข: ล้างข้อมูล State ให้เป็นค่าเริ่มต้นทุกครั้งที่กดเพิ่มผู้ใช้ใหม่ ป้องกันข้อมูลคนเก่าค้าง
-                                  setNewUser({ 
-                                      employeeId: '', 
-                                      firstName: '', 
-                                      lastName: '', 
+                                  setNewUser(createNewUserDraft({
                                       position: EMPLOYEE_POSITIONS[0], 
-                                      otherPosition: '', 
-                                      department: '', 
-                                      accessibleDepts: [], 
-                                      phone: '', 
-                                      username: '', 
-                                      password: '',
-                                      photo: null, 
                                       permissions: getMergedPermissions(rolePermissions[EMPLOYEE_POSITIONS[0]]) 
-                                  });
+                                  }));
                                   setShowAddUserModal(true); 
                               }}>{t('addUser')}</Button>
                           </>
