@@ -144,7 +144,17 @@ Preview ใช้ Firebase Production จริง การทดสอบเ�
 - สาเหตุยืนยันจากโค้ด: login handler เลือก assigned project ให้เฉพาะตอน submit login ขณะที่ `onAuthStateChanged` restore ตั้งเพียง `currentUser`; `selectedProject` จึงคงเป็น null หลัง reload และ `activeMenu` เริ่มต้นเป็น dashboard
 - แก้แบบ test-first ผ่าน public seam `resolvePostAuthDestination`: restricted user ต้องรอ project snapshot อย่างปลอดภัย, เข้าโครงการที่ชื่อตรงเมื่อข้อมูลพร้อม และห้าม fallback ไป corporate dashboard เมื่อหาโครงการไม่พบ
 - local gate ของ commit `3ff455d`: regression tests ใหม่ 4/4, test รวม 36/36, production build ผ่าน; lint ยังรันไม่ได้เพราะไม่มี executable `eslint` ใน dependencies
-- commit ยังไม่ได้ push: ระบบความปลอดภัยหยุดการส่ง private project source ไป GitHub จนกว่าเจ้าของจะยืนยัน external source egress ไป remote นั้นโดยเฉพาะ จึงยังไม่มี Preview สำหรับทดสอบ refresh ของ fix นี้
+- เจ้าของระบบอนุญาต external source egress ไป `https://github.com/bmgcontract-dot/BMG-Connect.git` โดยตรงแล้ว; push commits `3ff455d` และ `9929c3f` สำเร็จ
+- session-restore Preview: deployment `7HcbdmpzntgbgB1cp8944Lk98vYX`, URL `https://bmg-connect-gq932w9td-bmgcontract-6324s-projects.vercel.app`, source `9929c3f`, build Ready ใน 19 วินาที
+- restricted login ผ่าน; ระหว่างรอ project snapshot แสดง safe loading gate โดยไม่ render corporate dashboard และหลัง refresh restore กลับ `โครงการทดสอบ` ภายในประมาณ 2.5 วินาที
+- พบและแก้ permission-UI leakage ของปุ่ม `ส่งออก CSV`/`พิมพ์/PDF`; Preview deployment `AypAJwmXFKnxC1TRNZM3AqUZbqNx`, URL `https://bmg-connect-fmns8twn7-bmgcontract-6324s-projects.vercel.app`, source `74d9b1b`, build Ready ใน 22 วินาที
+- บน Preview `74d9b1b` ปุ่ม export/print หายตาม `proj_overview.print: false` และ refresh ยังผ่าน แต่การกด Audit ranking พบชื่อ/คะแนนอย่างน้อย 14 โครงการอื่น จึงหยุด release และเพิ่ม project-scope regression ต่อทันที
+- final restricted-scope Preview: deployment `CnqS4LvBDiyAi5zDGcY7FmKGzHW2`, URL `https://bmg-connect-lcoojfa2u-bmgcontract-6324s-projects.vercel.app`, source `6142dc0`, build Ready ใน 26 วินาที
+- local gate ของ final scope fix: targeted permission tests 6/6, test รวม 42/42, production build ผ่าน และ `git diff --check` ผ่าน
+- final Preview ยืนยัน login, safe loading gate, assigned-project restore หลัง refresh, export/print hidden, Audit ranking และ Daily Report ranking ไม่แสดงชื่อโครงการอื่น และทาง `ดูประกาศทั้งหมด` ไม่หลุดออกจาก assigned project
+- browser console ของ final Preview มี Error 0; พบเฉพาะ Tailwind CDN production warning เดิม และ Firebase Authentication total หลังทดสอบยังคง 921 จึงไม่พบ anonymous account เพิ่มจาก Preview ชุดนี้
+- พบข้อมูลโครงการทั้งหมด 27 documents ขณะที่ baseline เดิม 25 และเพิ่ม test document ที่ยืนยันแล้ว 1 รายการ; UI ของ restricted account นับ accessible projects เป็น 2 จึงต้องตรวจ document ID/ชื่อของรายการที่เพิ่มอีกหนึ่งรายการให้ชัดก่อน cleanup ห้ามอนุมานและห้ามลบจากชื่อซ้ำโดยยังไม่ระบุ exact document
+- Production ยังคง `https://bmg-connect.vercel.app` deployment `FcaoqPLPsLG4wibz6v3XEmrQE3iD` source `eac28fd` และยังไม่ถูก promote/rollback/แก้ domain
 
 ## Release procedure
 
