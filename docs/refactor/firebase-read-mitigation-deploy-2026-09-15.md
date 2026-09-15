@@ -121,6 +121,9 @@ Preview ใช้ Firebase Production จริง การทดสอบเ�
 - เพิ่ม regression check ให้ admin-user function โหลดแบบ ESM และล็อก Vercel runtime เป็น Node `22.x` ซึ่ง Firebase Admin v14 รองรับ
 - local gate หลังแก้: test 30/30 และ production build ผ่าน; lint ยังรันไม่ได้เพราะ repository ไม่มี `eslint` dependency แม้มี script เดิม
 - Preview แรกที่ commit `080f9f5` build ไม่ผ่านเพราะ lockfile เดิมบันทึกเฉพาะ Rollup binary ของ macOS และการเปลี่ยน Node ทำให้ Vercel ข้าม cache; เพิ่ม `@rollup/rollup-linux-x64-gnu@4.63.1` เป็น optional dependency ให้ตรงกับ Rollup ที่ Vite ใช้ แล้วรัน test/build ซ้ำผ่าน
+- Preview `3yYDDetCz7gYNJDuNfx7aXgjtjuq` ที่ commit `870d4b3` build Ready และ Resources ยืนยัน Node `22.x` แต่ safe GET ยังได้ 500 พร้อม `ERR_REQUIRE_ESM` เดิม จึงยืนยันว่าการลด Node version อย่างเดียวไม่พอและยังไม่มีการเรียก handler
+- ไม่ใช้ทางเลือก downgrade Firebase Admin 13.10.0 เพราะ production audit เพิ่มเป็นช่องโหว่ระดับปานกลาง 8 รายการ; คง Firebase Admin 14.4.0 แล้ว override เฉพาะ `jose` เป็น 5.10.0 ซึ่งมีทั้ง CommonJS และ ESM exports เพื่อให้ `jwks-rsa` 4.1.0 โหลดบน Vercel ได้
+- dependency gate ของแนวทาง override: Firebase Admin 14.4.0 → jwks-rsa 4.1.0 → jose 5.10.0, test 31/31 และ build ผ่าน; production audit เหลือ 2 moderate จาก gaxios 6.7.1 → uuid 9.0.1 ซึ่งไม่ได้เกิดจาก jose override และยังต้องติดตามแยก
 - ขั้นถัดไปต้องสร้าง Preview ใหม่ แล้วยืนยัน Resources เป็น Node 22 และ GET `/api/admin-users` เปลี่ยนจาก `500 FUNCTION_INVOCATION_FAILED` เป็น handler-level `405 method-not-allowed` ก่อนทดสอบการสร้างบัญชีอีกครั้ง
 - หาก Node 22 ยังเกิด `ERR_REQUIRE_ESM` ให้ rollback เฉพาะ Preview ไป deployment `BnR6Yw5KzaLauggi1qDf9ER8EwFM` และพิจารณาตรึง dependency/ปรับ ESM bundling ใน Preview ใหม่; ห้าม promote Production
 
