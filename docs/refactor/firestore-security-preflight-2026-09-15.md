@@ -162,3 +162,76 @@ and tested against the Emulator to:
 
 Until these client changes pass, Production must retain its current application
 and Rules state even though the public rule remains an urgent security risk.
+
+## 5. Client query remediation — 2026-09-15 (not deployed)
+
+The collection-query blocker has now been remediated in the working branch. The
+application uses one query-plan policy for both Firestore listeners and cached
+local data:
+
+- restricted project lists query only profile-assigned project names;
+- project-owned collections query the selected `projectId`, or the caller's
+  accessible project IDs on global screens;
+- query plans with more than 30 values are split into multiple Firestore `in`
+  queries and their snapshots are merged by document ID;
+- `users` is blocked without explicit `proj_staff.view` and otherwise queries
+  only accessible departments;
+- utility readings query accessible `meterId` values after the scoped meter
+  listener resolves;
+- announcements query `All` plus accessible project IDs;
+- cached localStorage/IndexedDB records are filtered synchronously with the same
+  query plan, preventing an Admin cache from flashing cross-project data after
+  a restricted user signs in; and
+- central-fee status listeners now require `projectId`; new status, state, and
+  chunk writes persist `projectId` and `menuId` ownership metadata.
+
+Two composite indexes were added to source for the scoped date-range listeners:
+
+- `bmg_dailyReports_docs`: `projectId ASC`, `date ASC`
+- `bmg_pmHistoryList_docs`: `projectId ASC`, `date ASC`
+
+The application query plans themselves were run against the Rules Emulator.
+The latest evidence is 17/17 Rules tests passing for anonymous, unprofiled,
+inactive, restricted employee, multi-project manager, and Admin contexts. The
+application regression suite passes 51/51 and the Vite production build passes.
+`git diff --check` also passes. `npm run lint` remains unavailable because the
+repository declares the script but does not install `eslint`; this is a tooling
+configuration issue rather than a lint result and must not be recorded as a
+successful lint run.
+
+### Remaining release gates
+
+Do not publish the draft Rules yet. The collection-query blocker is fixed, but
+the following migration gates remain:
+
+1. Deploy the two composite indexes first and wait until both report `READY`.
+2. Dry-run and review a backfill for existing `house_statuses_*`, central-fee
+   `app_state`, and `app_state_chunks` documents that predate `projectId` and
+   `menuId`. The new Rules intentionally deny those legacy documents to
+   non-Admin users until ownership is explicit.
+3. Replace or migrate the global schedule and other legacy `usePersistentState`
+   singleton documents (`bmg_schedules_v2`, schedule notes/approvals, project
+   staff order, and meeting land documents) with project-owned records. The
+   draft Rules currently leave these Admin-only rather than expose cross-project
+   payloads.
+4. Create a Preview from this branch only after the indexes are ready, then
+   smoke-test login, dashboard, project overview, staff, utilities, announcements,
+   and central fee with the restricted and manager test accounts.
+5. Publish Rules only in a monitored maintenance window after the Preview gate
+   passes. Production application deployment and Rules publication must remain
+   separate rollback points.
+
+### Rollback plan
+
+- Application rollback: redeploy the last verified Production source or revert
+  only the query-remediation commit. The prior safe baseline is commit
+  `3724b82`.
+- Rules rollback: keep
+  `config-snapshots/firestore.rules.production-2026-09-15.rules` available as an
+  exact emergency configuration rollback. It reopens public access, so use it
+  only to restore service temporarily while immediately preparing a corrected
+  restricted rule.
+- Data rollback: do not delete or overwrite legacy records during backfill.
+  Apply ownership metadata with merge writes after the dry-run manifest is
+  approved. The managed export at
+  `2026-09-15T14:32:04_36710` remains the full pre-change recovery checkpoint.

@@ -19,6 +19,7 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
+import { createFirestoreCollectionQueryPlan } from '../../src/firebase/queryScope.js';
 
 const PROJECT_ID = 'demo-bmg-connect-rules';
 const APP_ID = 'bmg-app-prod';
@@ -60,6 +61,18 @@ function domainCollection(database, collectionName) {
 
 function domainDocument(database, collectionName, documentId) {
   return doc(domainCollection(database, collectionName), documentId);
+}
+
+function queryFromPlan(collectionReference, plan) {
+  assert.equal(plan.targets.length, 1, 'fixture expects one Firestore query target');
+  return query(
+    collectionReference,
+    ...plan.targets[0].map((filter) => where(
+      filter.field,
+      filter.operator,
+      filter.value,
+    )),
+  );
 }
 
 before(async () => {
@@ -116,6 +129,8 @@ before(async () => {
         proj_contractors: { view: true, save: false, edit: false, delete: false },
         proj_staff: { view: true, save: false, edit: false, delete: false },
         proj_utilities: { view: true, save: true, edit: true, delete: true },
+        proj_centralfee: { view: true, save: true, edit: true, delete: true },
+        announcements: { view: true, save: false, edit: false, delete: false },
       },
     });
     await setDoc(userDocument(context.firestore(), 'admin-user'), {
@@ -133,6 +148,14 @@ before(async () => {
       department: 'โครงการ A',
       accessibleDepts: [],
       permissions: { projects: { view: true } },
+    });
+    await setDoc(userDocument(context.firestore(), 'project-b-staff'), {
+      authUid: 'project-b-staff',
+      username: 'project-b-staff',
+      status: 'Active',
+      department: 'โครงการ B',
+      accessibleDepts: [],
+      permissions: {},
     });
     await setDoc(domainDocument(context.firestore(), 'bmg_audits', 'audit-a'), {
       id: 'audit-a',
@@ -154,6 +177,11 @@ before(async () => {
       projectId: 'project-c',
       name: 'มิเตอร์ C',
     });
+    await setDoc(domainDocument(context.firestore(), 'bmg_meters', 'meter-b'), {
+      id: 'meter-b',
+      projectId: 'project-b',
+      name: 'มิเตอร์ B',
+    });
     await setDoc(domainDocument(context.firestore(), 'bmg_utilityReadings', 'reading-a'), {
       id: 'reading-a',
       meterId: 'meter-a',
@@ -164,9 +192,61 @@ before(async () => {
       meterId: 'meter-c',
       currentValue: 240,
     });
+    await setDoc(domainDocument(context.firestore(), 'bmg_utilityReadings', 'reading-b'), {
+      id: 'reading-b',
+      meterId: 'meter-b',
+      currentValue: 180,
+    });
     await setDoc(domainDocument(context.firestore(), 'bmg_contractors', 'contractor-1'), {
       id: 'contractor-1',
       name: 'ผู้รับเหมาส่วนกลาง',
+    });
+    await setDoc(domainDocument(context.firestore(), 'bmg_announcements', 'announcement-all'), {
+      id: 'announcement-all',
+      projectId: 'All',
+      title: 'ประกาศส่วนกลาง',
+    });
+    await setDoc(domainDocument(context.firestore(), 'bmg_announcements', 'announcement-a'), {
+      id: 'announcement-a',
+      projectId: 'project-a',
+      title: 'ประกาศโครงการ A',
+    });
+    await setDoc(domainDocument(context.firestore(), 'bmg_announcements', 'announcement-c'), {
+      id: 'announcement-c',
+      projectId: 'project-c',
+      title: 'ประกาศโครงการ C',
+    });
+    await setDoc(doc(
+      context.firestore(),
+      'artifacts', APP_ID, 'public', 'data', 'house_statuses_project-a', 'house-1',
+    ), {
+      houseNo: '1/1',
+      projectId: 'project-a',
+      status: 'ติดตาม',
+    });
+    await setDoc(doc(
+      context.firestore(),
+      'artifacts', APP_ID, 'public', 'data', 'house_statuses_project-c', 'house-2',
+    ), {
+      houseNo: '2/1',
+      projectId: 'project-c',
+      status: 'ติดตาม',
+    });
+    await setDoc(doc(
+      context.firestore(),
+      'artifacts', APP_ID, 'public', 'data', 'app_state', 'central_fee_raw_project-a',
+    ), {
+      projectId: 'project-a',
+      menuId: 'proj_centralfee',
+      totalChunks: 1,
+    });
+    await setDoc(doc(
+      context.firestore(),
+      'artifacts', APP_ID, 'public', 'data', 'app_state_chunks', 'central_fee_raw_project-a_0',
+    ), {
+      projectId: 'project-a',
+      menuId: 'proj_centralfee',
+      chunk: '{}',
     });
   });
 });
@@ -297,4 +377,155 @@ test('staff directory queries must be constrained to an accessible department', 
 
   await assertSucceeds(getDocs(query(users, where('department', '==', 'โครงการ A'))));
   await assertFails(getDocs(users));
+});
+
+test('application query plans are accepted for restricted, manager, and admin roles', async () => {
+  const restrictedDatabase = environment.authenticatedContext('restricted-user').firestore();
+  const restrictedProjectsPlan = createFirestoreCollectionQueryPlan({
+    collectionName: 'bmg_projects',
+    currentUser: {
+      username: 'restricted',
+      department: 'โครงการ A',
+      accessibleDepts: [],
+    },
+  });
+  const restrictedProjects = await assertSucceeds(getDocs(queryFromPlan(
+    domainCollection(restrictedDatabase, 'bmg_projects'),
+    restrictedProjectsPlan,
+  )));
+  assert.equal(restrictedProjects.size, 1);
+
+  const managerDatabase = environment.authenticatedContext('manager-user').firestore();
+  const managerAuditsPlan = createFirestoreCollectionQueryPlan({
+    collectionName: 'bmg_audits',
+    currentUser: {
+      username: 'manager',
+      department: 'โครงการ A',
+      accessibleDepts: ['โครงการ B'],
+    },
+    accessibleProjects: [
+      { id: 'project-a', name: 'โครงการ A' },
+      { id: 'project-b', name: 'โครงการ B' },
+    ],
+  });
+  const managerAudits = await assertSucceeds(getDocs(queryFromPlan(
+    domainCollection(managerDatabase, 'bmg_audits'),
+    managerAuditsPlan,
+  )));
+  assert.equal(managerAudits.size, 2);
+
+  const managerUsersPlan = createFirestoreCollectionQueryPlan({
+    collectionName: 'users',
+    currentUser: {
+      username: 'manager',
+      department: 'โครงการ A',
+      accessibleDepts: ['โครงการ B'],
+      permissions: { proj_staff: { view: true } },
+    },
+  });
+  const managerUsers = await assertSucceeds(getDocs(queryFromPlan(
+    collection(managerDatabase, 'users'),
+    managerUsersPlan,
+  )));
+  assert.equal(managerUsers.size, 4);
+
+  const adminDatabase = environment.authenticatedContext('admin-user', { admin: true }).firestore();
+  const adminProjectsPlan = createFirestoreCollectionQueryPlan({
+    collectionName: 'bmg_projects',
+    currentUser: { username: 'admin', accessibleDepts: ['All'] },
+  });
+  const adminProjects = await assertSucceeds(getDocs(
+    adminProjectsPlan.kind === 'unscoped'
+      ? domainCollection(adminDatabase, 'bmg_projects')
+      : queryFromPlan(domainCollection(adminDatabase, 'bmg_projects'), adminProjectsPlan),
+  ));
+  assert.equal(adminProjects.size, 3);
+});
+
+test('application utility-reading query supports multiple accessible meter IDs', async () => {
+  const managerDatabase = environment.authenticatedContext('manager-user').firestore();
+  const plan = createFirestoreCollectionQueryPlan({
+    collectionName: 'bmg_utilityReadings',
+    currentUser: {
+      username: 'manager',
+      department: 'โครงการ A',
+      accessibleDepts: ['โครงการ B'],
+    },
+    accessibleProjects: [
+      { id: 'project-a', name: 'โครงการ A' },
+      { id: 'project-b', name: 'โครงการ B' },
+    ],
+    meters: [
+      { id: 'meter-a', projectId: 'project-a' },
+      { id: 'meter-b', projectId: 'project-b' },
+      { id: 'meter-c', projectId: 'project-c' },
+    ],
+  });
+
+  const readings = await assertSucceeds(getDocs(queryFromPlan(
+    domainCollection(managerDatabase, 'bmg_utilityReadings'),
+    plan,
+  )));
+  assert.equal(readings.size, 2);
+});
+
+test('global announcements plus accessible project announcements use one rules-safe query', async () => {
+  const managerDatabase = environment.authenticatedContext('manager-user').firestore();
+  const plan = createFirestoreCollectionQueryPlan({
+    collectionName: 'bmg_announcements',
+    currentUser: {
+      username: 'manager',
+      department: 'โครงการ A',
+      accessibleDepts: ['โครงการ B'],
+    },
+    accessibleProjects: [
+      { id: 'project-a', name: 'โครงการ A' },
+      { id: 'project-b', name: 'โครงการ B' },
+    ],
+  });
+
+  const announcements = await assertSucceeds(getDocs(queryFromPlan(
+    domainCollection(managerDatabase, 'bmg_announcements'),
+    plan,
+  )));
+  assert.equal(announcements.size, 2);
+});
+
+test('central-fee documents require project scope and explicit menu permission', async () => {
+  const restrictedDatabase = environment.authenticatedContext('restricted-user').firestore();
+  const managerDatabase = environment.authenticatedContext('manager-user').firestore();
+  const managerStatuses = collection(
+    managerDatabase,
+    'artifacts', APP_ID, 'public', 'data', 'house_statuses_project-a',
+  );
+
+  await assertFails(getDocs(query(
+    collection(
+      restrictedDatabase,
+      'artifacts', APP_ID, 'public', 'data', 'house_statuses_project-a',
+    ),
+    where('projectId', '==', 'project-a'),
+  )));
+  const statuses = await assertSucceeds(getDocs(query(
+    managerStatuses,
+    where('projectId', '==', 'project-a'),
+  )));
+  assert.equal(statuses.size, 1);
+  await assertFails(getDoc(doc(
+    managerDatabase,
+    'artifacts', APP_ID, 'public', 'data', 'house_statuses_project-c', 'house-2',
+  )));
+
+  await assertSucceeds(getDoc(doc(
+    managerDatabase,
+    'artifacts', APP_ID, 'public', 'data', 'app_state', 'central_fee_raw_project-a',
+  )));
+  await assertSucceeds(getDoc(doc(
+    managerDatabase,
+    'artifacts', APP_ID, 'public', 'data', 'app_state_chunks', 'central_fee_raw_project-a_0',
+  )));
+  await assertFails(getDoc(doc(
+    restrictedDatabase,
+    'artifacts', APP_ID, 'public', 'data', 'app_state', 'central_fee_raw_project-a',
+  )));
 });

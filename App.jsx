@@ -34,6 +34,7 @@ import { startLegacyFirebaseSession } from './src/auth/firebaseSession.js';
 import { resolveAuthMode } from './src/auth/authMode.js';
 import { createFirestoreSubscriptionPolicy } from './src/firebase/subscriptionPolicy.js';
 import { createMonthScope, reconcileCollectionSnapshot, shouldApplyCollectionSnapshot } from './src/firebase/collectionSnapshot.js';
+import { createFirestoreCollectionQueryPlan, filterItemsForQueryPlan } from './src/firebase/queryScope.js';
 import { createNewUserDraft } from './src/users/userDraft.js';
 import { resolvePostAuthDestination } from './src/auth/postAuthDestination.js';
 import { filterAccessibleProjects, hasUserPermission } from './src/auth/permissions.js';
@@ -1697,6 +1698,8 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
     const dateScopeField = options.dateScope?.field;
     const dateScopeStart = options.dateScope?.start;
     const dateScopeEnd = options.dateScope?.endExclusive;
+    const queryPlan = options.queryPlan || { kind: 'unscoped', targets: [[]] };
+    const queryPlanKey = JSON.stringify(queryPlan);
     const localKey = options.localKey || (collectionName.startsWith('bmg_') ? collectionName : `bmg_${collectionName}`);
 
     const getCollectionReference = () => rootCollection
@@ -1716,7 +1719,9 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
                     if (Array.isArray(initialValue) && !Array.isArray(parsed)) {
                         return (parsed && typeof parsed === 'object') ? Object.values(parsed) : [...initialValue];
                     }
-                    return Array.isArray(parsed) ? parsed : initialValue;
+                    return Array.isArray(parsed)
+                        ? filterItemsForQueryPlan(parsed, queryPlan)
+                        : initialValue;
                 } catch(e) { 
                     return initialValue; 
                 }
@@ -1731,12 +1736,16 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
     useEffect(() => { dataRef.current = data; }, [data]);
 
     useEffect(() => {
-        if (!db || !appId || !fbUser) {
+        if (!db || !appId || !fbUser || queryPlan.kind === 'blocked') {
+            if (queryPlan.kind === 'blocked') {
+                setData([]);
+                dataRef.current = [];
+            }
             setIsLoaded(true);
             return;
         }
 
-        let unsubscribe = () => {};
+        let unsubscribes = [];
         let isMounted = true;
         
         const initData = async () => {
@@ -1746,29 +1755,48 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
                 // NEW: Load from IndexedDB first for fast and large offline data
                 const idbData = await loadStateLocallyIDB(localKey);
                 if (idbData && Array.isArray(idbData) && idbData.length > 0) {
+                    const safeIdbData = filterItemsForQueryPlan(idbData, queryPlan);
                     if (isMounted) {
-                        setData(idbData);
-                        dataRef.current = idbData;
+                        setData(safeIdbData);
+                        dataRef.current = safeIdbData;
                     }
                 }
 
                 const colRef = getCollectionReference();
                 const hasDateScope = dateScopeField && dateScopeStart && dateScopeEnd;
-                const listenTarget = hasDateScope
-                    ? query(
-                        colRef,
-                        where(dateScopeField, '>=', dateScopeStart),
-                        where(dateScopeField, '<', dateScopeEnd),
-                    )
-                    : colRef;
-                const handleSnapshot = (snapshot) => {
+                const targetFilters = queryPlan.targets.map((filters) => (
+                    hasDateScope
+                        ? [
+                            ...filters,
+                            { field: dateScopeField, operator: '>=', value: dateScopeStart },
+                            { field: dateScopeField, operator: '<', value: dateScopeEnd },
+                        ]
+                        : filters
+                ));
+                const targetSnapshots = new Map();
+                const receivedTargets = new Set();
+                const handleSnapshot = (targetIndex, snapshot) => {
                     if (!isMounted) return;
                     if (!shouldApplyCollectionSnapshot({
                         requireServerSnapshot,
                         fromCache: snapshot.metadata.fromCache,
                     })) return;
-                    const serverItems = [];
-                    snapshot.forEach(docSnap => serverItems.push(docSnap.data()));
+                    const targetItems = [];
+                    snapshot.forEach((docSnap) => {
+                        const item = docSnap.data();
+                        targetItems.push(item?.[documentIdField]
+                            ? item
+                            : { ...item, [documentIdField]: docSnap.id });
+                    });
+                    targetSnapshots.set(targetIndex, targetItems);
+                    receivedTargets.add(targetIndex);
+                    if (receivedTargets.size !== targetFilters.length) return;
+
+                    const serverItemsById = new Map();
+                    targetSnapshots.forEach((items) => {
+                        items.forEach((item) => serverItemsById.set(item[documentIdField], item));
+                    });
+                    const serverItems = [...serverItemsById.values()];
 
                     const nextItems = reconcileCollectionSnapshot({
                         currentItems: dataRef.current,
@@ -1795,14 +1823,25 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
                     console.warn(`Sync info for ${collectionName}: Working offline.`);
                     if (isMounted) setIsLoaded(true);
                 };
-                unsubscribe = requireServerSnapshot
-                    ? onSnapshot(
-                        listenTarget,
-                        { includeMetadataChanges: true },
-                        handleSnapshot,
-                        handleSnapshotError,
-                    )
-                    : onSnapshot(listenTarget, handleSnapshot, handleSnapshotError);
+                unsubscribes = targetFilters.map((filters, targetIndex) => {
+                    const listenTarget = filters.length > 0
+                        ? query(colRef, ...filters.map((filter) => (
+                            where(filter.field, filter.operator, filter.value)
+                        )))
+                        : colRef;
+                    return requireServerSnapshot
+                        ? onSnapshot(
+                            listenTarget,
+                            { includeMetadataChanges: true },
+                            (snapshot) => handleSnapshot(targetIndex, snapshot),
+                            handleSnapshotError,
+                        )
+                        : onSnapshot(
+                            listenTarget,
+                            (snapshot) => handleSnapshot(targetIndex, snapshot),
+                            handleSnapshotError,
+                        );
+                });
 
             } catch (err) {
                 console.warn(`Init info for ${collectionName}: Working offline or network unavailable.`);
@@ -1814,12 +1853,12 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
 
         return () => {
             isMounted = false;
-            unsubscribe();
+            unsubscribes.forEach((unsubscribe) => unsubscribe());
         };
-    }, [db, appId, fbUser, collectionName, localKey, rootCollection, requireServerSnapshot, dateScopeField, dateScopeStart, dateScopeEnd, documentIdField]);
+    }, [db, appId, fbUser, collectionName, localKey, rootCollection, requireServerSnapshot, dateScopeField, dateScopeStart, dateScopeEnd, documentIdField, queryPlanKey]);
 
     const setPersistentValue = async (newValueOrUpdater, isRestore = false) => {
-        const oldValue = dataRef.current;
+        const oldValue = filterItemsForQueryPlan(dataRef.current, queryPlan);
         const newValue = typeof newValueOrUpdater === 'function' ? newValueOrUpdater(oldValue) : newValueOrUpdater;
         
         setData(newValue);
@@ -1985,7 +2024,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
         }
     };
 
-    return [data, setPersistentValue, isLoaded, true];
+    return [filterItemsForQueryPlan(data, queryPlan), setPersistentValue, isLoaded, true];
 }
 
 const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
@@ -2033,8 +2072,9 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
 
     // Use a unique collection for each project's central fee data to prevent mixing
     const statusColRef = collection(db, 'artifacts', appId, 'public', 'data', `house_statuses_${selectedProject.id}`);
+    const statusQuery = query(statusColRef, where('projectId', '==', selectedProject.id));
     
-    const unsubscribeStatuses = onSnapshot(statusColRef, (snapshot) => {
+    const unsubscribeStatuses = onSnapshot(statusQuery, (snapshot) => {
       const loadedStatuses = {};
       const loadedNotes = {};
       const loadedHistories = {};
@@ -2214,12 +2254,21 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
                 for (let i = 0; i < totalChunks; i++) {
                     const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `central_fee_raw_${selectedProject.id}_${i}`);
                     const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                    await setDoc(chunkRef, { chunk: chunkData });
+                    await setDoc(chunkRef, {
+                        chunk: chunkData,
+                        projectId: selectedProject.id,
+                        menuId: 'proj_centralfee',
+                    });
                     await new Promise(r => setTimeout(r, 10)); // พัก UI
                 }
 
                 const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', `central_fee_raw_${selectedProject.id}`);
-                await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
+                await setDoc(metaRef, {
+                    totalChunks,
+                    timestamp: Date.now(),
+                    projectId: selectedProject.id,
+                    menuId: 'proj_centralfee',
+                });
             };
 
             syncData().then(() => {
@@ -2454,6 +2503,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
           
           await setDoc(docRef, {
             houseNo: selectedHouse.houseNo,
+            projectId: selectedProject.id,
             status: finalStatusToSave,
             note: tempNote,
             history: historyToSave,
@@ -3796,7 +3846,21 @@ export default function App() {
 
   // --- NEW: Meeting Gantt Plans State ---
   const INITIAL_GANTT_PLANS = [];
-  const [meetingGanttPlans, setMeetingGanttPlans] = usePersistentCollection('bmg_meeting_gantt_plans', INITIAL_GANTT_PLANS, subscriptionPolicy.userFor('bmg_meeting_gantt_plans'));
+  const [meetingGanttPlans, setMeetingGanttPlans] = usePersistentCollection(
+      'bmg_meeting_gantt_plans',
+      INITIAL_GANTT_PLANS,
+      subscriptionPolicy.userFor('bmg_meeting_gantt_plans'),
+      {
+          queryPlan: USE_FIREBASE_BUSINESS_AUTH
+              ? createFirestoreCollectionQueryPlan({
+                  collectionName: 'bmg_meeting_gantt_plans',
+                  currentUser,
+                  selectedProject,
+                  accessibleProjects: selectedProject ? [selectedProject] : [],
+              })
+              : { kind: 'unscoped', targets: [[]] },
+      },
+  );
   const [editingGanttPlan, setEditingGanttPlan] = useState(null);
   const [ganttPaintMode, setGanttPaintMode] = useState(null); // 'add', 'remove', null
   const [ganttSelectedColor, setGanttSelectedColor] = useState('bg-orange-500');
@@ -3867,7 +3931,17 @@ export default function App() {
       USE_FIREBASE_BUSINESS_AUTH ? [] : INITIAL_USERS,
       subscriptionPolicy.userFor(USE_FIREBASE_BUSINESS_AUTH ? 'users' : 'bmg_users'),
       USE_FIREBASE_BUSINESS_AUTH
-          ? { rootCollection: true, documentIdField: 'authUid', localKey: 'bmg_user_profiles_v2', readOnly: true, requireServerSnapshot: true }
+          ? {
+              rootCollection: true,
+              documentIdField: 'authUid',
+              localKey: 'bmg_user_profiles_v2',
+              readOnly: true,
+              requireServerSnapshot: true,
+              queryPlan: createFirestoreCollectionQueryPlan({
+                  collectionName: 'users',
+                  currentUser,
+              }),
+          }
           : {},
   );
   const dashboardDailyReportScope = useMemo(
@@ -3877,7 +3951,19 @@ export default function App() {
   const dailyReportScope = activeMenu === 'dashboard'
       ? dashboardDailyReportScope
       : currentMonthScope;
-  const [projects, setProjects, isProjectsLoaded] = usePersistentCollection('bmg_projects', INITIAL_PROJECTS, subscriptionPolicy.userFor('bmg_projects'));
+  const [projects, setProjects, isProjectsLoaded] = usePersistentCollection(
+      'bmg_projects',
+      INITIAL_PROJECTS,
+      subscriptionPolicy.userFor('bmg_projects'),
+      {
+          queryPlan: USE_FIREBASE_BUSINESS_AUTH
+              ? createFirestoreCollectionQueryPlan({
+                  collectionName: 'bmg_projects',
+                  currentUser,
+              })
+              : { kind: 'unscoped', targets: [[]] },
+      },
+  );
   const postAuthDestination = useMemo(() => resolvePostAuthDestination({
       user: currentUser,
       projects,
@@ -3887,6 +3973,17 @@ export default function App() {
       user: currentUser,
       projects,
   }), [currentUser, projects]);
+  const queryPlanFor = (collectionName, extra = {}) => (
+      USE_FIREBASE_BUSINESS_AUTH
+          ? createFirestoreCollectionQueryPlan({
+              collectionName,
+              currentUser,
+              selectedProject,
+              accessibleProjects,
+              ...extra,
+          })
+          : { kind: 'unscoped', targets: [[]] }
+  );
 
   useEffect(() => {
       if (postAuthDestination.kind !== 'assigned-project') return;
@@ -3896,39 +3993,45 @@ export default function App() {
       setActiveMenu('projects');
       setProjectTab('overview');
   }, [postAuthDestination.kind, postAuthDestination.project, selectedProject?.id]);
-  const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, subscriptionPolicy.userFor('bmg_contracts'));
-  const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, subscriptionPolicy.userFor('bmg_audits'));
+  const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, subscriptionPolicy.userFor('bmg_contracts'), { queryPlan: queryPlanFor('bmg_contracts') });
+  const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, subscriptionPolicy.userFor('bmg_audits'), { queryPlan: queryPlanFor('bmg_audits') });
   const [dailyReports, setDailyReports] = usePersistentCollection(
       'bmg_dailyReports',
       INITIAL_DAILY_REPORTS,
       subscriptionPolicy.userFor('bmg_dailyReports'),
-      shouldScopeHeavyHistory ? { dateScope: dailyReportScope } : {},
+      {
+          ...(shouldScopeHeavyHistory ? { dateScope: dailyReportScope } : {}),
+          queryPlan: queryPlanFor('bmg_dailyReports'),
+      },
   );
-  const [repairs, setRepairs] = usePersistentCollection('bmg_repairs', INITIAL_REPAIRS, subscriptionPolicy.userFor('bmg_repairs'));
-  const [contractors, setContractors] = usePersistentCollection('bmg_contractors', INITIAL_CONTRACTORS, subscriptionPolicy.userFor('bmg_contractors'));
-  const [assets, setAssets] = usePersistentCollection('bmg_assets', INITIAL_ASSETS, subscriptionPolicy.userFor('bmg_assets'));
-  const [tools, setTools] = usePersistentCollection('bmg_tools', INITIAL_TOOLS, subscriptionPolicy.userFor('bmg_tools'));
-  const [machines, setMachines] = usePersistentCollection('bmg_machines', INITIAL_MACHINES, subscriptionPolicy.userFor('bmg_machines'));
-  const [pmPlans, setPmPlans] = usePersistentCollection('bmg_pmPlans', INITIAL_PM_PLANS, subscriptionPolicy.userFor('bmg_pmPlans'));
+  const [repairs, setRepairs] = usePersistentCollection('bmg_repairs', INITIAL_REPAIRS, subscriptionPolicy.userFor('bmg_repairs'), { queryPlan: queryPlanFor('bmg_repairs') });
+  const [contractors, setContractors] = usePersistentCollection('bmg_contractors', INITIAL_CONTRACTORS, subscriptionPolicy.userFor('bmg_contractors'), { queryPlan: queryPlanFor('bmg_contractors') });
+  const [assets, setAssets] = usePersistentCollection('bmg_assets', INITIAL_ASSETS, subscriptionPolicy.userFor('bmg_assets'), { queryPlan: queryPlanFor('bmg_assets') });
+  const [tools, setTools] = usePersistentCollection('bmg_tools', INITIAL_TOOLS, subscriptionPolicy.userFor('bmg_tools'), { queryPlan: queryPlanFor('bmg_tools') });
+  const [machines, setMachines] = usePersistentCollection('bmg_machines', INITIAL_MACHINES, subscriptionPolicy.userFor('bmg_machines'), { queryPlan: queryPlanFor('bmg_machines') });
+  const [pmPlans, setPmPlans] = usePersistentCollection('bmg_pmPlans', INITIAL_PM_PLANS, subscriptionPolicy.userFor('bmg_pmPlans'), { queryPlan: queryPlanFor('bmg_pmPlans') });
   const [pmHistoryList, setPmHistoryList] = usePersistentCollection(
       'bmg_pmHistoryList',
       INITIAL_PM_HISTORY,
       subscriptionPolicy.userFor('bmg_pmHistoryList'),
-      shouldScopeHeavyHistory ? { dateScope: currentMonthScope } : {},
+      {
+          ...(shouldScopeHeavyHistory ? { dateScope: currentMonthScope } : {}),
+          queryPlan: queryPlanFor('bmg_pmHistoryList'),
+      },
   );
-  const [meters, setMeters] = usePersistentCollection('bmg_meters', INITIAL_METERS, subscriptionPolicy.userFor('bmg_meters'));
-  const [utilityReadings, setUtilityReadings] = usePersistentCollection('bmg_utilityReadings', INITIAL_READINGS, subscriptionPolicy.userFor('bmg_utilityReadings'));
-  const [actionPlans, setActionPlans] = usePersistentCollection('bmg_actionPlans', INITIAL_ACTION_PLANS, subscriptionPolicy.userFor('bmg_actionPlans'));
-  const [othersData, setOthersData] = usePersistentCollection('bmg_othersData', INITIAL_OTHERS, subscriptionPolicy.userFor('bmg_othersData'));
-  const [formsList, setFormsList] = usePersistentCollection('bmg_forms_list', STANDARD_FORMS, subscriptionPolicy.userFor('bmg_forms_list'));
-  const [meetingsList, setMeetingsList] = usePersistentCollection('bmg_meetings', INITIAL_MEETINGS, subscriptionPolicy.userFor('bmg_meetings'));
-  const [announcements, setAnnouncements] = usePersistentCollection('bmg_announcements', INITIAL_ANNOUNCEMENTS, subscriptionPolicy.userFor('bmg_announcements'));
-  const [deposits, setDeposits] = usePersistentCollection('bmg_deposits', INITIAL_DEPOSITS, subscriptionPolicy.userFor('bmg_deposits'));
-  const [inventoryList, setInventoryList] = usePersistentCollection('bmg_inventory', INITIAL_INVENTORY, subscriptionPolicy.userFor('bmg_inventory'));
-  const [inventoryTransactions, setInventoryTransactions] = usePersistentCollection('bmg_inventory_transactions', INITIAL_TRANSACTIONS, subscriptionPolicy.userFor('bmg_inventory_transactions'));
+  const [meters, setMeters] = usePersistentCollection('bmg_meters', INITIAL_METERS, subscriptionPolicy.userFor('bmg_meters'), { queryPlan: queryPlanFor('bmg_meters') });
+  const [utilityReadings, setUtilityReadings] = usePersistentCollection('bmg_utilityReadings', INITIAL_READINGS, subscriptionPolicy.userFor('bmg_utilityReadings'), { queryPlan: queryPlanFor('bmg_utilityReadings', { meters }) });
+  const [actionPlans, setActionPlans] = usePersistentCollection('bmg_actionPlans', INITIAL_ACTION_PLANS, subscriptionPolicy.userFor('bmg_actionPlans'), { queryPlan: queryPlanFor('bmg_actionPlans') });
+  const [othersData, setOthersData] = usePersistentCollection('bmg_othersData', INITIAL_OTHERS, subscriptionPolicy.userFor('bmg_othersData'), { queryPlan: queryPlanFor('bmg_othersData') });
+  const [formsList, setFormsList] = usePersistentCollection('bmg_forms_list', STANDARD_FORMS, subscriptionPolicy.userFor('bmg_forms_list'), { queryPlan: queryPlanFor('bmg_forms_list') });
+  const [meetingsList, setMeetingsList] = usePersistentCollection('bmg_meetings', INITIAL_MEETINGS, subscriptionPolicy.userFor('bmg_meetings'), { queryPlan: queryPlanFor('bmg_meetings') });
+  const [announcements, setAnnouncements] = usePersistentCollection('bmg_announcements', INITIAL_ANNOUNCEMENTS, subscriptionPolicy.userFor('bmg_announcements'), { queryPlan: queryPlanFor('bmg_announcements') });
+  const [deposits, setDeposits] = usePersistentCollection('bmg_deposits', INITIAL_DEPOSITS, subscriptionPolicy.userFor('bmg_deposits'), { queryPlan: queryPlanFor('bmg_deposits') });
+  const [inventoryList, setInventoryList] = usePersistentCollection('bmg_inventory', INITIAL_INVENTORY, subscriptionPolicy.userFor('bmg_inventory'), { queryPlan: queryPlanFor('bmg_inventory') });
+  const [inventoryTransactions, setInventoryTransactions] = usePersistentCollection('bmg_inventory_transactions', INITIAL_TRANSACTIONS, subscriptionPolicy.userFor('bmg_inventory_transactions'), { queryPlan: queryPlanFor('bmg_inventory_transactions') });
 
   // --- NEW: Meeting Invitations State ---
-  const [meetingInvitations, setMeetingInvitations] = usePersistentCollection('bmg_meeting_invitations', [], subscriptionPolicy.userFor('bmg_meeting_invitations'));
+  const [meetingInvitations, setMeetingInvitations] = usePersistentCollection('bmg_meeting_invitations', [], subscriptionPolicy.userFor('bmg_meeting_invitations'), { queryPlan: queryPlanFor('bmg_meeting_invitations') });
   const [showAddInvitationModal, setShowAddInvitationModal] = useState(false);
   const [selectedInvitationView, setSelectedInvitationView] = useState(null); // NEW: State สำหรับเก็บข้อมูลหนังสือเชิญที่ถูกเลือกดู
   const [newInvitation, setNewInvitation] = useState({
@@ -3942,7 +4045,7 @@ export default function App() {
   });
 
   // --- NEW: Meeting Proxies State ---
-  const [meetingProxies, setMeetingProxies] = usePersistentCollection('bmg_meeting_proxies', [], subscriptionPolicy.userFor('bmg_meeting_proxies'));
+  const [meetingProxies, setMeetingProxies] = usePersistentCollection('bmg_meeting_proxies', [], subscriptionPolicy.userFor('bmg_meeting_proxies'), { queryPlan: queryPlanFor('bmg_meeting_proxies') });
   const [showAddProxyModal, setShowAddProxyModal] = useState(false);
   const [selectedProxyView, setSelectedProxyView] = useState(null);
   const [newProxy, setNewProxy] = useState({
@@ -3957,7 +4060,7 @@ export default function App() {
   });
 
   // --- NEW: Meetings Tab ---
-  const [meetingBallots, setMeetingBallots] = usePersistentCollection('bmg_meeting_ballots', [], subscriptionPolicy.userFor('bmg_meeting_ballots'));
+  const [meetingBallots, setMeetingBallots] = usePersistentCollection('bmg_meeting_ballots', [], subscriptionPolicy.userFor('bmg_meeting_ballots'), { queryPlan: queryPlanFor('bmg_meeting_ballots') });
   const [showAddBallotModal, setShowAddBallotModal] = useState(false);
   const [selectedBallotView, setSelectedBallotView] = useState(null);
   const [newBallot, setNewBallot] = useState({
@@ -3973,14 +4076,14 @@ export default function App() {
 
   // --- NEW: Extended Meeting States ---
   const [selectedMeetingManageId, setSelectedMeetingManageId] = useState('');
-  const [meetingAttendances, setMeetingAttendances] = usePersistentCollection('bmg_meeting_attendances', [], subscriptionPolicy.userFor('bmg_meeting_attendances'));
-  const [meetingAgendas, setMeetingAgendas] = usePersistentCollection('bmg_meeting_agendas', [], subscriptionPolicy.userFor('bmg_meeting_agendas'));
+  const [meetingAttendances, setMeetingAttendances] = usePersistentCollection('bmg_meeting_attendances', [], subscriptionPolicy.userFor('bmg_meeting_attendances'), { queryPlan: queryPlanFor('bmg_meeting_attendances') });
+  const [meetingAgendas, setMeetingAgendas] = usePersistentCollection('bmg_meeting_agendas', [], subscriptionPolicy.userFor('bmg_meeting_agendas'), { queryPlan: queryPlanFor('bmg_meeting_agendas') });
   const [landDocsChecklist, setLandDocsChecklist] = usePersistentState('bmg_meeting_land_docs', {}, subscriptionPolicy.userFor('bmg_meeting_land_docs'));
   const [newAttendance, setNewAttendance] = useState({ unitNo: '', ownerName: '', attendeeName: '', type: 'เจ้าของร่วม', weight: 1 });
   const [newAgendaTitle, setNewAgendaTitle] = useState('');
 
   // --- NEW: Project Events (Calendar) State ---
-  const [projectEvents, setProjectEvents] = usePersistentCollection('bmg_project_events', [], subscriptionPolicy.userFor('bmg_project_events'));
+  const [projectEvents, setProjectEvents] = usePersistentCollection('bmg_project_events', [], subscriptionPolicy.userFor('bmg_project_events'), { queryPlan: queryPlanFor('bmg_project_events') });
   const [showAddEventModal, setShowAddEventModal] = useState(false);
   const [currentEventMonth, setCurrentEventMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [selectedEventDate, setSelectedEventDate] = useState(() => new Date().toISOString().split('T')[0]);

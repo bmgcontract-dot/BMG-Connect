@@ -43,6 +43,11 @@ service cloud.firestore {
         );
     }
 
+    function canAccessProjectReference(collectionName, projectId) {
+      return (collectionName == 'bmg_announcements_docs' && projectId == 'All')
+        || canAccessProjectId(projectId);
+    }
+
     function isBmgApp(appId) {
       return appId == 'bmg-app-prod';
     }
@@ -148,6 +153,25 @@ service cloud.firestore {
         && canAccessProjectId(meterProjectId(meterId));
     }
 
+    function isCentralFeeStatusCollection(collectionName) {
+      return collectionName.matches('house_statuses_.*');
+    }
+
+    function isAllowedScopedState(data) {
+      return data.projectId is string
+        && data.projectId != ''
+        && data.menuId in ['proj_centralfee', 'proj_schedule']
+        && canAccessProjectId(data.projectId);
+    }
+
+    function canReadScopedState(data) {
+      return isAllowedScopedState(data) && hasPermission(data.menuId, 'view');
+    }
+
+    function canWriteScopedState(data, action) {
+      return isAllowedScopedState(data) && hasPermission(data.menuId, action);
+    }
+
     match /users/{userId} {
       allow get, list: if isSignedIn()
         && (
@@ -176,7 +200,7 @@ service cloud.firestore {
         && isProjectCollection(collectionName)
         && resource.data.get('projectId', '') is string
         && resource.data.get('projectId', '') != ''
-        && canAccessProjectId(resource.data.get('projectId', ''))
+        && canAccessProjectReference(collectionName, resource.data.get('projectId', ''))
         && canReadProjectCollection(collectionName);
 
       allow create: if isBmgApp(appId)
@@ -184,7 +208,7 @@ service cloud.firestore {
         && isProjectCollection(collectionName)
         && request.resource.data.get('projectId', '') is string
         && request.resource.data.get('projectId', '') != ''
-        && canAccessProjectId(request.resource.data.get('projectId', ''))
+        && canAccessProjectReference(collectionName, request.resource.data.get('projectId', ''))
         && hasPermission(menuForCollection(collectionName), 'save');
 
       allow update: if isBmgApp(appId)
@@ -194,8 +218,8 @@ service cloud.firestore {
         && request.resource.data.get('projectId', '') is string
         && resource.data.get('projectId', '') != ''
         && request.resource.data.get('projectId', '') != ''
-        && canAccessProjectId(resource.data.get('projectId', ''))
-        && canAccessProjectId(request.resource.data.get('projectId', ''))
+        && canAccessProjectReference(collectionName, resource.data.get('projectId', ''))
+        && canAccessProjectReference(collectionName, request.resource.data.get('projectId', ''))
         && hasPermission(menuForCollection(collectionName), 'edit');
 
       allow delete: if isBmgApp(appId)
@@ -203,7 +227,7 @@ service cloud.firestore {
         && isProjectCollection(collectionName)
         && resource.data.get('projectId', '') is string
         && resource.data.get('projectId', '') != ''
-        && canAccessProjectId(resource.data.get('projectId', ''))
+        && canAccessProjectReference(collectionName, resource.data.get('projectId', ''))
         && hasPermission(menuForCollection(collectionName), 'delete');
     }
 
@@ -235,6 +259,60 @@ service cloud.firestore {
       allow create: if isBmgApp(appId) && isActiveBusinessUser() && hasPermission('proj_forms', 'save');
       allow update: if isBmgApp(appId) && isActiveBusinessUser() && hasPermission('proj_forms', 'edit');
       allow delete: if isBmgApp(appId) && isActiveBusinessUser() && hasPermission('proj_forms', 'delete');
+    }
+
+    match /artifacts/{appId}/public/data/{statusCollection}/{statusId} {
+      allow read: if isBmgApp(appId)
+        && isActiveBusinessUser()
+        && isCentralFeeStatusCollection(statusCollection)
+        && resource.data.projectId is string
+        && canAccessProjectId(resource.data.projectId)
+        && hasPermission('proj_centralfee', 'view');
+      allow create: if isBmgApp(appId)
+        && isActiveBusinessUser()
+        && isCentralFeeStatusCollection(statusCollection)
+        && request.resource.data.projectId is string
+        && canAccessProjectId(request.resource.data.projectId)
+        && hasPermission('proj_centralfee', 'save');
+      allow update: if isBmgApp(appId)
+        && isActiveBusinessUser()
+        && isCentralFeeStatusCollection(statusCollection)
+        && resource.data.projectId is string
+        && request.resource.data.projectId == resource.data.projectId
+        && canAccessProjectId(resource.data.projectId)
+        && hasPermission('proj_centralfee', 'edit');
+      allow delete: if isBmgApp(appId)
+        && isActiveBusinessUser()
+        && isCentralFeeStatusCollection(statusCollection)
+        && resource.data.projectId is string
+        && canAccessProjectId(resource.data.projectId)
+        && hasPermission('proj_centralfee', 'delete');
+    }
+
+    match /artifacts/{appId}/public/data/app_state/{stateId} {
+      allow read: if isBmgApp(appId) && isActiveBusinessUser() && canReadScopedState(resource.data);
+      allow create: if isBmgApp(appId) && isActiveBusinessUser()
+        && canWriteScopedState(request.resource.data, 'save');
+      allow update: if isBmgApp(appId) && isActiveBusinessUser()
+        && canWriteScopedState(resource.data, 'edit')
+        && canWriteScopedState(request.resource.data, 'edit')
+        && request.resource.data.projectId == resource.data.projectId
+        && request.resource.data.menuId == resource.data.menuId;
+      allow delete: if isBmgApp(appId) && isActiveBusinessUser()
+        && canWriteScopedState(resource.data, 'delete');
+    }
+
+    match /artifacts/{appId}/public/data/app_state_chunks/{chunkId} {
+      allow read: if isBmgApp(appId) && isActiveBusinessUser() && canReadScopedState(resource.data);
+      allow create: if isBmgApp(appId) && isActiveBusinessUser()
+        && canWriteScopedState(request.resource.data, 'save');
+      allow update: if isBmgApp(appId) && isActiveBusinessUser()
+        && canWriteScopedState(resource.data, 'edit')
+        && canWriteScopedState(request.resource.data, 'edit')
+        && request.resource.data.projectId == resource.data.projectId
+        && request.resource.data.menuId == resource.data.menuId;
+      allow delete: if isBmgApp(appId) && isActiveBusinessUser()
+        && canWriteScopedState(resource.data, 'delete');
     }
 
     match /artifacts/{appId}/public/data/{document=**} {
