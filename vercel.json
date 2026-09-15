@@ -1,7 +1,7 @@
 {
   "rewrites": [
     {
-      "source": "/health-probe",
+      "source": "/foo",
       "destination": "/api/health-probe"
     }
   ]
