@@ -135,6 +135,17 @@ Preview ใช้ Firebase Production จริง การทดสอบเ�
 - ระหว่างการตรวจพบ Auth total เพิ่มจาก baseline 917 เป็น 920 ก่อนสร้างบัญชีทดสอบ โดยหน้า Firebase แสดง anonymous records ใหม่วันที่ 15 กันยายน 2026 จำนวนอย่างน้อย 3 รายการ; clean Preview ที่ล็อกอิน Admin ไม่ได้สร้าง anonymous user แต่ยังต้องสืบหา traffic จาก Production/Preview เก่าหรือ client อื่นแยกต่างหาก
 - หาก Node 22 ยังเกิด `ERR_REQUIRE_ESM` ให้ rollback เฉพาะ Preview ไป deployment `BnR6Yw5KzaLauggi1qDf9ER8EwFM` และพิจารณาตรึง dependency/ปรับ ESM bundling ใน Preview ใหม่; ห้าม promote Production
 
+### Restricted-account activation and refresh blocker
+
+- เปิดใช้งานบัญชีทดสอบ `TEST-260915` สำเร็จผ่าน Admin API: Firebase Authentication มี record เดียว UID `ga3jDpeuGDZyRVpevSQmQ5yERRD2`, หน้า BMG แสดงสถานะ `ใช้งาน`, และ Vercel runtime log ของ PATCH เป็น HTTP 200 โดย Warning/Error/Fatal เท่ากับ 0
+- Preview ของ fix ค่าเริ่มต้นบัญชีใหม่: deployment `Wgn4uKZqHC4D1yMQZ3vgV2uiZcUq`, URL `https://bmg-connect-al0ibzlng-bmgcontract-6324s-projects.vercel.app`, source `7893e50`; build Ready และหน้า login ไม่มี runtime error
+- restricted login ครั้งแรกผ่านและเปิด `โครงการทดสอบ` ได้ แต่พบปุ่มส่งออก CSV และพิมพ์/PDF ทั้งที่ permission `print` เป็น false จึงบันทึกเป็น permission-UI follow-up แยกต่างหาก
+- refresh ของ restricted account ไม่ผ่าน release gate: Firebase session/profile กลับมาสำเร็จ แต่ UI ไม่เลือกโครงการที่สังกัด กลับแสดง corporate dashboard และข้อความว่าไม่พบหน่วยงาน จึงหยุดไว้ที่ Preview และไม่ promote Production
+- สาเหตุยืนยันจากโค้ด: login handler เลือก assigned project ให้เฉพาะตอน submit login ขณะที่ `onAuthStateChanged` restore ตั้งเพียง `currentUser`; `selectedProject` จึงคงเป็น null หลัง reload และ `activeMenu` เริ่มต้นเป็น dashboard
+- แก้แบบ test-first ผ่าน public seam `resolvePostAuthDestination`: restricted user ต้องรอ project snapshot อย่างปลอดภัย, เข้าโครงการที่ชื่อตรงเมื่อข้อมูลพร้อม และห้าม fallback ไป corporate dashboard เมื่อหาโครงการไม่พบ
+- local gate ของ commit `3ff455d`: regression tests ใหม่ 4/4, test รวม 36/36, production build ผ่าน; lint ยังรันไม่ได้เพราะไม่มี executable `eslint` ใน dependencies
+- commit ยังไม่ได้ push: ระบบความปลอดภัยหยุดการส่ง private project source ไป GitHub จนกว่าเจ้าของจะยืนยัน external source egress ไป remote นั้นโดยเฉพาะ จึงยังไม่มี Preview สำหรับทดสอบ refresh ของ fix นี้
+
 ## Release procedure
 
 1. สร้าง Preview จาก branch ที่ commit แล้ว และตรวจ build logs
