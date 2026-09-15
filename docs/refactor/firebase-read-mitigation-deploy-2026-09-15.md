@@ -156,6 +156,16 @@ Preview ใช้ Firebase Production จริง การทดสอบเ�
 - พบข้อมูลโครงการทั้งหมด 27 documents ขณะที่ baseline เดิม 25 และเพิ่ม test document ที่ยืนยันแล้ว 1 รายการ; UI ของ restricted account นับ accessible projects เป็น 2 จึงต้องตรวจ document ID/ชื่อของรายการที่เพิ่มอีกหนึ่งรายการให้ชัดก่อน cleanup ห้ามอนุมานและห้ามลบจากชื่อซ้ำโดยยังไม่ระบุ exact document
 - Production ยังคง `https://bmg-connect.vercel.app` deployment `FcaoqPLPsLG4wibz6v3XEmrQE3iD` source `eac28fd` และยังไม่ถูก promote/rollback/แก้ domain
 
+### Firestore security preflight (steps 1–4)
+
+- ยืนยันรายการซ้ำแบบ exact query แล้ว: `dhtc5355v` และ `tst260915` ต่างมี code `O-002` และชื่อ `โครงการทดสอบ`; ยังไม่ลบรายการใด
+- Authentication 921 บัญชี แบ่งเป็น anonymous 858 และ email 63; Anonymous provider ยัง Enabled
+- managed export ทั้งฐานข้อมูลสำเร็จ 35,798 documents, 1.58 GB ที่ `bmg-connect-3e99a.firebasestorage.app/2026-09-15T14:32:04_36710`
+- บันทึก Rules/Indexes Production เดิมใน `docs/refactor/config-snapshots/` แล้ว
+- เพิ่ม Rules ฉบับร่างและ Firestore Emulator tests แบบ fail-closed; Rules tests ผ่าน 13/13, application tests ผ่าน 42/42 และ production build ผ่าน
+- ห้าม deploy Rules ฉบับร่างตอนนี้: tests ยืนยันว่า client ต้องเปลี่ยน unscoped listeners เป็น project-scoped queries ก่อน มิฉะนั้นหน้าของผู้ใช้จำกัดสิทธิ์จะถูก Rules ปฏิเสธทั้ง query
+- รายละเอียดและ checklist ขั้นถัดไปอยู่ใน `firestore-security-preflight-2026-09-15.md`
+
 ## Release procedure
 
 1. สร้าง Preview จาก branch ที่ commit แล้ว และตรวจ build logs
@@ -191,8 +201,8 @@ Release นี้ไม่เปลี่ยน schema, Rules หรือข้
 ## งานที่ยังไม่รวมใน release นี้
 
 - project-scoped queries, limits และ pagination (release นี้เพิ่มเฉพาะ date scope สำหรับสอง collection ขนาดใหญ่บน Dashboard/ภาพรวมโครงการ)
-- export/version Firestore Rules และ indexes
-- Firebase Emulator Rules tests
+- ปรับ client subscriptions ให้เป็น project-scoped queries และทดสอบ app จริงกับ Emulator seed
+- ทำ non-production restore drill จาก managed export ที่สร้างแล้ว
 - Query Insights และ budget alerts
 - ปิด Anonymous provider และลบบัญชีเก่า
 - เพิ่ม auth-loading screen ระหว่าง `onAuthStateChanged` restore เพื่อไม่ให้หน้า Login กระพริบชั่วครู่หลัง refresh

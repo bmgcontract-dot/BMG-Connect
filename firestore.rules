@@ -1,0 +1,248 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isActiveBusinessUser() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && userProfile().status == 'Active'
+        && userProfile().authUid == request.auth.uid;
+    }
+
+    function isAdmin() {
+      return isActiveBusinessUser() && request.auth.token.get('admin', false) == true;
+    }
+
+    function canAccessProjectName(projectName) {
+      let profile = userProfile();
+      return isAdmin()
+        || profile.department == projectName
+        || (
+          profile.accessibleDepts is list
+          && (
+            'All' in profile.accessibleDepts
+            || projectName in profile.accessibleDepts
+          )
+        );
+    }
+
+    function canAccessProjectId(projectId) {
+      let projectPath = /databases/$(database)/documents/artifacts/bmg-app-prod/public/data/bmg_projects_docs/$(projectId);
+      return isAdmin()
+        || (
+          exists(projectPath)
+          && canAccessProjectName(get(projectPath).data.name)
+        );
+    }
+
+    function isBmgApp(appId) {
+      return appId == 'bmg-app-prod';
+    }
+
+    function hasPermission(menuId, action) {
+      let profile = userProfile();
+      return isAdmin()
+        || (
+          profile.permissions is map
+          && profile.permissions.get(menuId, {}).get(action, false) == true
+        );
+    }
+
+    function isProjectCollection(collectionName) {
+      return collectionName in [
+        'bmg_contracts_docs',
+        'bmg_audits_docs',
+        'bmg_dailyReports_docs',
+        'bmg_repairs_docs',
+        'bmg_contractors_docs',
+        'bmg_assets_docs',
+        'bmg_tools_docs',
+        'bmg_machines_docs',
+        'bmg_pmPlans_docs',
+        'bmg_pmHistoryList_docs',
+        'bmg_meters_docs',
+        'bmg_utilityReadings_docs',
+        'bmg_actionPlans_docs',
+        'bmg_othersData_docs',
+        'bmg_forms_list_docs',
+        'bmg_meetings_docs',
+        'bmg_announcements_docs',
+        'bmg_deposits_docs',
+        'bmg_inventory_docs',
+        'bmg_inventory_transactions_docs',
+        'bmg_meeting_gantt_plans_docs',
+        'bmg_meeting_invitations_docs',
+        'bmg_meeting_proxies_docs',
+        'bmg_meeting_ballots_docs',
+        'bmg_meeting_attendances_docs',
+        'bmg_meeting_agendas_docs',
+        'bmg_project_events_docs'
+      ];
+    }
+
+    function menuForCollection(collectionName) {
+      return collectionName == 'bmg_contracts_docs' ? 'proj_contracts'
+        : collectionName == 'bmg_audits_docs' ? 'proj_audit'
+        : collectionName == 'bmg_dailyReports_docs' ? 'proj_daily'
+        : collectionName == 'bmg_repairs_docs' ? 'proj_repair'
+        : collectionName == 'bmg_contractors_docs' ? 'proj_contractors'
+        : collectionName == 'bmg_assets_docs' ? 'proj_assets'
+        : collectionName == 'bmg_tools_docs' ? 'proj_tools'
+        : collectionName in ['bmg_machines_docs', 'bmg_pmPlans_docs', 'bmg_pmHistoryList_docs'] ? 'proj_pm'
+        : collectionName in ['bmg_meters_docs', 'bmg_utilityReadings_docs'] ? 'proj_utilities'
+        : collectionName == 'bmg_actionPlans_docs' ? 'proj_action'
+        : collectionName == 'bmg_othersData_docs' ? 'proj_others'
+        : collectionName == 'bmg_forms_list_docs' ? 'proj_forms'
+        : collectionName in [
+          'bmg_meetings_docs',
+          'bmg_meeting_gantt_plans_docs',
+          'bmg_meeting_invitations_docs',
+          'bmg_meeting_proxies_docs',
+          'bmg_meeting_ballots_docs',
+          'bmg_meeting_attendances_docs',
+          'bmg_meeting_agendas_docs'
+        ] ? 'proj_meeting'
+        : collectionName in ['bmg_deposits_docs', 'bmg_inventory_docs', 'bmg_inventory_transactions_docs'] ? 'proj_inventory'
+        : collectionName == 'bmg_announcements_docs' ? 'announcements'
+        : collectionName == 'bmg_project_events_docs' ? 'proj_overview'
+        : 'projects';
+    }
+
+    function isOverviewCollection(collectionName) {
+      return collectionName in [
+        'bmg_contracts_docs',
+        'bmg_audits_docs',
+        'bmg_dailyReports_docs',
+        'bmg_repairs_docs',
+        'bmg_pmPlans_docs',
+        'bmg_pmHistoryList_docs',
+        'bmg_meters_docs',
+        'bmg_actionPlans_docs',
+        'bmg_announcements_docs',
+        'bmg_project_events_docs',
+        'bmg_deposits_docs'
+      ];
+    }
+
+    function canReadProjectCollection(collectionName) {
+      return hasPermission(menuForCollection(collectionName), 'view')
+        || (isOverviewCollection(collectionName) && hasPermission('proj_overview', 'view'));
+    }
+
+    function meterProjectId(meterId) {
+      return get(/databases/$(database)/documents/artifacts/bmg-app-prod/public/data/bmg_meters_docs/$(meterId)).data.projectId;
+    }
+
+    function canAccessMeter(meterId) {
+      let meterPath = /databases/$(database)/documents/artifacts/bmg-app-prod/public/data/bmg_meters_docs/$(meterId);
+      return meterId is string
+        && exists(meterPath)
+        && canAccessProjectId(meterProjectId(meterId));
+    }
+
+    match /users/{userId} {
+      allow get, list: if isSignedIn()
+        && (
+          request.auth.uid == userId
+          || isAdmin()
+          || (
+            isActiveBusinessUser()
+            && hasPermission('proj_staff', 'view')
+            && resource.data.department is string
+            && canAccessProjectName(resource.data.department)
+          )
+        );
+      allow create, update, delete: if false;
+    }
+
+    match /artifacts/{appId}/public/data/bmg_projects_docs/{projectId} {
+      allow read: if isBmgApp(appId)
+        && isActiveBusinessUser()
+        && canAccessProjectName(resource.data.name);
+      allow create, update, delete: if isBmgApp(appId) && isAdmin();
+    }
+
+    match /artifacts/{appId}/public/data/{collectionName}/{documentId} {
+      allow read: if isBmgApp(appId)
+        && isActiveBusinessUser()
+        && isProjectCollection(collectionName)
+        && resource.data.get('projectId', '') is string
+        && resource.data.get('projectId', '') != ''
+        && canAccessProjectId(resource.data.get('projectId', ''))
+        && canReadProjectCollection(collectionName);
+
+      allow create: if isBmgApp(appId)
+        && isActiveBusinessUser()
+        && isProjectCollection(collectionName)
+        && request.resource.data.get('projectId', '') is string
+        && request.resource.data.get('projectId', '') != ''
+        && canAccessProjectId(request.resource.data.get('projectId', ''))
+        && hasPermission(menuForCollection(collectionName), 'save');
+
+      allow update: if isBmgApp(appId)
+        && isActiveBusinessUser()
+        && isProjectCollection(collectionName)
+        && resource.data.get('projectId', '') is string
+        && request.resource.data.get('projectId', '') is string
+        && resource.data.get('projectId', '') != ''
+        && request.resource.data.get('projectId', '') != ''
+        && canAccessProjectId(resource.data.get('projectId', ''))
+        && canAccessProjectId(request.resource.data.get('projectId', ''))
+        && hasPermission(menuForCollection(collectionName), 'edit');
+
+      allow delete: if isBmgApp(appId)
+        && isActiveBusinessUser()
+        && isProjectCollection(collectionName)
+        && resource.data.get('projectId', '') is string
+        && resource.data.get('projectId', '') != ''
+        && canAccessProjectId(resource.data.get('projectId', ''))
+        && hasPermission(menuForCollection(collectionName), 'delete');
+    }
+
+    match /artifacts/{appId}/public/data/bmg_utilityReadings_docs/{readingId} {
+      allow read: if isBmgApp(appId) && isActiveBusinessUser()
+        && hasPermission('proj_utilities', 'view')
+        && canAccessMeter(resource.data.get('meterId', ''));
+      allow create: if isBmgApp(appId) && isActiveBusinessUser()
+        && hasPermission('proj_utilities', 'save')
+        && canAccessMeter(request.resource.data.get('meterId', ''));
+      allow update: if isBmgApp(appId) && isActiveBusinessUser()
+        && hasPermission('proj_utilities', 'edit')
+        && canAccessMeter(resource.data.get('meterId', ''))
+        && canAccessMeter(request.resource.data.get('meterId', ''));
+      allow delete: if isBmgApp(appId) && isActiveBusinessUser()
+        && hasPermission('proj_utilities', 'delete')
+        && canAccessMeter(resource.data.get('meterId', ''));
+    }
+
+    match /artifacts/{appId}/public/data/bmg_contractors_docs/{contractorId} {
+      allow read: if isBmgApp(appId) && isActiveBusinessUser() && hasPermission('proj_contractors', 'view');
+      allow create: if isBmgApp(appId) && isActiveBusinessUser() && hasPermission('proj_contractors', 'save');
+      allow update: if isBmgApp(appId) && isActiveBusinessUser() && hasPermission('proj_contractors', 'edit');
+      allow delete: if isBmgApp(appId) && isActiveBusinessUser() && hasPermission('proj_contractors', 'delete');
+    }
+
+    match /artifacts/{appId}/public/data/bmg_forms_list_docs/{formId} {
+      allow read: if isBmgApp(appId) && isActiveBusinessUser() && hasPermission('proj_forms', 'view');
+      allow create: if isBmgApp(appId) && isActiveBusinessUser() && hasPermission('proj_forms', 'save');
+      allow update: if isBmgApp(appId) && isActiveBusinessUser() && hasPermission('proj_forms', 'edit');
+      allow delete: if isBmgApp(appId) && isActiveBusinessUser() && hasPermission('proj_forms', 'delete');
+    }
+
+    match /artifacts/{appId}/public/data/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
