@@ -4,10 +4,13 @@
 
 The application code now supports two explicit modes:
 
-- `VITE_AUTH_MODE=legacy` keeps the existing Firestore password login during the
-  preparation window.
+- `VITE_AUTH_MODE=legacy` explicitly enables the existing Firestore password
+  login for an intentional rollback only.
 - `VITE_AUTH_MODE=firebase` authenticates with Firebase Email/Password, loads the
   trusted profile from `users/{uid}`, and never uses a password from Firestore.
+
+If `VITE_AUTH_MODE` is omitted, the application now defaults to `firebase` so a
+deployment cannot silently fall back to legacy authentication.
 
 The visible login remains username/password. Internally, a normalized username is
 encoded into a deterministic address under `auth.bmg-connect.local`; users do not
@@ -86,10 +89,19 @@ their existing paths during this cutover.
 
 ## Rollback
 
-1. Set `VITE_AUTH_MODE=legacy` and redeploy the last verified build.
-2. Do not delete newly created Firebase Auth accounts or `users/{uid}` profiles.
-3. Compare sign-ins and profile records written after cutover.
-4. Fix forward, then re-enable Firebase mode in a preview before production.
+For the Firebase read-mitigation release, use the exact immutable Vercel
+deployment recorded in `firebase-read-mitigation-deploy-2026-09-15.md` and use
+Instant Rollback without rebuilding it.
+
+1. Stop testing and record the failure time and affected path.
+2. Roll back the `bmg-connect` project to the recorded known-good deployment.
+3. Do not change or delete Firebase Auth accounts, profiles, Rules, or data.
+4. Verify login/logout and read-only critical paths after the domain is restored.
+5. Fix forward in a new preview and repeat every deployment gate before promote.
+
+`VITE_AUTH_MODE=legacy` is a degraded local-only fallback when no trusted custom
+token is injected. It is not a full cloud-data rollback and must not be described
+or tested as one.
 
 Never delete legacy password fields until the production observation window is
 complete and an approved rollback no longer depends on legacy login.

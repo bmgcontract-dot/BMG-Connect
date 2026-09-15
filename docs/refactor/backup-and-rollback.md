@@ -1,5 +1,10 @@
 # Production backup and rollback runbook
 
+The release-specific application rollback target and gates for the 2026-09-15
+Firebase read mitigation are recorded in
+`firebase-read-mitigation-deploy-2026-09-15.md`. That application-only rollback
+uses the previous immutable Vercel deployment; it does not restore Firestore.
+
 Do not run a production migration until this runbook has been completed and the
 project owner has confirmed the Firebase project ID and backup destination.
 
