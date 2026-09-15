@@ -113,6 +113,16 @@ Preview ใช้ Firebase Production จริง การทดสอบเ�
 - บัญชีพนักงานทดสอบยังไม่ถูกสร้าง ขั้นเตรียมกำหนดให้สังกัดเฉพาะ `โครงการทดสอบ`, ไม่มี `accessibleDepts`, ตำแหน่ง `ช่างประจำอาคาร (Technician)` และให้สิทธิ์ดูเฉพาะ Dashboard/Projects/Project Overview โดยไม่มี save/edit/approve/delete/print
 - ก่อนกดสร้างบัญชีจริงต้องขอคำยืนยันอีกครั้ง เพราะจะสร้างทั้ง Firebase Authentication account และ Firestore profile; หลังสร้างต้องตรวจ Auth count, anonymous count, profile scope และ login/refresh/logout ด้วยบัญชีจำกัดสิทธิ์
 
+### Restricted-account API failure investigation
+
+- การกดบันทึกบัญชีทดสอบบน Preview ล้มเหลว 4 ครั้งด้วย HTTP 500; หยุด retry ทันทีเพื่อไม่ให้เสี่ยงเกิดข้อมูลซ้ำ
+- Vercel runtime logs ยืนยันว่า function ล้มระหว่างโหลดโมดูลก่อนเข้า handler: `jwks-rsa` เรียก `jose` ซึ่งเป็น ESM ผ่าน `require()` ภายใต้ Vercel Node 24 (`ERR_REQUIRE_ESM`)
+- เพราะล้มก่อนเข้า handler จึงไม่มีการสร้าง Auth user และไม่มีการเขียน Firestore profile; ค้นหา internal email ของ `bmg-test-limited-260915` ใน Firebase Authentication แล้วไม่พบบัญชี
+- เพิ่ม regression check ให้ admin-user function โหลดแบบ ESM และล็อก Vercel runtime เป็น Node `22.x` ซึ่ง Firebase Admin v14 รองรับ
+- local gate หลังแก้: test 30/30 และ production build ผ่าน; lint ยังรันไม่ได้เพราะ repository ไม่มี `eslint` dependency แม้มี script เดิม
+- ขั้นถัดไปต้องสร้าง Preview ใหม่ แล้วยืนยัน Resources เป็น Node 22 และ GET `/api/admin-users` เปลี่ยนจาก `500 FUNCTION_INVOCATION_FAILED` เป็น handler-level `405 method-not-allowed` ก่อนทดสอบการสร้างบัญชีอีกครั้ง
+- หาก Node 22 ยังเกิด `ERR_REQUIRE_ESM` ให้ rollback เฉพาะ Preview ไป deployment `BnR6Yw5KzaLauggi1qDf9ER8EwFM` และพิจารณาตรึง dependency/ปรับ ESM bundling ใน Preview ใหม่; ห้าม promote Production
+
 ## Release procedure
 
 1. สร้าง Preview จาก branch ที่ commit แล้ว และตรวจ build logs
