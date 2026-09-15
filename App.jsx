@@ -18,9 +18,16 @@ import {
 } from 'recharts';
 
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import {
+  browserLocalPersistence,
+  indexedDBLocalPersistence,
+  initializeAuth,
+  onAuthStateChanged,
+  signInWithCustomToken,
+} from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot, getDoc, getDocs, collection, deleteDoc, writeBatch, query, where } from 'firebase/firestore';
 import { createFirebaseBusinessAuth } from './src/auth/firebaseAuthAdapter.js';
+import { initializeFirebaseBrowserAuth } from './src/auth/firebaseBrowserAuth.js';
 import { createAdminUserClient } from './src/auth/adminUserClient.js';
 import { sanitizeUsersForExport, stripUserSecrets } from './src/auth/identity.js';
 import { startLegacyFirebaseSession } from './src/auth/firebaseSession.js';
@@ -61,7 +68,12 @@ try {
 
   if (firebaseConfig) {
       app = initializeApp(firebaseConfig);
-      auth = getAuth(app);
+      auth = initializeFirebaseBrowserAuth({
+        app,
+        initializeAuth,
+        indexedDBLocalPersistence,
+        browserLocalPersistence,
+      });
       db = getFirestore(app);
   } else {
       console.warn("ไม่พบ Firebase Config: ระบบจะสลับไปใช้ Local Storage");
