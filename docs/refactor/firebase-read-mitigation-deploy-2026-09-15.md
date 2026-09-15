@@ -31,9 +31,9 @@ Environment variable names ที่มีอยู่ในโปรเจก�
 - [x] review สองแกน Standards/Spec; แก้ runtime crash, strict Auth UID gate และ schedule listener regression แล้ว
 - [x] local login page render และ browser console ไม่มี error ใน session ใหม่
 - [x] เปิด local preview แล้ว Firebase Authentication total ยังคง 917 บัญชี ไม่เกิด user ใหม่
-- [x] รัน `npm test` ผ่าน 21/21, Firebase-default build ผ่าน, explicit-legacy build ผ่าน และ `git diff --check` ผ่านหลังแก้ครั้งสุดท้าย
-- [ ] commit เฉพาะ source, tests, script และเอกสารของ release นี้; ห้ามใช้ `git add .`
-- [ ] push branch เพื่อสร้าง Vercel Preview; ห้าม merge เข้า `main`
+- [x] รอบแรก `npm test` ผ่าน 21/21; หลังพบปัญหา Preview เพิ่ม regression tests แล้วผ่าน 25/25, Firebase-default build, explicit-legacy build และ `git diff --check` ผ่าน
+- [x] commit เฉพาะ source, tests, script และเอกสารของ release นี้ที่ `ded9609566e0beb6ccabb840630b7d5c0ad1859a`; ไม่ได้ใช้ `git add .`
+- [x] push เฉพาะ branch `codex/phase-1-baseline`; ยังไม่ merge เข้า `main`
 - [x] ยืนยันจาก Vercel ว่า Preview และ Production ตั้ง `VITE_AUTH_MODE=firebase` โดยไม่เปิดเผยค่า secret/config อื่น
 - [ ] smoke test บัญชีตัวแทน: Super Admin, ผู้ใช้หลายโครงการ, ผู้จัดการโครงการ และพนักงานจำกัดสิทธิ์
 - [ ] ทดสอบ login, logout, refresh/session restore, เมนูที่อนุญาต/ห้าม, project scope และการเปิดแต่ละแท็บ
@@ -43,6 +43,22 @@ Environment variable names ที่มีอยู่ในโปรเจก�
 - [ ] เจ้าของระบบอนุมัติ Production promotion หลังอ่านผลทดสอบ
 
 Preview ใช้ Firebase Production จริง การทดสอบเขียนจึงมีผลต่อข้อมูลจริง ห้ามสร้าง/แก้/ลบข้อมูลธุรกิจเพื่อ smoke test
+
+### Preview evidence
+
+- Vercel deployment: `EhJyLs9cTsUdpLN35KNpYSokrSJy`
+- Preview URL: `https://bmg-connect-jswujkla0-bmgcontract-6324s-projects.vercel.app`
+- source commit: `ded9609566e0beb6ccabb840630b7d5c0ad1859a`
+- build: `Ready` ใน 21 วินาที ไม่มี build error
+- remote browser smoke: หน้า login render, ไม่มี runtime console error; พบเฉพาะ Tailwind CDN warning เดิม
+- Vercel runtime logs หลังเปิด Preview: Warning 0, Error 0, Fatal 0
+- Firebase Authentication หลังเปิด local และ remote Preview: total ยังคง 917 บัญชี
+- ผู้ใช้ล็อกอินบัญชี Super Admin บน Preview สำเร็จ และข้อมูลหลักโหลดได้ 25 โครงการ / 62 พนักงาน
+- พบตัวบล็อกหลังโหลดข้อมูลจริง: `RangeError: Invalid string length` จากการ stringify snapshot ทั้ง collection จึงหยุด release นี้ไว้ที่ Preview และยังไม่ promote Production
+- แก้ใน branch โดยเลิก stringify snapshot เพื่อเปรียบเทียบ และจำกัด listener ของ `bmg_dailyReports`/`bmg_pmHistoryList` บน Dashboard/ภาพรวมโครงการไว้เฉพาะเดือนที่หน้าจอใช้ โดยเก็บข้อมูลเดือนอื่นใน IndexedDB; หน้า Daily/PM ยังโหลดประวัติเต็มเมื่อเปิดใช้งาน
+- Dashboard เปลี่ยนเดือนอันดับรายงานได้ตามเดิม โดย query เฉพาะเดือนที่เลือกแทนการสะสมข้อมูลตั้งแต่เดือนนั้นถึงปัจจุบัน
+- regression tests ครอบคลุม payload ที่ serialize ไม่ได้, ขอบเขตต้นเดือน/สิ้นเดือน, การแทนที่/ลบข้อมูลในช่วง query, การเก็บข้อมูลนอกช่วง และการป้องกัน ID ซ้ำ
+- ยังไม่มีการเขียนข้อมูล เพราะ Preview ใช้ Firebase Production และยังไม่ได้ระบุข้อมูลทดสอบที่อนุญาต
 
 ## Release procedure
 
@@ -78,7 +94,7 @@ Release นี้ไม่เปลี่ยน schema, Rules หรือข้
 
 ## งานที่ยังไม่รวมใน release นี้
 
-- project/date-scoped queries, limits และ pagination
+- project-scoped queries, limits และ pagination (release นี้เพิ่มเฉพาะ date scope สำหรับสอง collection ขนาดใหญ่บน Dashboard/ภาพรวมโครงการ)
 - export/version Firestore Rules และ indexes
 - Firebase Emulator Rules tests
 - Query Insights และ budget alerts

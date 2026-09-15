@@ -19,13 +19,14 @@ import {
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot, getDoc, getDocs, collection, deleteDoc, writeBatch } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, onSnapshot, getDoc, getDocs, collection, deleteDoc, writeBatch, query, where } from 'firebase/firestore';
 import { createFirebaseBusinessAuth } from './src/auth/firebaseAuthAdapter.js';
 import { createAdminUserClient } from './src/auth/adminUserClient.js';
 import { sanitizeUsersForExport, stripUserSecrets } from './src/auth/identity.js';
 import { startLegacyFirebaseSession } from './src/auth/firebaseSession.js';
 import { resolveAuthMode } from './src/auth/authMode.js';
 import { createFirestoreSubscriptionPolicy } from './src/firebase/subscriptionPolicy.js';
+import { createMonthScope, reconcileCollectionSnapshot } from './src/firebase/collectionSnapshot.js';
 
 // --- Firebase Initialization ---
 let app, auth, db, appId;
@@ -1677,6 +1678,9 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
     const rootCollection = options.rootCollection === true;
     const readOnly = options.readOnly === true;
     const documentIdField = options.documentIdField || 'id';
+    const dateScopeField = options.dateScope?.field;
+    const dateScopeStart = options.dateScope?.start;
+    const dateScopeEnd = options.dateScope?.endExclusive;
     const localKey = options.localKey || (collectionName.startsWith('bmg_') ? collectionName : `bmg_${collectionName}`);
 
     const getCollectionReference = () => rootCollection
@@ -1733,22 +1737,35 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
                 }
 
                 const colRef = getCollectionReference();
-                unsubscribe = onSnapshot(colRef, (snapshot) => {
+                const hasDateScope = dateScopeField && dateScopeStart && dateScopeEnd;
+                const listenTarget = hasDateScope
+                    ? query(
+                        colRef,
+                        where(dateScopeField, '>=', dateScopeStart),
+                        where(dateScopeField, '<', dateScopeEnd),
+                    )
+                    : colRef;
+                unsubscribe = onSnapshot(listenTarget, (snapshot) => {
                     if (!isMounted) return;
                     const serverItems = [];
                     snapshot.forEach(docSnap => serverItems.push(docSnap.data()));
-                    
-                    const serverJson = JSON.stringify(serverItems);
-                    const localJson = JSON.stringify(dataRef.current);
 
-                    // Cloud is the absolute source of truth. If it differs, overwrite local data.
-                    // This permanently kills any "Zombie Data" that was kept locally after being deleted on the server.
-                    if (serverJson !== localJson) {
-                        setData(serverItems);
-                        dataRef.current = serverItems;
-                        saveStateLocallyIDB(localKey, serverItems);
-                        if (typeof window !== 'undefined') {
-                            try { localStorage.setItem(localKey, serverJson); } catch(e) {}
+                    const nextItems = reconcileCollectionSnapshot({
+                        currentItems: dataRef.current,
+                        serverItems,
+                        scope: hasDateScope
+                            ? { field: dateScopeField, start: dateScopeStart, endExclusive: dateScopeEnd }
+                            : undefined,
+                        documentIdField,
+                    });
+                    setData(nextItems);
+                    dataRef.current = nextItems;
+                    saveStateLocallyIDB(localKey, nextItems);
+                    if (typeof window !== 'undefined') {
+                        try {
+                            localStorage.setItem(localKey, JSON.stringify(nextItems));
+                        } catch(e) {
+                            // IndexedDB remains the large-data cache when localStorage cannot serialize the payload.
                         }
                     }
 
@@ -1770,7 +1787,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
             isMounted = false;
             unsubscribe();
         };
-    }, [db, appId, fbUser, collectionName, localKey, rootCollection]);
+    }, [db, appId, fbUser, collectionName, localKey, rootCollection, dateScopeField, dateScopeStart, dateScopeEnd, documentIdField]);
 
     const setPersistentValue = async (newValueOrUpdater, isRestore = false) => {
         const oldValue = dataRef.current;
@@ -3427,6 +3444,12 @@ export default function App() {
       selectedProject,
       projectTab,
   }), [fbUser, currentUser, activeMenu, selectedProject, projectTab]);
+  const currentMonthScope = useMemo(
+      () => createMonthScope('date', new Date().toISOString().slice(0, 7)),
+      [],
+  );
+  const shouldScopeHeavyHistory = activeMenu === 'dashboard'
+      || Boolean(selectedProject && projectTab === 'overview');
   const [contractFilter, setContractFilter] = useState('All'); // NEW: State สำหรับตัวกรองสัญญา
   const [contractSortOrder, setContractSortOrder] = useState('expiry_asc'); // NEW: State สำหรับเรียงลำดับวันหมดอายุสัญญา
   const [actionPlanFilter, setActionPlanFilter] = useState('All'); // NEW: State สำหรับตัวกรอง Action Plan
@@ -3815,17 +3838,34 @@ export default function App() {
           ? { rootCollection: true, documentIdField: 'authUid', localKey: 'bmg_user_profiles_v2', readOnly: true }
           : {},
   );
+  const dashboardDailyReportScope = useMemo(
+      () => createMonthScope('date', reportRankingMonth),
+      [reportRankingMonth],
+  );
+  const dailyReportScope = activeMenu === 'dashboard'
+      ? dashboardDailyReportScope
+      : currentMonthScope;
   const [projects, setProjects] = usePersistentCollection('bmg_projects', INITIAL_PROJECTS, subscriptionPolicy.userFor('bmg_projects'));
   const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, subscriptionPolicy.userFor('bmg_contracts'));
   const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, subscriptionPolicy.userFor('bmg_audits'));
-  const [dailyReports, setDailyReports] = usePersistentCollection('bmg_dailyReports', INITIAL_DAILY_REPORTS, subscriptionPolicy.userFor('bmg_dailyReports'));
+  const [dailyReports, setDailyReports] = usePersistentCollection(
+      'bmg_dailyReports',
+      INITIAL_DAILY_REPORTS,
+      subscriptionPolicy.userFor('bmg_dailyReports'),
+      shouldScopeHeavyHistory ? { dateScope: dailyReportScope } : {},
+  );
   const [repairs, setRepairs] = usePersistentCollection('bmg_repairs', INITIAL_REPAIRS, subscriptionPolicy.userFor('bmg_repairs'));
   const [contractors, setContractors] = usePersistentCollection('bmg_contractors', INITIAL_CONTRACTORS, subscriptionPolicy.userFor('bmg_contractors'));
   const [assets, setAssets] = usePersistentCollection('bmg_assets', INITIAL_ASSETS, subscriptionPolicy.userFor('bmg_assets'));
   const [tools, setTools] = usePersistentCollection('bmg_tools', INITIAL_TOOLS, subscriptionPolicy.userFor('bmg_tools'));
   const [machines, setMachines] = usePersistentCollection('bmg_machines', INITIAL_MACHINES, subscriptionPolicy.userFor('bmg_machines'));
   const [pmPlans, setPmPlans] = usePersistentCollection('bmg_pmPlans', INITIAL_PM_PLANS, subscriptionPolicy.userFor('bmg_pmPlans'));
-  const [pmHistoryList, setPmHistoryList] = usePersistentCollection('bmg_pmHistoryList', INITIAL_PM_HISTORY, subscriptionPolicy.userFor('bmg_pmHistoryList'));
+  const [pmHistoryList, setPmHistoryList] = usePersistentCollection(
+      'bmg_pmHistoryList',
+      INITIAL_PM_HISTORY,
+      subscriptionPolicy.userFor('bmg_pmHistoryList'),
+      shouldScopeHeavyHistory ? { dateScope: currentMonthScope } : {},
+  );
   const [meters, setMeters] = usePersistentCollection('bmg_meters', INITIAL_METERS, subscriptionPolicy.userFor('bmg_meters'));
   const [utilityReadings, setUtilityReadings] = usePersistentCollection('bmg_utilityReadings', INITIAL_READINGS, subscriptionPolicy.userFor('bmg_utilityReadings'));
   const [actionPlans, setActionPlans] = usePersistentCollection('bmg_actionPlans', INITIAL_ACTION_PLANS, subscriptionPolicy.userFor('bmg_actionPlans'));
