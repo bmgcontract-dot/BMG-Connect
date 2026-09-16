@@ -443,6 +443,15 @@ privacy-preserving Production readiness audit requested only `status` and
 profile document ID, and the audit reported `safeToDeployEmergencyAuthGate:
 true`. The exact public Rules snapshot remains the rollback configuration.
 
+The emergency authenticated-access Rules were published to Production through
+the Firebase Console on 2026-09-16 at 19:51 Asia/Bangkok. The Console showed a
+new published version and no longer displayed the public-Rules warning. A
+post-publish unauthenticated REST audit was rejected with HTTP 403 (`Missing or
+insufficient permissions`), confirming that anonymous collection reads were
+blocked. A full browser reload of an existing Active Admin session then loaded
+the dashboard and Production data successfully, confirming that the legacy
+authenticated application path remained operational after the cutover.
+
 ### Rollback plan
 
 - Application rollback: redeploy the last verified Production source or revert
