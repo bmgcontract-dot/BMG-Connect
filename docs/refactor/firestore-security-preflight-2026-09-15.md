@@ -332,6 +332,45 @@ client-side guard against ordinary duplicate entry; a concurrent multi-client
 uniqueness guarantee would require a server-side transactional name/code
 registry and remains a separate hardening task.
 
+### Latest Preview verification and Gate 3 schedule audit — 2026-09-16
+
+Commit `7938970` was pushed to `codex/phase-1-baseline`. Both Vercel deployment
+statuses completed successfully. The immutable Preview URL is
+`https://bmg-connect-j1f22dsxp-bmgcontract-6324s-projects.vercel.app/` and it
+loaded the same `index-KKYZ-4cn.js` bundle produced by the verified local build.
+After the user signed in as `TEST-260915`, the Preview showed only the Dashboard
+navigation item, the canonical `โครงการทดสอบ`, and `ดูอันดับ (ที่ 1 จาก 1)`.
+The browser console contained no Firebase or permission errors; its only warning
+was the pre-existing Tailwind CDN production warning. The restricted-user slice
+of the Preview gate therefore passes.
+
+A privacy-preserving read-only audit then reconstructed the four legacy schedule
+singletons in memory and emitted only aggregate counts and project IDs. It did
+not emit employee identifiers, employee names, or schedule cell contents. The
+audit found:
+
+- `bmg_schedules_v2`: 12,165 cells (10,579 plan and 1,586 actual) spanning
+  2026-01-28 through 2026-10-31 and 116 distinct legacy user IDs;
+- 8,017 schedule cells can currently be associated with one project through a
+  migrated profile's Auth UID or `legacyId` and unique department name;
+- 4,148 schedule cells cannot be associated with a project because their legacy
+  user ID has no remaining profile-to-project mapping;
+- `bmg_scheduleNotes`: 144 of 145 entries resolve to an existing project;
+- `bmg_scheduleApprovals`: 143 of 144 entries resolve;
+- `bmg_projectStaffOrder`: 11 of 12 entries resolve; and
+- the unresolved notes, approval, and staff-order entries all reference the
+  deleted/missing project ID `uuovsrp01`.
+
+The 8,017 apparently resolvable schedule cells are still not safe for blind
+historical migration: the schedule key contains only user ID and date, not
+project ID, so using the employee's *current* department would misclassify old
+cells if the employee moved between projects. The safe default is therefore to
+leave the legacy singleton Admin-only as an archive, introduce project-owned
+schedule records for new writes, and migrate historical records only where an
+authoritative dated employee-to-project mapping is available. Production Rules
+must remain undeployed until this product/data-retention choice is confirmed and
+the new schedule path passes Emulator and role smoke tests.
+
 ### Rollback plan
 
 - Application rollback: redeploy the last verified Production source or revert
