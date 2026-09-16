@@ -418,6 +418,31 @@ mode requires the exact Production project ID, write count, and manifest hash.
 If any target is created or source input changes before approval, the fresh
 manifest changes or the create precondition fails instead of overwriting data.
 
+### Cost-containment Production release and emergency auth gate — 2026-09-16
+
+Firestore usage reached approximately 1.8 million reads for the day while the
+deployed Rules still allowed public reads and writes. The previously verified
+query-scoping application at commit `7938970` was promoted to Production first.
+Vercel deployment `9Y4dFG617v9zWy9jUykSakYcvfDZ` completed with status Ready,
+and `bmg-connect.vercel.app` loaded the BMG login screen. The granular Rules
+remain blocked by the legacy schedule singleton used by that Production commit.
+
+For immediate containment without breaking the legacy schedule, an intermediate
+`firestore.emergency-auth.rules` configuration was prepared. It preserves
+legacy artifact reads and writes for a signed-in Active BMG profile, permits a
+signed-in user to read their own profile so the app can reject inactive users,
+keeps profile writes server-only, rejects unrelated app namespaces, and denies
+all other paths. It is intentionally less restrictive than the final scoped
+Rules and exists only as a short-lived bridge.
+
+The emergency gate feedback loop passed 5/5 tests, including a 25-request
+anonymous read burst with zero allowed reads. The combined Rules suite passed
+23/23, the application suite passed 62/62, and the Production build passed. A
+privacy-preserving Production readiness audit requested only `status` and
+`authUid`: all 63 profiles were Active, all 63 had an `authUid` matching the
+profile document ID, and the audit reported `safeToDeployEmergencyAuthGate:
+true`. The exact public Rules snapshot remains the rollback configuration.
+
 ### Rollback plan
 
 - Application rollback: redeploy the last verified Production source or revert

@@ -1,0 +1,32 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isActiveBusinessUser() {
+      let profilePath = /databases/$(database)/documents/users/$(request.auth.uid);
+      return isSignedIn()
+        && exists(profilePath)
+        && get(profilePath).data.status == 'Active'
+        && get(profilePath).data.authUid == request.auth.uid;
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn()
+        && (request.auth.uid == userId || isActiveBusinessUser());
+      allow list: if isActiveBusinessUser();
+      allow create, update, delete: if false;
+    }
+
+    match /artifacts/bmg-app-prod/public/data/{document=**} {
+      allow read, write: if isActiveBusinessUser();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
