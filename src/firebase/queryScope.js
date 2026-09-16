@@ -28,6 +28,7 @@ const PROJECT_OWNED_COLLECTIONS = new Set([
   'bmg_meeting_ballots',
   'bmg_meeting_attendances',
   'bmg_meeting_agendas',
+  'bmg_projectSchedules',
   'bmg_project_events',
 ]);
 

@@ -130,6 +130,7 @@ before(async () => {
         proj_staff: { view: true, save: false, edit: false, delete: false },
         proj_utilities: { view: true, save: true, edit: true, delete: true },
         proj_centralfee: { view: true, save: true, edit: true, delete: true },
+        proj_schedule: { view: true, save: true, edit: true, delete: true },
         announcements: { view: true, save: false, edit: false, delete: false },
       },
     });
@@ -215,6 +216,20 @@ before(async () => {
       id: 'announcement-c',
       projectId: 'project-c',
       title: 'ประกาศโครงการ C',
+    });
+    await setDoc(domainDocument(context.firestore(), 'bmg_projectSchedules', 'project-a_2026-09'), {
+      id: 'project-a_2026-09',
+      projectId: 'project-a',
+      month: '2026-09',
+      schemaVersion: 1,
+      schedules: {},
+    });
+    await setDoc(domainDocument(context.firestore(), 'bmg_projectSchedules', 'project-c_2026-09'), {
+      id: 'project-c_2026-09',
+      projectId: 'project-c',
+      month: '2026-09',
+      schemaVersion: 1,
+      schedules: {},
     });
     await setDoc(doc(
       context.firestore(),
@@ -414,6 +429,24 @@ test('application query plans are accepted for restricted, manager, and admin ro
   )));
   assert.equal(managerAudits.size, 2);
 
+  const managerSchedulePlan = createFirestoreCollectionQueryPlan({
+    collectionName: 'bmg_projectSchedules',
+    currentUser: {
+      username: 'manager',
+      department: 'โครงการ A',
+      accessibleDepts: ['โครงการ B'],
+    },
+    accessibleProjects: [
+      { id: 'project-a', name: 'โครงการ A' },
+      { id: 'project-b', name: 'โครงการ B' },
+    ],
+  });
+  const managerSchedules = await assertSucceeds(getDocs(queryFromPlan(
+    domainCollection(managerDatabase, 'bmg_projectSchedules'),
+    managerSchedulePlan,
+  )));
+  assert.equal(managerSchedules.size, 1);
+
   const managerUsersPlan = createFirestoreCollectionQueryPlan({
     collectionName: 'users',
     currentUser: {
@@ -528,4 +561,48 @@ test('central-fee documents require project scope and explicit menu permission',
     restrictedDatabase,
     'artifacts', APP_ID, 'public', 'data', 'app_state', 'central_fee_raw_project-a',
   )));
+});
+
+test('project schedule documents require schedule permission and an accessible project', async () => {
+  const managerDatabase = environment.authenticatedContext('manager-user').firestore();
+  const restrictedDatabase = environment.authenticatedContext('restricted-user').firestore();
+
+  await assertSucceeds(getDoc(domainDocument(
+    managerDatabase,
+    'bmg_projectSchedules',
+    'project-a_2026-09',
+  )));
+  await assertFails(getDoc(domainDocument(
+    managerDatabase,
+    'bmg_projectSchedules',
+    'project-c_2026-09',
+  )));
+  await assertFails(getDoc(domainDocument(
+    restrictedDatabase,
+    'bmg_projectSchedules',
+    'project-a_2026-09',
+  )));
+
+  await assertSucceeds(setDoc(domainDocument(
+    managerDatabase,
+    'bmg_projectSchedules',
+    'project-b_2026-09',
+  ), {
+    id: 'project-b_2026-09',
+    projectId: 'project-b',
+    month: '2026-09',
+    schemaVersion: 1,
+    schedules: {},
+  }));
+  await assertFails(setDoc(domainDocument(
+    managerDatabase,
+    'bmg_projectSchedules',
+    'project-c_2026-10',
+  ), {
+    id: 'project-c_2026-10',
+    projectId: 'project-c',
+    month: '2026-10',
+    schemaVersion: 1,
+    schedules: {},
+  }));
 });

@@ -371,6 +371,53 @@ authoritative dated employee-to-project mapping is available. Production Rules
 must remain undeployed until this product/data-retention choice is confirmed and
 the new schedule path passes Emulator and role smoke tests.
 
+### Project-owned schedule implementation and migration dry-run — 2026-09-16
+
+The confirmed implementation keeps the legacy schedule singleton unchanged as
+an Admin-only archive and introduces `bmg_projectSchedules_docs`, with one
+document per project and month. Each document has an explicit `projectId`,
+`month`, schema version, schedules, note, approval state, and staff order. New
+client listeners use the same accessible-project query plan as other
+project-owned collections. Dashboard listeners open this collection only for a
+user with `proj_schedule.view`; users without that permission do not start a
+listener that the restricted Rules would reject.
+
+The draft Rules map the new collection to `proj_schedule`. Emulator coverage
+verifies that a manager can query and mutate only schedule documents belonging
+to accessible projects, while a restricted employee without schedule
+permission and cross-project requests are denied. Verification completed with:
+
+- application/unit suite: 62/62 passing;
+- Firestore Rules Emulator on Java 21: 18/18 passing, including the actual
+  project-scoped schedule query;
+- Vite production build: passing; and
+- `git diff --check`: passing.
+
+The repository currently has no installed ESLint executable, so `npm run lint`
+cannot run (`eslint: command not found`). This is a pre-existing tooling gap,
+not a lint finding. Production Rules remain undeployed and no schedule migration
+writes have occurred.
+
+The read-only Production migration planner was then run. It intentionally
+excluded every legacy schedule cell and selected only project-keyed notes,
+approvals, and current staff order. The privacy-safe result was:
+
+- 27 current project IDs;
+- 144 target project-month documents;
+- 144 resolved notes, 143 resolved approvals, and 11 resolved staff orders;
+- one unresolved key in each source, all excluded from the target plan;
+- zero existing target documents, zero already-present documents, and zero
+  collisions;
+- 144 proposed create-only writes; and
+- manifest SHA-256
+  `cd45096f0ffdeff71e52e6d44eaead2f16b12c580ad1c4c75d8df296ca0414ee`.
+
+The planner reports `safeToApply: true`, but applying remains a separate gated
+operation. Each planned write uses an `exists=false` precondition, and the apply
+mode requires the exact Production project ID, write count, and manifest hash.
+If any target is created or source input changes before approval, the fresh
+manifest changes or the create precondition fails instead of overwriting data.
+
 ### Rollback plan
 
 - Application rollback: redeploy the last verified Production source or revert

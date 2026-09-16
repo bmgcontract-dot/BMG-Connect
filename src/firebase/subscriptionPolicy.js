@@ -12,12 +12,17 @@ export function createFirestoreSubscriptionPolicy({
     currentUser.status === 'Active' &&
     currentUser.authUid === firebaseUser.uid,
   );
+  const canViewProjectSchedules = Boolean(
+    currentUser?.username === 'admin'
+    || currentUser?.position === 'Super Admin'
+    || currentUser?.permissions?.proj_schedule?.view === true,
+  );
 
   const globalMenuCollections = {
     dashboard: [
       'bmg_projects', 'bmg_users', 'users', 'bmg_actionPlans',
       'bmg_announcements', 'bmg_audits', 'bmg_dailyReports',
-      'bmg_pmHistoryList', 'bmg_pmPlans',
+      'bmg_pmHistoryList', 'bmg_pmPlans', 'bmg_projectSchedules',
     ],
     users: ['bmg_users', 'users', 'bmg_projects', 'bmg_rolePermissions'],
     projects: ['bmg_projects'],
@@ -37,11 +42,10 @@ export function createFirestoreSubscriptionPolicy({
     ],
     centralfee: ['bmg_projects'],
     contracts: ['bmg_projects', 'bmg_contracts'],
-    staff: ['bmg_projects', 'bmg_users', 'users', 'bmg_projectStaffOrder'],
+    staff: ['bmg_projects', 'bmg_users', 'users'],
     schedule: [
       'bmg_projects', 'bmg_users', 'users', 'bmg_dailyReports',
-      'bmg_scheduleNotes', 'bmg_scheduleApprovals', 'bmg_projectStaffOrder',
-      'bmg_schedules_v2',
+      'bmg_projectSchedules',
     ],
     daily: ['bmg_projects', 'bmg_dailyReports'],
     assets: ['bmg_projects', 'bmg_assets'],
@@ -66,6 +70,7 @@ export function createFirestoreSubscriptionPolicy({
   return {
     userFor(collectionName) {
       if (!isVerifiedBusinessUser) return null;
+      if (collectionName === 'bmg_projectSchedules' && !canViewProjectSchedules) return null;
       if (!selectedProject && activeMenu === 'settings') return firebaseUser;
       if (alwaysActiveData.has(collectionName)) return firebaseUser;
 

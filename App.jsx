@@ -39,6 +39,7 @@ import { createNewUserDraft } from './src/users/userDraft.js';
 import { resolvePostAuthDestination } from './src/auth/postAuthDestination.js';
 import { filterAccessibleProjects, hasUserPermission } from './src/auth/permissions.js';
 import { validateProjectUniqueness } from './src/projects/projectValidation.js';
+import { deriveProjectScheduleViews, upsertProjectSchedule } from './src/schedule/projectScheduleState.js';
 
 // --- Firebase Initialization ---
 let app, auth, db, appId;
@@ -3562,8 +3563,6 @@ export default function App() {
   // ----------------------------------------------
   const [isEditingUser, setIsEditingUser] = useState(false);
   const [scheduleNote, setScheduleNote] = useState(''); // NEW: State สำหรับเก็บ Note ในตารางงาน
-  const [scheduleNotes, setScheduleNotes] = usePersistentState('bmg_scheduleNotes', {}, subscriptionPolicy.userFor('bmg_scheduleNotes')); // NEW: Persistent state for schedule notes
-  const [scheduleApprovals, setScheduleApprovals] = usePersistentState('bmg_scheduleApprovals', {}, subscriptionPolicy.userFor('bmg_scheduleApprovals')); // NEW: State สำหรับเก็บสถานะการอนุมัติตารางงาน
   const [hoScheduleModal, setHoScheduleModal] = useState(null); // NEW: Modal สำหรับเลือกหน่วยงานหลายแห่ง
   const [hoSelectedProjects, setHoSelectedProjects] = useState([]); // NEW: รายการหน่วยงานที่ถูกเลือก
   const [selectedKpiDetail, setSelectedKpiDetail] = useState(null); // NEW: State สำหรับเปิด Modal รายละเอียด KPI
@@ -4098,107 +4097,6 @@ export default function App() {
       projectId: ''
   });
 
-  // คงใช้ usePersistentState สำหรับข้อมูลที่เป็น Object เดี่ยวๆ
-  // --- FIX: เปลี่ยนวิธีเก็บ schedules ให้ฉลาดขึ้น ลดภาระการโหลด ---
-  const [schedules, setSchedules] = useState(() => {
-      if (typeof window !== 'undefined') {
-          try {
-              const local = localStorage.getItem('bmg_schedules_v2');
-              if (local) return JSON.parse(local);
-              // Migrate old data if v2 doesn't exist
-              const oldLocal = localStorage.getItem('bmg_schedules');
-              if (oldLocal) return JSON.parse(oldLocal);
-          } catch(e) { return {}; }
-      }
-      return {};
-  });
-
-  const schedulesRef = useRef(schedules);
-  const syncScheduleTimeoutRef = useRef(null);
-  const scheduleFbUser = subscriptionPolicy.userFor('bmg_schedules_v2');
-  
-  useEffect(() => {
-      schedulesRef.current = schedules;
-  }, [schedules]);
-
-  // NEW: โหลดข้อมูลจาก IndexedDB เพื่อป้องกันปัญหา LocalStorage เต็ม (5MB Limit) ทำให้ข้อมูลหาย
-  useEffect(() => {
-      let isMounted = true;
-      const loadIDB = async () => {
-          const idbData = await loadStateLocallyIDB('bmg_schedules_v2');
-          if (idbData && Object.keys(idbData).length > 0 && isMounted) {
-              // อัปเดตข้อมูลหากใน IDB มีข้อมูลมากกว่าหรือสมบูรณ์กว่า LocalStorage
-              setSchedules(idbData);
-              schedulesRef.current = idbData;
-          }
-      };
-      loadIDB();
-      return () => { isMounted = false; };
-  }, []);
-
-  // Schedule cloud sync is active only for a verified user on the schedule tab.
-  useEffect(() => {
-      if (!db || !scheduleFbUser || !appId) return;
-
-      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', 'bmg_schedules_v2');
-      
-      const unsubscribe = onSnapshot(docRef, async (docSnap) => {
-          if (docSnap.exists()) {
-              const data = docSnap.data();
-              if (data.totalChunks !== undefined) {
-                  let fullJson = '';
-                  let hasChunkError = false;
-                  for (let i = 0; i < data.totalChunks; i++) {
-                      const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `bmg_schedules_v2_${i}`);
-                      const chunkSnap = await getDoc(chunkRef);
-                      if (chunkSnap.exists()) {
-                          fullJson += chunkSnap.data().chunk;
-                      } else {
-                          hasChunkError = true;
-                      }
-                  }
-                  
-                  if (!hasChunkError && fullJson) {
-                      try {
-                          const parsedData = JSON.parse(fullJson);
-                          
-                          // FIX: ป้องกันข้อมูลหายจากกรณีโหลด Cloud มาเป็นค่าว่าง แต่ในเครื่องมีข้อมูลอยู่
-                          const isParsedEmpty = Object.keys(parsedData || {}).length === 0;
-                          const isCurrentNotEmpty = Object.keys(schedulesRef.current || {}).length > 0;
-                          
-                          if (isParsedEmpty && isCurrentNotEmpty) {
-                              console.warn("Prevented overwriting local schedules with empty cloud data.");
-                              return;
-                          }
-
-                          if (JSON.stringify(schedulesRef.current) !== JSON.stringify(parsedData)) {
-                              setSchedules(parsedData);
-                              schedulesRef.current = parsedData;
-                              
-                              // บันทึกลง IndexedDB เป็นหลัก (ไม่จำกัดขนาด ไม่สูญหายง่าย)
-                              saveStateLocallyIDB('bmg_schedules_v2', parsedData);
-                              
-                              if (typeof window !== 'undefined') {
-                                  try {
-                                      localStorage.setItem('bmg_schedules_v2', JSON.stringify(parsedData));
-                                  } catch(e) {
-                                      console.warn("LocalStorage Quota Exceeded for schedules. Relying on IndexedDB.");
-                                  }
-                              }
-                          }
-                      } catch (e) {
-                          console.error("Parse error for schedules v2", e);
-                      }
-                  }
-              }
-          }
-      }, (err) => {
-          console.error("Sync error for schedules", err);
-      });
-
-      return () => unsubscribe();
-  }, [db, scheduleFbUser, appId]);
-  
   const getLocalMonthStr = () => {
       const d = new Date();
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -4206,7 +4104,71 @@ export default function App() {
   const [currentMonth, setCurrentMonth] = useState(getLocalMonthStr());
   const [pmMonth, setPmMonth] = useState(getLocalMonthStr());
 
-  const [projectStaffOrder, setProjectStaffOrder] = usePersistentState('bmg_projectStaffOrder', {}, subscriptionPolicy.userFor('bmg_projectStaffOrder')); // NEW: State สำหรับเก็บลำดับพนักงานในตารางงาน
+  const [projectScheduleRecords, setProjectScheduleRecords] = usePersistentCollection(
+      'bmg_projectSchedules',
+      [],
+      subscriptionPolicy.userFor('bmg_projectSchedules'),
+      { queryPlan: queryPlanFor('bmg_projectSchedules') },
+  );
+  const scheduleViews = useMemo(
+      () => deriveProjectScheduleViews(projectScheduleRecords, selectedProject?.id),
+      [projectScheduleRecords, selectedProject?.id],
+  );
+  const schedules = scheduleViews.schedules;
+  const scheduleNotes = scheduleViews.scheduleNotes;
+  const scheduleApprovals = scheduleViews.scheduleApprovals;
+  const projectStaffOrder = scheduleViews.projectStaffOrder;
+  const schedulesRef = useRef(schedules);
+
+  useEffect(() => {
+      schedulesRef.current = schedules;
+  }, [schedules]);
+
+  const updateProjectScheduleField = (field, newValueOrUpdater) => {
+      const projectId = selectedProject?.id;
+      if (!projectId || !currentMonth) return;
+
+      setProjectScheduleRecords((records) => {
+          const currentViews = deriveProjectScheduleViews(records, projectId);
+          const currentValue = field === 'schedules'
+              ? currentViews.schedules
+              : field === 'note'
+                  ? currentViews.scheduleNotes[`${projectId}_${currentMonth}`] || ''
+                  : field === 'approval'
+                      ? currentViews.scheduleApprovals[`${projectId}_${currentMonth}`] || {}
+                      : currentViews.projectStaffOrder;
+          const nextValue = typeof newValueOrUpdater === 'function'
+              ? newValueOrUpdater(currentValue)
+              : newValueOrUpdater;
+          let valueForDocument = nextValue;
+
+          if (field === 'schedules') {
+              valueForDocument = Object.fromEntries(Object.entries(nextValue || {})
+                  .filter(([key]) => key.includes(`_${currentMonth}-`)));
+          } else if (field === 'staffOrder') {
+              valueForDocument = nextValue?.[projectId] || [];
+          }
+
+          return upsertProjectSchedule(records, {
+              projectId,
+              month: currentMonth,
+              update: { [field]: valueForDocument },
+          });
+      });
+  };
+
+  const setSchedules = (value) => updateProjectScheduleField('schedules', value);
+  const setScheduleNotes = (value) => updateProjectScheduleField('note', (currentNote) => {
+      const currentMap = { [`${selectedProject?.id}_${currentMonth}`]: currentNote };
+      const nextMap = typeof value === 'function' ? value(currentMap) : value;
+      return nextMap?.[`${selectedProject?.id}_${currentMonth}`] || '';
+  });
+  const setScheduleApprovals = (value) => updateProjectScheduleField('approval', (currentApproval) => {
+      const currentMap = { [`${selectedProject?.id}_${currentMonth}`]: currentApproval };
+      const nextMap = typeof value === 'function' ? value(currentMap) : value;
+      return nextMap?.[`${selectedProject?.id}_${currentMonth}`] || {};
+  });
+  const setProjectStaffOrder = (value) => updateProjectScheduleField('staffOrder', value);
   const dragItem = useRef(null); // NEW: Ref สำหรับจดจำ index ที่ถูกลาก
   const dragOverItem = useRef(null); // NEW: Ref สำหรับจดจำ index เป้าหมายที่จะวาง
 
@@ -4873,21 +4835,8 @@ export default function App() {
           if (selectedProject) {
               const noteKey = `${selectedProject.id}_${currentMonth}`;
               setScheduleNotes(prev => ({ ...prev, [noteKey]: scheduleNote }));
-              
-              // --- FIX: แยกการเซฟ Schedules ออกมาทำแบบมีระบบป้องกัน ---
               const scheduleData = schedulesRef.current;
-              
-              // 1. บันทึกลง IndexedDB เป็นหลัก (เพื่อป้องกัน LocalStorage เต็มแล้วแอปค้าง)
-              saveStateLocallyIDB('bmg_schedules_v2', scheduleData);
-
-              // 2. ลองบันทึกลง LocalStorage (ดัก Error ไว้ไม่ให้แอปพังถ้าเกิน 5MB)
-              if (typeof window !== 'undefined') {
-                  try {
-                      localStorage.setItem('bmg_schedules_v2', JSON.stringify(scheduleData));
-                  } catch (e) {
-                      console.warn("LocalStorage full, schedule saved to IndexedDB instead.");
-                  }
-              }
+              setSchedules(scheduleData);
 
               // --- NEW: ส่ง Backup ของ Schedule ขึ้น Google Drive เป็นไฟล์ JSON ด้วย ---
               if (GOOGLE_SCRIPT_CONFIG.DRIVE_URL && !GOOGLE_SCRIPT_CONFIG.DRIVE_URL.includes('YOUR_')) {
@@ -4976,39 +4925,6 @@ export default function App() {
                   }
               }
 
-              if (db && fbUser && appId) {
-                  if (syncScheduleTimeoutRef.current) clearTimeout(syncScheduleTimeoutRef.current);
-                  
-                  // แจ้งผู้ใช้ว่ากำลังบันทึก (เพราะข้อมูลอาจจะใหญ่)
-                  setAutoSyncMessage('กำลังบันทึกข้อมูลตารางงาน...');
-
-                  syncScheduleTimeoutRef.current = setTimeout(async () => {
-                      try {
-                          const jsonStr = JSON.stringify(scheduleData);
-                          const CHUNK_SIZE = 250000; // FIX: ลดขนาด Chunk ลงเพื่อป้องกันขีดจำกัด
-                          const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
-                          
-                          for (let i = 0; i < totalChunks; i++) {
-                              const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `bmg_schedules_v2_${i}`);
-                              const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                              await setDoc(chunkRef, { chunk: chunkData });
-                          }
-                          
-                          const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', 'bmg_schedules_v2');
-                          await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
-                          
-                          setAutoSyncMessage('บันทึกตารางงานสำเร็จ');
-                          setTimeout(() => setAutoSyncMessage(''), 3000);
-                      } catch (err) {
-                          console.error(`Firestore Schedule Save Error:`, err);
-                          alert('เกิดข้อผิดพลาดในการบันทึกตารางงาน (กรุณาลองอีกครั้ง)');
-                          setAutoSyncMessage('');
-                      } finally {
-                          syncScheduleTimeoutRef.current = null;
-                      }
-                  }, 1000);
-              }
-              
               // --- NEW: Workflow Logic ---
               const approvalKey = `${selectedProject.id}_${currentMonth}`;
               const currentApproval = scheduleApprovals[approvalKey] || {};
@@ -7867,10 +7783,7 @@ export default function App() {
           if (backupModules.audits) dataToBackup.audits = audits;
           if (backupModules.dailyReports) dataToBackup.dailyReports = dailyReports;
           if (backupModules.schedules) {
-              dataToBackup.schedules = schedules;
-              dataToBackup.scheduleNotes = scheduleNotes;
-              dataToBackup.scheduleApprovals = scheduleApprovals;
-              dataToBackup.projectStaffOrder = projectStaffOrder;
+              dataToBackup.projectScheduleRecords = projectScheduleRecords;
           }
           if (backupModules.othersData) dataToBackup.othersData = othersData;
           if (backupModules.announcements) dataToBackup.announcements = announcements;
@@ -7892,7 +7805,7 @@ export default function App() {
 
           const backupData = {
               timestamp: new Date().toISOString(),
-              version: '1.5', // Updated Version for Selective Backup
+              version: '1.6', // Project-owned schedule records
               data: dataToBackup
           };
           
@@ -7963,7 +7876,7 @@ export default function App() {
                   meetingsList: !!importedData.data.meetingsList,
                   audits: !!importedData.data.audits,
                   dailyReports: !!importedData.data.dailyReports,
-                  schedules: !!importedData.data.schedules,
+                  schedules: Array.isArray(importedData.data.projectScheduleRecords),
                   othersData: !!importedData.data.othersData,
                   announcements: !!importedData.data.announcements,
                   deposits: !!importedData.data.deposits,
@@ -8056,11 +7969,8 @@ export default function App() {
                   }
                   if (restoreModules.audits && d.audits) stateSetters.push({ key: 'ผลการประเมิน (Audit)', setter: setAudits, data: d.audits });
                   if (restoreModules.dailyReports && d.dailyReports) stateSetters.push({ key: 'รายงานประจำวัน', setter: setDailyReports, data: d.dailyReports });
-                  if (restoreModules.schedules && d.schedules) {
-                      stateSetters.push({ key: 'ตารางงาน', setter: setSchedules, data: d.schedules });
-                      if (d.scheduleNotes) stateSetters.push({ key: 'หมายเหตุตารางงาน', setter: setScheduleNotes, data: d.scheduleNotes });
-                      if (d.scheduleApprovals) stateSetters.push({ key: 'สถานะอนุมัติตารางงาน', setter: setScheduleApprovals, data: d.scheduleApprovals });
-                      if (d.projectStaffOrder) stateSetters.push({ key: 'ลำดับพนักงาน', setter: setProjectStaffOrder, data: d.projectStaffOrder });
+                  if (restoreModules.schedules && Array.isArray(d.projectScheduleRecords)) {
+                      stateSetters.push({ key: 'ตารางงานแยกโครงการ', setter: setProjectScheduleRecords, data: d.projectScheduleRecords });
                   }
                   if (restoreModules.othersData && d.othersData) stateSetters.push({ key: 'ข้อมูลอื่นๆ', setter: setOthersData, data: d.othersData });
                   if (restoreModules.announcements && d.announcements) stateSetters.push({ key: 'ประกาศและข่าวสาร', setter: setAnnouncements, data: d.announcements });
@@ -17430,7 +17340,7 @@ export default function App() {
                                       {Object.keys(restoreModules).map(key => {
                                           const hasData = importDataPreview?.data?.[key] !== undefined || 
                                               (key === 'inventory' && importDataPreview?.data?.inventoryList) ||
-                                              (key === 'schedules' && importDataPreview?.data?.schedules) ||
+                                              (key === 'schedules' && Array.isArray(importDataPreview?.data?.projectScheduleRecords)) ||
                                               (key === 'meetingsList' && importDataPreview?.data?.meetingsList);
 
                                           if (!hasData) return null;

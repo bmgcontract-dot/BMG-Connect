@@ -15,6 +15,8 @@
     "auth:migrate:dry-run": "node scripts/migrate-users-to-firebase-auth.mjs",
     "auth:migrate": "node scripts/migrate-users-to-firebase-auth.mjs --apply",
     "firestore:ownership:audit": "node scripts/audit-firestore-ownership.mjs",
+    "schedule:migrate:dry-run": "node scripts/migrate-project-schedule-metadata.mjs",
+    "schedule:migrate": "node scripts/migrate-project-schedule-metadata.mjs --apply",
     "preview": "vite preview"
   },
   "dependencies": {

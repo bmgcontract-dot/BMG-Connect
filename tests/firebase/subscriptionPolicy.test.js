@@ -20,7 +20,11 @@ test('dashboard opens only the collections used by the dashboard', () => {
   const firebaseUser = { uid: 'auth-123', isAnonymous: false };
   const policy = createFirestoreSubscriptionPolicy({
     firebaseUser,
-    currentUser: { authUid: 'auth-123', status: 'Active' },
+    currentUser: {
+      authUid: 'auth-123',
+      status: 'Active',
+      permissions: { proj_schedule: { view: true } },
+    },
     activeMenu: 'dashboard',
     selectedProject: null,
     projectTab: 'overview',
@@ -28,14 +32,32 @@ test('dashboard opens only the collections used by the dashboard', () => {
 
   assert.equal(policy.userFor('bmg_projects'), firebaseUser);
   assert.equal(policy.userFor('bmg_audits'), firebaseUser);
+  assert.equal(policy.userFor('bmg_projectSchedules'), firebaseUser);
   assert.equal(policy.userFor('bmg_inventory'), null);
+});
+
+test('dashboard does not subscribe to schedule data without schedule permission', () => {
+  const firebaseUser = { uid: 'auth-123', isAnonymous: false };
+  const policy = createFirestoreSubscriptionPolicy({
+    firebaseUser,
+    currentUser: { authUid: 'auth-123', status: 'Active', permissions: {} },
+    activeMenu: 'dashboard',
+    selectedProject: null,
+    projectTab: 'overview',
+  });
+
+  assert.equal(policy.userFor('bmg_projectSchedules'), null);
 });
 
 test('a project tools tab subscribes to tools and core project data only', () => {
   const firebaseUser = { uid: 'auth-123', isAnonymous: false };
   const policy = createFirestoreSubscriptionPolicy({
     firebaseUser,
-    currentUser: { authUid: 'auth-123', status: 'Active' },
+    currentUser: {
+      authUid: 'auth-123',
+      status: 'Active',
+      permissions: { proj_schedule: { view: true } },
+    },
     activeMenu: 'projects',
     selectedProject: { id: 'project-1' },
     projectTab: 'tools',
@@ -75,11 +97,15 @@ test('Firestore access requires a non-anonymous user and an active profile with 
   }).userFor('bmg_projects'), null);
 });
 
-test('schedule document sync runs only while the project schedule tab is active', () => {
+test('project schedule data syncs on the dashboard and project schedule tab only', () => {
   const firebaseUser = { uid: 'auth-123', isAnonymous: false };
   const context = {
     firebaseUser,
-    currentUser: { authUid: 'auth-123', status: 'Active' },
+    currentUser: {
+      authUid: 'auth-123',
+      status: 'Active',
+      permissions: { proj_schedule: { view: true } },
+    },
     activeMenu: 'projects',
     selectedProject: { id: 'project-1' },
   };
@@ -87,9 +113,9 @@ test('schedule document sync runs only while the project schedule tab is active'
   assert.equal(createFirestoreSubscriptionPolicy({
     ...context,
     projectTab: 'schedule',
-  }).userFor('bmg_schedules_v2'), firebaseUser);
+  }).userFor('bmg_projectSchedules'), firebaseUser);
   assert.equal(createFirestoreSubscriptionPolicy({
     ...context,
     projectTab: 'tools',
-  }).userFor('bmg_schedules_v2'), null);
+  }).userFor('bmg_projectSchedules'), null);
 });

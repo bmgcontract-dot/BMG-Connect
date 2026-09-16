@@ -66,6 +66,21 @@ test('an open project narrows project-owned listeners to that project', () => {
   });
 });
 
+test('project schedule listeners are scoped to accessible project IDs', () => {
+  assert.deepEqual(createFirestoreCollectionQueryPlan({
+    collectionName: 'bmg_projectSchedules',
+    currentUser: managerUser,
+    accessibleProjects,
+  }), {
+    kind: 'scoped',
+    targets: [[{
+      field: 'projectId',
+      operator: 'in',
+      value: ['project-a', 'project-b'],
+    }]],
+  });
+});
+
 test('staff directory access is blocked without permission and department-scoped for managers', () => {
   assert.deepEqual(createFirestoreCollectionQueryPlan({
     collectionName: 'users',

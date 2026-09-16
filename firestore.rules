@@ -89,6 +89,7 @@ service cloud.firestore {
         'bmg_meeting_ballots_docs',
         'bmg_meeting_attendances_docs',
         'bmg_meeting_agendas_docs',
+        'bmg_projectSchedules_docs',
         'bmg_project_events_docs'
       ];
     }
@@ -115,6 +116,7 @@ service cloud.firestore {
           'bmg_meeting_attendances_docs',
           'bmg_meeting_agendas_docs'
         ] ? 'proj_meeting'
+        : collectionName == 'bmg_projectSchedules_docs' ? 'proj_schedule'
         : collectionName in ['bmg_deposits_docs', 'bmg_inventory_docs', 'bmg_inventory_transactions_docs'] ? 'proj_inventory'
         : collectionName == 'bmg_announcements_docs' ? 'announcements'
         : collectionName == 'bmg_project_events_docs' ? 'proj_overview'
