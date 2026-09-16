@@ -221,6 +221,117 @@ the following migration gates remain:
    passes. Production application deployment and Rules publication must remain
    separate rollback points.
 
+### Release-gate evidence — 2026-09-16
+
+Gate 1 is complete. The following Production composite indexes report
+`Enabled` in Firebase Console:
+
+- `bmg_dailyReports_docs`: `projectId ASC`, `date ASC`
+  (`CICAgOjXh4EK`)
+- `bmg_pmHistoryList_docs`: `projectId ASC`, `date ASC`
+  (`CICAgJiUpoMK`)
+
+Gate 2 completed its read-only dry-run before the approved backfill was applied.
+`scripts/audit-firestore-ownership.mjs` used Firestore REST field masks
+and did not request payloads, chunk contents, house numbers, or resident data.
+The 2026-09-16 dry-run found:
+
+- 27 project records;
+- 1,108 `house_statuses_*` documents across 16 populated project collections,
+  all missing `projectId` and none containing a mismatched `projectId`;
+- 17 central-fee `app_state` documents, all missing both `projectId` and
+  `menuId`, with no unresolved project IDs or mismatches; and
+- 176 central-fee `app_state_chunks` documents, all missing both ownership
+  fields, with no unresolved project IDs or mismatches.
+
+The proposed ownership-only backfill therefore affects exactly 1,301 existing
+documents. It must use merge/update-mask writes, preserve every existing field,
+and abort on any document update-time conflict. The reviewed manifest SHA-256 is
+`efcac769b58f913aa28b38f27491fe162be835fa702cf69d2b22897a7ad7bf3a`.
+That manifest was explicitly approved and applied on 2026-09-16 in four atomic
+commit batches of 400, 400, 400, and 101 writes. Every write used an update mask
+and the document's dry-run `updateTime` as a precondition; no payload field was
+requested or replaced.
+
+The immediate post-write audit found zero proposed writes and zero ownership
+mismatches:
+
+- all 1,108 `house_statuses_*` documents have the expected `projectId`;
+- all 17 central-fee `app_state` documents have the expected `projectId` and
+  `menuId`; and
+- all 176 central-fee `app_state_chunks` documents have the expected ownership
+  fields.
+
+Gate 2 is complete. The post-backfill empty-plan SHA-256 is
+`4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945`.
+
+Gate 3 remains blocked. The dry-run confirmed these global singleton records:
+
+- `bmg_schedules_v2` plus 2 chunks;
+- `bmg_scheduleNotes` plus 1 chunk;
+- `bmg_scheduleApprovals` plus 1 chunk; and
+- `bmg_projectStaffOrder` plus 1 chunk.
+
+`bmg_meeting_land_docs` was not present. These singleton payloads cannot safely
+be assigned to one project without a product/data-model decision. The draft
+Rules continue to leave them Admin-only.
+
+### Restricted Preview smoke test — 2026-09-16
+
+The restricted account `TEST-260915` was tested against the Vercel Preview at
+`https://bmg-connect-fjyly1df0-bmgcontract-6324s-projects.vercel.app/` after its
+password was reset through the Admin UI. The profile/auth metadata audit found
+one matching profile, matching Auth UID and profile document ID, the expected
+internal Auth email mapping, schema version 2, `Active` status, and no legacy
+password field in Firestore. A first login attempt displayed the generic invalid
+credential message, but the same new credentials subsequently authenticated
+successfully; the initial transient failure was not reproducible, so no code
+change is justified from that message alone.
+
+The authenticated restricted UI showed only the Dashboard navigation item,
+identified the user as `บัญชีทดสอบ` / Technician, and selected
+`โครงการทดสอบ`. No Firebase errors were present in the browser console. This
+confirms the new password and basic restricted-role routing, but it does not
+complete Gate 4.
+
+Gate 4 is blocked by a duplicate project-name security defect. Production has
+two active project documents named `โครงการทดสอบ`: `dhtc5355v` and the canonical
+test record `tst260915`. Because both the client query plan and draft Rules map a
+restricted user's department to project *name*, the test account receives both
+project IDs; the Preview exposed this as `ดูอันดับ (ที่ 1 จาก 2)`. A read-only
+aggregation audit across every project-owned collection, `app_state`,
+`app_state_chunks`, and both `house_statuses_<projectId>` collections found zero
+documents referencing either ID. The duplicate can therefore be quarantined
+without moving business records.
+
+The user explicitly approved the quarantine on 2026-09-16. A dry-run first
+verified that `dhtc5355v` still had name `โครงการทดสอบ`, status `Active`, and
+update time `2026-09-15T11:18:36.936582Z`. One conditional REST patch then used
+an update mask for only `name` and `status`, together with that update-time
+precondition. The verified result is:
+
+- name: `โครงการทดสอบ (ยกเลิก-รายการซ้ำ)`;
+- status: `Inactive`; and
+- update time: `2026-09-16T01:57:45.346789Z`.
+
+No project document was deleted and no other field was replaced. The immediate
+restricted Preview listener changed from `ดูอันดับ (ที่ 1 จาก 2)` to
+`ดูอันดับ (ที่ 1 จาก 1)`, confirming that only the canonical `tst260915`
+record remains in the restricted account's name-scoped result. The reversible
+rollback values for `dhtc5355v` are name `โครงการทดสอบ` and status `Active`;
+restoring them would deliberately reintroduce the duplicate-name authorization
+problem and must be used only if the quarantine itself is proven incorrect.
+
+The client now also rejects project saves when the candidate name duplicates an
+existing name after trimming/collapsing whitespace, or when the project code
+duplicates an existing code after trimming and case normalization. Editing a
+project is allowed to keep its own name and code. The policy is covered at its
+public validation seam and is invoked before the project save begins. The
+application suite passes 54/54 and the Vite production build passes. This is a
+client-side guard against ordinary duplicate entry; a concurrent multi-client
+uniqueness guarantee would require a server-side transactional name/code
+registry and remains a separate hardening task.
+
 ### Rollback plan
 
 - Application rollback: redeploy the last verified Production source or revert

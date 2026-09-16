@@ -14,6 +14,7 @@
     "test:rules": "firebase emulators:exec --only firestore \"node --test tests/firestore-rules/**/*.rules-test.js\"",
     "auth:migrate:dry-run": "node scripts/migrate-users-to-firebase-auth.mjs",
     "auth:migrate": "node scripts/migrate-users-to-firebase-auth.mjs --apply",
+    "firestore:ownership:audit": "node scripts/audit-firestore-ownership.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

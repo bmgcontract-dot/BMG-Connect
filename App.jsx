@@ -38,6 +38,7 @@ import { createFirestoreCollectionQueryPlan, filterItemsForQueryPlan } from './s
 import { createNewUserDraft } from './src/users/userDraft.js';
 import { resolvePostAuthDestination } from './src/auth/postAuthDestination.js';
 import { filterAccessibleProjects, hasUserPermission } from './src/auth/permissions.js';
+import { validateProjectUniqueness } from './src/projects/projectValidation.js';
 
 // --- Firebase Initialization ---
 let app, auth, db, appId;
@@ -8485,6 +8486,18 @@ export default function App() {
 
   const handleSaveProject = async (e) => {
       e.preventDefault();
+
+      const uniqueness = validateProjectUniqueness({
+          candidate: newProject,
+          projects,
+      });
+      if (!uniqueness.valid) {
+          alert(uniqueness.duplicateField === 'name'
+              ? 'ไม่สามารถบันทึกได้: มีชื่อโครงการ/หน่วยงานนี้อยู่แล้ว'
+              : 'ไม่สามารถบันทึกได้: มีรหัสโครงการ/หน่วยงานนี้อยู่แล้ว');
+          return;
+      }
+
       setIsSavingProject(true);
       
       try {
