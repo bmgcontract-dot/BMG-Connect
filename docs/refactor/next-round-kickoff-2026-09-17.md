@@ -6,7 +6,9 @@ Starting point: `9e91b85` (`docs: close production rollout`)
 
 ## Goal
 
-Close the remaining P0 gap between a user's business profile and the
+First close the urgent Firestore transfer/read-cost regression check documented
+in `billing-firestore-analysis-2026-09-17.md`. After a complete post-release
+working day is available, close the remaining P0 gap between a user's business profile and the
 server-issued Firebase `admin` custom claim. Creating, promoting, demoting, or
 disabling an account must leave Firebase Authentication and Firestore in a
 consistent authorization state.
@@ -125,6 +127,7 @@ git log -3 --oneline
 npm test
 ```
 
-Then write the failing claim-lifecycle tests before modifying
+Then recheck the delayed 17/18 September Billing and Firestore Usage data. If
+the scoped-query release meets the cost acceptance check, write the failing
+claim-lifecycle tests before modifying
 `api/admin-users.js`.
-
