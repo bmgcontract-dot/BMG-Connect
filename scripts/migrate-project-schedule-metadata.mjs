@@ -1,5 +1,6 @@
 import process from 'node:process';
 import { createHash } from 'node:crypto';
+import { applicationDefault, cert } from 'firebase-admin/app';
 
 import { buildAuthoritativeProjectScheduleRecords } from '../src/schedule/legacyScheduleMigration.js';
 
@@ -14,6 +15,19 @@ const CURRENT_MONTH = '2026-09';
 const APPLY_BATCH_SIZE = 400;
 const API_ROOT = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/${encodeURIComponent(DATABASE_ID)}/documents`;
 const RESOURCE_ROOT = `projects/${PROJECT_ID}/databases/${DATABASE_ID}/documents`;
+
+const credential = process.env.FIREBASE_SERVICE_ACCOUNT_JSON
+  ? cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON))
+  : applicationDefault();
+
+let authorizationHeadersPromise;
+
+function getAuthorizationHeaders() {
+  authorizationHeadersPromise ??= credential.getAccessToken().then(({ access_token: accessToken }) => ({
+    authorization: `Bearer ${accessToken}`,
+  }));
+  return authorizationHeadersPromise;
+}
 
 function encodePath(path) {
   return path.split('/').map(encodeURIComponent).join('/');
@@ -56,7 +70,12 @@ function encodeFields(fields) {
 }
 
 async function fetchJson(url, options) {
-  const response = await fetch(url, { ...options, signal: AbortSignal.timeout(60_000) });
+  const authorizationHeaders = await getAuthorizationHeaders();
+  const response = await fetch(url, {
+    ...options,
+    headers: { ...authorizationHeaders, ...options?.headers },
+    signal: AbortSignal.timeout(60_000),
+  });
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`Firestore request failed (${response.status}): ${body.slice(0, 500)}`);

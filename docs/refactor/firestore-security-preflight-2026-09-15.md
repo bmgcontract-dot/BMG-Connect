@@ -418,6 +418,25 @@ mode requires the exact Production project ID, write count, and manifest hash.
 If any target is created or source input changes before approval, the fresh
 manifest changes or the create precondition fails instead of overwriting data.
 
+### Project schedule metadata migration applied — 2026-09-17
+
+After the emergency authenticated-access Rules were published, the migration
+script was updated to authenticate Firestore REST requests with Application
+Default Credentials (or `FIREBASE_SERVICE_ACCOUNT_JSON`) without printing an
+access token. The application test suite passed 62/62 and `git diff --check`
+passed before the Production migration was run.
+
+A fresh authenticated dry-run reported 27 projects, 144 proposed create-only
+writes, zero collisions, and `safeToApply: true`. The approved manifest SHA-256
+was `96d8b366c91e3b22da00ae2da3a8f3933cc48190a395291b2092c92fc6480dec`.
+The migration created 144/144 documents in `bmg_projectSchedules_docs` and did
+not modify the legacy schedule singletons or migrate legacy schedule cells.
+
+The immediate post-migration dry-run reported 145 existing target documents,
+144 already-present documents matching the migration plan, zero collisions,
+zero proposed writes, and `safeToApply: true`. The extra target document was
+already present before the migration and did not collide with the plan.
+
 ### Cost-containment Production release and emergency auth gate — 2026-09-16
 
 Firestore usage reached approximately 1.8 million reads for the day while the
