@@ -35,6 +35,7 @@ import { resolveAuthMode } from './src/auth/authMode.js';
 import { createFirestoreSubscriptionPolicy } from './src/firebase/subscriptionPolicy.js';
 import { createMonthScope, reconcileCollectionSnapshot, shouldApplyCollectionSnapshot } from './src/firebase/collectionSnapshot.js';
 import { createFirestoreCollectionQueryPlan, filterItemsForQueryPlan } from './src/firebase/queryScope.js';
+import { BMG_FIREBASE_CONFIG, BMG_FIRESTORE_APP_ID } from './src/firebase/browserConfig.js';
 import { createNewUserDraft } from './src/users/userDraft.js';
 import { resolvePostAuthDestination } from './src/auth/postAuthDestination.js';
 import { filterAccessibleProjects, hasUserPermission } from './src/auth/permissions.js';
@@ -43,16 +44,6 @@ import { deriveProjectScheduleViews, upsertProjectSchedule } from './src/schedul
 
 // --- Firebase Initialization ---
 let app, auth, db, appId;
-
-const MANUAL_FIREBASE_CONFIG = {
-  apiKey: "AIzaSyAy03rxniCLFDYT4ztY_Ry2zh0ddzdBoPE",
-  authDomain: "bmg-connect-3e99a.firebaseapp.com",
-  projectId: "bmg-connect-3e99a",
-  storageBucket: "bmg-connect-3e99a.firebasestorage.app",
-  messagingSenderId: "707276998308",
-  appId: "1:707276998308:web:1a5364f7a94cfe06c08831",
-  measurementId: "G-4B69L2731M"
-};
 
 const GOOGLE_SCRIPT_CONFIG = {
   SHEETS_URL: "https://script.google.com/macros/s/AKfycbzmNdR7LVpfUossHkcNH_onBPTG2dw6GuJzh5JilthkMwW-Sdr4s0lFjPKwSsCBTg/exec", 
@@ -67,9 +58,9 @@ try {
   if (typeof __firebase_config !== 'undefined') {
      firebaseConfig = JSON.parse(__firebase_config);
      appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-  } else if (MANUAL_FIREBASE_CONFIG.apiKey && MANUAL_FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY") {
-     firebaseConfig = MANUAL_FIREBASE_CONFIG;
-     appId = "bmg-app-prod"; 
+  } else if (BMG_FIREBASE_CONFIG.apiKey && BMG_FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY") {
+     firebaseConfig = BMG_FIREBASE_CONFIG;
+     appId = BMG_FIRESTORE_APP_ID;
   }
 
   if (firebaseConfig) {
