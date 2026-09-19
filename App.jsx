@@ -4151,6 +4151,9 @@ export default function App() {
           month: currentMonth,
           staffIds: scheduleStaffIds,
           staffAliases: scheduleStaffAliases,
+          migratedStaffIds: projectScheduleRecords.find((record) =>
+              record.projectId === selectedProject?.id && record.month === currentMonth
+              && record.legacyCellMigration?.status === 'complete')?.legacyCellMigration?.staffIds ?? [],
           projectSchedules: scheduleViews.schedules,
           legacySchedules: legacyScheduleArchive,
       }),
@@ -4161,6 +4164,8 @@ export default function App() {
           scheduleStaffAliases,
           scheduleViews.schedules,
           legacyScheduleArchive,
+          projectScheduleRecords,
+          selectedProject?.id,
       ],
   );
   const schedules = legacyScheduleFallback.schedules;

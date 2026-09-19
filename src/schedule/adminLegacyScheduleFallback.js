@@ -18,6 +18,7 @@ export function buildAdminLegacyScheduleFallback({
   month,
   staffIds = [],
   staffAliases = {},
+  migratedStaffIds = [],
   projectSchedules = {},
   legacySchedules = {},
 }) {
@@ -28,7 +29,8 @@ export function buildAdminLegacyScheduleFallback({
     return { schedules: current, isReadOnlyFallback: false, legacyCellCount: 0 };
   }
 
-  const allowedStaffIds = staffIds.filter((value) => typeof value === 'string' && value.length > 0);
+  const migrated = new Set(Array.isArray(migratedStaffIds) ? migratedStaffIds : []);
+  const allowedStaffIds = staffIds.filter((value) => typeof value === 'string' && value.length > 0 && !migrated.has(value));
   const legacy = {};
   for (const [key, value] of Object.entries(legacySchedules ?? {})) {
     const canonicalKey = canonicalScheduleKey({
