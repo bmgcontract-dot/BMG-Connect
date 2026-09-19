@@ -39,6 +39,7 @@ import { createNewUserDraft } from './src/users/userDraft.js';
 import { resolvePostAuthDestination } from './src/auth/postAuthDestination.js';
 import { filterAccessibleProjects, hasUserPermission } from './src/auth/permissions.js';
 import { validateProjectUniqueness } from './src/projects/projectValidation.js';
+import { buildAdminLegacyScheduleFallback } from './src/schedule/adminLegacyScheduleFallback.js';
 import { deriveProjectScheduleViews, upsertProjectSchedule } from './src/schedule/projectScheduleState.js';
 
 // --- Firebase Initialization ---
@@ -4104,6 +4105,17 @@ export default function App() {
   const [currentMonth, setCurrentMonth] = useState(getLocalMonthStr());
   const [pmMonth, setPmMonth] = useState(getLocalMonthStr());
 
+  const isLegacyScheduleArchiveAdmin = currentUser?.username === 'admin'
+      || currentUser?.position === 'Super Admin';
+  const shouldLoadLegacyScheduleArchive = Boolean(
+      isLegacyScheduleArchiveAdmin && selectedProject && projectTab === 'schedule',
+  );
+  const [legacyScheduleArchive] = usePersistentState(
+      'bmg_schedules_v2',
+      {},
+      shouldLoadLegacyScheduleArchive ? fbUser : null,
+  );
+
   const [projectScheduleRecords, setProjectScheduleRecords] = usePersistentCollection(
       'bmg_projectSchedules',
       [],
@@ -4114,7 +4126,45 @@ export default function App() {
       () => deriveProjectScheduleViews(projectScheduleRecords, selectedProject?.id),
       [projectScheduleRecords, selectedProject?.id],
   );
-  const schedules = scheduleViews.schedules;
+  const selectedProjectScheduleStaff = useMemo(
+      () => users.filter((user) => user?.department === selectedProject?.name),
+      [users, selectedProject?.name],
+  );
+  const scheduleStaffIds = useMemo(
+      () => selectedProjectScheduleStaff
+          .map((user) => user?.id || user?.authUid)
+          .filter((id) => typeof id === 'string' && id.length > 0),
+      [selectedProjectScheduleStaff],
+  );
+  const scheduleStaffAliases = useMemo(
+      () => Object.fromEntries(selectedProjectScheduleStaff.map((user) => {
+          const canonicalId = user?.id || user?.authUid;
+          const aliases = [...new Set([user?.legacyId, user?.authUid, user?.id]
+              .filter((id) => typeof id === 'string' && id.length > 0 && id !== canonicalId))];
+          return [canonicalId, aliases];
+      }).filter(([canonicalId]) => typeof canonicalId === 'string' && canonicalId.length > 0)),
+      [selectedProjectScheduleStaff],
+  );
+  const legacyScheduleFallback = useMemo(
+      () => buildAdminLegacyScheduleFallback({
+          isAdmin: shouldLoadLegacyScheduleArchive,
+          month: currentMonth,
+          staffIds: scheduleStaffIds,
+          staffAliases: scheduleStaffAliases,
+          projectSchedules: scheduleViews.schedules,
+          legacySchedules: legacyScheduleArchive,
+      }),
+      [
+          shouldLoadLegacyScheduleArchive,
+          currentMonth,
+          scheduleStaffIds,
+          scheduleStaffAliases,
+          scheduleViews.schedules,
+          legacyScheduleArchive,
+      ],
+  );
+  const schedules = legacyScheduleFallback.schedules;
+  const isLegacyScheduleReadOnly = legacyScheduleFallback.isReadOnlyFallback;
   const scheduleNotes = scheduleViews.scheduleNotes;
   const scheduleApprovals = scheduleViews.scheduleApprovals;
   const projectStaffOrder = scheduleViews.projectStaffOrder;
@@ -4832,6 +4882,10 @@ export default function App() {
   
   const handleSaveSchedule = () => { 
       try {
+          if (isLegacyScheduleReadOnly) {
+              alert('ตารางนี้กำลังแสดงข้อมูลจากคลังเดิมแบบอ่านอย่างเดียว กรุณาย้ายและตรวจสอบข้อมูลก่อนแก้ไข');
+              return;
+          }
           if (selectedProject) {
               const noteKey = `${selectedProject.id}_${currentMonth}`;
               setScheduleNotes(prev => ({ ...prev, [noteKey]: scheduleNote }));
@@ -8556,6 +8610,7 @@ export default function App() {
   };
 
   const updateSchedule = (userId, dateString, shiftId, type = 'plan') => {
+      if (isLegacyScheduleReadOnly) return;
       const key = type === 'plan' ? `${userId}_${dateString}` : `${userId}_${dateString}_act`;
       setSchedules(prev => ({ ...prev, [key]: shiftId }));
   };
@@ -10792,6 +10847,7 @@ export default function App() {
     });
 
     const handleDragEnd = () => {
+        if (isLegacyScheduleReadOnly) return;
         if (dragItem.current !== null && dragOverItem.current !== null && dragItem.current !== dragOverItem.current) {
             const newStaffOrder = [...sortedStaff];
             const draggedItemContent = newStaffOrder[dragItem.current];
@@ -11930,10 +11986,10 @@ export default function App() {
             const isHR = currentUser?.position?.includes('เจ้าหน้าที่ฝ่ายบุคคล') || currentUser?.username === 'admin';
             
             // Plan จะแก้ไขได้ก็ต่อเมื่อ ยังไม่ล็อค และ ยังไม่อนุมัติ (ปลดล็อคข้อจำกัดวันที่ 22 ออก)
-            const canEditPlan = !isLocked && !isApproved;
+            const canEditPlan = !isLegacyScheduleReadOnly && !isLocked && !isApproved;
             
             // ACT จะแก้ไขได้ก็ต่อเมื่อ ยังไม่ถูกล็อค
-            const canEditAct = !isLocked;
+            const canEditAct = !isLegacyScheduleReadOnly && !isLocked;
 
             // ตรวจสอบว่าเป็นหน่วยงาน Head Office หรือไม่
             const isHeadOffice = selectedProject?.name === 'Head Office';
@@ -11949,6 +12005,7 @@ export default function App() {
                         </h3>
                         {/* Status Badge */}
                         {(() => {
+                            if (isLegacyScheduleReadOnly) return <span className={`bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold border border-amber-300 shadow-sm flex items-center gap-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}><Archive size={isExporting ? 10 : 12}/> ข้อมูลเดิม — อ่านอย่างเดียว ({legacyScheduleFallback.legacyCellCount} ช่อง)</span>;
                             if (!approval.status) return <span className={`bg-gray-100 text-gray-500 px-2 py-0.5 rounded font-bold border ${isExporting ? 'text-[9px]' : 'text-xs'}`}>ฉบับร่าง (ยังไม่บันทึก)</span>;
                             if (approval.isLocked) return <span className={`bg-red-100 text-red-700 px-2 py-0.5 rounded font-bold border border-red-200 shadow-sm flex items-center gap-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}><Lock size={isExporting ? 10 : 12}/> ล็อคตารางแล้ว</span>;
                             if (approval.status === 'Pending Manager') return <span className={`bg-orange-100 text-orange-700 px-2 py-0.5 rounded font-bold border border-orange-200 shadow-sm flex items-center gap-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}><Clock size={isExporting ? 10 : 12}/> รอผู้จัดการอนุมัติ</span>;
@@ -11980,6 +12037,7 @@ export default function App() {
                             
                             {/* Approval Action Buttons */}
                             {(() => {
+                                if (isLegacyScheduleReadOnly) return null;
                                 const approval = scheduleApprovals[`${selectedProject.id}_${currentMonth}`];
                                 if (!approval) return null; // ยังไม่มีการบันทึก
                                 
@@ -12008,10 +12066,20 @@ export default function App() {
                                 return null;
                             })()}
 
-                            {hasPerm('proj_schedule', 'save') && <Button size="sm" icon={Save} onClick={handleSaveSchedule}>{t('save')}</Button>}
+                            {hasPerm('proj_schedule', 'save') && <Button size="sm" icon={Save} onClick={handleSaveSchedule} disabled={isLegacyScheduleReadOnly} title={isLegacyScheduleReadOnly ? 'ข้อมูลเดิมเปิดให้อ่านและส่งออกเท่านั้น' : undefined}>{t('save')}</Button>}
                         </div>
                     </div>
                 </div>
+
+                {isLegacyScheduleReadOnly && !isExporting && (
+                    <div className="mx-4 mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-start gap-2">
+                        <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+                        <div>
+                            <div className="font-bold">กำลังแสดงตารางจากคลังข้อมูลเดิมแบบอ่านอย่างเดียว</div>
+                            <div className="text-xs mt-1">ระบบจับคู่จากรหัสพนักงานและโครงการปัจจุบัน ข้อมูลของพนักงานที่เคยย้ายโครงการต้องตรวจสอบก่อนนำไปใช้อ้างอิงหรือย้ายเข้าระบบใหม่</div>
+                        </div>
+                    </div>
+                )}
                 
                 <div id="schedule-table-container" className={`w-full bg-white rounded-b-lg ${isExporting ? 'px-0 pb-2 overflow-visible block' : 'overflow-hidden pb-4'}`}>
                     {(() => {
@@ -12049,8 +12117,8 @@ export default function App() {
                                 {sortedStaff.map((user, index) => (
                                     <tbody 
                                         key={user.id} 
-                                        className={`border-b-2 border-gray-400 transition-all ${!isExporting ? 'cursor-move' : ''}`}
-                                        draggable={!isExporting}
+                                        className={`border-b-2 border-gray-400 transition-all ${!isExporting && !isLegacyScheduleReadOnly ? 'cursor-move' : ''}`}
+                                        draggable={!isExporting && !isLegacyScheduleReadOnly}
                                         onDragStart={(e) => { 
                                             dragItem.current = index; 
                                             e.currentTarget.style.opacity = '0.5';
@@ -12064,7 +12132,7 @@ export default function App() {
                                             handleDragEnd();
                                         }}
                                         onDragOver={(e) => e.preventDefault()}
-                                        title={!isExporting ? "คลิกค้างที่แถวแล้วลากเพื่อสลับตำแหน่ง (Drag & Drop)" : ""}
+                                        title={!isExporting && !isLegacyScheduleReadOnly ? "คลิกค้างที่แถวแล้วลากเพื่อสลับตำแหน่ง (Drag & Drop)" : ""}
                                     >
                                         <tr className="hover:bg-gray-50 border-b border-gray-200">
                                             <td className={`border-r border-gray-300 text-center text-gray-500 truncate ${isExporting ? 'p-0.5 text-[7px]' : 'p-1'}`} rowSpan="2">
@@ -12234,8 +12302,8 @@ export default function App() {
                             {SHIFTS.map(shift => (
                                 <div 
                                     key={shift.id} 
-                                    onClick={() => !isExporting && setSelectedShift(selectedShift === shift.id ? null : shift.id)}
-                                    className={`flex items-center gap-1.5 transition-all select-none ${isExporting ? 'text-[9px]' : 'text-xs cursor-pointer hover:bg-gray-200 p-1 rounded'} ${selectedShift === shift.id && !isExporting ? 'ring-2 ring-orange-500 bg-white shadow-md scale-105' : ''}`}
+                                    onClick={() => !isExporting && !isLegacyScheduleReadOnly && setSelectedShift(selectedShift === shift.id ? null : shift.id)}
+                                    className={`flex items-center gap-1.5 transition-all select-none ${isExporting ? 'text-[9px]' : `text-xs p-1 rounded ${isLegacyScheduleReadOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-gray-200'}`} ${selectedShift === shift.id && !isExporting && !isLegacyScheduleReadOnly ? 'ring-2 ring-orange-500 bg-white shadow-md scale-105' : ''}`}
                                 >
                                     <span className={`inline-block text-center rounded font-bold border ${shift.color} ${isExporting ? 'w-5 py-0 text-[7px]' : 'w-8 py-0.5'}`}>
                                         {shift.id}
@@ -12248,8 +12316,8 @@ export default function App() {
                             {/* ยางลบ (Eraser) */}
                             {!isExporting && (
                                 <div 
-                                    onClick={() => setSelectedShift(selectedShift === 'ERASE' ? null : 'ERASE')}
-                                    className={`flex items-center gap-1.5 transition-all select-none text-xs cursor-pointer hover:bg-gray-200 p-1 rounded ${selectedShift === 'ERASE' ? 'ring-2 ring-red-500 bg-white shadow-md scale-105' : ''}`}
+                                    onClick={() => !isLegacyScheduleReadOnly && setSelectedShift(selectedShift === 'ERASE' ? null : 'ERASE')}
+                                    className={`flex items-center gap-1.5 transition-all select-none text-xs p-1 rounded ${isLegacyScheduleReadOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-gray-200'} ${selectedShift === 'ERASE' && !isLegacyScheduleReadOnly ? 'ring-2 ring-red-500 bg-white shadow-md scale-105' : ''}`}
                                 >
                                     <span className={`inline-block text-center rounded font-bold border bg-red-50 text-red-600 border-red-200 w-8 py-0.5`}>
                                         <Eraser size={14} className="mx-auto" />
@@ -12273,6 +12341,7 @@ export default function App() {
                             className="w-full border border-gray-300 rounded-md p-3 text-sm h-20 focus:ring-1 focus:ring-orange-500 outline-none resize-none bg-gray-50 focus:bg-white transition-colors"
                             placeholder="พิมพ์รายละเอียดเพิ่มเติมที่นี่..."
                             value={scheduleNote}
+                            disabled={isLegacyScheduleReadOnly}
                             onChange={(e) => setScheduleNote(e.target.value)}
                         ></textarea>
                     )}
