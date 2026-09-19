@@ -32,11 +32,11 @@ const PROJECT_OWNED_COLLECTIONS = new Set([
   'bmg_project_events',
 ]);
 
-function uniqueStrings(values) {
+function uniqueStrings(values, trim = true) {
   return [...new Set(values
     .filter((value) => typeof value === 'string')
-    .map((value) => value.trim())
-    .filter(Boolean))];
+    .map((value) => trim ? value.trim() : value)
+    .filter((value) => value.trim().length > 0))];
 }
 
 function accessibleDepartmentNames(currentUser) {
@@ -46,7 +46,7 @@ function accessibleDepartmentNames(currentUser) {
       ? currentUser.accessibleDepts.split(',')
       : []);
 
-  return uniqueStrings([currentUser?.department, ...configured])
+  return uniqueStrings([currentUser?.department, ...configured], false)
     .filter((name) => name !== 'All');
 }
 
@@ -68,7 +68,8 @@ function hasExplicitPermission(currentUser, menuId, action = 'view') {
 }
 
 function createTargets(field, values) {
-  const safeValues = uniqueStrings(values);
+  // Names are stored authorization keys; trimming them changes the Firestore query.
+  const safeValues = uniqueStrings(values, field !== 'name' && field !== 'department');
   if (safeValues.length === 0) return [];
 
   const targets = [];

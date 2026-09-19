@@ -2,10 +2,10 @@ export function resolvePostAuthDestination({ user, projects, projectsLoaded }) {
   if (!user) return { kind: 'signed-out' };
 
   const department = typeof user.department === 'string'
-    ? user.department.trim()
+    ? user.department
     : '';
 
-  if (!department || department === 'Head Office') {
+  if (!department.trim() || department === 'Head Office') {
     return { kind: 'global' };
   }
 
