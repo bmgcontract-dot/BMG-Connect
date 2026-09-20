@@ -611,6 +611,15 @@ test('central-fee documents require project scope and explicit menu permission',
     noticeThresholdDays: 45,
     freezeThresholdMonths: 3,
   }));
+  await assertFails(setDoc(doc(
+    managerDatabase,
+    'artifacts', APP_ID, 'public', 'data', 'app_state', 'central_fee_settings_project-c',
+  ), {
+    projectId: 'project-a',
+    menuId: 'proj_centralfee',
+    noticeThresholdDays: 45,
+    freezeThresholdMonths: 3,
+  }));
 });
 
 test('project schedule documents require schedule permission and an accessible project', async () => {

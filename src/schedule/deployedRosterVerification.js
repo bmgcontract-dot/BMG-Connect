@@ -1,6 +1,12 @@
 const ROSTER_FIELDS = ['employeeId', 'firstName', 'id', 'lastName', 'position'];
 
-export function validateDeployedRoster({ status, cacheControl, payload, projectId }) {
+export function validateDeployedRoster({
+  status,
+  cacheControl,
+  payload,
+  projectId,
+  expectedStaffIds,
+}) {
   if (status !== 200) {
     throw new Error(`roster-http-${status}:${payload?.error || 'unexpected-response'}`);
   }
@@ -9,6 +15,13 @@ export function validateDeployedRoster({ status, cacheControl, payload, projectI
   }
   if (payload?.projectId !== projectId || !Array.isArray(payload?.staff)) {
     throw new Error('roster-response-shape-invalid');
+  }
+  if (
+    !Array.isArray(expectedStaffIds)
+    || expectedStaffIds.length === 0
+    || expectedStaffIds.some(id => typeof id !== 'string' || id.trim() === '')
+  ) {
+    throw new Error('roster-expected-staff-required');
   }
   if (payload.staff.length > 500) throw new Error('roster-response-too-large');
 
@@ -24,5 +37,15 @@ export function validateDeployedRoster({ status, cacheControl, payload, projectI
     seenIds.add(person.id);
   }
 
-  return { projectId, staffCount: payload.staff.length };
+  for (const expectedId of expectedStaffIds) {
+    if (!seenIds.has(expectedId)) {
+      throw new Error(`roster-expected-staff-missing:${expectedId}`);
+    }
+  }
+
+  return {
+    projectId,
+    staffCount: payload.staff.length,
+    expectedStaffCount: expectedStaffIds.length,
+  };
 }

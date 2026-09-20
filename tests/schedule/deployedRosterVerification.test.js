@@ -17,7 +17,8 @@ test('deployed roster verifier accepts only the minimal private response', () =>
     cacheControl: 'private, no-store',
     projectId: 'project-a',
     payload: { projectId: 'project-a', staff: [validPerson] },
-  }), { projectId: 'project-a', staffCount: 1 });
+    expectedStaffIds: ['staff-1'],
+  }), { projectId: 'project-a', staffCount: 1, expectedStaffCount: 1 });
 });
 test('deployed roster verifier rejects missing endpoints, cache leaks, and profile fields', () => {
   assert.throws(() => validateDeployedRoster({
@@ -37,5 +38,19 @@ test('deployed roster verifier rejects missing endpoints, cache leaks, and profi
     cacheControl: 'private, no-store',
     projectId: 'project-a',
     payload: { projectId: 'project-a', staff: [{ ...validPerson, phone: 'private' }] },
+    expectedStaffIds: ['staff-1'],
   }), /fields-invalid/);
+  assert.throws(() => validateDeployedRoster({
+    status: 200,
+    cacheControl: 'private, no-store',
+    projectId: 'project-a',
+    payload: { projectId: 'project-a', staff: [] },
+  }), /expected-staff-required/);
+  assert.throws(() => validateDeployedRoster({
+    status: 200,
+    cacheControl: 'private, no-store',
+    projectId: 'project-a',
+    payload: { projectId: 'project-a', staff: [] },
+    expectedStaffIds: ['staff-1'],
+  }), /expected-staff-missing:staff-1/);
 });

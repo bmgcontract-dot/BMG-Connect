@@ -174,6 +174,14 @@ service cloud.firestore {
       return isAllowedScopedState(data) && hasPermission(data.menuId, action);
     }
 
+    function hasValidScopedStateId(stateId, data) {
+      return !stateId.matches('^central_fee_settings_.*')
+        || (
+          data.menuId == 'proj_centralfee'
+          && stateId == 'central_fee_settings_' + data.projectId
+        );
+    }
+
     match /users/{userId} {
       allow get, list: if isSignedIn()
         && (
@@ -304,16 +312,22 @@ service cloud.firestore {
     }
 
     match /artifacts/{appId}/public/data/app_state/{stateId} {
-      allow read: if isBmgApp(appId) && isActiveBusinessUser() && canReadScopedState(resource.data);
+      allow read: if isBmgApp(appId) && isActiveBusinessUser()
+        && canReadScopedState(resource.data)
+        && hasValidScopedStateId(stateId, resource.data);
       allow create: if isBmgApp(appId) && isActiveBusinessUser()
-        && canWriteScopedState(request.resource.data, 'save');
+        && canWriteScopedState(request.resource.data, 'save')
+        && hasValidScopedStateId(stateId, request.resource.data);
       allow update: if isBmgApp(appId) && isActiveBusinessUser()
         && canWriteScopedState(resource.data, 'edit')
         && canWriteScopedState(request.resource.data, 'edit')
+        && hasValidScopedStateId(stateId, resource.data)
+        && hasValidScopedStateId(stateId, request.resource.data)
         && request.resource.data.projectId == resource.data.projectId
         && request.resource.data.menuId == resource.data.menuId;
       allow delete: if isBmgApp(appId) && isActiveBusinessUser()
-        && canWriteScopedState(resource.data, 'delete');
+        && canWriteScopedState(resource.data, 'delete')
+        && hasValidScopedStateId(stateId, resource.data);
     }
 
     match /artifacts/{appId}/public/data/app_state_chunks/{chunkId} {

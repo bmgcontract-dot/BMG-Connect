@@ -1,11 +1,17 @@
 import { validateDeployedRoster } from '../src/schedule/deployedRosterVerification.js';
 
-const baseUrl = process.env.BMG_ROSTER_BASE_URL || 'https://bmg-connect.vercel.app';
+const baseUrl = process.env.BMG_ROSTER_BASE_URL;
 const projectId = process.env.BMG_ROSTER_PROJECT_ID;
 const token = process.env.BMG_ROSTER_ID_TOKEN;
+const expectedStaffIds = (process.env.BMG_ROSTER_EXPECTED_STAFF_IDS || '')
+  .split(',')
+  .map(value => value.trim())
+  .filter(Boolean);
 
-if (!projectId || !token) {
-  console.error('Set BMG_ROSTER_PROJECT_ID and the short-lived BMG_ROSTER_ID_TOKEN.');
+if (!baseUrl || !projectId || !token || expectedStaffIds.length === 0) {
+  console.error(
+    'Set BMG_ROSTER_BASE_URL, BMG_ROSTER_PROJECT_ID, BMG_ROSTER_ID_TOKEN, and BMG_ROSTER_EXPECTED_STAFF_IDS.',
+  );
   process.exitCode = 2;
 } else {
   const url = new URL('/api/schedule-roster', baseUrl);
@@ -20,6 +26,7 @@ if (!projectId || !token) {
     cacheControl: response.headers.get('cache-control'),
     payload,
     projectId,
+    expectedStaffIds,
   });
 
   console.log(JSON.stringify({
