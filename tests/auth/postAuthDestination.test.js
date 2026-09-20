@@ -63,3 +63,16 @@ test('head-office users keep access to the global destination', () => {
     kind: 'global',
   });
 });
+
+test('head-office match ignores case and surrounding whitespace', () => {
+  // Production data has 11 users stored as "Head office" (lowercase o) plus
+  // padded/cased variants. All of them are head-office staff and must resolve
+  // to the global destination, not "assigned-project-unavailable".
+  for (const department of ['Head office', ' head office ', 'HEAD OFFICE', 'Head  Office']) {
+    assert.deepEqual(
+      resolvePostAuthDestination({ user: { department }, projects: [], projectsLoaded: true }),
+      { kind: 'global' },
+      `expected global for department=${JSON.stringify(department)}`,
+    );
+  }
+});

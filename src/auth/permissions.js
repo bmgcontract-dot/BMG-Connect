@@ -23,6 +23,16 @@ export function hasUserPermission(user, menuId, action = 'view') {
   return Boolean(permissions[menuId]?.[action]);
 }
 
+// Tolerant name comparison: trim, collapse internal whitespace, lowercase.
+// Production department/project names have cased and padded variants that must
+// still match (e.g. "Head office" vs "Head Office", trailing spaces).
+function normalizeName(value) {
+  return (typeof value === 'string' ? value : '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
 export function filterAccessibleProjects({ user, projects }) {
   const projectList = Array.isArray(projects) ? projects : [];
   if (!user) return [];
@@ -35,7 +45,9 @@ export function filterAccessibleProjects({ user, projects }) {
 
   if (departmentList.includes('All')) return projectList;
 
-  return projectList.filter((project) => (
-    project?.name === user.department || departmentList.includes(project?.name)
-  ));
+  const allowedNames = new Set(
+    [user.department, ...departmentList].map(normalizeName).filter(Boolean),
+  );
+
+  return projectList.filter((project) => allowedNames.has(normalizeName(project?.name)));
 }
