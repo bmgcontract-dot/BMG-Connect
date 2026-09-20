@@ -4083,14 +4083,20 @@ export default function App() {
       'bmg_projects',
       INITIAL_PROJECTS,
       subscriptionPolicy.userFor('bmg_projects'),
-      {
-          queryPlan: USE_FIREBASE_BUSINESS_AUTH
-              ? createFirestoreCollectionQueryPlan({
+      USE_FIREBASE_BUSINESS_AUTH
+          ? {
+              // Wait for the authoritative server snapshot before treating projects as
+              // "loaded". Otherwise a restricted user's post-auth destination can resolve
+              // to "assigned-project-unavailable" from an empty/partial cache snapshot
+              // that arrives before the scoped server result, showing a false
+              // "ไม่พบข้อมูลโครงการที่สังกัด" until the next render.
+              requireServerSnapshot: true,
+              queryPlan: createFirestoreCollectionQueryPlan({
                   collectionName: 'bmg_projects',
                   currentUser,
-              })
-              : { kind: 'unscoped', targets: [[]] },
-      },
+              }),
+          }
+          : { queryPlan: { kind: 'unscoped', targets: [[]] } },
   );
   const postAuthDestination = useMemo(() => resolvePostAuthDestination({
       user: currentUser,

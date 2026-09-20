@@ -15,3 +15,5 @@ migration-output/
 # Local tooling
 .DS_Store
 *.log
+.vercel
+.env*
