@@ -49,6 +49,7 @@ import {
 } from './src/fees/feeSettings.js';
 import { buildAdminLegacyScheduleFallback } from './src/schedule/adminLegacyScheduleFallback.js';
 import { deriveProjectScheduleViews, upsertProjectSchedule } from './src/schedule/projectScheduleState.js';
+import { unlockScheduleApproval } from './src/schedule/scheduleApprovalWorkflow.js';
 import { scheduleDocumentEqual } from './src/schedule/scheduleDocumentEqual.js';
 import { prepareLegacyScheduleEditing, readLegacyScheduleSnapshot } from './src/schedule/legacyScheduleEditing.js';
 import { useScheduleRoster } from './src/schedule/useScheduleRoster.js';
@@ -5327,13 +5328,7 @@ export default function App() {
       
       const result = await setScheduleApprovals(prev => ({
           ...prev,
-          [approvalKey]: {
-              ...currentApproval,
-              isLocked: false,
-              status: 'Pending HR', // ย้อนสถานะกลับเพื่อให้สามารถแก้ Plan ได้ด้วย
-              hrApprovedBy: null,
-              updatedAt: new Date().toISOString()
-          }
+          [approvalKey]: unlockScheduleApproval(currentApproval, new Date().toISOString())
       }));
       if (result?.ok) alert('ปลดล็อคตารางงานสำเร็จ สถานะกลับไปเป็นรอฝ่ายบุคคลอนุมัติ');
   };
