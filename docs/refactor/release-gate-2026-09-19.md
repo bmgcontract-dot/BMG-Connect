@@ -86,3 +86,29 @@ No Production application, Rules, data migration, or deployment was changed in t
 - Standards review found no violation of documented repository standards. It recorded non-blocking maintainability debt in the large `App.jsx`, duplicated legacy chunk readers, raw lifecycle strings, and the legacy-import context data clump. Spec review passed the malformed-archive, runtime CSS selector, draft/save, absent-month, and in-flight-edit fixes.
 
 Decision remains **HOLD**. The fresh full export and isolated restore gate is now complete. Remaining blockers are: deploy the roster function and validate authenticated Production IAM; complete persisted cross-module write smoke coverage; confirm unlock workflow; and review the split commits before any deploy. Local work must be split into explicit product/test, audit-tooling, and evidence-documentation commits without adding local `.agents/`, `.claude/`, or `skills-lock.json` files.
+
+## Persisted-write smoke and pre-deploy baseline — 2026-09-20
+
+No Production data, Rules, application deployment, or roster IAM configuration was changed. Browser writes used only synthetic accounts and project `qa-project` against Auth/Firestore emulators on localhost.
+
+- Daily Reports passed: created the 2026-09-20 synthetic report and verified its document in `bmg_dailyReports_docs`.
+- Assets passed: created `QA-LOCAL-A-001` / `SMOKE-ASSET-20260920`, quantity 2 at `LOCAL-LAB`, and verified `bmg_assets_docs`.
+- Machines passed: created `BMG-M-001` / `SMOKE-MACHINE-20260920`, Generator, quantity 1 at `LOCAL-PLANT`, and verified `bmg_machines_docs`.
+- PM passed: created an active monthly plan for the synthetic machine, scheduled on day 1, and verified `bmg_pmPlans_docs`.
+- Repairs passed: created `QA-LOCAL-REP-001` for `LOCAL-ROOM`, confirmed the rendered request, and verified `bmg_repairs_docs`.
+- Utilities passed: created water meter `QA-W-001` / `SMOKE-METER-20260920` at `LOCAL-UTILITY` with opening value 100, recorded 125, and verified both the updated meter and reading (`prevValue: 100`, `usage: 25`) in `bmg_meters_docs` and `bmg_utilityReadings_docs`.
+- Personnel is blocked in this isolated browser setup: saving a user requires the Firebase Authentication Admin API, which is not emulated by the local Vite setup. The attempted synthetic edit showed an explicit failure and did not claim or produce a persisted write.
+- Central Fees failed the persistence gate: the settings modal's “save” control only closes the modal. `noticeThresholdDays` and `freezeThresholdMonths` are component state and are not written to shared storage. This is a release blocker if these settings are expected to survive reload or be shared across users.
+- Native `alert()` calls in Machines, PM, and Utilities temporarily blocked browser automation. Each write was accepted only after the success dialog was dismissed and the resulting Firestore document was read back; alerts alone were not counted as evidence.
+
+Pre-deploy baseline captured at 2026-09-20 09:11 ICT:
+
+- Candidate branch: `codex/schedule-legacy-read-fallback`.
+- Candidate HEAD: `41c55c49cda804ff861dc2698c9c020d71541867` before this evidence update.
+- Remote branch baseline: `origin/codex/schedule-legacy-read-fallback` at `cf40c9002916e6533bd1d3ff8d3ba4e291e3604e`; the candidate was three commits ahead.
+- Remote main baseline: `origin/main` at `eac28fde8a8dde59d608b046bd6d214be917859d`.
+- Production roster request still returned `HTTP 404`, `X-Vercel-Error: NOT_FOUND`, request ID `sin1::j2nd7-1789870284277-453577bac985`. No authenticated IAM test is possible until the function is deployed.
+- No local immutable Vercel deployment identifier or deployed Rules snapshot was available, so those two rollback anchors remain unrecorded and must be captured from the deployment platform before release.
+- The three reviewed split commits are `99794e1` (product/tests), `28e8fcb` (audit tooling), and `41c55c4` (evidence documentation). Local `.agents/`, `.claude/`, and `skills-lock.json` remain untracked and excluded.
+
+Decision remains **HOLD**. The persisted-write gate is complete for Reports, Assets, Machines/PM, Repairs, and Utilities. Remaining release blockers are Central Fees persistence, a production-capable Personnel/Admin-API smoke path, deployment plus authenticated IAM validation for the roster API, and recording the immutable pre-deploy Vercel deployment and deployed Rules revision. Current unlock-to-Pending-HR behavior is the working release assumption; record explicit business-owner approval in the final release decision.
