@@ -1,6 +1,7 @@
 # Stabilization release gate — 2026-09-19
 
-Decision: HOLD. Local working-tree changes are not deployed or approved as a complete release.
+Initial decision: HOLD. This historical decision is superseded by the final
+release decision at the end of this document.
 
 ## Fresh verification
 
@@ -218,3 +219,29 @@ Decision remains **HOLD** only for the explicit business-owner decision on the
 unlock workflow: unlocking an approved schedule currently clears the HR
 approval and returns the workflow to Pending HR so Plan corrections require HR
 approval again.
+
+## Final unlock decision and release readiness — 2026-09-20
+
+The business owner explicitly confirmed the intended workflow: unlocking an
+approved schedule clears the HR approval, returns the schedule to `Pending HR`,
+allows Plan corrections, and requires HR to approve the corrected schedule
+again. Manager approval and the existing audit context remain preserved.
+
+The decision is now encoded in `unlockScheduleApproval` and protected by a
+regression test. Exact product/test candidate commit:
+`ac4af932ac8ec78da40043606729f8c678748cfb`.
+
+Fresh exact-candidate verification used Node 22.23.2 and Java 21:
+
+- Application tests: 125/125 passed, including the new unlock/reapproval test.
+- Firestore Rules suite: 27/27 passed.
+- Isolated Admin API emulator: 1/1 passed.
+- ESLint: zero errors and zero warnings.
+- Production build: passed; 2,125.47 kB JavaScript, 532.68 kB gzip, with the
+  accepted existing large-chunk warning.
+- `git diff --check`: passed.
+
+All release blockers recorded in this document are closed. The branch is
+**READY FOR PRODUCTION DEPLOYMENT APPROVAL**. This status is not a Production
+deployment authorization: promote only after an explicit deploy instruction,
+using the recorded rollback anchors and post-deploy role/API checks.
