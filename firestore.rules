@@ -196,6 +196,18 @@ service cloud.firestore {
       allow create, update, delete: if isBmgApp(appId) && isAdmin();
     }
 
+    // Transactions must read an absent project-month before safely creating it.
+    // This grant is get-only, absent-only, and scoped through the project encoded in the ID.
+    match /artifacts/{appId}/public/data/bmg_projectSchedules_docs/{documentId} {
+      allow get: if isBmgApp(appId)
+        && isActiveBusinessUser()
+        && documentId.matches('^.+_[0-9]{4}-(0[1-9]|1[0-2])$')
+        && !exists(/databases/$(database)/documents/artifacts/$(appId)/public/data/bmg_projectSchedules_docs/$(documentId))
+        && hasPermission('proj_schedule', 'view')
+        && hasPermission('proj_schedule', 'save')
+        && canAccessProjectId(documentId.replace('_[0-9]{4}-(0[1-9]|1[0-2])$', ''));
+    }
+
     match /artifacts/{appId}/public/data/{collectionName}/{documentId} {
       allow read: if isBmgApp(appId)
         && isActiveBusinessUser()

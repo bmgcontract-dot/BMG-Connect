@@ -1,16 +1,16 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   Users, Building2, BarChart3, Settings, LogOut, 
   Plus, Search, FileText, Download, Trash2, Edit, 
   CheckCircle, AlertTriangle, Wrench, Calendar, 
   ClipboardList, Droplet, Zap, Shield, 
   Clock, ArrowRight, ClipboardCheck,
-  Briefcase, Globe, Printer, Loader2, X, Upload, User, CheckSquare, Square,
+  Briefcase, Globe, Printer, Loader2, X, Upload, User, CheckSquare,
   XCircle, Image as ImageIcon, File, Hourglass, Phone, Mail, LayoutGrid, List, ChevronDown, Save,
   ChevronLeft, ChevronRight, MousePointer2, FileCheck, DollarSign, Camera,
   MapPin, Box, PenTool, Printer as PrinterIcon, History, Folder, Lock,
   Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2, Bell, Megaphone, Radio, Medal, Landmark, RefreshCw, QrCode,
-  Package, Archive, ShoppingCart, ArrowDownRight, ArrowUpRight, FileSpreadsheet, ListChecks, Home, MessageSquare, PieChart as PieChartIcon, Eraser
+  Package, Archive, ArrowDownRight, ArrowUpRight, FileSpreadsheet, ListChecks, Home, MessageSquare, PieChart as PieChartIcon, Eraser
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
@@ -24,8 +24,10 @@ import {
   initializeAuth,
   onAuthStateChanged,
   signInWithCustomToken,
+  connectAuthEmulator,
 } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot, getDoc, getDocs, collection, deleteDoc, writeBatch, query, where } from 'firebase/firestore';
+import { getFirestore, connectFirestoreEmulator, doc, setDoc, onSnapshot, getDoc, getDocFromServer, collection, writeBatch, runTransaction, query, where } from 'firebase/firestore';
+import { browserTestConfig } from './src/firebase/browserTestConfig.js';
 import { createFirebaseBusinessAuth } from './src/auth/firebaseAuthAdapter.js';
 import { initializeFirebaseBrowserAuth } from './src/auth/firebaseBrowserAuth.js';
 import { createAdminUserClient } from './src/auth/adminUserClient.js';
@@ -41,9 +43,14 @@ import { filterAccessibleProjects, hasUserPermission } from './src/auth/permissi
 import { validateProjectUniqueness } from './src/projects/projectValidation.js';
 import { buildAdminLegacyScheduleFallback } from './src/schedule/adminLegacyScheduleFallback.js';
 import { deriveProjectScheduleViews, upsertProjectSchedule } from './src/schedule/projectScheduleState.js';
+import { scheduleDocumentEqual } from './src/schedule/scheduleDocumentEqual.js';
+import { prepareLegacyScheduleEditing, readLegacyScheduleSnapshot } from './src/schedule/legacyScheduleEditing.js';
+import { useScheduleRoster } from './src/schedule/useScheduleRoster.js';
 
 // --- Firebase Initialization ---
 let app, auth, db, appId;
+const LOCAL_EMULATOR = import.meta.env.BMG_LOCAL_EMULATOR === true;
+const LOCAL_FIREBASE_CONFIG = browserTestConfig({ enabled: LOCAL_EMULATOR, development: import.meta.env.DEV, hostname: window.location.hostname });
 
 const MANUAL_FIREBASE_CONFIG = {
   apiKey: "AIzaSyAy03rxniCLFDYT4ztY_Ry2zh0ddzdBoPE",
@@ -55,17 +62,20 @@ const MANUAL_FIREBASE_CONFIG = {
   measurementId: "G-4B69L2731M"
 };
 
-const GOOGLE_SCRIPT_CONFIG = {
+const GOOGLE_SCRIPT_CONFIG = LOCAL_EMULATOR ? { SHEETS_URL: '', DRIVE_URL: '' } : {
   SHEETS_URL: "https://script.google.com/macros/s/AKfycbzmNdR7LVpfUossHkcNH_onBPTG2dw6GuJzh5JilthkMwW-Sdr4s0lFjPKwSsCBTg/exec", 
   DRIVE_URL: "https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec"
 };
 
-const USE_FIREBASE_BUSINESS_AUTH = resolveAuthMode(import.meta.env.VITE_AUTH_MODE) === 'firebase';
-const INTERNAL_AUTH_DOMAIN = import.meta.env.VITE_INTERNAL_AUTH_DOMAIN || 'auth.bmg-connect.local';
+const USE_FIREBASE_BUSINESS_AUTH = LOCAL_EMULATOR || resolveAuthMode(import.meta.env.VITE_AUTH_MODE) === 'firebase';
+const INTERNAL_AUTH_DOMAIN = LOCAL_EMULATOR ? 'auth.bmg-connect.local' : import.meta.env.VITE_INTERNAL_AUTH_DOMAIN || 'auth.bmg-connect.local';
 
 try {
   let firebaseConfig = null;
-  if (typeof __firebase_config !== 'undefined') {
+  if (LOCAL_EMULATOR) {
+     firebaseConfig = LOCAL_FIREBASE_CONFIG;
+     appId = 'bmg-app-prod'; // Same Rules namespace; isolated by demo project and emulator host.
+  } else if (typeof __firebase_config !== 'undefined') {
      firebaseConfig = JSON.parse(__firebase_config);
      appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
   } else if (MANUAL_FIREBASE_CONFIG.apiKey && MANUAL_FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY") {
@@ -82,22 +92,19 @@ try {
         browserLocalPersistence,
       });
       db = getFirestore(app);
+      if (LOCAL_EMULATOR) {
+          connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+          connectFirestoreEmulator(db, '127.0.0.1', 8090);
+      }
   } else {
       console.warn("ไม่พบ Firebase Config: ระบบจะสลับไปใช้ Local Storage");
   }
 } catch (e) {
+  if (LOCAL_EMULATOR) throw e;
   console.error("Firebase init failed", e);
 }
 
 // --- Configuration & Constants ---
-const THEME = {
-  primary: '#FF4D00', 
-  secondary: '#FF7A00',
-  bg: '#F3F4F6',
-  sidebar: '#1F2937',
-  text: '#111827'
-};
-
 const PROJECT_TYPES = ['Condo', 'Village', 'Office Building'];
 const PROJECT_TYPE_CODES = {
   'Condo': 'C',
@@ -423,18 +430,7 @@ const getDefaultPermissions = () => {
     return perms;
 };
 
-const getFullPermissions = () => {
-    const perms = {};
-    AVAILABLE_MENUS.forEach(m => {
-        perms[m.id] = { view: true, save: true, edit: true, approve: true, delete: true, print: true };
-        if (m.submenus) {
-            m.submenus.forEach(sub => {
-                perms[sub.id] = { view: true, save: true, edit: true, approve: true, delete: true, print: true };
-            });
-        }
-    });
-    return perms;
-};
+
 
 const getMergedPermissions = (templatePerms) => {
     const base = getDefaultPermissions();
@@ -1050,21 +1046,7 @@ const ThreeDBar = (props) => {
     );
 };
 
-const ThreeDBarHorizontal = (props) => {
-    const { fill, x, y, width, height } = props;
-    const depth = 8;
-    if (!width || width <= 0 || height <= 0) return null;
 
-    return (
-        <g style={{ filter: 'drop-shadow(3px 6px 5px rgba(0,0,0,0.25))' }}>
-            <path d={`M${x},${y} L${x + depth},${y - depth} L${x + width + depth},${y - depth} L${x + width},${y} Z`} fill={fill} />
-            <path d={`M${x},${y} L${x + depth},${y - depth} L${x + width + depth},${y - depth} L${x + width},${y} Z`} fill="#ffffff" fillOpacity={0.3} />
-            <path d={`M${x + width},${y} L${x + width + depth},${y - depth} L${x + width + depth},${y + height - depth} L${x + width},${y + height} Z`} fill={fill} />
-            <path d={`M${x + width},${y} L${x + width + depth},${y - depth} L${x + width + depth},${y + height - depth} L${x + width},${y + height} Z`} fill="#000000" fillOpacity={0.25} />
-            <path d={`M${x},${y} L${x + width},${y} L${x + width},${y + height} L${x},${y + height} Z`} fill={fill} />
-        </g>
-    );
-};
 
 const ThreeDMedal = ({ rank }) => {
     if (rank > 3) return <span className="font-bold text-gray-500 text-base">{rank}</span>;
@@ -1190,9 +1172,9 @@ const INITIAL_READINGS = [];
 const INITIAL_DAILY_REPORTS = []; 
 const INITIAL_AUDITS = []; 
 const INITIAL_TOOLS = []; 
-const INITIAL_UTILITY_READINGS = []; 
+
 const INITIAL_ACTION_PLANS = []; 
-const INITIAL_SCHEDULES = []; 
+
 const INITIAL_CONTRACTORS = [];
 const INITIAL_INVENTORY = [];
 const INITIAL_TRANSACTIONS = [];
@@ -1265,7 +1247,7 @@ const normalizeImportedDate = (rawStr, isMDY = false) => {
     
     if (/^\d{4}-\d{2}-\d{2}$/.test(dStr)) return dStr;
     
-    const parts = dStr.split(/[\/\-]/);
+    const parts = dStr.split(/[/-]/);
     if (parts.length === 3) {
         let d, m, y;
         if (parts[0].length === 4) { 
@@ -1449,12 +1431,13 @@ const loadStateLocallyIDB = async (key) => {
             request.onsuccess = () => resolve(request.result);
             request.onerror = () => reject(request.error);
         });
-    } catch (e) {
+    } catch {
         return null;
     }
 };
 
 function usePersistentState(key, initialValue, fbUser) {
+  const expectsArray = Array.isArray(initialValue);
   const [state, setState] = useState(() => {
       if (typeof window !== 'undefined') {
           const local = localStorage.getItem(key);
@@ -1467,7 +1450,7 @@ function usePersistentState(key, initialValue, fbUser) {
                       }
                   }
                   return parsed; 
-              } catch(e) { return initialValue; }
+              } catch { return initialValue; }
           }
       }
       return initialValue;
@@ -1567,13 +1550,13 @@ function usePersistentState(key, initialValue, fbUser) {
                   console.error("Parse payload error", e);
               }
           }
-        } catch (err) {
+        } catch {
             console.warn("Download chunks info: Using local data (offline or network unavailable).");
         }
       }
       setIsLoaded(true);
       clearTimeout(fallbackTimer);
-    }, (error) => {
+    }, () => {
         console.warn("Sync info: Working offline.");
         setIsLoaded(true);
         clearTimeout(fallbackTimer);
@@ -1581,7 +1564,7 @@ function usePersistentState(key, initialValue, fbUser) {
 
     const applyData = (parsedData) => {
         let finalData = parsedData;
-        if (Array.isArray(initialValue) && !Array.isArray(parsedData)) {
+        if (expectsArray && !Array.isArray(parsedData)) {
             finalData = (parsedData && typeof parsedData === 'object') ? Object.values(parsedData) : [];
         }
 
@@ -1596,7 +1579,7 @@ function usePersistentState(key, initialValue, fbUser) {
             setState(finalData);
             saveStateLocallyIDB(key, finalData); // Save fetched data to IDB
             if (typeof window !== 'undefined') {
-                try { localStorage.setItem(key, JSON.stringify(finalData)); } catch(e){}
+                try { localStorage.setItem(key, JSON.stringify(finalData)); } catch { /* IndexedDB remains the fallback when localStorage is full. */ }
             }
         }
         setIsSynced(true);
@@ -1606,7 +1589,7 @@ function usePersistentState(key, initialValue, fbUser) {
         unsubscribe();
         clearTimeout(fallbackTimer);
     };
-  }, [db, fbUser, appId, key]);
+  }, [fbUser, key, expectsArray]);
 
   const setPersistentValue = (newValueOrUpdater) => {
       const oldValue = stateRef.current;
@@ -1618,7 +1601,7 @@ function usePersistentState(key, initialValue, fbUser) {
       saveStateLocallyIDB(key, newValue);
 
       if (typeof window !== 'undefined') {
-          try { localStorage.setItem(key, JSON.stringify(newValue)); } catch(e){}
+          try { localStorage.setItem(key, JSON.stringify(newValue)); } catch { /* IndexedDB remains the fallback when localStorage is full. */ }
       }
 
       if (!db || !fbUser || !appId) return;
@@ -1659,7 +1642,7 @@ function useUserPersistentState(key, initialValue, fbUser) {
         if (typeof window !== 'undefined') {
             const local = localStorage.getItem(userSpecificKey);
             if (local) {
-                try { return JSON.parse(local); } catch(e) { return initialValue; }
+                try { return JSON.parse(local); } catch { return initialValue; }
             }
         }
         return initialValue;
@@ -1684,7 +1667,7 @@ function useUserPersistentState(key, initialValue, fbUser) {
             if (typeof window !== 'undefined') {
                 try {
                     localStorage.setItem(userSpecificKey, JSON.stringify(newValue));
-                } catch (e) {}
+                } catch { /* IndexedDB remains the fallback when localStorage is full. */ }
             }
             return newValue;
         });
@@ -1694,9 +1677,11 @@ function useUserPersistentState(key, initialValue, fbUser) {
 }
 
 function usePersistentCollection(collectionName, initialValue, fbUser, options = {}) {
+    const guardedScheduleWrites = collectionName === 'bmg_projectSchedules';
+    const scheduleWritePending = useRef(false);
     const rootCollection = options.rootCollection === true;
     const readOnly = options.readOnly === true;
-    const requireServerSnapshot = options.requireServerSnapshot === true;
+    const requireServerSnapshot = guardedScheduleWrites || options.requireServerSnapshot === true;
     const documentIdField = options.documentIdField || 'id';
     const dateScopeField = options.dateScope?.field;
     const dateScopeStart = options.dateScope?.start;
@@ -1704,10 +1689,6 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
     const queryPlan = options.queryPlan || { kind: 'unscoped', targets: [[]] };
     const queryPlanKey = JSON.stringify(queryPlan);
     const localKey = options.localKey || (collectionName.startsWith('bmg_') ? collectionName : `bmg_${collectionName}`);
-
-    const getCollectionReference = () => rootCollection
-        ? collection(db, collectionName)
-        : collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
 
     const getDocumentReference = (id) => rootCollection
         ? doc(db, collectionName, id)
@@ -1725,7 +1706,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
                     return Array.isArray(parsed)
                         ? filterItemsForQueryPlan(parsed, queryPlan)
                         : initialValue;
-                } catch(e) { 
+                } catch {
                     return initialValue; 
                 }
             }
@@ -1735,11 +1716,21 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
 
     const dataRef = useRef(data);
     const [isLoaded, setIsLoaded] = useState(false);
+    const readScope = JSON.stringify([collectionName, fbUser?.uid, queryPlanKey, dateScopeField, dateScopeStart, dateScopeEnd]);
+    const [readState, setReadState] = useState({ scope: null, status: 'loading' });
+    const collectionReadState = queryPlan.kind === 'blocked'
+        ? { status: 'blocked' }
+        : (!db || !appId || !fbUser)
+            ? { status: 'unavailable' }
+            : readState.scope === readScope ? readState : { status: 'loading' };
 
     useEffect(() => { dataRef.current = data; }, [data]);
 
     useEffect(() => {
+        // Reconstruct from the stable key: equivalent query objects must not resubscribe.
+        const queryPlan = JSON.parse(queryPlanKey);
         if (!db || !appId || !fbUser || queryPlan.kind === 'blocked') {
+            setReadState({ scope: null, status: 'unavailable' });
             if (queryPlan.kind === 'blocked') {
                 setData([]);
                 dataRef.current = [];
@@ -1753,10 +1744,12 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
         
         const initData = async () => {
             setIsLoaded(false);
+            setReadState({ scope: readScope, status: 'loading' });
             
             try {
                 // NEW: Load from IndexedDB first for fast and large offline data
                 const idbData = await loadStateLocallyIDB(localKey);
+                if (!isMounted) return;
                 if (idbData && Array.isArray(idbData) && idbData.length > 0) {
                     const safeIdbData = filterItemsForQueryPlan(idbData, queryPlan);
                     if (isMounted) {
@@ -1765,7 +1758,9 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
                     }
                 }
 
-                const colRef = getCollectionReference();
+                const colRef = rootCollection
+                    ? collection(db, collectionName)
+                    : collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
                 const hasDateScope = dateScopeField && dateScopeStart && dateScopeEnd;
                 const targetFilters = queryPlan.targets.map((filters) => (
                     hasDateScope
@@ -1780,6 +1775,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
                 const receivedTargets = new Set();
                 const handleSnapshot = (targetIndex, snapshot) => {
                     if (!isMounted) return;
+                    if (guardedScheduleWrites && snapshot.metadata.hasPendingWrites) return;
                     if (!shouldApplyCollectionSnapshot({
                         requireServerSnapshot,
                         fromCache: snapshot.metadata.fromCache,
@@ -1815,16 +1811,20 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
                     if (typeof window !== 'undefined') {
                         try {
                             localStorage.setItem(localKey, JSON.stringify(nextItems));
-                        } catch(e) {
+                        } catch {
                             // IndexedDB remains the large-data cache when localStorage cannot serialize the payload.
                         }
                     }
 
                     setIsLoaded(true);
+                    setReadState({ scope: readScope, status: 'ready' });
                 };
-                const handleSnapshotError = (error) => {
+                const handleSnapshotError = () => {
                     console.warn(`Sync info for ${collectionName}: Working offline.`);
-                    if (isMounted) setIsLoaded(true);
+                    if (isMounted) {
+                        setIsLoaded(true);
+                        setReadState({ scope: readScope, status: 'error' });
+                    }
                 };
                 unsubscribes = targetFilters.map((filters, targetIndex) => {
                     const listenTarget = filters.length > 0
@@ -1846,9 +1846,12 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
                         );
                 });
 
-            } catch (err) {
+            } catch {
                 console.warn(`Init info for ${collectionName}: Working offline or network unavailable.`);
-                if (isMounted) setIsLoaded(true);
+                if (isMounted) {
+                    setIsLoaded(true);
+                    setReadState({ scope: readScope, status: 'error' });
+                }
             }
         };
 
@@ -1858,11 +1861,65 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
             isMounted = false;
             unsubscribes.forEach((unsubscribe) => unsubscribe());
         };
-    }, [db, appId, fbUser, collectionName, localKey, rootCollection, requireServerSnapshot, dateScopeField, dateScopeStart, dateScopeEnd, documentIdField, queryPlanKey]);
+    }, [fbUser, collectionName, localKey, rootCollection, requireServerSnapshot, dateScopeField, dateScopeStart, dateScopeEnd, documentIdField, queryPlanKey, guardedScheduleWrites, readScope]);
 
-    const setPersistentValue = async (newValueOrUpdater, isRestore = false) => {
+    const setPersistentValue = async (newValueOrUpdater, isRestore = false, forceDocumentIds = []) => {
+        if (guardedScheduleWrites && scheduleWritePending.current) {
+            return { ok: false, error: new Error('กำลังบันทึกตารางงาน กรุณารอแล้วลองใหม่') };
+        }
+        const originalData = dataRef.current;
         const oldValue = filterItemsForQueryPlan(dataRef.current, queryPlan);
-        const newValue = typeof newValueOrUpdater === 'function' ? newValueOrUpdater(oldValue) : newValueOrUpdater;
+        let newValue;
+        try {
+            newValue = typeof newValueOrUpdater === 'function' ? newValueOrUpdater(oldValue) : newValueOrUpdater;
+        } catch (error) {
+            return { ok: false, error };
+        }
+
+        if (guardedScheduleWrites) {
+            if (readOnly || !db || !fbUser || !appId || queryPlan.kind === 'blocked') {
+                return { ok: false, error: new Error('ยังไม่ได้บันทึกบนเซิร์ฟเวอร์ กรุณาเข้าสู่ระบบและตรวจสอบการเชื่อมต่อ') };
+            }
+            // Restore is intentionally not an escape hatch around concurrency checks.
+            if (isRestore) {
+                return { ok: false, error: new Error('การกู้คืนตารางงานต้องใช้ขั้นตอนสำรองและตรวจความขัดแย้ง ไม่สามารถเขียนทับจากหน้านี้ได้') };
+            }
+            scheduleWritePending.current = true;
+            try {
+                const before = new Map(oldValue.map(item => [item.id, item]));
+                const after = new Map(newValue.map(item => [item.id, item]));
+                const changed = [...new Set([...before.keys(), ...after.keys()])].filter(id =>
+                    forceDocumentIds.includes(id) || !scheduleDocumentEqual(before.get(id), after.get(id)));
+                await runTransaction(db, async transaction => {
+                    // All reads must precede writes; retry rechecks the original baseline.
+                    for (const id of changed) {
+                        const snapshot = await transaction.get(getDocumentReference(id));
+                        const raw = snapshot.exists() ? snapshot.data() : undefined;
+                        const current = raw ? { ...raw, id: raw.id || id } : undefined;
+                        if (!scheduleDocumentEqual(current, before.get(id))) {
+                            const error = new Error('ตารางงานถูกเปลี่ยนจากอีกเครื่องแล้ว การแก้ไขครั้งนี้ยังไม่ได้บันทึก กรุณาตรวจข้อมูลล่าสุดแล้วลองใหม่');
+                            error.code = 'schedule/conflict';
+                            throw error;
+                        }
+                    }
+                    for (const id of changed) {
+                        if (after.has(id)) transaction.set(getDocumentReference(id), after.get(id));
+                        else transaction.delete(getDocumentReference(id));
+                    }
+                });
+                // Do not replace a newer listener snapshot that arrived while awaiting the server.
+                if (dataRef.current === originalData) {
+                    setData(newValue);
+                    dataRef.current = newValue;
+                    saveStateLocallyIDB(localKey, newValue);
+                }
+                return { ok: true };
+            } catch (error) {
+                return { ok: false, error };
+            } finally {
+                scheduleWritePending.current = false;
+            }
+        }
         
         setData(newValue);
         dataRef.current = newValue;
@@ -1872,12 +1929,14 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
         if (typeof window !== 'undefined') {
             try {
                 localStorage.setItem(localKey, JSON.stringify(newValue));
-            } catch (e) {
+            } catch {
                 // Silently ignore quota exceeded, IDB handles it
             }
         }
 
-        if (readOnly || !db || !fbUser || !appId) return;
+        if (readOnly || !db || !fbUser || !appId) {
+            return { ok: false, error: new Error('ยังไม่ได้บันทึกบนเซิร์ฟเวอร์: กรุณาตรวจสอบการเชื่อมต่อและเข้าสู่ระบบ') };
+        }
 
         if (isRestore && Array.isArray(newValue)) {
             try {
@@ -1936,8 +1995,11 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
                     if (opCount >= 50) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
                 }
                 if (opCount > 0) await batch.commit();
-            } catch (e) { console.error("Restore error", e); }
-            return;
+            } catch (e) {
+                console.error("Restore error", e);
+                return { ok: false, error: e };
+            }
+            return { ok: true };
         }
 
         const oldMap = new Map(Array.isArray(oldValue) ? oldValue.map(i => [i[documentIdField], i]) : []);
@@ -1950,7 +2012,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
             const documentId = newItem[documentIdField];
             if (!documentId) return;
             const oldItem = oldMap.get(documentId);
-            if (!oldItem || JSON.stringify(oldItem) !== JSON.stringify(newItem)) {
+            if (forceDocumentIds.includes(documentId) || !oldItem || JSON.stringify(oldItem) !== JSON.stringify(newItem)) {
                 toSet.push(newItem);
             }
         });
@@ -2024,10 +2086,12 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
             }
         } catch (e) {
             console.error(`Save error ${collectionName}:`, e);
+            return { ok: false, error: e };
         }
+        return { ok: true };
     };
 
-    return [filterItemsForQueryPlan(data, queryPlan), setPersistentValue, isLoaded, true];
+    return [filterItemsForQueryPlan(data, queryPlan), setPersistentValue, isLoaded, true, collectionReadState];
 }
 
 const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
@@ -2123,7 +2187,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
             if (fullJson) {
                 // ซ่อมแซม JSON กรณี Chunk หาย
                 let safeJson = fullJson;
-                try { JSON.parse(safeJson); } catch (e) {
+                try { JSON.parse(safeJson); } catch {
                     if (safeJson.startsWith('{')) safeJson += '}';
                 }
                 try {
@@ -3447,7 +3511,7 @@ export default function App() {
                   }
 
                   return parsed;
-              } catch(e) { return null; }
+              } catch { return null; }
           }
       }
       return null;
@@ -3566,7 +3630,7 @@ export default function App() {
   const [scheduleNote, setScheduleNote] = useState(''); // NEW: State สำหรับเก็บ Note ในตารางงาน
   const [hoScheduleModal, setHoScheduleModal] = useState(null); // NEW: Modal สำหรับเลือกหน่วยงานหลายแห่ง
   const [hoSelectedProjects, setHoSelectedProjects] = useState([]); // NEW: รายการหน่วยงานที่ถูกเลือก
-  const [selectedKpiDetail, setSelectedKpiDetail] = useState(null); // NEW: State สำหรับเปิด Modal รายละเอียด KPI
+  const [, setSelectedKpiDetail] = useState(null); // NEW: State สำหรับเปิด Modal รายละเอียด KPI
   const [isSyncingSheets, setIsSyncingSheets] = useState(false); // NEW: State สำหรับสถานะกำลังส่งข้อมูลไป Google Sheets
   const [isBackingUpToDrive, setIsBackingUpToDrive] = useState(false); // NEW: State สำหรับสถานะกำลังส่งไฟล์ไป Google Drive
 
@@ -3585,8 +3649,8 @@ export default function App() {
 
   // Company Info State
   const [companyInfo, setCompanyInfo] = usePersistentState('bmg_companyInfo', INITIAL_COMPANY_INFO, subscriptionPolicy.userFor('bmg_companyInfo'));
-  const [showEditCompanyModal, setShowEditCompanyModal] = useState(false);
-  const [editCompanyForm, setEditCompanyForm] = useState({ ...INITIAL_COMPANY_INFO });
+  const [, setShowEditCompanyModal] = useState(false);
+  const [, setEditCompanyForm] = useState({ ...INITIAL_COMPANY_INFO });
 
   // Add Contract Modal State
   const [showAddContractModal, setShowAddContractModal] = useState(false);
@@ -3808,10 +3872,10 @@ export default function App() {
   });
 
   // Meetings State
-  const [showAddMeetingModal, setShowAddMeetingModal] = useState(false);
-  const [isEditingMeeting, setIsEditingMeeting] = useState(false);
-  const [selectedMeetingView, setSelectedMeetingView] = useState(null);
-  const [newMeeting, setNewMeeting] = useState({
+  const [, setShowAddMeetingModal] = useState(false);
+  const [, setIsEditingMeeting] = useState(false);
+  const [, setSelectedMeetingView] = useState(null);
+  const [, setNewMeeting] = useState({
       id: null,
       title: '',
       type: 'AGM', // AGM, EGM, Committee
@@ -3927,7 +3991,7 @@ export default function App() {
 
   // อัปเกรดเป็น usePersistentCollection สำหรับข้อมูลที่เป็น Array (รายการ) ป้องกันข้อมูลสูญหาย/ทับกัน
   // โดยใช้ชื่อ Collection คงเดิมทั้งหมด เพื่อให้ระบบกู้ข้อมูลเก่าขึ้นมาเซฟเป็น Document ให้อัตโนมัติ!
-  const [users, setUsers, isUsersLoaded, isUsersSynced] = usePersistentCollection(
+  const [users, setUsers, isUsersLoaded, isUsersSynced, usersReadState] = usePersistentCollection(
       USE_FIREBASE_BUSINESS_AUTH ? 'users' : 'bmg_users',
       USE_FIREBASE_BUSINESS_AUTH ? [] : INITIAL_USERS,
       subscriptionPolicy.userFor(USE_FIREBASE_BUSINESS_AUTH ? 'users' : 'bmg_users'),
@@ -4033,9 +4097,9 @@ export default function App() {
 
   // --- NEW: Meeting Invitations State ---
   const [meetingInvitations, setMeetingInvitations] = usePersistentCollection('bmg_meeting_invitations', [], subscriptionPolicy.userFor('bmg_meeting_invitations'), { queryPlan: queryPlanFor('bmg_meeting_invitations') });
-  const [showAddInvitationModal, setShowAddInvitationModal] = useState(false);
-  const [selectedInvitationView, setSelectedInvitationView] = useState(null); // NEW: State สำหรับเก็บข้อมูลหนังสือเชิญที่ถูกเลือกดู
-  const [newInvitation, setNewInvitation] = useState({
+  const [, setShowAddInvitationModal] = useState(false);
+  const [, setSelectedInvitationView] = useState(null); // NEW: State สำหรับเก็บข้อมูลหนังสือเชิญที่ถูกเลือกดู
+  const [, setNewInvitation] = useState({
       id: null,
       meetingId: '',
       title: 'ขอเชิญเข้าร่วมประชุม',
@@ -4047,9 +4111,9 @@ export default function App() {
 
   // --- NEW: Meeting Proxies State ---
   const [meetingProxies, setMeetingProxies] = usePersistentCollection('bmg_meeting_proxies', [], subscriptionPolicy.userFor('bmg_meeting_proxies'), { queryPlan: queryPlanFor('bmg_meeting_proxies') });
-  const [showAddProxyModal, setShowAddProxyModal] = useState(false);
-  const [selectedProxyView, setSelectedProxyView] = useState(null);
-  const [newProxy, setNewProxy] = useState({
+  const [, setShowAddProxyModal] = useState(false);
+  const [, setSelectedProxyView] = useState(null);
+  const [, setNewProxy] = useState({
       id: null,
       meetingId: '',
       date: new Date().toISOString().split('T')[0],
@@ -4062,9 +4126,9 @@ export default function App() {
 
   // --- NEW: Meetings Tab ---
   const [meetingBallots, setMeetingBallots] = usePersistentCollection('bmg_meeting_ballots', [], subscriptionPolicy.userFor('bmg_meeting_ballots'), { queryPlan: queryPlanFor('bmg_meeting_ballots') });
-  const [showAddBallotModal, setShowAddBallotModal] = useState(false);
-  const [selectedBallotView, setSelectedBallotView] = useState(null);
-  const [newBallot, setNewBallot] = useState({
+  const [, setShowAddBallotModal] = useState(false);
+  const [, setSelectedBallotView] = useState(null);
+  const [, setNewBallot] = useState({
       id: null,
       meetingId: '',
       date: new Date().toISOString().split('T')[0],
@@ -4116,7 +4180,7 @@ export default function App() {
       shouldLoadLegacyScheduleArchive ? fbUser : null,
   );
 
-  const [projectScheduleRecords, setProjectScheduleRecords] = usePersistentCollection(
+  const [projectScheduleRecords, setProjectScheduleRecords, , , schedulesReadState] = usePersistentCollection(
       'bmg_projectSchedules',
       [],
       subscriptionPolicy.userFor('bmg_projectSchedules'),
@@ -4126,9 +4190,15 @@ export default function App() {
       () => deriveProjectScheduleViews(projectScheduleRecords, selectedProject?.id),
       [projectScheduleRecords, selectedProject?.id],
   );
+  const needsScheduleRoster = usersReadState.status === 'blocked';
+  const minimalScheduleRoster = useScheduleRoster({
+      auth, user: fbUser, projectId: selectedProject?.id,
+      enabled: USE_FIREBASE_BUSINESS_AUTH && needsScheduleRoster && projectTab === 'schedule' && Boolean(selectedProject),
+  });
+  const scheduleRosterReadState = needsScheduleRoster ? minimalScheduleRoster : usersReadState;
   const selectedProjectScheduleStaff = useMemo(
-      () => users.filter((user) => user?.department === selectedProject?.name),
-      [users, selectedProject?.name],
+      () => needsScheduleRoster ? minimalScheduleRoster.staff : users.filter((user) => user?.department === selectedProject?.name),
+      [needsScheduleRoster, minimalScheduleRoster.staff, users, selectedProject?.name],
   );
   const scheduleStaffIds = useMemo(
       () => selectedProjectScheduleStaff
@@ -4168,22 +4238,111 @@ export default function App() {
           selectedProject?.id,
       ],
   );
-  const schedules = legacyScheduleFallback.schedules;
+  const serverSchedules = legacyScheduleFallback.schedules;
+  const scheduleScopeKey = selectedProject?.id && currentMonth ? `${selectedProject.id}_${currentMonth}` : null;
+  const [scheduleDraft, setScheduleDraft] = useState(null);
+  const scheduleDraftRef = useRef(null);
+  const schedules = scheduleDraft?.scope === scheduleScopeKey ? scheduleDraft.cells : serverSchedules;
   const isLegacyScheduleReadOnly = legacyScheduleFallback.isReadOnlyFallback;
   const scheduleNotes = scheduleViews.scheduleNotes;
   const scheduleApprovals = scheduleViews.scheduleApprovals;
   const projectStaffOrder = scheduleViews.projectStaffOrder;
   const schedulesRef = useRef(schedules);
+  const legacyEditInFlight = useRef(false);
+  const [isImportingLegacySchedule, setIsImportingLegacySchedule] = useState(false);
+  const legacyEditContext = { projectId: selectedProject?.id, month: currentMonth, actorUid: fbUser?.uid,
+      staffIds: scheduleStaffIds, staffAliases: scheduleStaffAliases, isAdmin: isLegacyScheduleArchiveAdmin };
+  const legacyEditContextRef = useRef(legacyEditContext);
+  legacyEditContextRef.current = legacyEditContext;
+
+  const handleEnableLegacyScheduleEditing = async () => {
+      if (legacyEditInFlight.current || !isLegacyScheduleArchiveAdmin || !selectedProject || !fbUser) return;
+      legacyEditInFlight.current = true;
+      setIsImportingLegacySchedule(true);
+      const context = legacyEditContext;
+      const targetId = `${context.projectId}_${context.month}`;
+      const expected = projectScheduleRecords.find(record => record.id === targetId);
+      const importedAt = new Date().toISOString();
+      const readArchive = () => readLegacyScheduleSnapshot(async (type, index) => {
+          const ref = type === 'metadata'
+              ? doc(db, 'artifacts', appId, 'public', 'data', 'app_state', 'bmg_schedules_v2')
+              : doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `bmg_schedules_v2_${index}`);
+          const snapshot = await getDocFromServer(ref);
+          return snapshot.exists() ? snapshot.data() : undefined;
+      });
+      try {
+          const archive = await readArchive();
+          const args = { ...context, legacySchedules: archive, confirmed: true, importedAt };
+          const preview = prepareLegacyScheduleEditing({ ...args, records: projectScheduleRecords });
+          const serverView = buildAdminLegacyScheduleFallback({
+              isAdmin: true, month: context.month, staffIds: context.staffIds, staffAliases: context.staffAliases,
+              migratedStaffIds: expected?.legacyCellMigration?.status === 'complete' ? expected.legacyCellMigration.staffIds : [],
+              projectSchedules: scheduleViews.schedules, legacySchedules: archive,
+          });
+          if (!scheduleDocumentEqual(serverView.schedules, schedules)) throw new Error('คลังบนเซิร์ฟเวอร์ไม่ตรงกับตารางที่แสดง กรุณาโหลดหน้าใหม่และตรวจข้อมูลก่อนนำเข้า');
+          if (!scheduleDocumentEqual(context, legacyEditContextRef.current)) throw new Error('โครงการ เดือน หรือผู้ใช้งานเปลี่ยน กรุณาเริ่มใหม่');
+          showConfirm('นำเข้าตารางเดิมเพื่อแก้ไข',
+              `${selectedProject.name} เดือน ${context.month}: พบ ${preview.cellCount} ช่องที่จับคู่ได้ โดยจะคงค่าชุดใหม่ไว้ ${preview.preservedConflicts} ช่องที่ต่างกัน กรุณายืนยันว่าพนักงานและกะที่แสดงเป็นของโครงการนี้ในเดือนนี้จริง (พนักงานที่เคยย้ายโครงการต้องตรวจสอบก่อน) ระบบเก็บสำเนาก่อนนำเข้าและไม่ลบคลังเดิม รายการนอกกลุ่มรหัสที่เลือกจะไม่นำเข้า การล็อกและสถานะอนุมัติเดิมยังคงอยู่`,
+              async () => {
+                  if (legacyEditInFlight.current) return;
+                  legacyEditInFlight.current = true;
+                  setIsImportingLegacySchedule(true);
+                  try {
+                      if (!scheduleDocumentEqual(context, legacyEditContextRef.current)) throw new Error('โครงการ เดือน หรือผู้ใช้งานเปลี่ยน กรุณาเริ่มใหม่');
+                      const latestArchive = await readArchive();
+                      if (!scheduleDocumentEqual(archive, latestArchive)) throw new Error('คลังตารางเดิมเปลี่ยนหลังตรวจ กรุณาตรวจและยืนยันใหม่');
+                      if (!scheduleDocumentEqual(context, legacyEditContextRef.current)) throw new Error('ข้อมูลผู้ใช้งานหรือโครงการเปลี่ยน กรุณาเริ่มใหม่');
+                      const result = await setProjectScheduleRecords(records => {
+                          if (!scheduleDocumentEqual(expected, records.find(record => record.id === targetId))) throw new Error('ตารางชุดใหม่เปลี่ยนแล้ว กรุณาตรวจและยืนยันใหม่');
+                          return prepareLegacyScheduleEditing({ ...args, records }).records;
+                      }, false, [targetId]);
+                      if (!result?.ok) throw result?.error || new Error('เซิร์ฟเวอร์ยังไม่ยืนยันการนำเข้า');
+                      alert('นำเข้าตารางเดิมสำเร็จ เก็บสำเนาค่าก่อนนำเข้าแล้ว สามารถแก้ไขตามสิทธิ์และสถานะล็อกของตาราง');
+                  } catch (error) {
+                      alert(`ยังไม่นำเข้าตารางเดิม: ${error.message}`);
+                  } finally {
+                      legacyEditInFlight.current = false;
+                      setIsImportingLegacySchedule(false);
+                  }
+              }, 'ยืนยันข้อมูลและนำเข้า', 'warning');
+      } catch (error) {
+          alert(`ยังไม่นำเข้าตารางเดิม: ${error.message}`);
+      } finally {
+          legacyEditInFlight.current = false;
+          setIsImportingLegacySchedule(false);
+      }
+  };
 
   useEffect(() => {
       schedulesRef.current = schedules;
   }, [schedules]);
 
-  const updateProjectScheduleField = (field, newValueOrUpdater) => {
+  const setScheduleDraftCells = (newValueOrUpdater) => {
+      if (!scheduleScopeKey) return;
+      const currentDraft = scheduleDraftRef.current?.scope === scheduleScopeKey
+          ? scheduleDraftRef.current
+          : {
+              scope: scheduleScopeKey,
+              cells: serverSchedules,
+              baseline: projectScheduleRecords.find(record => record.id === scheduleScopeKey),
+          };
+      const nextCells = typeof newValueOrUpdater === 'function'
+          ? newValueOrUpdater(currentDraft.cells)
+          : newValueOrUpdater;
+      const nextDraft = { ...currentDraft, cells: nextCells };
+      scheduleDraftRef.current = nextDraft;
+      setScheduleDraft(nextDraft);
+  };
+
+  const updateProjectScheduleField = async (field, newValueOrUpdater) => {
       const projectId = selectedProject?.id;
       if (!projectId || !currentMonth) return;
 
-      setProjectScheduleRecords((records) => {
+      const result = await setProjectScheduleRecords((records) => {
+          const id = `${projectId}_${currentMonth}`;
+          if (!scheduleDocumentEqual(projectScheduleRecords.find(record => record.id === id), records.find(record => record.id === id))) {
+              throw new Error('ข้อมูลตารางงานเพิ่งเปลี่ยน กรุณาตรวจหน้าจอล่าสุดแล้วลองใหม่');
+          }
           const currentViews = deriveProjectScheduleViews(records, projectId);
           const currentValue = field === 'schedules'
               ? currentViews.schedules
@@ -4210,14 +4369,10 @@ export default function App() {
               update: { [field]: valueForDocument },
           });
       });
+      if (!result?.ok) alert(result?.error?.message || 'ยังไม่ได้บันทึกตารางงาน กรุณาลองใหม่');
+      return result;
   };
 
-  const setSchedules = (value) => updateProjectScheduleField('schedules', value);
-  const setScheduleNotes = (value) => updateProjectScheduleField('note', (currentNote) => {
-      const currentMap = { [`${selectedProject?.id}_${currentMonth}`]: currentNote };
-      const nextMap = typeof value === 'function' ? value(currentMap) : value;
-      return nextMap?.[`${selectedProject?.id}_${currentMonth}`] || '';
-  });
   const setScheduleApprovals = (value) => updateProjectScheduleField('approval', (currentApproval) => {
       const currentMap = { [`${selectedProject?.id}_${currentMonth}`]: currentApproval };
       const nextMap = typeof value === 'function' ? value(currentMap) : value;
@@ -4342,18 +4497,21 @@ export default function App() {
               }
           }
       }
-  }, [users]);
+  }, [users, currentUser]);
 
   // --- NEW: ตรวจจับและบันทึกเวลาล่าสุดเมื่อเปิดระบบ (Refresh/Auto-login) เพื่อให้ซิงค์ข้ามเครื่อง ---
+  const presenceUserId = currentUser?.id;
+  const presenceWriter = useRef(setUsers);
+  useEffect(() => { presenceWriter.current = setUsers; }, [setUsers]);
   useEffect(() => {
       // 🛡️ ป้องกันการใช้ข้อมูลเก่าจาก LocalStorage ไปทับข้อมูลบน Server โดยการรอให้ Sync ข้อมูลจาก Server ให้เสร็จก่อนเสมอ!
-      if (!currentUser || !isUsersSynced) return; 
+      if (!presenceUserId || !isUsersSynced) return;
 
       // ฟังก์ชันสำหรับอัปเดตเวลาล่าสุด
       const updatePresence = () => {
-          setUsers(prevUsers => {
+          presenceWriter.current(prevUsers => {
               if (!Array.isArray(prevUsers)) return prevUsers;
-              const foundUser = prevUsers.find(u => u.id === currentUser.id);
+              const foundUser = prevUsers.find(u => u.id === presenceUserId);
               if (!foundUser) return prevUsers;
               
               const lastLoginTime = new Date(foundUser.lastLogin || 0).getTime();
@@ -4362,7 +4520,7 @@ export default function App() {
               // อัปเดตเวลาลงฐานข้อมูลทุกๆ 5 นาที (300,000 ms) เพื่อให้สถานะไม่หมดอายุ (15 นาที)
               if (nowTime - lastLoginTime > 5 * 60 * 1000) { 
                   return prevUsers.map(u => 
-                      u.id === currentUser.id ? { ...u, lastLogin: new Date().toISOString() } : u
+                      u.id === presenceUserId ? { ...u, lastLogin: new Date().toISOString() } : u
                   );
               }
               return prevUsers; // ถ้าสียังไม่ถึง 5 นาที ไม่ต้องสั่งอัปเดต State (ลดการดึงเครือข่าย)
@@ -4377,7 +4535,7 @@ export default function App() {
 
       // ยกเลิกการตั้งเวลาเมื่อผู้ใช้ออกจากระบบหรือปิดหน้าต่าง
       return () => clearInterval(intervalId);
-  }, [currentUser?.id, isUsersSynced]); // ผูกกับ Dependency 2 ตัวนี้
+  }, [presenceUserId, isUsersSynced]);
 
   // --- NEW: Auto-Sync State (สถานะการซิงค์อัตโนมัติ) ---
   const [autoSyncMessage, setAutoSyncMessage] = useState('');
@@ -4388,7 +4546,7 @@ export default function App() {
           try {
               const parsed = JSON.parse(localStorage.getItem('bmg_dismissed_announcements') || '[]');
               return Array.isArray(parsed) ? parsed : [];
-          } catch(e) { return []; }
+          } catch { return []; }
       }
       return [];
   });
@@ -4885,17 +5043,58 @@ export default function App() {
   const t = (key) => TRANSLATIONS[lang][key] || key;
   const changeMonth = (increment) => { const [year, month] = currentMonth.split('-').map(Number); const date = new Date(year, month - 1 + increment, 1); const newYear = date.getFullYear(); const newMonth = String(date.getMonth() + 1).padStart(2, '0'); setCurrentMonth(`${newYear}-${newMonth}`); }; const getDaysInMonth = (year, month) => { const numDays = new Date(year, month, 0).getDate(); return Array.from({ length: numDays }, (_, i) => i + 1); }; 
   
-  const handleSaveSchedule = () => { 
+  const scheduleSaveInFlight = useRef(false);
+  const [isSavingSchedule, setIsSavingSchedule] = useState(false);
+  const handleSaveSchedule = async () => {
+      if (scheduleSaveInFlight.current) return;
+      scheduleSaveInFlight.current = true;
+      setIsSavingSchedule(true);
       try {
           if (isLegacyScheduleReadOnly) {
               alert('ตารางนี้กำลังแสดงข้อมูลจากคลังเดิมแบบอ่านอย่างเดียว กรุณาย้ายและตรวจสอบข้อมูลก่อนแก้ไข');
               return;
           }
           if (selectedProject) {
-              const noteKey = `${selectedProject.id}_${currentMonth}`;
-              setScheduleNotes(prev => ({ ...prev, [noteKey]: scheduleNote }));
-              const scheduleData = schedulesRef.current;
-              setSchedules(scheduleData);
+              const approvalKey = `${selectedProject.id}_${currentMonth}`;
+              const activeDraft = scheduleDraftRef.current?.scope === approvalKey ? scheduleDraftRef.current : null;
+              const scheduleData = activeDraft?.cells || schedulesRef.current;
+              const expectedRecord = activeDraft
+                  ? activeDraft.baseline
+                  : projectScheduleRecords.find(record => record.id === approvalKey);
+              const currentApproval = scheduleApprovals[approvalKey] || {};
+              const isManager = (currentUser?.position || '').includes('ผู้จัดการอาคาร') || (currentUser?.position || '').includes('ผู้จัดการหมู่บ้าน');
+              const isAreaManager = (currentUser?.position || '').includes('ผู้จัดการพื้นที่');
+              const isAdmin = currentUser?.username === 'admin';
+              const nextStatus = isAreaManager || isAdmin ? 'Pending HR' : isManager ? 'Pending Area Manager' : 'Pending Manager';
+              // Cells, note and submission status belong to the same acknowledged write.
+              // Force this document on retries even when the optimistic local cache is identical.
+              const result = await setProjectScheduleRecords((records) => {
+                  if (!scheduleDocumentEqual(expectedRecord, records.find(record => record.id === approvalKey))) {
+                      throw new Error('ข้อมูลตารางงานเพิ่งเปลี่ยน กรุณาตรวจหน้าจอล่าสุดแล้วลองใหม่');
+                  }
+                  return upsertProjectSchedule(records, {
+                  projectId: selectedProject.id,
+                  month: currentMonth,
+                  update: {
+                      schedules: Object.fromEntries(Object.entries(scheduleData).filter(([key]) => key.includes(`_${currentMonth}-`))),
+                      note: scheduleNote,
+                      approval: {
+                          ...currentApproval,
+                          status: nextStatus,
+                          preparedBy: `${currentUser.firstName} ${currentUser.lastName}`,
+                          preparedByRole: currentUser.position,
+                          managerApprovedBy: (isAreaManager || isAdmin) ? `${currentUser.firstName} ${currentUser.lastName}` : null,
+                          managerApprovedByRole: (isAreaManager || isAdmin) ? currentUser.position : null,
+                          updatedAt: new Date().toISOString(),
+                      },
+                  },
+                  });
+              }, false, [approvalKey]);
+              if (!result?.ok) throw result?.error || new Error('เซิร์ฟเวอร์ยังไม่ยืนยันการบันทึก');
+              if (scheduleDraftRef.current?.scope === approvalKey) {
+                  scheduleDraftRef.current = null;
+                  setScheduleDraft(null);
+              }
 
               // --- NEW: ส่ง Backup ของ Schedule ขึ้น Google Drive เป็นไฟล์ JSON ด้วย ---
               if (GOOGLE_SCRIPT_CONFIG.DRIVE_URL && !GOOGLE_SCRIPT_CONFIG.DRIVE_URL.includes('YOUR_')) {
@@ -4984,48 +5183,19 @@ export default function App() {
                   }
               }
 
-              // --- NEW: Workflow Logic ---
-              const approvalKey = `${selectedProject.id}_${currentMonth}`;
-              const currentApproval = scheduleApprovals[approvalKey] || {};
-              
-              const isManager = (currentUser?.position || '').includes('ผู้จัดการอาคาร') || (currentUser?.position || '').includes('ผู้จัดการหมู่บ้าน');
-              const isAreaManager = (currentUser?.position || '').includes('ผู้จัดการพื้นที่');
-              const isAdmin = currentUser?.username === 'admin';
-              
-              let nextStatus = 'Pending Manager';
-              
-              // ถ้าเป็น Area Manager หรือ Admin ทำเอง ให้ไปรอ HR อนุมัติเลย
-              if (isAreaManager || isAdmin) {
-                  nextStatus = 'Pending HR';
-              } 
-              // ถ้าเป็น Manager ทำเอง ให้ส่งไปรอ Area Manager อนุมัติ
-              else if (isManager) {
-                  nextStatus = 'Pending Area Manager';
-              }
-              
-              setScheduleApprovals(prev => ({
-                  ...prev,
-                  [approvalKey]: {
-                      ...currentApproval,
-                      status: nextStatus,
-                      preparedBy: `${currentUser.firstName} ${currentUser.lastName}`,
-                      preparedByRole: currentUser.position,
-                      managerApprovedBy: (isAreaManager || isAdmin) ? `${currentUser.firstName} ${currentUser.lastName}` : null,
-                      managerApprovedByRole: (isAreaManager || isAdmin) ? currentUser.position : null,
-                      updatedAt: new Date().toISOString()
-                  }
-              }));
-
               alert(`บันทึกตารางงานสำเร็จ! ระบบได้ส่งข้อมูลให้ ${nextStatus === 'Pending Area Manager' ? 'ผู้จัดการพื้นที่' : nextStatus === 'Pending HR' ? 'เจ้าหน้าที่ฝ่ายบุคคล (HR)' : 'ผู้จัดการ'} อนุมัติตามลำดับแล้ว`); 
           }
       } catch (error) {
           console.error("Critical error in handleSaveSchedule:", error);
           alert(`เกิดข้อผิดพลาดระหว่างการบันทึก: ${error.message}`);
+      } finally {
+          scheduleSaveInFlight.current = false;
+          setIsSavingSchedule(false);
       }
   }; 
 
   // --- NEW: Handle Schedule Approval ---
-  const handleApproveSchedule = () => {
+  const handleApproveSchedule = async () => {
       if (!selectedProject) return;
       const approvalKey = `${selectedProject.id}_${currentMonth}`;
       const currentApproval = scheduleApprovals[approvalKey];
@@ -5037,26 +5207,27 @@ export default function App() {
 
       let nextStatus = currentApproval.status;
       let updates = {};
+      let successMessage;
 
       if (currentApproval.status === 'Pending Manager' && isManager) {
           // หากคนอนุมัติเป็น Manager ปกติให้ส่งไป HR ได้เลย (กรณีลูกน้องเป็นคนทำ)
           nextStatus = 'Pending HR';
           updates.managerApprovedBy = `${currentUser.firstName} ${currentUser.lastName}`;
           updates.managerApprovedByRole = currentUser.position;
-          alert('อนุมัติตารางงานระดับ "ผู้จัดการ" สำเร็จ! ระบบส่งต่อให้เจ้าหน้าที่ฝ่ายบุคคลตรวจสอบ');
+          successMessage = 'อนุมัติตารางงานระดับ "ผู้จัดการ" สำเร็จ! ระบบส่งต่อให้เจ้าหน้าที่ฝ่ายบุคคลตรวจสอบ';
       } else if (currentApproval.status === 'Pending Area Manager' && isAreaManager) {
           nextStatus = 'Pending HR';
           // ลงชื่อในฐานะผู้ตรวจสอบ
           updates.managerApprovedBy = `${currentUser.firstName} ${currentUser.lastName}`;
           updates.managerApprovedByRole = currentUser.position;
-          alert('อนุมัติตารางงานระดับ "ผู้จัดการพื้นที่" สำเร็จ! ระบบส่งต่อให้เจ้าหน้าที่ฝ่ายบุคคลตรวจสอบ');
+          successMessage = 'อนุมัติตารางงานระดับ "ผู้จัดการพื้นที่" สำเร็จ! ระบบส่งต่อให้เจ้าหน้าที่ฝ่ายบุคคลตรวจสอบ';
       } else if (currentApproval.status === 'Pending HR' && isHR) {
           nextStatus = 'Approved';
           updates.hrApprovedBy = `${currentUser.firstName} ${currentUser.lastName}`;
-          alert('อนุมัติตารางงานระดับ "ฝ่ายบุคคล" สำเร็จ! ตารางงานเสร็จสมบูรณ์');
+          successMessage = 'อนุมัติตารางงานระดับ "ฝ่ายบุคคล" สำเร็จ! ตารางงานเสร็จสมบูรณ์';
       }
-
-      setScheduleApprovals(prev => ({
+      if (!successMessage) return;
+      const result = await setScheduleApprovals(prev => ({
           ...prev,
           [approvalKey]: {
               ...currentApproval,
@@ -5065,15 +5236,16 @@ export default function App() {
               updatedAt: new Date().toISOString()
           }
       }));
+      if (result?.ok) alert(successMessage);
   };
 
-  const handleLockSchedule = () => {
+  const handleLockSchedule = async () => {
       if (!selectedProject) return;
       const approvalKey = `${selectedProject.id}_${currentMonth}`;
       const currentApproval = scheduleApprovals[approvalKey];
       if (!currentApproval) return;
       
-      setScheduleApprovals(prev => ({
+      const result = await setScheduleApprovals(prev => ({
           ...prev,
           [approvalKey]: {
               ...currentApproval,
@@ -5082,16 +5254,16 @@ export default function App() {
               updatedAt: new Date().toISOString()
           }
       }));
-      alert('ล็อคตารางงานสมบูรณ์แล้ว พนักงานจะไม่สามารถแก้ไขข้อมูล(ทั้ง Plan และ Act) ได้จนกว่าจะปลดล็อค');
+      if (result?.ok) alert('ล็อคตารางงานสมบูรณ์แล้ว พนักงานจะไม่สามารถแก้ไขข้อมูล(ทั้ง Plan และ Act) ได้จนกว่าจะปลดล็อค');
   };
 
-  const handleUnlockSchedule = () => {
+  const handleUnlockSchedule = async () => {
       if (!selectedProject) return;
       const approvalKey = `${selectedProject.id}_${currentMonth}`;
       const currentApproval = scheduleApprovals[approvalKey];
       if (!currentApproval) return;
       
-      setScheduleApprovals(prev => ({
+      const result = await setScheduleApprovals(prev => ({
           ...prev,
           [approvalKey]: {
               ...currentApproval,
@@ -5101,7 +5273,7 @@ export default function App() {
               updatedAt: new Date().toISOString()
           }
       }));
-      alert('ปลดล็อคตารางงานสำเร็จ สถานะกลับไปเป็นรอฝ่ายบุคคลอนุมัติ');
+      if (result?.ok) alert('ปลดล็อคตารางงานสำเร็จ สถานะกลับไปเป็นรอฝ่ายบุคคลอนุมัติ');
   };
 
   const Badge = ({ status }) => { 
@@ -5415,33 +5587,9 @@ export default function App() {
       e.currentTarget.setPointerCapture(e.pointerId);
   };
 
-  const handleBellPointerMove = (e) => {
-      if (!isDraggingBell) return;
-      const dx = dragRef.current.startX - e.clientX; 
-      const dy = dragRef.current.startY - e.clientY;
-      
-      // ป้องกันการคลิกปกติกลายเป็นการลาก (ต้องลากเกิน 3px ถึงจะถือว่าขยับ)
-      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
-          dragRef.current.isDragging = true;
-      }
 
-      if (dragRef.current.isDragging) {
-          // ควบคุมไม่ให้ลากหลุดออกนอกจอ
-          const newRight = Math.max(0, Math.min(window.innerWidth - 60, dragRef.current.startRight + dx));
-          const newBottom = Math.max(0, Math.min(window.innerHeight - 60, dragRef.current.startBottom + dy));
-          setBellPos({ right: newRight, bottom: newBottom });
-      }
-  };
 
-  const handleBellPointerUp = (e) => {
-      setIsDraggingBell(false);
-      e.currentTarget.releasePointerCapture(e.pointerId);
-      
-      // ถ้าไม่ได้เป็นการลาก (เป็นการคลิก) ให้เปิดหน้าต่างแจ้งเตือน
-      if (!dragRef.current.isDragging) {
-          setShowNotificationModal(true);
-      }
-  };
+
 
   const handleLogin = async (e) => {
       e.preventDefault(); 
@@ -5539,7 +5687,7 @@ export default function App() {
       } 
   };
   
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
       if (USE_FIREBASE_BUSINESS_AUTH && firebaseBusinessAuth) {
           await firebaseBusinessAuth.signOut().catch((error) => {
               console.warn('Firebase sign out failed.', error);
@@ -5552,8 +5700,8 @@ export default function App() {
       }
       setLoginForm({ username: '', password: '' }); 
       setActiveMenu('dashboard'); 
-      setSelectedProject(null); 
-  };
+      setSelectedProject(null);
+  }, [firebaseBusinessAuth]);
 
   // --- NEW: ระบบ Auto Logout เมื่อถึงเวลาเที่ยงคืน (00:00 น.) ขณะที่ผู้ใช้ยังเปิดแอปพลิเคชันค้างไว้ ---
   useEffect(() => {
@@ -5575,9 +5723,9 @@ export default function App() {
       const intervalId = setInterval(checkSessionExpiry, 60000); 
       
       return () => clearInterval(intervalId);
-  }, [currentUser]);
+  }, [currentUser, handleLogout]);
+
   
-  const getKPIs = () => ({ projects: projects.length, employees: users.length, pendingTasks: 0, pmDue: 0 });
   const exportToCSV = (data, filename) => { 
       if (!data || data.length === 0) return alert('No data to export'); 
       
@@ -5911,7 +6059,7 @@ export default function App() {
       const csvData = [];
 
       // สร้างรายชื่อพนักงานและตารางกะ
-      const projectStaffForSchedule = users.filter(u => u.department === selectedProject.name);
+      const projectStaffForSchedule = selectedProjectScheduleStaff;
       const rawOrder = projectStaffOrder[selectedProject.id];
       const currentOrder = Array.isArray(rawOrder) ? rawOrder : [];
       const sortedStaff = [...projectStaffForSchedule].sort((a, b) => {
@@ -6001,7 +6149,7 @@ export default function App() {
               const buffer = e.target.result;
               let text = '';
               try { text = new TextDecoder('utf-8', { fatal: true }).decode(buffer); } 
-              catch (err) { text = new TextDecoder('windows-874').decode(buffer); }
+              catch { text = new TextDecoder('windows-874').decode(buffer); }
 
               const lines = text.split(/\r?\n/);
               if (lines.length < 2) return alert('ไฟล์ CSV ไม่มีข้อมูล หรือมีแค่หัวตาราง');
@@ -6099,7 +6247,7 @@ export default function App() {
               const buffer = e.target.result;
               let text = '';
               try { text = new TextDecoder('utf-8', { fatal: true }).decode(buffer); } 
-              catch (err) { text = new TextDecoder('windows-874').decode(buffer); }
+              catch { text = new TextDecoder('windows-874').decode(buffer); }
 
               const lines = text.split(/\r?\n/);
               if (lines.length < 2) return alert('ไฟล์ CSV ไม่มีข้อมูล หรือมีแค่หัวตาราง');
@@ -6818,7 +6966,7 @@ export default function App() {
               const buffer = e.target.result;
               let text = '';
               try { text = new TextDecoder('utf-8', { fatal: true }).decode(buffer); } 
-              catch (err) { text = new TextDecoder('windows-874').decode(buffer); }
+              catch { text = new TextDecoder('windows-874').decode(buffer); }
 
               const lines = text.split(/\r?\n/);
               if (lines.length < 2) return alert('ไฟล์ CSV ไม่มีข้อมูล หรือมีแค่หัวตาราง');
@@ -6899,7 +7047,7 @@ export default function App() {
               const buffer = e.target.result;
               let text = '';
               try { text = new TextDecoder('utf-8', { fatal: true }).decode(buffer); } 
-              catch (err) { text = new TextDecoder('windows-874').decode(buffer); }
+              catch { text = new TextDecoder('windows-874').decode(buffer); }
 
               const lines = text.split(/\r?\n/);
               if (lines.length < 2) return alert('ไฟล์ CSV ไม่มีข้อมูล หรือมีแค่หัวตาราง');
@@ -6940,7 +7088,7 @@ export default function App() {
                   for (let row of dataLines) {
                       const dStr = row[dateIdx]?.trim();
                       if (dStr) {
-                          const parts = dStr.split(/[\/\-]/);
+                          const parts = dStr.split(/[/-]/);
                           if (parts.length === 3) {
                               const p0 = parseInt(parts[0], 10);
                               const p1 = parseInt(parts[1], 10);
@@ -7096,7 +7244,7 @@ export default function App() {
               let text = '';
               try {
                   text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
-              } catch (err) {
+              } catch {
                   text = new TextDecoder('windows-874').decode(buffer);
               }
 
@@ -7389,12 +7537,7 @@ export default function App() {
       alert('บันทึกกิจกรรม/นัดหมายสำเร็จ');
   };
 
-  const handleSaveCompanyInfo = (e) => {
-      e.preventDefault();
-      setCompanyInfo(editCompanyForm);
-      setShowEditCompanyModal(false);
-      alert(t('saveSuccess'));
-  };
+
 
   const handleEditActionPlan = (ap) => {
       let resp = ap.responsible || '';
@@ -7428,13 +7571,7 @@ export default function App() {
       }
   };
 
-  const handleCompanyLogoUpload = async (e) => {
-      const file = e.target.files[0];
-      if (file) {
-          const compressedBase64 = await compressImage(file);
-          setEditCompanyForm(prev => ({ ...prev, logo: compressedBase64 }));
-      }
-  };
+
   
   // Others Handlers
   const handleSaveOther = (e) => {
@@ -7451,81 +7588,9 @@ export default function App() {
   };
 
   // Meetings Handlers
-  const handleMeetingFileUpload = (e) => {
-      const file = e.target.files[0];
-      if (file) {
-          const reader = new FileReader();
-          reader.onloadend = async () => {
-              const fileId = generateId();
-              await saveFileLocally(fileId, reader.result);
-              setNewMeeting(prev => ({ ...prev, minutesFile: { name: file.name, fileId: fileId, isLocal: true, data: reader.result } }));
-          };
-          reader.readAsDataURL(file);
-      }
-  };
 
-  const handleSaveMeeting = async (e) => {
-      e.preventDefault();
-      
-      try {
-          let nextList;
-          let savedMeeting = JSON.parse(JSON.stringify(newMeeting));
-          
-          if (!isEditingMeeting) {
-              savedMeeting.id = generateId();
-              savedMeeting.projectId = selectedProject.id;
-          }
 
-          // --- อัปโหลดไฟล์รายงานการประชุมเข้า Drive อัตโนมัติ ---
-          if (savedMeeting.minutesFile && savedMeeting.minutesFile.data && savedMeeting.minutesFile.data.startsWith('data:')) {
-              setAutoSyncMessage('กำลังอัปโหลดไฟล์รายงานการประชุมลง Google Drive...');
-              const GOOGLE_SCRIPT_DRIVE_URL = GOOGLE_SCRIPT_CONFIG.DRIVE_URL;
-              
-              const match = savedContract.minutesFile.data.match(/^data:(.+);base64,(.+)$/);
-              if (match) {
-                  const payload = {
-                      filename: `Meeting_${savedMeeting.id}_${savedMeeting.minutesFile.name}`,
-                      mimeType: match[1],
-                      data: match[2],
-                      folderName: `Meetings_${selectedProject.code}`
-                  };
-                  
-                  try {
-                      await fetch(GOOGLE_SCRIPT_DRIVE_URL, {
-                          method: 'POST',
-                          mode: 'no-cors',
-                          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                          body: JSON.stringify(payload)
-                      });
-                  } catch (err) {
-                      console.error("Auto-upload to Drive failed", err);
-                  }
-              }
-              // ลบ base64 ออกจาก object ที่จะเซฟลง Firestore เพื่อป้องกัน 1MB Limit Error
-              delete savedMeeting.minutesFile.data;
-          }
 
-          if (isEditingMeeting) {
-              nextList = meetingsList.map(m => m.id === savedMeeting.id ? savedMeeting : m);
-              if (selectedMeetingView?.id === savedMeeting.id) setSelectedMeetingView(savedMeeting);
-          } else {
-              nextList = [...meetingsList, savedMeeting];
-          }
-          
-          setMeetingsList(nextList);
-          triggerAutoSync('Meetings_ประชุม', nextList, []);
-          
-          setShowAddMeetingModal(false);
-          setIsEditingMeeting(false);
-          setNewMeeting({ id: null, title: '', type: 'AGM', date: new Date().toISOString().split('T')[0], time: '09:00', location: '', agenda: '', status: 'Scheduled', minutesFile: null });
-          alert('บันทึกข้อมูลการประชุมเรียบร้อยแล้ว');
-      } catch (error) {
-          console.error(error);
-          alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
-      } finally {
-          setTimeout(() => setAutoSyncMessage(''), 3000);
-      }
-  };
 
   const handleEditMeeting = (meeting) => {
       setSelectedMeetingView(null);
@@ -7535,70 +7600,13 @@ export default function App() {
   };
 
   // --- NEW: Meeting Invitation Handlers ---
-  const handleSaveInvitation = (e) => {
-      e.preventDefault();
-      let nextList;
-      const dataToSave = { ...newInvitation };
-      
-      if (!dataToSave.signatory && currentUser) {
-          dataToSave.signatory = `${currentUser.firstName} ${currentUser.lastName}`;
-      }
 
-      if (dataToSave.id) {
-          nextList = meetingInvitations.map(inv => inv.id === dataToSave.id ? dataToSave : inv);
-      } else {
-          const id = generateId();
-          nextList = [{ ...dataToSave, id, projectId: selectedProject.id }, ...meetingInvitations];
-      }
-      
-      setMeetingInvitations(nextList);
-      triggerAutoSync('Meeting_Invitations_หนังสือเชิญ', nextList, []);
-      setShowAddInvitationModal(false);
-      alert('บันทึกหนังสือเชิญประชุมเรียบร้อยแล้ว');
-  };
 
   // --- NEW: Meeting Proxy Handlers ---
-  const handleSaveProxy = (e) => {
-      e.preventDefault();
-      let nextList;
-      const dataToSave = { ...newProxy };
 
-      if (dataToSave.id) {
-          nextList = meetingProxies.map(p => p.id === dataToSave.id ? dataToSave : p);
-      } else {
-          const id = generateId();
-          nextList = [{ ...dataToSave, id, projectId: selectedProject.id }, ...meetingProxies];
-      }
-      
-      setMeetingProxies(nextList);
-      triggerAutoSync('Meeting_Proxies_ใบมอบฉันทะ', nextList, []);
-      setShowAddProxyModal(false);
-      alert('บันทึกใบมอบฉันทะเรียบร้อยแล้ว');
-  };
 
   // --- NEW: Meeting Ballot Handlers ---
-  const handleSaveBallot = (e) => {
-      e.preventDefault();
-      let nextList;
-      const dataToSave = { ...newBallot };
 
-      // ถ้าเป็นเจ้าของร่วม ให้ชื่อผู้ลงคะแนนตรงกับชื่อเจ้าของโดยอัตโนมัติ (ถ้าไม่ได้กรอก)
-      if (dataToSave.voterType === 'เจ้าของร่วม' && !dataToSave.voterName) {
-          dataToSave.voterName = dataToSave.ownerName;
-      }
-
-      if (dataToSave.id) {
-          nextList = meetingBallots.map(b => b.id === dataToSave.id ? dataToSave : b);
-      } else {
-          const id = generateId();
-          nextList = [{ ...dataToSave, id, projectId: selectedProject.id }, ...meetingBallots];
-      }
-      
-      setMeetingBallots(nextList);
-      triggerAutoSync('Meeting_Ballots_ใบลงคะแนน', nextList, []);
-      setShowAddBallotModal(false);
-      alert('บันทึกข้อมูลใบลงคะแนนเรียบร้อยแล้ว');
-  };
 
   // Audit Handlers
   const handleAuditScoreChange = (catIdx, itemIdx, score) => {
@@ -8041,6 +8049,10 @@ export default function App() {
 
                   const totalTables = stateSetters.length;
                   let currentTable = 0;
+
+                  if (restoreModules.schedules && Array.isArray(d.projectScheduleRecords)) {
+                      throw new Error('กรุณายกเลิกการเลือกตารางงาน การกู้คืนตารางงานต้องตรวจความขัดแย้งก่อนเขียนทับ');
+                  }
 
                   for (const item of stateSetters) {
                       currentTable++;
@@ -8604,20 +8616,12 @@ export default function App() {
       setShowAddContractModal(true);
   };
 
-  const handleAddStaffToProject = () => {
-      setIsEditingUser(false);
-      setNewUser(createNewUserDraft({
-          position: EMPLOYEE_POSITIONS[0],
-          department: selectedProject.name,
-          permissions: getDefaultPermissions(),
-      }));
-      setShowAddUserModal(true);
-  };
+
 
   const updateSchedule = (userId, dateString, shiftId, type = 'plan') => {
-      if (isLegacyScheduleReadOnly) return;
+      if (isLegacyScheduleReadOnly || scheduleSaveInFlight.current) return;
       const key = type === 'plan' ? `${userId}_${dateString}` : `${userId}_${dateString}_act`;
-      setSchedules(prev => ({ ...prev, [key]: shiftId }));
+      setScheduleDraftCells(prev => ({ ...prev, [key]: shiftId }));
   };
 
   // ... (View Components) ...
@@ -9559,7 +9563,7 @@ export default function App() {
                   try {
                       // พยายามถอดรหัสเป็นแบบ UTF-8 (มาตรฐาน) ก่อน โดยตั้ง fatal: true เพื่อให้เกิด Error ทันทีหากอ่านภาษาไทยไม่ออก
                       text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
-                  } catch (err) {
+                  } catch {
                       // หากเกิด Error (มักจะเกิดจากไฟล์ CSV ที่เซฟจาก Excel ภาษาไทย) ให้สลับไปใช้ windows-874 / tis-620 อัตโนมัติ
                       text = new TextDecoder('windows-874').decode(buffer);
                   }
@@ -10838,7 +10842,7 @@ export default function App() {
     const remainingDays = calculateDaysRemaining(selectedProject.contractEndDate);
 
     // --- NEW: Drag & Drop Logic for Schedule ---
-    const projectStaffForSchedule = users.filter(u => u.department === selectedProject.name);
+    const projectStaffForSchedule = selectedProjectScheduleStaff;
     const rawOrder = projectStaffOrder[selectedProject.id];
     const currentOrder = Array.isArray(rawOrder) ? rawOrder : [];
     
@@ -11983,18 +11987,33 @@ export default function App() {
           )}
 
           {projectTab === 'schedule' && (() => {
+            // Do not render an empty/editable grid from a blocked roster or unconfirmed cache.
+            const rosterBlocked = scheduleRosterReadState.status === 'blocked';
+            const scheduleBlocked = schedulesReadState.status === 'blocked';
+            const readFailed = [scheduleRosterReadState, schedulesReadState].some(state => ['error', 'unavailable'].includes(state.status));
+            const dataReady = scheduleRosterReadState.status === 'ready' && schedulesReadState.status === 'ready';
+            if (!dataReady) return (
+                <Card className="p-6" role="status">
+                    <h3 className="font-bold text-lg">{rosterBlocked || scheduleBlocked ? 'ยังไม่สามารถแสดงตารางตามสิทธิ์บัญชีนี้' : readFailed ? 'โหลดข้อมูลตารางไม่สำเร็จ' : 'กำลังโหลดตารางและรายชื่อพนักงานจากเซิร์ฟเวอร์'}</h3>
+                    <p className="mt-2 text-gray-600">{rosterBlocked
+                        ? 'บัญชีนี้ไม่มีสิทธิ์อ่านทะเบียนพนักงานที่ใช้สร้างแถวตาราง จึงยังแสดงตารางไม่ได้ ไม่ได้หมายความว่าข้อมูลตารางถูกลบ กรุณาติดต่อผู้ดูแลเพื่อตรวจสอบสิทธิ์'
+                        : scheduleBlocked ? 'บัญชีนี้ไม่มีสิทธิ์อ่านตารางของโครงการที่เลือก กรุณาติดต่อผู้ดูแล'
+                        : readFailed ? 'ระบบยังยืนยันข้อมูลไม่ได้ กรุณาตรวจสอบการเชื่อมต่อและสิทธิ์ แล้วโหลดหน้าใหม่ ระบบปิดการแก้ไขไว้เพื่อป้องกันการบันทึกทับข้อมูล'
+                        : 'กรุณารอให้ข้อมูลพร้อมก่อนแก้ไขหรือส่งออก หากรอนานให้ตรวจสอบการเชื่อมต่อและโหลดหน้าใหม่'}</p>
+                </Card>
+            );
             // --- NEW: Logic for Schedule Deadlines and Approvals ---
             const approval = scheduleApprovals[`${selectedProject.id}_${currentMonth}`] || {};
             const isApproved = approval.status === 'Approved';
             const isLocked = approval.isLocked === true;
 
-            const isHR = currentUser?.position?.includes('เจ้าหน้าที่ฝ่ายบุคคล') || currentUser?.username === 'admin';
+
             
             // Plan จะแก้ไขได้ก็ต่อเมื่อ ยังไม่ล็อค และ ยังไม่อนุมัติ (ปลดล็อคข้อจำกัดวันที่ 22 ออก)
-            const canEditPlan = !isLegacyScheduleReadOnly && !isLocked && !isApproved;
+            const canEditPlan = hasPerm('proj_schedule', 'save') && !isLegacyScheduleReadOnly && !isSavingSchedule && !isLocked && !isApproved;
             
             // ACT จะแก้ไขได้ก็ต่อเมื่อ ยังไม่ถูกล็อค
-            const canEditAct = !isLegacyScheduleReadOnly && !isLocked;
+            const canEditAct = hasPerm('proj_schedule', 'save') && !isLegacyScheduleReadOnly && !isSavingSchedule && !isLocked;
 
             // ตรวจสอบว่าเป็นหน่วยงาน Head Office หรือไม่
             const isHeadOffice = selectedProject?.name === 'Head Office';
@@ -12010,7 +12029,7 @@ export default function App() {
                         </h3>
                         {/* Status Badge */}
                         {(() => {
-                            if (isLegacyScheduleReadOnly) return <span className={`bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold border border-amber-300 shadow-sm flex items-center gap-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}><Archive size={isExporting ? 10 : 12}/> ข้อมูลเดิม — อ่านอย่างเดียว ({legacyScheduleFallback.legacyCellCount} ช่อง)</span>;
+                            if (isLegacyScheduleReadOnly) return <span className={`bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold border border-amber-300 shadow-sm flex items-center gap-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}><Archive size={isExporting ? 10 : 12}/> ข้อมูลเดิม — รอนำเข้าเพื่อแก้ไข ({legacyScheduleFallback.legacyCellCount} ช่อง)</span>;
                             if (!approval.status) return <span className={`bg-gray-100 text-gray-500 px-2 py-0.5 rounded font-bold border ${isExporting ? 'text-[9px]' : 'text-xs'}`}>ฉบับร่าง (ยังไม่บันทึก)</span>;
                             if (approval.isLocked) return <span className={`bg-red-100 text-red-700 px-2 py-0.5 rounded font-bold border border-red-200 shadow-sm flex items-center gap-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}><Lock size={isExporting ? 10 : 12}/> ล็อคตารางแล้ว</span>;
                             if (approval.status === 'Pending Manager') return <span className={`bg-orange-100 text-orange-700 px-2 py-0.5 rounded font-bold border border-orange-200 shadow-sm flex items-center gap-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}><Clock size={isExporting ? 10 : 12}/> รอผู้จัดการอนุมัติ</span>;
@@ -12030,13 +12049,13 @@ export default function App() {
                             <button onClick={() => changeMonth(1)} className={`p-1 hover:bg-white rounded shadow-sm transition ${isExporting ? 'hidden' : ''}`}><ChevronRight size={18}/></button>
                         </div>
                         <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
-                            <Button variant="outline" size="sm" icon={Download} onClick={exportScheduleCSV} disabled={isExporting} className="border-green-500 text-green-600 hover:bg-green-50">
+                            <Button variant="outline" size="sm" icon={Download} onClick={exportScheduleCSV} disabled={isExporting || !hasPerm('proj_schedule', 'print')} className="border-green-500 text-green-600 hover:bg-green-50">
                                 ดาวน์โหลด CSV
                             </Button>
-                            <Button variant="outline" size="sm" icon={isExporting ? Loader2 : ImageIcon} onClick={exportScheduleImage} disabled={isExporting} className="border-blue-500 text-blue-600 hover:bg-blue-50">
+                            <Button variant="outline" size="sm" icon={isExporting ? Loader2 : ImageIcon} onClick={exportScheduleImage} disabled={isExporting || !hasPerm('proj_schedule', 'print')} className="border-blue-500 text-blue-600 hover:bg-blue-50">
                                 {isExporting ? 'กำลังประมวลผล...' : 'ดาวน์โหลดรูปภาพ'}
                             </Button>
-                            <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={exportSchedulePDF} disabled={isExporting}>
+                            <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={exportSchedulePDF} disabled={isExporting || !hasPerm('proj_schedule', 'print')}>
                                 {isExporting ? 'กำลังประมวลผล...' : t('printPDF')}
                             </Button>
                             
@@ -12071,7 +12090,7 @@ export default function App() {
                                 return null;
                             })()}
 
-                            {hasPerm('proj_schedule', 'save') && <Button size="sm" icon={Save} onClick={handleSaveSchedule} disabled={isLegacyScheduleReadOnly} title={isLegacyScheduleReadOnly ? 'ข้อมูลเดิมเปิดให้อ่านและส่งออกเท่านั้น' : undefined}>{t('save')}</Button>}
+                            {hasPerm('proj_schedule', 'save') && <Button size="sm" icon={Save} onClick={handleSaveSchedule} disabled={isLegacyScheduleReadOnly || isSavingSchedule} title={isLegacyScheduleReadOnly ? 'ข้อมูลเดิมเปิดให้อ่านและส่งออกเท่านั้น' : undefined}>{isSavingSchedule ? 'รอเซิร์ฟเวอร์ยืนยัน…' : t('save')}</Button>}
                         </div>
                     </div>
                 </div>
@@ -12080,8 +12099,9 @@ export default function App() {
                     <div className="mx-4 mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-start gap-2">
                         <AlertTriangle size={18} className="mt-0.5 shrink-0" />
                         <div>
-                            <div className="font-bold">กำลังแสดงตารางจากคลังข้อมูลเดิมแบบอ่านอย่างเดียว</div>
-                            <div className="text-xs mt-1">ระบบจับคู่จากรหัสพนักงานและโครงการปัจจุบัน ข้อมูลของพนักงานที่เคยย้ายโครงการต้องตรวจสอบก่อนนำไปใช้อ้างอิงหรือย้ายเข้าระบบใหม่</div>
+                            <div className="font-bold">ตรวจสอบตารางเดิมก่อนนำเข้าเพื่อแก้ไข</div>
+                            <div className="text-xs mt-1">ตรวจสอบว่ารายชื่อและกะงานเป็นของโครงการนี้ในเดือนที่เลือก เมื่อยืนยัน ระบบจะเก็บสำเนาและนำเข้าเฉพาะรหัสที่จับคู่ได้ โดยไม่ทับค่าชุดใหม่และไม่ปลดล็อกตารางอัตโนมัติ</div>
+                            {isLegacyScheduleArchiveAdmin && <Button size="sm" icon={Archive} onClick={handleEnableLegacyScheduleEditing} disabled={isImportingLegacySchedule || isSavingSchedule} className="mt-2">{isImportingLegacySchedule ? 'กำลังตรวจและนำเข้าข้อมูล…' : 'นำเข้าตารางเดิมเพื่อแก้ไข'}</Button>}
                         </div>
                     </div>
                 )}
@@ -12123,18 +12143,18 @@ export default function App() {
                                     <tbody 
                                         key={user.id} 
                                         className={`border-b-2 border-gray-400 transition-all ${!isExporting && !isLegacyScheduleReadOnly ? 'cursor-move' : ''}`}
-                                        draggable={!isExporting && !isLegacyScheduleReadOnly}
+                                        draggable={!isExporting && canEditAct}
                                         onDragStart={(e) => { 
                                             dragItem.current = index; 
                                             e.currentTarget.style.opacity = '0.5';
                                             e.dataTransfer.effectAllowed = 'move';
                                         }}
-                                        onDragEnter={(e) => { 
+                                        onDragEnter={() => {
                                             dragOverItem.current = index; 
                                         }}
                                         onDragEnd={(e) => {
                                             e.currentTarget.style.opacity = '1';
-                                            handleDragEnd();
+                                            if (canEditAct) handleDragEnd();
                                         }}
                                         onDragOver={(e) => e.preventDefault()}
                                         title={!isExporting && !isLegacyScheduleReadOnly ? "คลิกค้างที่แถวแล้วลากเพื่อสลับตำแหน่ง (Drag & Drop)" : ""}
@@ -12210,7 +12230,7 @@ export default function App() {
                                                                 onChange={(e) => canEditPlan && updateSchedule(user.id, dateString, e.target.value.toUpperCase(), 'plan')}
                                                                 readOnly={!canEditPlan || !!selectedShift}
                                                                 disabled={!canEditPlan}
-                                                                title={!canEditPlan ? "ตาราง Plan ถูกอนุมัติหรือล็อคแล้ว" : "ตารางแผนงาน (Plan)"}
+                                                                title={!hasPerm('proj_schedule', 'save') ? "ตารางแผนงาน (Plan) — อ่านอย่างเดียวตามสิทธิ์" : !canEditPlan ? "ตาราง Plan ถูกอนุมัติหรือล็อคแล้ว" : "ตารางแผนงาน (Plan)"}
                                                             />
                                                         )}
                                                     </td>
@@ -12272,7 +12292,7 @@ export default function App() {
                                                                 onChange={(e) => canEditAct && updateSchedule(user.id, dateString, e.target.value.toUpperCase(), 'act')}
                                                                 readOnly={!canEditAct || !!selectedShift}
                                                                 disabled={!canEditAct}
-                                                                title={!canEditAct ? "ตารางถูกล็อคแล้วโดยฝ่ายบุคคล" : "แก้ไขตารางตามการเข้างานจริง (Actual)"}
+                                                                title={!hasPerm('proj_schedule', 'save') ? "ตารางตามจริง (Actual) — อ่านอย่างเดียวตามสิทธิ์" : !canEditAct ? "ตารางถูกล็อคแล้วโดยฝ่ายบุคคล" : "แก้ไขตารางตามการเข้างานจริง (Actual)"}
                                                             />
                                                         )}
                                                     </td>
@@ -12346,7 +12366,7 @@ export default function App() {
                             className="w-full border border-gray-300 rounded-md p-3 text-sm h-20 focus:ring-1 focus:ring-orange-500 outline-none resize-none bg-gray-50 focus:bg-white transition-colors"
                             placeholder="พิมพ์รายละเอียดเพิ่มเติมที่นี่..."
                             value={scheduleNote}
-                            disabled={isLegacyScheduleReadOnly}
+                            disabled={!canEditAct}
                             onChange={(e) => setScheduleNote(e.target.value)}
                         ></textarea>
                     )}
@@ -14295,7 +14315,7 @@ export default function App() {
                                                   {/* Filter */}
                                                   <div className="flex flex-wrap gap-2 mb-6 bg-gray-50 p-3 rounded-lg border border-gray-100">
                                                       <div className="text-xs font-bold text-gray-500 mr-2 flex items-center"><Search size={14} className="mr-1"/> ตัวกรองมิเตอร์:</div>
-                                                      {waterMeters.map((m, idx) => (
+                                                      {waterMeters.map((m) => (
                                                           <label key={m.id} className={`flex items-center gap-1.5 text-xs cursor-pointer px-2.5 py-1 rounded-md border transition-all ${!hiddenAnalysisMeters.has(m.id) ? 'bg-blue-100 border-blue-300 text-blue-800 font-medium shadow-sm' : 'bg-white border-gray-200 text-gray-400 hover:bg-gray-50'}`}>
                                                               <input type="checkbox" checked={!hiddenAnalysisMeters.has(m.id)} onChange={() => toggleMeterVisibility(m.id)} className="accent-blue-600 w-3.5 h-3.5" />
                                                               <span className="truncate max-w-[150px]" title={`${m.name} (${m.code})`}>{m.name}</span>
@@ -14388,7 +14408,7 @@ export default function App() {
                                                   {/* Filter */}
                                                   <div className="flex flex-wrap gap-2 mb-6 bg-gray-50 p-3 rounded-lg border border-gray-100">
                                                       <div className="text-xs font-bold text-gray-500 mr-2 flex items-center"><Search size={14} className="mr-1"/> ตัวกรองมิเตอร์:</div>
-                                                      {elecMeters.map((m, idx) => (
+                                                      {elecMeters.map((m) => (
                                                           <label key={m.id} className={`flex items-center gap-1.5 text-xs cursor-pointer px-2.5 py-1 rounded-md border transition-all ${!hiddenAnalysisMeters.has(m.id) ? 'bg-orange-100 border-orange-300 text-orange-800 font-medium shadow-sm' : 'bg-white border-gray-200 text-gray-400 hover:bg-gray-50'}`}>
                                                               <input type="checkbox" checked={!hiddenAnalysisMeters.has(m.id)} onChange={() => toggleMeterVisibility(m.id)} className="accent-orange-600 w-3.5 h-3.5" />
                                                               <span className="truncate max-w-[150px]" title={`${m.name} (${m.code})`}>{m.name}</span>
@@ -14819,7 +14839,7 @@ export default function App() {
                               { name: 'ยกเลิก', value: statusCounts['Cancelled'], color: 'url(#colorGray)' }
                           ].filter(d => d.value > 0);
 
-                          const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, index }) => {
+                          const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
                               const RADIAN = Math.PI / 180;
                               const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
                               const x = cx + radius * Math.cos(-midAngle * RADIAN);
@@ -18042,9 +18062,9 @@ export default function App() {
         .sweet-theme .bg-gray-900 .text-white { color: #5C434B !important; } 
         .sweet-theme .bg-gray-900 .text-gray-400 { color: #997B86 !important; }
         .sweet-theme .bg-gray-900 .text-gray-500 { color: #8C6D78 !important; }
-        .sweet-theme .bg-gray-900 .hover\:text-white:hover { color: #D4758B !important; }
+        .sweet-theme .bg-gray-900 .hover\\:text-white:hover { color: #D4758B !important; }
         .sweet-theme .border-gray-800 { border-color: #F4C4D0 !important; }
-        .sweet-theme .bg-gray-800, .sweet-theme .hover\:bg-gray-800:hover, .sweet-theme .group:hover .group-hover\:bg-gray-800 { background-color: #F4C4D0 !important; }
+        .sweet-theme .bg-gray-800, .sweet-theme .hover\\:bg-gray-800:hover, .sweet-theme .group:hover .group-hover\\:bg-gray-800 { background-color: #F4C4D0 !important; }
         
         /* Inputs in Sweet Theme */
         .sweet-theme input:not([type="radio"]):not([type="checkbox"]), .sweet-theme select, .sweet-theme textarea {
@@ -18062,7 +18082,7 @@ export default function App() {
         .sweet-theme .bg-orange-50 { background-color: #FFF5F8 !important; }
         .sweet-theme .bg-orange-100 { background-color: #FFEDF1 !important; }
         .sweet-theme .bg-orange-500, .sweet-theme .bg-orange-600 { background-color: #F4A6B7 !important; color: white !important; }
-        .sweet-theme .hover\:bg-orange-700:hover { background-color: #E88FA4 !important; }
+        .sweet-theme .hover\\:bg-orange-700:hover { background-color: #E88FA4 !important; }
         
         .sweet-theme .text-orange-400, .sweet-theme .text-orange-500, .sweet-theme .text-orange-600, .sweet-theme .text-orange-700 { color: #D4758B !important; }
         .sweet-theme .border-orange-200, .sweet-theme .border-orange-300, .sweet-theme .border-orange-500 { border-color: #F4A6B7 !important; }
@@ -18094,9 +18114,9 @@ export default function App() {
         .crimson-theme .bg-gray-900 .text-white { color: #FFFFFF !important; } 
         .crimson-theme .bg-gray-900 .text-gray-400 { color: #FCA5A5 !important; }
         .crimson-theme .bg-gray-900 .text-gray-500 { color: #F87171 !important; }
-        .crimson-theme .bg-gray-900 .hover\:text-white:hover { color: #FFFFFF !important; }
+        .crimson-theme .bg-gray-900 .hover\\:text-white:hover { color: #FFFFFF !important; }
         .crimson-theme .border-gray-800 { border-color: #7F1D1D !important; }
-        .crimson-theme .bg-gray-800, .crimson-theme .hover\:bg-gray-800:hover, .crimson-theme .group:hover .group-hover\:bg-gray-800 { background-color: #7F1D1D !important; }
+        .crimson-theme .bg-gray-800, .crimson-theme .hover\\:bg-gray-800:hover, .crimson-theme .group:hover .group-hover\\:bg-gray-800 { background-color: #7F1D1D !important; }
         
         /* Inputs in Crimson Theme */
         .crimson-theme input:not([type="radio"]):not([type="checkbox"]), .crimson-theme select, .crimson-theme textarea {
@@ -18114,7 +18134,7 @@ export default function App() {
         /* Accents in Crimson Theme */
         .crimson-theme .bg-orange-50, .crimson-theme .bg-orange-100 { background-color: rgba(220, 38, 38, 0.15) !important; border-color: rgba(220, 38, 38, 0.3) !important; color: #FCA5A5 !important; }
         .crimson-theme .bg-orange-500, .crimson-theme .bg-orange-600 { background-color: #DC2626 !important; color: white !important; }
-        .crimson-theme .hover\:bg-orange-700:hover { background-color: #B91C1C !important; }
+        .crimson-theme .hover\\:bg-orange-700:hover { background-color: #B91C1C !important; }
         
         .crimson-theme .text-orange-400, .crimson-theme .text-orange-500, .crimson-theme .text-orange-600, .crimson-theme .text-orange-700 { color: #FCA5A5 !important; }
         .crimson-theme .border-orange-200, .crimson-theme .border-orange-300, .crimson-theme .border-orange-500 { border-color: rgba(220, 38, 38, 0.4) !important; }
@@ -18182,9 +18202,9 @@ export default function App() {
         .sunset-theme .bg-gray-900 .text-white { color: #FFFDE7 !important; } 
         .sunset-theme .bg-gray-900 .text-gray-400 { color: #FDE047 !important; }
         .sunset-theme .bg-gray-900 .text-gray-500 { color: #FEF08A !important; }
-        .sunset-theme .bg-gray-900 .hover\:text-white:hover { color: #FFFFFF !important; }
+        .sunset-theme .bg-gray-900 .hover\\:text-white:hover { color: #FFFFFF !important; }
         .sunset-theme .border-gray-800 { border-color: #C23A1D !important; }
-        .sunset-theme .bg-gray-800, .sunset-theme .hover\:bg-gray-800:hover, .sunset-theme .group:hover .group-hover\:bg-gray-800 { background-color: #C23A1D !important; }
+        .sunset-theme .bg-gray-800, .sunset-theme .hover\\:bg-gray-800:hover, .sunset-theme .group:hover .group-hover\\:bg-gray-800 { background-color: #C23A1D !important; }
         
         /* Inputs in Sunset Theme */
         .sunset-theme input:not([type="radio"]):not([type="checkbox"]), .sunset-theme select, .sunset-theme textarea {
@@ -18201,7 +18221,7 @@ export default function App() {
         .sunset-theme .bg-orange-50 { background-color: #FFEDD5 !important; }
         .sunset-theme .bg-orange-100 { background-color: #FED7AA !important; }
         .sunset-theme .bg-orange-500, .sunset-theme .bg-orange-600 { background-color: #EA580C !important; color: white !important; }
-        .sunset-theme .hover\:bg-orange-700:hover { background-color: #C2410C !important; }
+        .sunset-theme .hover\\:bg-orange-700:hover { background-color: #C2410C !important; }
         
         .sunset-theme .text-orange-400, .sunset-theme .text-orange-500, .sunset-theme .text-orange-600, .sunset-theme .text-orange-700 { color: #EA580C !important; }
         .sunset-theme .border-orange-200, .sunset-theme .border-orange-300, .sunset-theme .border-orange-500 { border-color: #EA580C !important; }
@@ -19175,7 +19195,7 @@ export default function App() {
                                                     a.download = `QR_Asset_${selectedAssetView.code}.png`;
                                                     a.click();
                                                     URL.revokeObjectURL(url);
-                                                } catch (e) {
+                                                } catch {
                                                     window.open(qrUrl, '_blank');
                                                 }
                                             }}><Download size={12}/> โหลด QR</Button>
@@ -19550,7 +19570,7 @@ export default function App() {
                                                     a.download = `QR_Machine_${selectedMachineDetails.code}.png`;
                                                     a.click();
                                                     URL.revokeObjectURL(url);
-                                                } catch (e) {
+                                                } catch {
                                                     window.open(qrUrl, '_blank');
                                                 }
                                             }}><Download size={12}/> โหลด QR</Button>

@@ -82,7 +82,7 @@ if (!args.includes('--apply')) {
       }
     }
     const after={id:`${project.id}_${month}`,projectId:project.id,month,schemaVersion:1,
-      schedules:{},note:'',approval:{},staffOrder:[],...before,
+      note:'',approval:{},staffOrder:[],...before,
       schedules:{...before?.schedules,...additions},
       legacyCellMigration:{status:'complete',staffIds:staff.map(s=>s.id),
         confirmedBy:'project-owner: Bangkok Admin verified May–September 2026',
