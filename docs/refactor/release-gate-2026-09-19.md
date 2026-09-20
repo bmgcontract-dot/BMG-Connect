@@ -178,3 +178,43 @@ correctness failure in the release paths. Non-blocking design debt remains in th
 large `App.jsx`, duplicated legacy archive decoding, raw lifecycle strings, and
 the legacy-import context data clump. Billing analysis remains separate from the
 release decision.
+
+## Restore reconciliation and rollback-standard resolution — 2026-09-20
+
+Google Cloud CLI was authorized with the BMG project account for a read-only
+Firestore REST reconciliation. The access token was passed directly from
+`gcloud` to the process and was not printed or stored in the repository. The
+temporary reconciliation script was deleted immediately after the check.
+
+- Production `(default)` and `restore-drill-20260920` each expose the same 66
+  business collections under `artifacts/bmg-app-prod/public/data`.
+- All 66 collection names exist in both databases. Counts match exactly for 62
+  collections.
+- The isolated restore contains 35,339 business documents plus 63/63 root user
+  profiles. Current Production contains 35,368 business documents plus the same
+  63 root profiles.
+- The 29-document current-Production delta is entirely additive: Daily Reports
+  `1,739` versus `1,736`, inventory transactions `711` versus `709`, repairs
+  `480` versus `478`, and utility readings `14,228` versus `14,206`. No
+  collection is larger in the restore than current Production, and no restored
+  collection is absent. These are current-state differences after the completed
+  export; the managed export/import operation itself reported 35,932 documents
+  on both sides.
+- User, project, image-bearing announcement, project schedule, and inventory
+  transaction samples were readable in both databases. Only field names were
+  compared; record values and personal data were not written to logs or Git.
+  The field sets matched for each category, including project files/logo,
+  announcement image fields, schedule approval/month/project/cells, and
+  transaction quantity/status/type fields.
+
+The restore reconciliation and required category-sample criteria are closed.
+The rollback review finding is also resolved without reintroducing an unsafe
+global legacy writer: `backup-and-rollback.md` now records that the schedule
+cutover was accepted on 17 September 2026, identifies the compatible immutable
+rollback deployment/source, and requires project/month reconciliation. The
+current release does not perform a new schedule-storage migration.
+
+Decision remains **HOLD** only for the explicit business-owner decision on the
+unlock workflow: unlocking an approved schedule currently clears the HR
+approval and returns the workflow to Pending HR so Plan corrections require HR
+approval again.

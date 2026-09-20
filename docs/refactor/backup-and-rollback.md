@@ -61,7 +61,24 @@ Do not download personal images into the repository.
 
 ## Migration rollback
 
-Every module migration must have its own feature flag and cutover timestamp.
+Before cutover, every module migration must have its own feature flag and
+cutover timestamp. After an accepted cutover and observation window, a legacy
+writer may be retired when re-enabling it would violate the current security or
+data-ownership model. That retirement must be recorded with a compatible,
+immutable application rollback target and a data-reconciliation procedure.
+
+The project-scoped schedule migration is such a retired path. Its cutover was
+accepted on 17 September 2026 at release commit `7e9c250`; the global legacy
+schedule remains an Admin-only archive and must not be re-enabled for writes
+under the project-scoped Rules. For the current stabilization release, the
+compatible application rollback target is Vercel deployment
+`7YVMfhYbWKJB1fbkMg4HiyWbFKyZ` at source `cf40c9002916e653bd1d3ff8d3ba4e291e3604e`.
+That deployment already uses project-owned schedule records. Reconcile only
+verified project/month records written after the release boundary; never copy
+the global archive back over project-owned schedules.
+
+For migrations whose legacy writer has not been retired, use this rollback
+order:
 Rollback order:
 
 1. Disable new writes for the affected module.
