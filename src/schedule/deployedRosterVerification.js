@@ -26,4 +26,3 @@ export function validateDeployedRoster({ status, cacheControl, payload, projectI
 
   return { projectId, staffCount: payload.staff.length };
 }
-

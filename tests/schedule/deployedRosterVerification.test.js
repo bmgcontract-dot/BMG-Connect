@@ -19,7 +19,6 @@ test('deployed roster verifier accepts only the minimal private response', () =>
     payload: { projectId: 'project-a', staff: [validPerson] },
   }), { projectId: 'project-a', staffCount: 1 });
 });
-
 test('deployed roster verifier rejects missing endpoints, cache leaks, and profile fields', () => {
   assert.throws(() => validateDeployedRoster({
     status: 404,
@@ -40,4 +39,3 @@ test('deployed roster verifier rejects missing endpoints, cache leaks, and profi
     payload: { projectId: 'project-a', staff: [{ ...validPerson, phone: 'private' }] },
   }), /fields-invalid/);
 });
-

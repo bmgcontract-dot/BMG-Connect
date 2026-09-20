@@ -28,4 +28,3 @@ if (!projectId || !token) {
     ...evidence,
   }));
 }
-
