@@ -297,12 +297,60 @@ listener). Gates re-run green (125/125, lint zero, build passed, diff clean).
   bundle `index-DKRK4aN-.js`. Rollback anchor for this step:
   `dpl_3fkshjb4fG645YSdFnShgU2PAEpE`. Firestore Rules unchanged in this step.
 
+### Follow-up product fix — case/whitespace-sensitive department match
+
+Post-deploy, head-office / area-manager users who normally see every unit could
+no longer enter any unit ("ไม่พบข้อมูลโครงการที่สังกัด"). Confirmed against
+production data via a read-only field-masked query (department/position/username
+only, no photos):
+
+- 63 users total. Department stored as `"Head office"` (lowercase o) for 11
+  users and `"Head Office"` for 2. Example: user `2310002` (นายวิมล, Area
+  Manager) had `department: "Head office"`, `accessibleDepts: ["All", …]`, status
+  Active, and a full 25-menu `permissions` map already saved.
+- Root cause (code): `resolvePostAuthDestination` compared
+  `department === 'Head Office'` case-sensitively, so the 11 `"Head office"`
+  users failed the global-destination branch and were routed to
+  `assigned-project-unavailable`. `filterAccessibleProjects` matched project
+  names the same case-sensitive way.
+- This is why it looked like "admin-set permissions are not remembered": the
+  Admin API (`api/admin-users.js`) persisted `permissions`/`department`/
+  `accessibleDepts` correctly (verified in Firestore); the routing gate rejected
+  the users before their permissions could take effect. No permission data was
+  lost.
+
+Fix commit `5c15753`: normalize (trim + collapse internal whitespace +
+lowercase) both the head-office check and project-name matching in
+`resolvePostAuthDestination`, and apply the same normalization in
+`filterAccessibleProjects` so per-department (non-"All") users also match
+padded/cased names. Regression test covers `"Head office"`, `" head office "`,
+`"HEAD OFFICE"`, `"Head  Office"`.
+
+- Gates re-run: `npm test` 126/126 (one new case), `npm run lint` zero,
+  `npm run build` passed (accepted large-chunk warning), `git diff --check` clean.
+- Third Vercel production deploy of source `5c15753`:
+  new deployment `dpl_5AahoZ2NpArzfGRpspKdsFUWyURU`
+  (hostname `bmg-connect-dam1zmwnd-…`), aliased to `bmg-connect.vercel.app`,
+  bundle `index-CxjbsYxQ.js`, status Ready. Post-deploy: prod HTTP 200, Rules
+  still 403 for unauthenticated reads. Rollback anchor for this step:
+  `dpl_9Ggyf38TjgzLsLYz9v3Zf4nYMwvV`. Firestore Rules unchanged.
+- Data note: the underlying data inconsistency (mixed `"Head office"` /
+  `"Head Office"` casing) was left in place; the code now tolerates it. Optional
+  future cleanup: normalize the stored department values to a single canonical
+  form (separate, non-urgent task).
+- Pushed to `origin/codex/schedule-legacy-read-fallback`
+  (`e7ab13d`, `a99bb01`, `5c15753`).
+
 ### Rollback (code and data kept separate)
 
-- Code: Vercel Instant Rollback to `dpl_3fkshjb4fG645YSdFnShgU2PAEpE`, or to the
-  pre-release `dpl_7YVMfhYbWKJB1fbkMg4HiyWbFKyZ`.
+- Code: Vercel Instant Rollback. Current production is
+  `dpl_5AahoZ2NpArzfGRpspKdsFUWyURU` (source `5c15753`). Prior anchors, newest
+  first: `dpl_9Ggyf38TjgzLsLYz9v3Zf4nYMwvV` (`e7ab13d`),
+  `dpl_3fkshjb4fG645YSdFnShgU2PAEpE` (`9708570`), and the pre-release
+  `dpl_7YVMfhYbWKJB1fbkMg4HiyWbFKyZ` (`cf40c90`).
 - Rules: re-deploy prior ruleset `5631d288-…` or
-  `config-snapshots/firestore.rules.production-2026-09-15.rules`.
+  `config-snapshots/firestore.rules.production-2026-09-15.rules`. Current live
+  ruleset is `6c1527fb-…`.
 - Data: no schema/data migration was performed in this rollout. Point-in-time
   recovery is OFF; the only data checkpoint is the managed export
   `2026-09-20T01:36:34_32392`. An app/Rules rollback does not restore Firestore
