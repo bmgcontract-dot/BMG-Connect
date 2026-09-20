@@ -41,6 +41,12 @@ import { createNewUserDraft } from './src/users/userDraft.js';
 import { resolvePostAuthDestination } from './src/auth/postAuthDestination.js';
 import { filterAccessibleProjects, hasUserPermission } from './src/auth/permissions.js';
 import { validateProjectUniqueness } from './src/projects/projectValidation.js';
+import {
+  DEFAULT_FEE_SETTINGS,
+  createFeeSettingsDocument,
+  feeSettingsDocumentId,
+  readFeeSettings,
+} from './src/fees/feeSettings.js';
 import { buildAdminLegacyScheduleFallback } from './src/schedule/adminLegacyScheduleFallback.js';
 import { deriveProjectScheduleViews, upsertProjectSchedule } from './src/schedule/projectScheduleState.js';
 import { scheduleDocumentEqual } from './src/schedule/scheduleDocumentEqual.js';
@@ -2107,9 +2113,10 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
   const [reportDate, setReportDate] = useState('บริหารจัดการโดย บริษัท เบสท์ มิลเลี่ยน กรุ๊ป จำกัด');
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [encoding, setEncoding] = useState('windows-874'); 
-  const [freezeThresholdMonths, setFreezeThresholdMonths] = useState(6); 
-  const [noticeThresholdDays, setNoticeThresholdDays] = useState(90); 
+  const [freezeThresholdMonths, setFreezeThresholdMonths] = useState(DEFAULT_FEE_SETTINGS.freezeThresholdMonths);
+  const [noticeThresholdDays, setNoticeThresholdDays] = useState(DEFAULT_FEE_SETTINGS.noticeThresholdDays);
 
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -2136,6 +2143,26 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
   // --- Firebase Cloud Data Sync ---
   useEffect(() => {
     if (!db || !appId || !selectedProject) return;
+
+    setNoticeThresholdDays(DEFAULT_FEE_SETTINGS.noticeThresholdDays);
+    setFreezeThresholdMonths(DEFAULT_FEE_SETTINGS.freezeThresholdMonths);
+
+    const settingsRef = doc(
+      db,
+      'artifacts',
+      appId,
+      'public',
+      'data',
+      'app_state',
+      feeSettingsDocumentId(selectedProject.id),
+    );
+    const unsubscribeSettings = onSnapshot(settingsRef, (settingsSnapshot) => {
+      const settings = readFeeSettings(settingsSnapshot.exists() ? settingsSnapshot.data() : null);
+      setNoticeThresholdDays(settings.noticeThresholdDays);
+      setFreezeThresholdMonths(settings.freezeThresholdMonths);
+    }, (error) => {
+      console.error('Firestore central-fee settings sync error:', error);
+    });
 
     // Use a unique collection for each project's central fee data to prevent mixing
     const statusColRef = collection(db, 'artifacts', appId, 'public', 'data', `house_statuses_${selectedProject.id}`);
@@ -2212,6 +2239,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
     });
 
     return () => {
+      unsubscribeSettings();
       unsubscribeStatuses();
       unsubscribeRawData();
     };
@@ -2588,6 +2616,39 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
       }
     }
     setIsModalOpen(false);
+  };
+
+  const handleSaveFeeSettings = async () => {
+    if (!db || !appId || !selectedProject) {
+      alert('ไม่สามารถบันทึกการตั้งค่าได้ เนื่องจากยังไม่ได้เชื่อมต่อฐานข้อมูล');
+      return;
+    }
+
+    setIsSavingSettings(true);
+    try {
+      const settingsRef = doc(
+        db,
+        'artifacts',
+        appId,
+        'public',
+        'data',
+        'app_state',
+        feeSettingsDocumentId(selectedProject.id),
+      );
+      await setDoc(settingsRef, createFeeSettingsDocument({
+        projectId: selectedProject.id,
+        noticeThresholdDays,
+        freezeThresholdMonths,
+        updatedAt: new Date().toISOString(),
+        updatedBy: currentUser?.username || currentUser?.firstName || 'System',
+      }));
+      setIsSettingsOpen(false);
+    } catch (error) {
+      console.error('Error saving central-fee settings:', error);
+      alert('ไม่สามารถบันทึกการตั้งค่าได้ กรุณาตรวจสอบสิทธิ์และลองใหม่');
+    } finally {
+      setIsSavingSettings(false);
+    }
   };
 
   const loadScript = (src) => {
@@ -3477,10 +3538,11 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
             </div>
             <div className="bg-gray-50 px-6 py-4 flex justify-end gap-3 border-t border-gray-200">
               <button 
-                onClick={() => setIsSettingsOpen(false)}
-                className="px-6 py-2.5 rounded-lg text-white bg-gray-800 hover:bg-gray-900 transition font-bold shadow-sm flex items-center gap-2 text-sm"
+                onClick={handleSaveFeeSettings}
+                disabled={isSavingSettings}
+                className="px-6 py-2.5 rounded-lg text-white bg-gray-800 hover:bg-gray-900 transition font-bold shadow-sm flex items-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <CheckCircle size={16}/> ปิดและบันทึกการตั้งค่า
+                {isSavingSettings ? <Loader2 size={16} className="animate-spin"/> : <CheckCircle size={16}/>} {isSavingSettings ? 'กำลังบันทึก...' : 'ปิดและบันทึกการตั้งค่า'}
               </button>
             </div>
           </div>
