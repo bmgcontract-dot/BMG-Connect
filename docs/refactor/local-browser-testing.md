@@ -81,3 +81,10 @@ Only browser QA and this evidence record changed in this continuation; prior aut
 - Final automated verification after the draft fixes: Node 22 tests 119/119, lint clean, Production build passed, and Java 21 Firestore Rules tests 27/27.
 
 These checks do not validate a deployed roster function or Production IAM. The primary deployed roster URL currently returns Vercel 404, so deployment acceptance remains blocked. They also do not replace persisted write smoke tests for the other shared-persistence modules.
+
+## Central Fees and Personnel API continuation — 2026-09-20
+
+- Central Fees project settings are now stored in scoped `app_state` documents. Browser acceptance saved 91 notice days / 7 freeze months, verified the emulator document, reloaded, and displayed the same values.
+- The isolated Vite server still fails closed for `/api/admin-users`; it does not expose privileged account management inside the browser harness.
+- Personnel server behavior is covered separately with `npm run test:admin-api`. This starts isolated Auth/Firestore emulators and invokes the real Vercel handler for create, update, and delete using only synthetic records.
+- The deployed roster acceptance command is `npm run verify:deployed-roster`; its three required environment variables and fail-closed checks are recorded in the release gate document. Do not store the short-lived ID token in a file or commit it.

@@ -112,3 +112,16 @@ Pre-deploy baseline captured at 2026-09-20 09:11 ICT:
 - The three reviewed split commits are `99794e1` (product/tests), `28e8fcb` (audit tooling), and `41c55c4` (evidence documentation). Local `.agents/`, `.claude/`, and `skills-lock.json` remain untracked and excluded.
 
 Decision remains **HOLD**. The persisted-write gate is complete for Reports, Assets, Machines/PM, Repairs, and Utilities. Remaining release blockers are Central Fees persistence, a production-capable Personnel/Admin-API smoke path, deployment plus authenticated IAM validation for the roster API, and recording the immutable pre-deploy Vercel deployment and deployed Rules revision. Current unlock-to-Pending-HR behavior is the working release assumption; record explicit business-owner approval in the final release decision.
+
+## Central Fees, Personnel API, and roster preflight — 2026-09-20
+
+No Production application, data, Rules, user account, push, or deployment was changed.
+
+- Central Fees settings now use project-scoped `app_state/central_fee_settings_<projectId>` documents with the existing `proj_centralfee` Rules boundary. Invalid values normalize to the safe defaults of 90 notice days and 6 freeze months.
+- Browser acceptance against `demo-bmg-browser` saved 91 notice days and 7 freeze months for `qa-project`, read the exact scoped document from Firestore, reloaded the application, and displayed 91/7 again. The prior component-only persistence blocker is closed.
+- Rules acceptance covers permitted create/update/read, denial without Central Fees permission, and denial for an inaccessible project. Java 21 Rules suite remains 27/27.
+- Added `npm run test:admin-api`, which invokes the real `api/admin-users.js` handler against Auth and Firestore emulators. It created, updated, and removed a synthetic Personnel identity and profile successfully. The isolated Vite browser intentionally continues to disable this privileged endpoint; the production-capable handler path is now independently repeatable without Production writes.
+- Added `npm run verify:deployed-roster`. After a Preview deploy, provide `BMG_ROSTER_BASE_URL`, `BMG_ROSTER_PROJECT_ID`, and a short-lived `BMG_ROSTER_ID_TOKEN` through the process environment. The verifier never prints the token and requires HTTP 200, `no-store`, the requested project ID, at most 500 unique staff, and exactly the minimal roster fields.
+- Node 22 verification passed: 123 application tests, lint with zero warnings/errors, and Production build with the existing large-chunk warning. The Admin API emulator test and Central Fees browser test are additional to the 123 default tests.
+
+Decision remains **HOLD**. Central Fees persistence and the Personnel/Admin-API smoke path are closed. Before any Production promotion, record the immutable current Vercel deployment and deployed Rules revision, create a commit-based Preview containing the roster function, then run the authenticated deployed-roster verifier and inspect Preview runtime logs. Stop if the endpoint is missing, credentials/IAM fail, caching is public, the project scope is wrong, or extra Personnel fields appear.
