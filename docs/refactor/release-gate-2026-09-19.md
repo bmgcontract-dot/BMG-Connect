@@ -245,3 +245,74 @@ All release blockers recorded in this document are closed. The branch is
 **READY FOR PRODUCTION DEPLOYMENT APPROVAL**. This status is not a Production
 deployment authorization: promote only after an explicit deploy instruction,
 using the recorded rollback anchors and post-deploy role/API checks.
+
+## Production deployment closeout — 2026-09-20
+
+The owner gave an explicit deploy instruction. A coordinated Firestore Rules +
+Vercel rollout was performed with the owner Firebase account
+(`bmg.contract@gmail.com`) and the linked Vercel project
+`bmgcontract-6324s-projects/bmg-connect`. Independent gate re-run before deploy:
+`npm test` 125/125, `npm run lint` zero, `npm run build` passed (2,125.47 kB JS,
+532.68 kB gzip, accepted large-chunk warning), `git diff --check` passed,
+`npm run test:rules` 27/27, `npm run test:admin-api` 1/1.
+
+Note: the documented Java 21 runtime path `/private/tmp/bmg-java21-current` was
+gone (temp dir cleared); the Rules/admin-api suites ran and passed on the
+system Java 17 fallback. Result parity held but this differs from the recorded
+Java 21 requirement — re-provision Java 21 for future runs.
+
+### Rollout sequence and identifiers
+
+1. Firestore Rules deployed first (`firebase deploy --only firestore:rules`).
+   - Previous live ruleset (rollback anchor): `5631d288-ce9f-44d8-a507-c81ddd1b1962`
+     (updateTime 2026-09-17T04:22:51Z).
+   - New live ruleset: `6c1527fb-5c7a-43e8-b5e7-0bd48a810390`
+     (updateTime 2026-09-20T12:51:04Z). Diff vs prior baseline is additive only:
+     the `hasValidScopedStateId` Central Fee state-ID validation and the
+     absent-month get grant on `bmg_projectSchedules_docs`.
+   - Rules smoke: unauthenticated REST reads of `bmg_users_docs` and
+     `bmg_projects_docs` returned HTTP 403 (fail-closed confirmed).
+2. Vercel production deploy of source `9708570`.
+   - Rollback anchor (prior production): `dpl_7YVMfhYbWKJB1fbkMg4HiyWbFKyZ`
+     (hostname `bmg-connect-9leh7hdht-…`).
+   - New deployment: `dpl_3fkshjb4fG645YSdFnShgU2PAEpE`
+     (hostname `bmg-connect-c837dcn6r-…`), aliased to `bmg-connect.vercel.app`.
+   - Post-deploy: `bmg-connect.vercel.app` HTTP 200, served from `sin1`,
+     Rules still 403 for unauthenticated reads.
+
+### Follow-up product fix — assigned-project race
+
+Post-deploy, a Village Manager saw a false "ไม่พบข้อมูลโครงการที่สังกัด".
+Root cause (confirmed in code, not a data mismatch — every user department in the
+read-only export matched a project by exact and trimmed name):
+`resolvePostAuthDestination` received `isProjectsLoaded=true` from an empty/partial
+cache snapshot before the scoped server snapshot, resolving to
+`assigned-project-unavailable` prematurely. Fix commit `e7ab13d` gives the
+`bmg_projects` listener `requireServerSnapshot:true` (matching the `users`
+listener). Gates re-run green (125/125, lint zero, build passed, diff clean).
+
+- Second Vercel production deploy of source `e7ab13d`:
+  new deployment `dpl_9Ggyf38TjgzLsLYz9v3Zf4nYMwvV`
+  (hostname `bmg-connect-470ojavt4-…`), aliased to `bmg-connect.vercel.app`,
+  bundle `index-DKRK4aN-.js`. Rollback anchor for this step:
+  `dpl_3fkshjb4fG645YSdFnShgU2PAEpE`. Firestore Rules unchanged in this step.
+
+### Rollback (code and data kept separate)
+
+- Code: Vercel Instant Rollback to `dpl_3fkshjb4fG645YSdFnShgU2PAEpE`, or to the
+  pre-release `dpl_7YVMfhYbWKJB1fbkMg4HiyWbFKyZ`.
+- Rules: re-deploy prior ruleset `5631d288-…` or
+  `config-snapshots/firestore.rules.production-2026-09-15.rules`.
+- Data: no schema/data migration was performed in this rollout. Point-in-time
+  recovery is OFF; the only data checkpoint is the managed export
+  `2026-09-20T01:36:34_32392`. An app/Rules rollback does not restore Firestore
+  documents.
+
+### Not verified by this closeout (needs an authenticated in-app check)
+
+Authenticated role behavior (admin/manager/restricted login, assigned-project
+resolution after the fix, new-month schedule create against the new absent-month
+Rules grant, Central Fee persistence) was not exercised with a real ID token from
+this environment. The Rules emulator suite covers these paths, but confirm in the
+live app with real accounts and watch Firestore permission-denied logs and Vercel
+runtime logs during the first canary window.
