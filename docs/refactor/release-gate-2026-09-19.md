@@ -126,3 +126,55 @@ No Production application, data, Rules, user account, push, or deployment was ch
 - Node 22 verification passed: 123 application tests, lint with zero warnings/errors, and Production build with the existing large-chunk warning. The Admin API emulator test and Central Fees browser test are additional to the 123 default tests.
 
 Decision remains **HOLD**. Central Fees persistence, the Personnel/Admin-API smoke path, and both rollback anchors are closed. Before any Production promotion, create a commit-based Preview containing the roster function, then run the authenticated deployed-roster verifier and inspect Preview runtime logs. Stop if the endpoint is missing, credentials/IAM fail, caching is public, an expected synthetic row is missing, the project scope is wrong, or extra Personnel fields appear.
+
+## Final Preview/IAM and exact-candidate verification — 2026-09-20
+
+No Production application, Rules, database, or deployment was changed in this
+verification. The only Production account change was the previously authorized,
+temporary schedule-view permission on `TEST-260915`; it was removed immediately
+after the restricted-role test and the persisted final value was reopened and
+verified as disabled.
+
+- Exact candidate commit: `87df86dcd7d9939a50e6f13bcd9287e5c40c2bdc`.
+- Commit-based Vercel Preview deployment: `BtAWFdweUmSXd1j6BzM1svVPYqj2`, immutable
+  hostname `bmg-connect-fbbe6t6y0-bmgcontract-6324s-projects.vercel.app`, status
+  Ready. The tested branch alias was
+  `bmg-connect-git-codex-schedul-7303a0-bmgcontract-6324s-projects.vercel.app`.
+- Authenticated restricted-role acceptance passed against the Preview. The
+  account could not use the full Personnel directory but the schedule roster
+  returned `TEST-260915` through the minimal roster path. PLAN/ACT inputs and
+  write actions remained unavailable. Browser console errors were empty.
+- Vercel runtime logs recorded `GET /api/schedule-roster` with HTTP 200 at
+  2026-09-20 15:55:43 ICT on the tested branch alias. The selected log window
+  reported zero Warning, Error, and Fatal entries. The same window recorded the
+  two authorized `PATCH /api/admin-users` permission changes with HTTP 200.
+- The original Production permission state was restored and reopened in the
+  administrator editor: enabled permissions are only `dashboard.view`,
+  `projects.view`, and `proj_overview.view`; `proj_schedule.view` is disabled.
+- Fresh exact-HEAD local verification used Node 22.23.2: 123/123 application
+  tests, lint with zero warnings/errors, Production build passed with the known
+  large-chunk warning, and `git diff --check` passed. Firestore Rules passed
+  27/27 with temporary Java 21. The isolated Admin API emulator test passed 1/1.
+  The first parallel lint attempt raced Vite's temporary config file; the clean
+  sequential rerun passed and is the recorded result.
+
+The Preview roster/IAM blocker and stale candidate-identity blocker are closed.
+Decision remains **HOLD** for the following release-acceptance items:
+
+1. Reconcile Production and `restore-drill-20260920` per root collection and
+   record readable samples for the user, project, image, schedule, and
+   transaction categories required by `backup-and-rollback.md`. The successful
+   full export/import totals and one representative sample prove that the
+   operations completed, but do not yet satisfy those stronger runbook criteria.
+2. Obtain the business owner's explicit decision that unlocking an approved
+   schedule should return its workflow to Pending HR.
+3. Resolve or explicitly accept the rollback-standard gap found in final review:
+   the schedule storage migration has no runtime feature flag/cutover boundary;
+   current rollback relies on the recorded compatible immutable deployment.
+
+Final two-axis review against `origin/main` found one documented-standard gap
+(the schedule rollback flag/cutover requirement above) and no new implementation
+correctness failure in the release paths. Non-blocking design debt remains in the
+large `App.jsx`, duplicated legacy archive decoding, raw lifecycle strings, and
+the legacy-import context data clump. Billing analysis remains separate from the
+release decision.
