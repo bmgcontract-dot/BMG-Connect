@@ -3613,7 +3613,14 @@ export default function App() {
                 const restoredUser = await firebaseBusinessAuth.restore(user);
                 if (!isMounted) return;
                 setCurrentUser(restoredUser);
-                localStorage.setItem('bmg_current_user', JSON.stringify(restoredUser));
+                // Persisting to localStorage is best-effort: a QuotaExceededError
+                // (e.g. a large base64 profile photo when storage is full) must NOT
+                // sign the user out — the session already lives in React state.
+                try {
+                    localStorage.setItem('bmg_current_user', JSON.stringify(restoredUser));
+                } catch (cacheError) {
+                    console.warn('Could not cache profile to localStorage (login still valid).', cacheError?.name || cacheError);
+                }
             } catch (error) {
                 console.warn('Unable to restore Firebase business profile.', error?.code || error);
                 if (isMounted) setCurrentUser(null);
@@ -5679,7 +5686,13 @@ export default function App() {
               );
               setFbUser(firebaseUser);
               setCurrentUser(authenticatedUser);
-              localStorage.setItem('bmg_current_user', JSON.stringify(authenticatedUser));
+              // Best-effort cache: a QuotaExceededError must not fail an otherwise
+              // successful login (the session lives in React state).
+              try {
+                  localStorage.setItem('bmg_current_user', JSON.stringify(authenticatedUser));
+              } catch (cacheError) {
+                  console.warn('Could not cache profile to localStorage (login still valid).', cacheError?.name || cacheError);
+              }
               setNewDailyReport(prev => ({
                   ...prev,
                   reporter: `${authenticatedUser.firstName} ${authenticatedUser.lastName}`,
