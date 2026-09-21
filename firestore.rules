@@ -144,14 +144,6 @@ service cloud.firestore {
         || (isOverviewCollection(collectionName) && hasPermission('proj_overview', 'view'));
     }
 
-    // Read-only site-wide audit overview: an admin ticking the global "audits"
-    // module view lets a QC reviewer read every project's audit score and
-    // enumerate every unit, without needing accessibleDepts:['All']. This is
-    // strictly a READ grant — it never affects create/update/delete.
-    function canReadSiteWideAudits() {
-      return hasPermission('audits', 'view');
-    }
-
     function meterProjectId(meterId) {
       return get(/databases/$(database)/documents/artifacts/bmg-app-prod/public/data/bmg_meters_docs/$(meterId)).data.projectId;
     }
@@ -208,7 +200,7 @@ service cloud.firestore {
     match /artifacts/{appId}/public/data/bmg_projects_docs/{projectId} {
       allow read: if isBmgApp(appId)
         && isActiveBusinessUser()
-        && (canAccessProjectName(resource.data.name) || canReadSiteWideAudits());
+        && canAccessProjectName(resource.data.name);
       allow create, update, delete: if isBmgApp(appId) && isAdmin();
     }
 
@@ -222,17 +214,6 @@ service cloud.firestore {
         && hasPermission('proj_schedule', 'view')
         && hasPermission('proj_schedule', 'save')
         && canAccessProjectId(documentId.replace('_[0-9]{4}-(0[1-9]|1[0-2])$', ''));
-    }
-
-    // Read-only site-wide audit overview. A separate, simple match so an unscoped
-    // list query (how the QC overview loads) evaluates cleanly per-document
-    // against just the audits.view permission — no cross-doc exists()/get() on the
-    // project, which is what makes an all-projects list allowable. Writes are NOT
-    // granted here; they remain governed by the scoped rules below.
-    match /artifacts/{appId}/public/data/bmg_audits_docs/{documentId} {
-      allow read: if isBmgApp(appId)
-        && isActiveBusinessUser()
-        && canReadSiteWideAudits();
     }
 
     match /artifacts/{appId}/public/data/{collectionName}/{documentId} {

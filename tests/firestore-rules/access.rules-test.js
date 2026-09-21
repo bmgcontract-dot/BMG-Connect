@@ -161,20 +161,6 @@ before(async () => {
       accessibleDepts: ['All'],
       permissions: {},
     });
-    // QC/audit reviewer: admin ticked the global "audits" module view, but the
-    // user is NOT given accessibleDepts:['All']. They must read every project's
-    // audit score (read-only) yet must not gain write access anywhere.
-    await setDoc(userDocument(context.firestore(), 'audit-viewer'), {
-      authUid: 'audit-viewer',
-      username: 'audit-viewer',
-      status: 'Active',
-      department: 'Head Office',
-      accessibleDepts: ['โครงการ A'],
-      permissions: {
-        audits: { view: true, save: false, edit: false, delete: false },
-        proj_audit: { view: true, save: false, edit: false, delete: false },
-      },
-    });
     await setDoc(userDocument(context.firestore(), 'inactive-user'), {
       authUid: 'inactive-user',
       username: 'inactive',
@@ -369,30 +355,6 @@ test('restricted employees cannot create, update, or delete project records', as
     score: 100,
   }));
   await assertFails(deleteDoc(domainDocument(restrictedDatabase, 'bmg_audits', 'audit-a')));
-});
-
-test('audits.view grants read-only site-wide audit access across all projects', async () => {
-  const auditDatabase = environment.authenticatedContext('audit-viewer').firestore();
-
-  // Read every project's audit doc, including projects NOT in accessibleDepts.
-  await assertSucceeds(getDoc(domainDocument(auditDatabase, 'bmg_audits', 'audit-a')));
-  await assertSucceeds(getDoc(domainDocument(auditDatabase, 'bmg_audits', 'audit-b')));
-  // Unscoped list across all projects (this is how the site-wide overview loads).
-  await assertSucceeds(getDocs(domainCollection(auditDatabase, 'bmg_audits')));
-  // Enumerate every unit to build the ranking.
-  await assertSucceeds(getDoc(projectDocument(auditDatabase, 'project-c')));
-
-  // Read-only: no writes anywhere, not even in an accessible project.
-  await assertFails(setDoc(domainDocument(auditDatabase, 'bmg_audits', 'viewer-audit'), {
-    id: 'viewer-audit',
-    projectId: 'project-a',
-  }));
-  await assertFails(updateDoc(domainDocument(auditDatabase, 'bmg_audits', 'audit-a'), { score: 1 }));
-  await assertFails(deleteDoc(domainDocument(auditDatabase, 'bmg_audits', 'audit-b')));
-
-  // The site-wide grant does NOT widen other collections: a foreign project's
-  // non-audit records stay unreadable.
-  await assertFails(getDoc(domainDocument(auditDatabase, 'bmg_meters', 'meter-c')));
 });
 
 test('project managers can mutate permitted records only inside accessible projects', async () => {
