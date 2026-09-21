@@ -341,16 +341,85 @@ padded/cased names. Regression test covers `"Head office"`, `" head office "`,
 - Pushed to `origin/codex/schedule-legacy-read-fallback`
   (`e7ab13d`, `a99bb01`, `5c15753`).
 
+### Follow-up product fix — vague sign-in error on bad credentials
+
+A wrong password showed "ระบบยืนยันตัวตนขัดข้อง" (the `auth-unavailable`
+fallback) instead of "รหัสผ่านไม่ถูกต้อง". Current Firebase JS SDK / Email
+Enumeration Protection returns `auth/invalid-login-credentials` (and sometimes
+surfaces only `INVALID_LOGIN_CREDENTIALS` in the message), which
+`mapSignInError` did not recognize.
+
+Fix commit `be73f5c`: normalize the code (strip `auth/`, lowercase), match all
+bad-credential variants, and also inspect the raw message. Regression test added.
+Deployed as `dpl_… (index-Diw17ec_.js)`. Rules unchanged.
+
+### Root-cause fix — localStorage quota error bounced valid logins
+
+Users on `bmg-connect.vercel.app` with a full localStorage (large base64 profile
+photo) could not log in; the console showed `Unable to restore Firebase business
+profile. 22`. Confirmed by simulating the exact browser SDK path against
+production (temporary password reset): Firebase Auth sign-in AND the
+`users/{uid}` profile read both succeed — the failure was purely the cache write.
+
+- Root cause (code): both the `onAuthStateChanged` restore path and the
+  interactive sign-in handler wrapped `setCurrentUser(...)` and
+  `localStorage.setItem('bmg_current_user', …)` in the same `try`. A
+  `QuotaExceededError` (DOMException code 22) on `setItem` fell into the catch,
+  which called `signOut()` and cleared `currentUser`, bouncing the user back to
+  login even though auth + profile read had succeeded.
+- Fix commit `c826f96`: move each `localStorage.setItem` into its own try/catch
+  (best-effort cache) so a cache failure only skips persistence — the session
+  stays valid in React state. Deployed as `dpl_… (index-Cd6k9ig0.js)`. Rules
+  unchanged.
+- Config fix (no deploy): added `bmg-connect.vercel.app` to Firebase Auth
+  authorized domains (previously only `localhost`, `*.firebaseapp.com`,
+  `*.web.app`) — the browser SDK requires the serving domain to be authorized.
+  Rollback: remove the domain from the authorized list.
+
+### Feature — audits.view grants read-only site-wide audit access
+
+Reported: a QC/audit user granted the global `audits` module could not see the
+all-projects audit overview. Root cause (confirmed in code): site-wide totals are
+computed client-side from the loaded `audits` array, but the query plan and rules
+only delivered audits for the user's own `accessibleDepts`. The full total
+required `accessibleDepts:['All']` (which also grants broad write access) — a
+mismatch with the intended "admin ticks the module → access granted" model.
+
+Fix commit `d5c2cf1` (coordinated Rules + Vercel):
+- queryScope: `permissions.audits.view` → unscoped read of `bmg_audits` and
+  `bmg_projects` (to enumerate every unit). Drilling into a specific project
+  still narrows to it; other collections and users without the flag keep normal
+  project scoping.
+- firestore.rules: `canReadSiteWideAudits()`; `bmg_projects` read allows it, plus
+  a dedicated `bmg_audits_docs` read match so an unscoped list evaluates cleanly
+  per document against just `audits.view`. Writes are unchanged — create/update/
+  delete stay project-scoped by menu permission.
+- Scope is READ-ONLY and limited to audits + projects. Tests: unit 132/132,
+  queryScope +5, rules 28/28 (cross-project audit read incl. unscoped list
+  succeeds; all writes and foreign non-audit reads still denied), admin-api 1/1.
+- Deploy: Rules released (new ruleset), unauth read smoke still 403, then Vercel
+  `dpl_D6qsPyXY5EPL1crNr1rHBmdDtkCY` (bundle `index-BOtSBK5u.js`, served bundle
+  verified to match the local build). Note: `vercel --prod` reused a cached build
+  the first time; `--force` was required to build and promote the new bundle.
+- Admin usage: tick the `audits` module view for the user (no longer need
+  `accessibleDepts:['All']`); keep their `department` empty/"Head Office" so they
+  are not redirected into a single project.
+
 ### Rollback (code and data kept separate)
 
 - Code: Vercel Instant Rollback. Current production is
-  `dpl_5AahoZ2NpArzfGRpspKdsFUWyURU` (source `5c15753`). Prior anchors, newest
-  first: `dpl_9Ggyf38TjgzLsLYz9v3Zf4nYMwvV` (`e7ab13d`),
+  `dpl_D6qsPyXY5EPL1crNr1rHBmdDtkCY` (source `d5c2cf1`, bundle `index-BOtSBK5u.js`).
+  Prior anchors, newest first: `… (index-Cd6k9ig0.js, c826f96)`,
+  `… (index-Diw17ec_.js, be73f5c)`, `dpl_5AahoZ2NpArzfGRpspKdsFUWyURU`
+  (`5c15753`), `dpl_9Ggyf38TjgzLsLYz9v3Zf4nYMwvV` (`e7ab13d`),
   `dpl_3fkshjb4fG645YSdFnShgU2PAEpE` (`9708570`), and the pre-release
   `dpl_7YVMfhYbWKJB1fbkMg4HiyWbFKyZ` (`cf40c90`).
-- Rules: re-deploy prior ruleset `5631d288-…` or
-  `config-snapshots/firestore.rules.production-2026-09-15.rules`. Current live
-  ruleset is `6c1527fb-…`.
+- Rules: re-deploy the prior ruleset (before `d5c2cf1` the live ruleset was
+  `6c1527fb-…`; original pre-release baseline `5631d288-…` or
+  `config-snapshots/firestore.rules.production-2026-09-15.rules`).
+- Auth config: to revert the authorized-domains change, remove
+  `bmg-connect.vercel.app` from Firebase Auth authorized domains (this would
+  re-break browser login on that domain — only do so intentionally).
 - Data: no schema/data migration was performed in this rollout. Point-in-time
   recovery is OFF; the only data checkpoint is the managed export
   `2026-09-20T01:36:34_32392`. An app/Rules rollback does not restore Firestore
