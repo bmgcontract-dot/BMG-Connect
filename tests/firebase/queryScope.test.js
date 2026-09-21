@@ -24,10 +24,75 @@ const managerUser = {
   },
 };
 
+// A QC/audit user the admin granted the global "audits" module view, but who is
+// NOT given accessibleDepts:['All']. They must be able to read the site-wide
+// audit score (bmg_audits) and enumerate all units (bmg_projects) read-only.
+const siteAuditUser = {
+  username: 'qc-audit',
+  department: 'Head Office',
+  accessibleDepts: ['โครงการ A'],
+  permissions: {
+    audits: { view: true },
+    proj_staff: { view: false },
+  },
+};
+
 const accessibleProjects = [
   { id: 'project-a', name: 'โครงการ A' },
   { id: 'project-b', name: 'โครงการ B' },
 ];
+
+test('audits.view grants an unscoped site-wide read of bmg_audits', () => {
+  assert.deepEqual(createFirestoreCollectionQueryPlan({
+    collectionName: 'bmg_audits',
+    currentUser: siteAuditUser,
+    accessibleProjects,
+  }), { kind: 'unscoped', targets: [[]] });
+});
+
+test('audits.view grants an unscoped read of bmg_projects to enumerate all units', () => {
+  assert.deepEqual(createFirestoreCollectionQueryPlan({
+    collectionName: 'bmg_projects',
+    currentUser: siteAuditUser,
+    accessibleProjects,
+  }), { kind: 'unscoped', targets: [[]] });
+});
+
+test('audits.view does NOT widen other project-owned collections', () => {
+  // Only audits + projects open up; repairs etc. stay scoped to accessible units.
+  assert.deepEqual(createFirestoreCollectionQueryPlan({
+    collectionName: 'bmg_repairs',
+    currentUser: siteAuditUser,
+    accessibleProjects,
+  }), {
+    kind: 'scoped',
+    targets: [[{ field: 'projectId', operator: 'in', value: ['project-a', 'project-b'] }]],
+  });
+});
+
+test('audits stays scoped for a user without audits.view', () => {
+  assert.deepEqual(createFirestoreCollectionQueryPlan({
+    collectionName: 'bmg_audits',
+    currentUser: managerUser,
+    accessibleProjects,
+  }), {
+    kind: 'scoped',
+    targets: [[{ field: 'projectId', operator: 'in', value: ['project-a', 'project-b'] }]],
+  });
+});
+
+test('an open accessible project still narrows audits to that project even with audits.view', () => {
+  // When the user drills into a specific project, show just that project's audits.
+  assert.deepEqual(createFirestoreCollectionQueryPlan({
+    collectionName: 'bmg_audits',
+    currentUser: siteAuditUser,
+    selectedProject: accessibleProjects[0],
+    accessibleProjects,
+  }), {
+    kind: 'scoped',
+    targets: [[{ field: 'projectId', operator: '==', value: 'project-a' }]],
+  });
+});
 
 test('restricted employees query only projects named in their business profile', () => {
   assert.deepEqual(createFirestoreCollectionQueryPlan({

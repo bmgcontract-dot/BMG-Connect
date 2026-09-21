@@ -67,6 +67,16 @@ function hasExplicitPermission(currentUser, menuId, action = 'view') {
     || currentUser?.permissions?.[menuId]?.[action] === true;
 }
 
+// The global "audits" module (site-wide QC overview) is a read-only, cross-project
+// view. When an admin ticks audits.view for a user, they must be able to read
+// every project's audit docs and enumerate every unit — even without
+// accessibleDepts:['All'] (which would also grant broad write access). This grant
+// is READ-ONLY and limited to bmg_audits + bmg_projects; writes and all other
+// collections keep their normal project scoping.
+function hasSiteWideAuditRead(currentUser) {
+  return currentUser?.permissions?.audits?.view === true;
+}
+
 function createTargets(field, values) {
   // Names are stored authorization keys; trimming them changes the Firestore query.
   const safeValues = uniqueStrings(values, field !== 'name' && field !== 'department');
@@ -116,7 +126,10 @@ export function createFirestoreCollectionQueryPlan({
   if (!currentUser) return { kind: 'blocked', targets: [] };
 
   if (collectionName === 'bmg_projects') {
-    if (hasGlobalProjectAccess(currentUser)) return { kind: 'unscoped', targets: [[]] };
+    // Site-wide audit viewers need every unit's name to enumerate the ranking.
+    if (hasGlobalProjectAccess(currentUser) || hasSiteWideAuditRead(currentUser)) {
+      return { kind: 'unscoped', targets: [[]] };
+    }
     return scopedPlan('name', accessibleDepartmentNames(currentUser));
   }
 
@@ -165,6 +178,13 @@ export function createFirestoreCollectionQueryPlan({
       return scopedPlan('projectId', [selectedProject.id]);
     }
     if (!selectedProject && hasGlobalProjectAccess(currentUser)) {
+      return { kind: 'unscoped', targets: [[]] };
+    }
+    // Read-only site-wide audit overview: audits.view lets a QC user see every
+    // project's audit score when no single project is drilled into.
+    if (!selectedProject
+      && collectionName === 'bmg_audits'
+      && hasSiteWideAuditRead(currentUser)) {
       return { kind: 'unscoped', targets: [[]] };
     }
     return scopedPlan('projectId', accessibleProjectIds(accessibleProjects));
