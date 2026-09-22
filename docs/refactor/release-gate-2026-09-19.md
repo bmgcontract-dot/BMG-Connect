@@ -405,18 +405,89 @@ Fix commit `d5c2cf1` (coordinated Rules + Vercel):
   `accessibleDepts:['All']`); keep their `department` empty/"Head Office" so they
   are not redirected into a single project.
 
+> **REVERTED by `b02a7e7` — do not rely on this behavior.** `audits.view` turned
+> out to be too broad a trigger: a Village Manager (`2410063`) scoped to a single
+> project but with `audits.view` ticked started seeing every project's audit
+> score. Site-wide visibility was returned to being governed by
+> `accessibleDepts:['All']` only. See the two sections below for the revert and the
+> correct fix.
+
+### Revert — site-wide audit tied back to accessibleDepts:['All']
+
+`b02a7e7` reverts `d5c2cf1` in full (queryScope, firestore.rules, both test
+suites → back to unit 127 / rules 27). Reason above. Confirmed in production that
+exactly one non-'All' user (`2410063`) had `audits.view` ticked and was
+over-scoped by `d5c2cf1`. Deploy: Rules re-released (dropped
+`canReadSiteWideAudits`), then Vercel — see the deploy-size fix below, which was
+required before the reverted bundle could actually ship.
+
+### Deploy blocker fixed — .vercelignore excludes large local data
+
+Deploys after the revert silently failed with **"File size limit exceeded
+(100 MB)"**: a `.vercelignore` overrides `.gitignore` entirely, so `backups/`
+(377 MB), `migration-output/`, `dist/`, and `*.log` — all git-ignored — were being
+uploaded, and the last *successful* production deploy was therefore stale (still
+serving `index-BOtSBK5u.js`). `73d0b20` adds those plus `.git/` and dev-only dirs
+(tests/scripts/docs) to `.vercelignore`. Post-fix deploy `dpl_BuTaZrgia5RX` serves
+`index-Cd6k9ig0.js` (the reverted bundle). Also learned: `vercel --prod` can reuse
+a cached build; use `--force` to guarantee a rebuild, and always verify the served
+`assets/index-*.js` hash matches the local `npm run build` output.
+
+### Fix — All-access users can read the full staff directory and site-wide audits
+
+Admin reported (with screenshots): an All-access **HR** user saw an empty
+"จัดการผู้ใช้งาน" list (could not edit/add staff), and an All-access **audit/QC**
+user saw audits one project at a time instead of the all-projects overview.
+
+- Two-layer model confirmed with the owner: layer 1 = department access
+  (`accessibleDepts`, 'All' = every unit); layer 2 = per-module permissions the
+  admin ticks. 'All' must widen *department* scope only — never auto-grant module
+  actions.
+- Confirmed the client was fine: `queryScope` already returns `unscoped` for
+  All-access users on `users` and `bmg_audits`. Reproduced with emulator tests
+  that a per-document `get()` succeeds but the unscoped `list()` is denied.
+- Root cause (Firestore rules): the `users` and project-collection read rules
+  evaluate a per-document predicate — `canAccessProjectName(resource.data.department)`
+  / `canAccessProjectId()` via `exists()`+`get()`. An unscoped list must satisfy
+  the rule for *every* returned doc; a user whose department is not a project name
+  ("Head office" — 13 users in prod) or an audit whose project was removed fails
+  the per-doc check and collapses the whole list to empty.
+- Fix commit `96bfd20` (rules only; App.jsx untouched, bundle unchanged):
+  - add `hasAllDeptAccess()` (admin or `accessibleDepts:['All']`).
+  - `users` list: allow when `hasAllDeptAccess() && hasPermission('proj_staff','view')`
+    without touching `resource.data.department`.
+  - dedicated `bmg_audits_docs` read match: `hasAllDeptAccess() &&
+    hasPermission('proj_audit','view')` so the unscoped list evaluates per-doc with
+    no projectId lookup.
+  - project-collection read also short-circuits on `hasAllDeptAccess()` for gets.
+  - Widens DEPARTMENT scope only for All users; module view still required, all
+    writes stay scoped. Non-'All' users remain limited to their own units.
+- Tests: unit 127/127, rules 29/29 (added: HR full-directory list; All-access
+  site-wide audit list — both succeed; existing scoped/denied cases still pass),
+  admin-api 1/1. Deploy: Rules released, unauth smoke 403 on `users` and
+  `bmg_audits_docs`. No Vercel deploy needed. Effective immediately.
+- Admin usage: to give a QC/audit or HR user the cross-unit view, set
+  `accessibleDepts:['All']` and tick the relevant module view (`proj_audit` /
+  `proj_staff`). Users must re-login (or hard refresh) to pick up the new rules.
+
 ### Rollback (code and data kept separate)
 
 - Code: Vercel Instant Rollback. Current production is
-  `dpl_D6qsPyXY5EPL1crNr1rHBmdDtkCY` (source `d5c2cf1`, bundle `index-BOtSBK5u.js`).
-  Prior anchors, newest first: `… (index-Cd6k9ig0.js, c826f96)`,
+  `dpl_BuTaZrgia5RXSRFK6JfyjSetDvAp` (git label `73d0b20`; bundle
+  `index-Cd6k9ig0.js` — the post-revert app, i.e. functionally the `b02a7e7`
+  code). Prior anchors, newest first: `dpl_D6qsPyXY5EPL1crNr1rHBmdDtkCY`
+  (`d5c2cf1`, `index-BOtSBK5u.js` — the reverted site-wide-audit build; do NOT
+  roll back to this), `… (index-Cd6k9ig0.js, c826f96)`,
   `… (index-Diw17ec_.js, be73f5c)`, `dpl_5AahoZ2NpArzfGRpspKdsFUWyURU`
   (`5c15753`), `dpl_9Ggyf38TjgzLsLYz9v3Zf4nYMwvV` (`e7ab13d`),
   `dpl_3fkshjb4fG645YSdFnShgU2PAEpE` (`9708570`), and the pre-release
   `dpl_7YVMfhYbWKJB1fbkMg4HiyWbFKyZ` (`cf40c90`).
-- Rules: re-deploy the prior ruleset (before `d5c2cf1` the live ruleset was
-  `6c1527fb-…`; original pre-release baseline `5631d288-…` or
-  `config-snapshots/firestore.rules.production-2026-09-15.rules`).
+- Rules: the live ruleset is the one deployed by `96bfd20` (All-access directory +
+  site-wide audit read). To roll back, re-deploy `firestore.rules` at the prior
+  commit; earlier baselines: `6c1527fb-…`, `5631d288-…`, or
+  `config-snapshots/firestore.rules.production-2026-09-15.rules`. Note the current
+  ruleset was deployed straight from `firestore.rules` (no bundled Vercel change),
+  so a Vercel code rollback does NOT change the rules — revert them separately.
 - Auth config: to revert the authorized-domains change, remove
   `bmg-connect.vercel.app` from Firebase Auth authorized domains (this would
   re-break browser login on that domain — only do so intentionally).
