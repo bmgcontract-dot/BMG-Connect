@@ -33,6 +33,7 @@ import { initializeFirebaseBrowserAuth } from './src/auth/firebaseBrowserAuth.js
 import { createAdminUserClient } from './src/auth/adminUserClient.js';
 import { sanitizeUsersForExport, stripUserSecrets } from './src/auth/identity.js';
 import { buildPresenceDoc, mergePresenceIntoUsers, shouldWriteHeartbeat, PRESENCE_HEARTBEAT_MS } from './src/presence/presenceState.js';
+import { fileObjectHasContent } from './src/files/fileRef.js';
 import { startLegacyFirebaseSession } from './src/auth/firebaseSession.js';
 import { resolveAuthMode } from './src/auth/authMode.js';
 import { createFirestoreSubscriptionPolicy } from './src/firebase/subscriptionPolicy.js';
@@ -11795,7 +11796,9 @@ export default function App() {
                                           { key: 'resident_rules', label: t('doc_resident_rules') }
                                       ].map((doc) => {
                                           const fileObj = selectedProject.files && selectedProject.files[doc.key];
-                                          const hasFile = !!fileObj;
+                                          // An empty slot is stored as {}; only show the download
+                                          // button when the reference actually points to a file.
+                                          const hasFile = fileObjectHasContent(fileObj);
                                           const fileName = typeof fileObj === 'string' ? fileObj : fileObj?.name;
 
                                           return (
