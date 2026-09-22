@@ -128,6 +128,14 @@ export function createFirestoreCollectionQueryPlan({
     return scopedPlan('department', accessibleDepartmentNames(currentUser));
   }
 
+  if (collectionName === 'bmg_presence') {
+    // Presence carries no project/department field; anyone who may view the staff
+    // directory reads it unscoped, others are blocked.
+    return hasExplicitPermission(currentUser, 'proj_staff')
+      ? { kind: 'unscoped', targets: [[]] }
+      : { kind: 'blocked', targets: [] };
+  }
+
   if (GLOBAL_COLLECTIONS.has(collectionName)) {
     return { kind: 'unscoped', targets: [[]] };
   }

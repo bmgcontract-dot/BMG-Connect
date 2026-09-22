@@ -213,6 +213,24 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // Presence / last-active. Its own collection because users is read-only to
+    // clients. A user writes ONLY their own doc (documentId == their auth uid),
+    // and the doc may carry only { id, authUid, lastActive } with authUid == uid —
+    // no personal data, no way to spoof another user's presence. Read is allowed
+    // to anyone who may view the staff directory.
+    match /artifacts/{appId}/public/data/bmg_presence_docs/{documentId} {
+      allow read: if isBmgApp(appId)
+        && isActiveBusinessUser()
+        && (isAdmin() || hasPermission('proj_staff', 'view'));
+      allow create, update: if isBmgApp(appId)
+        && isActiveBusinessUser()
+        && documentId == request.auth.uid
+        && request.resource.data.authUid == request.auth.uid
+        && request.resource.data.lastActive is string
+        && request.resource.data.keys().hasOnly(['id', 'authUid', 'lastActive']);
+      allow delete: if false;
+    }
+
     match /artifacts/{appId}/public/data/bmg_projects_docs/{projectId} {
       allow read: if isBmgApp(appId)
         && isActiveBusinessUser()

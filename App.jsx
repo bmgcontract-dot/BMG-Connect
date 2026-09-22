@@ -32,6 +32,7 @@ import { createFirebaseBusinessAuth } from './src/auth/firebaseAuthAdapter.js';
 import { initializeFirebaseBrowserAuth } from './src/auth/firebaseBrowserAuth.js';
 import { createAdminUserClient } from './src/auth/adminUserClient.js';
 import { sanitizeUsersForExport, stripUserSecrets } from './src/auth/identity.js';
+import { buildPresenceDoc, mergePresenceIntoUsers, shouldWriteHeartbeat, PRESENCE_HEARTBEAT_MS } from './src/presence/presenceState.js';
 import { startLegacyFirebaseSession } from './src/auth/firebaseSession.js';
 import { resolveAuthMode } from './src/auth/authMode.js';
 import { createFirestoreSubscriptionPolicy } from './src/firebase/subscriptionPolicy.js';
@@ -4575,43 +4576,73 @@ export default function App() {
       }
   }, [users, currentUser]);
 
-  // --- NEW: ตรวจจับและบันทึกเวลาล่าสุดเมื่อเปิดระบบ (Refresh/Auto-login) เพื่อให้ซิงค์ข้ามเครื่อง ---
-  const presenceUserId = currentUser?.id;
+  // --- Presence / last-active. Stored in its own bmg_presence collection because
+  // the users collection is read-only to clients. Each client writes ONLY its own
+  // presence doc (keyed by auth uid), throttled, so online status syncs across
+  // devices without needing write access to the users directory. ---
+  const [presenceDocs, setPresenceDocs] = useState([]);
+  const presenceUserId = currentUser?.id; // legacy-mode key
   const presenceWriter = useRef(setUsers);
   useEffect(() => { presenceWriter.current = setUsers; }, [setUsers]);
-  useEffect(() => {
-      // 🛡️ ป้องกันการใช้ข้อมูลเก่าจาก LocalStorage ไปทับข้อมูลบน Server โดยการรอให้ Sync ข้อมูลจาก Server ให้เสร็จก่อนเสมอ!
-      if (!presenceUserId || !isUsersSynced) return;
 
-      // ฟังก์ชันสำหรับอัปเดตเวลาล่าสุด
+  // Subscribe to presence (only when we may view the staff directory).
+  const canViewStaffDirectory = hasUserPermission(currentUser, 'proj_staff', 'view');
+  useEffect(() => {
+      if (!USE_FIREBASE_BUSINESS_AUTH || !db || !appId || !fbUser) return;
+      if (!canViewStaffDirectory) return;
+      const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'bmg_presence_docs');
+      const unsub = onSnapshot(colRef, (snap) => {
+          const docs = [];
+          snap.forEach((d) => docs.push(d.data()));
+          setPresenceDocs(docs);
+      }, () => { /* offline: keep last known presence */ });
+      return () => unsub();
+      // db/appId are module-level and set once at init; not reactive deps.
+  }, [fbUser, canViewStaffDirectory]);
+
+  // Write our own heartbeat.
+  useEffect(() => {
+      if (USE_FIREBASE_BUSINESS_AUTH) {
+          const authUid = currentUser?.authUid || fbUser?.uid;
+          if (!db || !appId || !authUid) return;
+          const ref = doc(db, 'artifacts', appId, 'public', 'data', 'bmg_presence_docs', authUid);
+          let lastWrite = 0;
+          const beat = async () => {
+              const nowMs = Date.now();
+              if (!shouldWriteHeartbeat(new Date(lastWrite).toISOString(), nowMs)) return;
+              lastWrite = nowMs;
+              try { await setDoc(ref, buildPresenceDoc(authUid, new Date(nowMs).toISOString())); }
+              catch (e) { console.warn('presence heartbeat skipped', e?.code || e); }
+          };
+          beat();
+          const intervalId = setInterval(beat, 60 * 1000);
+          return () => clearInterval(intervalId);
+      }
+      // Legacy (localStorage) mode: keep updating lastLogin on the in-memory users.
+      if (!presenceUserId || !isUsersSynced) return;
       const updatePresence = () => {
           presenceWriter.current(prevUsers => {
               if (!Array.isArray(prevUsers)) return prevUsers;
               const foundUser = prevUsers.find(u => u.id === presenceUserId);
               if (!foundUser) return prevUsers;
-              
               const lastLoginTime = new Date(foundUser.lastLogin || 0).getTime();
-              const nowTime = new Date().getTime();
-              
-              // อัปเดตเวลาลงฐานข้อมูลทุกๆ 5 นาที (300,000 ms) เพื่อให้สถานะไม่หมดอายุ (15 นาที)
-              if (nowTime - lastLoginTime > 5 * 60 * 1000) { 
-                  return prevUsers.map(u => 
-                      u.id === presenceUserId ? { ...u, lastLogin: new Date().toISOString() } : u
-                  );
+              if (Date.now() - lastLoginTime > PRESENCE_HEARTBEAT_MS) {
+                  return prevUsers.map(u => u.id === presenceUserId ? { ...u, lastLogin: new Date().toISOString() } : u);
               }
-              return prevUsers; // ถ้าสียังไม่ถึง 5 นาที ไม่ต้องสั่งอัปเดต State (ลดการดึงเครือข่าย)
+              return prevUsers;
           });
       };
-
-      // รันเช็คครั้งแรกเมื่อระบบโหลดเสร็จ
       updatePresence();
-
-      // ตั้งเวลาเช็คซ้ำทุกๆ 1 นาทีตราบใดที่เปิดหน้าเว็บอยู่
       const intervalId = setInterval(updatePresence, 60 * 1000);
-
-      // ยกเลิกการตั้งเวลาเมื่อผู้ใช้ออกจากระบบหรือปิดหน้าต่าง
       return () => clearInterval(intervalId);
-  }, [presenceUserId, isUsersSynced]);
+      // db/appId are module-level and set once at init; not reactive deps.
+  }, [presenceUserId, isUsersSynced, currentUser?.authUid, fbUser?.uid]);
+
+  // Merge cross-device presence onto the directory for display.
+  const usersWithPresence = useMemo(
+      () => (USE_FIREBASE_BUSINESS_AUTH ? mergePresenceIntoUsers(users, presenceDocs) : users),
+      [users, presenceDocs],
+  );
 
   // --- NEW: Auto-Sync State (สถานะการซิงค์อัตโนมัติ) ---
   const [autoSyncMessage, setAutoSyncMessage] = useState('');
@@ -9605,7 +9636,8 @@ export default function App() {
 
   const UserManagement = () => {
       // Logic สำหรับการกรองและการเรียงลำดับ
-      const safeUsers = Array.isArray(users) ? users.filter(Boolean) : [];
+      // usersWithPresence merges cross-device online/last-active from bmg_presence.
+      const safeUsers = Array.isArray(usersWithPresence) ? usersWithPresence.filter(Boolean) : [];
       const filteredUsers = safeUsers
           .filter(u => userDeptFilter ? u.department === userDeptFilter : true)
           .filter(u => userRoleFilter ? u.position === userRoleFilter : true)

@@ -421,6 +421,32 @@ test('utility reading access inherits project scope from its meter', async () =>
   }));
 });
 
+test('presence: a user writes only their own doc, staff viewers read, others blocked', async () => {
+  const managerDb = environment.authenticatedContext('manager-user').firestore();
+  const restrictedDb = environment.authenticatedContext('restricted-user').firestore();
+
+  // Write own presence (documentId == uid, authUid == uid, allowed fields only).
+  await assertSucceeds(setDoc(domainDocument(managerDb, 'bmg_presence', 'manager-user'), {
+    id: 'manager-user', authUid: 'manager-user', lastActive: '2026-09-22T10:00:00.000Z',
+  }));
+  // Cannot spoof another user's presence.
+  await assertFails(setDoc(domainDocument(managerDb, 'bmg_presence', 'admin-user'), {
+    id: 'admin-user', authUid: 'admin-user', lastActive: '2026-09-22T10:00:00.000Z',
+  }));
+  // Cannot smuggle extra/spoofed fields.
+  await assertFails(setDoc(domainDocument(managerDb, 'bmg_presence', 'manager-user'), {
+    id: 'manager-user', authUid: 'manager-user', lastActive: '2026-09-22T10:00:00.000Z', role: 'admin',
+  }));
+  await assertFails(setDoc(domainDocument(managerDb, 'bmg_presence', 'manager-user'), {
+    id: 'manager-user', authUid: 'someone-else', lastActive: '2026-09-22T10:00:00.000Z',
+  }));
+  // Staff-directory viewer can read presence; a user without proj_staff.view cannot.
+  await assertSucceeds(getDoc(domainDocument(managerDb, 'bmg_presence', 'manager-user')));
+  await assertFails(getDoc(domainDocument(restrictedDb, 'bmg_presence', 'manager-user')));
+  // No deletes.
+  await assertFails(deleteDoc(domainDocument(managerDb, 'bmg_presence', 'manager-user')));
+});
+
 test('global contractor data requires its explicit menu permission', async () => {
   const restrictedDatabase = environment.authenticatedContext('restricted-user').firestore();
   const managerDatabase = environment.authenticatedContext('manager-user').firestore();
