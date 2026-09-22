@@ -2,6 +2,7 @@ import { applicationDefault, cert, getApps, initializeApp } from 'firebase-admin
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { normalizeUsername, stripUserSecrets, usernameToAuthEmail } from '../src/auth/identity.js';
+import { canManageStaffAccounts, isSuperAdminClaim } from '../src/auth/staffManagement.js';
 
 const PROJECT_ID = process.env.BMG_FIREBASE_PROJECT_ID || 'bmg-connect-3e99a';
 const AUTH_DOMAIN = process.env.BMG_INTERNAL_AUTH_DOMAIN || 'auth.bmg-connect.local';
@@ -24,13 +25,22 @@ function bearerToken(request) {
   return header.startsWith('Bearer ') ? header.slice(7) : '';
 }
 
-async function requireAdmin(request) {
+async function requireStaffManager(request, db) {
   const token = bearerToken(request);
   if (!token) throw Object.assign(new Error('unauthorized'), { status: 401 });
 
   const app = adminApp();
   const decoded = await getAuth(app).verifyIdToken(token);
-  if (decoded.admin !== true) {
+
+  // Super Admins (custom claim) are authorized without a profile lookup.
+  if (isSuperAdminClaim(decoded)) return decoded;
+
+  // Otherwise the caller must be an Active user the admin granted the staff
+  // module (proj_staff save/edit) with all-department access. Read their own
+  // profile server-side — never trust caller-supplied permissions.
+  const snapshot = await db.collection('users').doc(decoded.uid).get();
+  const callerProfile = snapshot.exists ? snapshot.data() : null;
+  if (!canManageStaffAccounts(decoded, callerProfile)) {
     throw Object.assign(new Error('admin-required'), { status: 403 });
   }
   return decoded;
@@ -62,10 +72,10 @@ export default async function handler(request, response) {
   }
 
   try {
-    const caller = await requireAdmin(request);
     const app = adminApp();
     const auth = getAuth(app);
     const db = getFirestore(app);
+    const caller = await requireStaffManager(request, db);
 
     if (request.method === 'POST') {
       const { profile: inputProfile, password } = request.body || {};
