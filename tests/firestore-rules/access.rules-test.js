@@ -161,6 +161,30 @@ before(async () => {
       accessibleDepts: ['All'],
       permissions: {},
     });
+    // HR/Support with All access + proj_staff view. Department "Head office" is NOT
+    // a project name (mirrors production). Must be able to list the whole directory.
+    await setDoc(userDocument(context.firestore(), 'hr-all-user'), {
+      authUid: 'hr-all-user',
+      username: 'hr-all-user',
+      status: 'Active',
+      department: 'Head office',
+      accessibleDepts: ['All'],
+      permissions: {
+        proj_staff: { view: true, save: true, edit: true, delete: false },
+      },
+    });
+    // Audit/QC with All access + proj_audit view: site-wide audit overview.
+    await setDoc(userDocument(context.firestore(), 'audit-all-user'), {
+      authUid: 'audit-all-user',
+      username: 'audit-all-user',
+      status: 'Active',
+      department: 'Head office',
+      accessibleDepts: ['All'],
+      permissions: {
+        audits: { view: true, save: false, edit: false, delete: false },
+        proj_audit: { view: true, save: false, edit: false, delete: false },
+      },
+    });
     await setDoc(userDocument(context.firestore(), 'inactive-user'), {
       authUid: 'inactive-user',
       username: 'inactive',
@@ -411,6 +435,25 @@ test('staff directory queries must be constrained to an accessible department', 
 
   await assertSucceeds(getDocs(query(users, where('department', '==', 'โครงการ A'))));
   await assertFails(getDocs(users));
+});
+
+test('an All-access user with proj_staff can list every user (HR directory)', async () => {
+  // HR/Support with accessibleDepts:['All'] + proj_staff.view must see the whole
+  // staff directory, including users whose department (e.g. "Head office") is not a
+  // project name — otherwise the list query fails and the directory is empty.
+  const hrDatabase = environment.authenticatedContext('hr-all-user').firestore();
+  const allUsers = await assertSucceeds(getDocs(collection(hrDatabase, 'users')));
+  assert.ok(allUsers.size >= 2, 'HR should see the full directory, not an empty list');
+});
+
+test('an All-access user can list audits across every project (site-wide overview)', async () => {
+  // Audit/QC with accessibleDepts:['All'] must load the whole audits collection
+  // unscoped for the all-projects overview — not one project at a time.
+  const auditDatabase = environment.authenticatedContext('audit-all-user').firestore();
+  await assertSucceeds(getDoc(domainDocument(auditDatabase, 'bmg_audits', 'audit-a')));
+  await assertSucceeds(getDoc(domainDocument(auditDatabase, 'bmg_audits', 'audit-b')));
+  const allAudits = await assertSucceeds(getDocs(domainCollection(auditDatabase, 'bmg_audits')));
+  assert.ok(allAudits.size >= 2, 'site-wide audit list should span projects');
 });
 
 test('application query plans are accepted for restricted, manager, and admin roles', async () => {

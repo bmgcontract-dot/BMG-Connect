@@ -21,6 +21,12 @@ service cloud.firestore {
       return isActiveBusinessUser() && request.auth.token.get('admin', false) == true;
     }
 
+    function hasAllDeptAccess() {
+      let profile = userProfile();
+      return isAdmin()
+        || (profile.accessibleDepts is list && 'All' in profile.accessibleDepts);
+    }
+
     function canAccessProjectName(projectName) {
       let profile = userProfile();
       return isAdmin()
@@ -187,6 +193,16 @@ service cloud.firestore {
         && (
           request.auth.uid == userId
           || isAdmin()
+          // All-access staff (accessibleDepts:['All']) with the staff-directory
+          // permission may read the whole directory. Checked without touching
+          // resource.data.department so an unscoped list query evaluates cleanly —
+          // otherwise a single user whose department is not a project name (e.g.
+          // "Head office") makes the entire list query fail (empty HR directory).
+          || (
+            isActiveBusinessUser()
+            && hasPermission('proj_staff', 'view')
+            && hasAllDeptAccess()
+          )
           || (
             isActiveBusinessUser()
             && hasPermission('proj_staff', 'view')
@@ -216,13 +232,32 @@ service cloud.firestore {
         && canAccessProjectId(documentId.replace('_[0-9]{4}-(0[1-9]|1[0-2])$', ''));
     }
 
+    // Site-wide audit read for All-access users. A dedicated match so an unscoped
+    // list query (the all-projects audit overview) evaluates cleanly per document
+    // against just the reader's global access + proj_audit view — without touching
+    // each doc's projectId via exists()/get(), which is what makes an unscoped list
+    // allowable. Writes are NOT granted here (governed by the scoped rules below).
+    match /artifacts/{appId}/public/data/bmg_audits_docs/{documentId} {
+      allow read: if isBmgApp(appId)
+        && isActiveBusinessUser()
+        && hasAllDeptAccess()
+        && hasPermission('proj_audit', 'view');
+    }
+
     match /artifacts/{appId}/public/data/{collectionName}/{documentId} {
       allow read: if isBmgApp(appId)
         && isActiveBusinessUser()
         && isProjectCollection(collectionName)
         && resource.data.get('projectId', '') is string
         && resource.data.get('projectId', '') != ''
-        && canAccessProjectReference(collectionName, resource.data.get('projectId', ''))
+        // All-access users (accessibleDepts:['All']) may read across every project
+        // without resolving each doc's project via exists()/get() — that per-doc
+        // lookup makes an unscoped list query fail (e.g. the site-wide audit
+        // overview, or an audit whose project was deleted). Module-level view
+        // permission is still required via canReadProjectCollection, so this only
+        // widens the DEPARTMENT scope, never the module permission.
+        && (hasAllDeptAccess()
+          || canAccessProjectReference(collectionName, resource.data.get('projectId', '')))
         && canReadProjectCollection(collectionName);
 
       allow create: if isBmgApp(appId)
