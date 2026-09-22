@@ -470,24 +470,81 @@ user saw audits one project at a time instead of the all-projects overview.
   `accessibleDepts:['All']` and tick the relevant module view (`proj_audit` /
   `proj_staff`). Users must re-login (or hard refresh) to pick up the new rules.
 
+### Fix — All-access staff managers can manage user accounts (not only Super Admin)
+
+Admin reported an HR user could not add or edit staff: the save returned "เฉพาะ
+ผู้ดูแลระบบสูงสุดเท่านั้นที่จัดการบัญชี Firebase Authentication ได้". Root cause: the
+privileged `/api/admin-users` endpoint (creates/updates/deletes Firebase Auth
+accounts via the Admin SDK) required a Super Admin custom claim. The earlier rules
+fix let HR see the directory, but the API still blocked writes — contradicting the
+"admin ticks proj_staff → the user can manage staff" model.
+
+Owner chose policy **A2**: allow a non-Super-Admin who is an Active user with
+`proj_staff` save/edit AND `accessibleDepts:['All']`.
+
+- Fix commit `8cfda14`: new pure policy `src/auth/staffManagement.js`
+  (`canManageStaffAccounts` = Super Admin claim OR active staff manager). The
+  endpoint's `requireStaffManager` reads the caller's OWN profile from Firestore
+  server-side (never trusts client-supplied permissions); Super Admins still
+  short-circuit without a lookup.
+- Confirmed in production: HR `2610191` / `2410048` (Active, proj_staff save+edit,
+  All) gain access; a staff-write user without All (`2610200`) stays denied.
+- Tests: staffManagement 8/8, unit 135/135, admin-api emulator 1/1, lint, build.
+  Serverless API change → Vercel deploy `dpl_FXAQE8Wxwrz6vqr6mvES77AeCNcW`
+  (`8cfda14`). Verified live: `/api/admin-users` GET→405, POST no-auth→401.
+- Admin usage: HR must re-login (fresh ID token) before adding/editing users; the
+  HR user must have `accessibleDepts:['All']` and `proj_staff` save/edit.
+
+### Fix — online / last-active syncs via a dedicated bmg_presence collection
+
+The user directory's online/last-active column was blank. Root cause: the presence
+heartbeat wrote `lastLogin` through `setUsers`, but in Firebase mode the users
+collection is read-only to clients (Rules deny client writes), so heartbeats never
+persisted or synced across devices.
+
+- Fix commit `242b3e4`: presence moved to its own `bmg_presence_docs/{authUid}`
+  collection carrying only `{ id, authUid, lastActive }` (no personal data).
+  - Rules: a user may create/update ONLY their own doc (`documentId ==
+    request.auth.uid`, `authUid == uid`, `keys().hasOnly([...])`); read requires
+    `proj_staff.view`; no deletes. queryScope: unscoped read for staff viewers,
+    else blocked.
+  - Client: writes its own heartbeat via `setDoc` throttled to 5 min, subscribes
+    to presence when it may view the directory, and merges presence `lastActive`
+    onto the user list (newer wins). Legacy localStorage mode unchanged. Pure
+    logic in `src/presence/presenceState.js`.
+- Tests: presence 6/6, rules 30/30 (own-write allowed; spoofing, extra fields, and
+  read-without-proj_staff denied), unit 141/141, admin-api 1/1, lint, build.
+- Deploy: Rules released (unauth presence read smoke 403), then Vercel
+  `dpl_8u3G4iNxheQCjRXyZ5ypgLJPi7to` (`242b3e4`, bundle `index-X4wHC2p3.js`,
+  served hash verified).
+- Behavior note: status becomes accurate after each user re-logs in once (their
+  presence doc is created on the next session); until then they may still show
+  "-". Cost: ~1 write / active user / 5 min.
+
 ### Rollback (code and data kept separate)
 
 - Code: Vercel Instant Rollback. Current production is
-  `dpl_BuTaZrgia5RXSRFK6JfyjSetDvAp` (git label `73d0b20`; bundle
-  `index-Cd6k9ig0.js` — the post-revert app, i.e. functionally the `b02a7e7`
-  code). Prior anchors, newest first: `dpl_D6qsPyXY5EPL1crNr1rHBmdDtkCY`
-  (`d5c2cf1`, `index-BOtSBK5u.js` — the reverted site-wide-audit build; do NOT
-  roll back to this), `… (index-Cd6k9ig0.js, c826f96)`,
-  `… (index-Diw17ec_.js, be73f5c)`, `dpl_5AahoZ2NpArzfGRpspKdsFUWyURU`
-  (`5c15753`), `dpl_9Ggyf38TjgzLsLYz9v3Zf4nYMwvV` (`e7ab13d`),
+  `dpl_8u3G4iNxheQCjRXyZ5ypgLJPi7to` (`242b3e4`, bundle `index-X4wHC2p3.js` —
+  presence). Prior anchors, newest first: `dpl_FXAQE8Wxwrz6vqr6mvES77AeCNcW`
+  (`8cfda14`, staff-manager API), `dpl_BuTaZrgia5RXSRFK6JfyjSetDvAp`
+  (`73d0b20`, `index-Cd6k9ig0.js` — post-revert app),
+  `dpl_D6qsPyXY5EPL1crNr1rHBmdDtkCY` (`d5c2cf1`, `index-BOtSBK5u.js` — reverted
+  site-wide-audit build; do NOT roll back to this), `… (index-Cd6k9ig0.js,
+  c826f96)`, `… (index-Diw17ec_.js, be73f5c)`,
+  `dpl_5AahoZ2NpArzfGRpspKdsFUWyURU` (`5c15753`),
+  `dpl_9Ggyf38TjgzLsLYz9v3Zf4nYMwvV` (`e7ab13d`),
   `dpl_3fkshjb4fG645YSdFnShgU2PAEpE` (`9708570`), and the pre-release
   `dpl_7YVMfhYbWKJB1fbkMg4HiyWbFKyZ` (`cf40c90`).
-- Rules: the live ruleset is the one deployed by `96bfd20` (All-access directory +
-  site-wide audit read). To roll back, re-deploy `firestore.rules` at the prior
-  commit; earlier baselines: `6c1527fb-…`, `5631d288-…`, or
-  `config-snapshots/firestore.rules.production-2026-09-15.rules`. Note the current
-  ruleset was deployed straight from `firestore.rules` (no bundled Vercel change),
-  so a Vercel code rollback does NOT change the rules — revert them separately.
+  Note: `8cfda14` (API) and `242b3e4` (presence client) both carry serverless /
+  Rules behavior — a pure Vercel code rollback past them also needs the matching
+  Rules reverted (see below).
+- Rules: the live ruleset is the one deployed by `242b3e4` (adds the
+  `bmg_presence_docs` self-write/staff-read match on top of `96bfd20`'s All-access
+  directory + site-wide audit read). To roll back, re-deploy `firestore.rules` at
+  the prior commit; earlier baselines: `6c1527fb-…`, `5631d288-…`, or
+  `config-snapshots/firestore.rules.production-2026-09-15.rules`. The ruleset is
+  deployed straight from `firestore.rules` (independent of the Vercel bundle), so
+  a Vercel code rollback does NOT change the rules — revert them separately.
 - Auth config: to revert the authorized-domains change, remove
   `bmg-connect.vercel.app` from Firebase Auth authorized domains (this would
   re-break browser login on that domain — only do so intentionally).
