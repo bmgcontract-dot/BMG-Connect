@@ -27,6 +27,7 @@ import {
   connectAuthEmulator,
 } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator, doc, setDoc, onSnapshot, getDoc, getDocFromServer, collection, writeBatch, runTransaction, query, where } from 'firebase/firestore';
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { browserTestConfig } from './src/firebase/browserTestConfig.js';
 import { createFirebaseBusinessAuth } from './src/auth/firebaseAuthAdapter.js';
 import { initializeFirebaseBrowserAuth } from './src/auth/firebaseBrowserAuth.js';
@@ -34,6 +35,7 @@ import { createAdminUserClient } from './src/auth/adminUserClient.js';
 import { sanitizeUsersForExport, stripUserSecrets } from './src/auth/identity.js';
 import { buildPresenceDoc, mergePresenceIntoUsers, shouldWriteHeartbeat, PRESENCE_HEARTBEAT_MS } from './src/presence/presenceState.js';
 import { fileObjectHasContent } from './src/files/fileRef.js';
+import { uploadProjectFile, getProjectFileUrl, isStorageBackedRef } from './src/files/projectFileStorage.js';
 import { startLegacyFirebaseSession } from './src/auth/firebaseSession.js';
 import { resolveAuthMode } from './src/auth/authMode.js';
 import { createFirestoreSubscriptionPolicy } from './src/firebase/subscriptionPolicy.js';
@@ -57,7 +59,9 @@ import { prepareLegacyScheduleEditing, readLegacyScheduleSnapshot } from './src/
 import { useScheduleRoster } from './src/schedule/useScheduleRoster.js';
 
 // --- Firebase Initialization ---
-let app, auth, db, appId;
+let app, auth, db, storage, appId;
+// SDK bundle passed to the projectFileStorage helpers (keeps them Firebase-free/testable).
+const STORAGE_SDK = { ref: storageRef, uploadBytes, getDownloadURL, deleteObject };
 const LOCAL_EMULATOR = import.meta.env.BMG_LOCAL_EMULATOR === true;
 const LOCAL_FIREBASE_CONFIG = browserTestConfig({ enabled: LOCAL_EMULATOR, development: import.meta.env.DEV, hostname: window.location.hostname });
 
@@ -101,6 +105,7 @@ try {
         browserLocalPersistence,
       });
       db = getFirestore(app);
+      try { storage = getStorage(app); } catch (e) { console.warn('Storage init skipped', e?.message); }
       if (LOCAL_EMULATOR) {
           connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
           connectFirestoreEmulator(db, '127.0.0.1', 8090);
@@ -4898,9 +4903,29 @@ export default function App() {
           let fileName = fileObj?.name || defaultName;
           let fileData = null;
 
-          const GOOGLE_SCRIPT_GET_FILE_URL = GOOGLE_SCRIPT_CONFIG.DRIVE_URL; 
+          const GOOGLE_SCRIPT_GET_FILE_URL = GOOGLE_SCRIPT_CONFIG.DRIVE_URL;
 
-          // --- 1. ลองดึงข้อมูลจาก Local (IndexedDB) ของเครื่องนี้ก่อน ---
+          // --- 0. ไฟล์ที่อยู่บน Firebase Storage (แนวทางใหม่: เปิดได้จากทุกเครื่อง) ---
+          if (storage && isStorageBackedRef(fileObj)) {
+              try {
+                  const url = await getProjectFileUrl({ storage, sdk: STORAGE_SDK, fileObj });
+                  if (url) {
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.target = '_blank';
+                      a.rel = 'noopener';
+                      a.download = fileName;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      return;
+                  }
+              } catch (err) {
+                  console.error('Storage download failed, trying local/Drive fallback', err);
+              }
+          }
+
+          // --- 1. ลองดึงข้อมูลจาก Local (IndexedDB) ของเครื่องนี้ก่อน (ไฟล์เก่า) ---
           if (fileObj?.isLocal && fileObj?.fileId) {
               fileData = await getFileLocally(fileObj.fileId);
           }
@@ -8548,23 +8573,49 @@ export default function App() {
       }
   };
 
-  const handleProjectFileUpload = (e, key) => {
+  const handleProjectFileUpload = async (e, key) => {
       const file = e.target.files[0];
-      if (file) {
-          const reader = new FileReader();
-          reader.onloadend = async () => {
-              const fileId = generateId();
-              await saveFileLocally(fileId, reader.result);
-              setNewProject(prev => ({ 
-                  ...prev, 
-                  files: { 
-                      ...(prev.files || {}), 
-                      [key]: { name: file.name, fileId: fileId, isLocal: true, data: reader.result } 
-                  } 
+      if (!file) return;
+      const fileId = generateId();
+      const projectId = newProject?.id || selectedProject?.id;
+
+      // Preferred path: upload to Firebase Storage so every device can download it.
+      // Requires a known projectId (edit mode) and an initialized storage client.
+      if (storage && projectId) {
+          try {
+              setIsSavingProject(true);
+              const fileRef = await uploadProjectFile({
+                  storage, sdk: STORAGE_SDK, projectId, fileId, file,
+                  name: file.name, nowIso: new Date().toISOString(),
+              });
+              setNewProject(prev => ({
+                  ...prev,
+                  files: { ...(prev.files || {}), [key]: fileRef },
               }));
-          };
-          reader.readAsDataURL(file);
+              return;
+          } catch (err) {
+              console.error('Storage upload failed, falling back to local cache', err);
+              alert('อัปโหลดขึ้นระบบไม่สำเร็จ ไฟล์จะถูกเก็บไว้ในเครื่องนี้ชั่วคราว: ' + (err?.message || ''));
+              // fall through to local cache below
+          } finally {
+              setIsSavingProject(false);
+          }
       }
+
+      // Fallback (new project without an id yet, or storage unavailable): keep the
+      // legacy local-only behavior so the flow never breaks.
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+          await saveFileLocally(fileId, reader.result);
+          setNewProject(prev => ({
+              ...prev,
+              files: {
+                  ...(prev.files || {}),
+                  [key]: { name: file.name, fileId, isLocal: true, data: reader.result },
+              },
+          }));
+      };
+      reader.readAsDataURL(file);
   };
 
   const handleEditProjectClick = () => {
