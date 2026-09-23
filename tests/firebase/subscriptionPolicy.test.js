@@ -49,6 +49,25 @@ test('dashboard does not subscribe to schedule data without schedule permission'
   assert.equal(policy.userFor('bmg_projectSchedules'), null);
 });
 
+test('the daily report tab also subscribes to meters + readings (for the 7-day chart)', () => {
+  // The daily report view renders a water/electricity trend from meters +
+  // utilityReadings; the tab must load them or the chart silently disappears.
+  const firebaseUser = { uid: 'auth-123', isAnonymous: false };
+  const policy = createFirestoreSubscriptionPolicy({
+    firebaseUser,
+    currentUser: { authUid: 'auth-123', status: 'Active', permissions: {} },
+    activeMenu: 'projects',
+    selectedProject: { id: 'project-1' },
+    projectTab: 'daily',
+  });
+
+  assert.equal(policy.userFor('bmg_projects'), firebaseUser);
+  assert.equal(policy.userFor('bmg_dailyReports'), firebaseUser);
+  assert.equal(policy.userFor('bmg_meters'), firebaseUser);
+  assert.equal(policy.userFor('bmg_utilityReadings'), firebaseUser);
+  assert.equal(policy.userFor('bmg_audits'), null);
+});
+
 test('a project tools tab subscribes to tools and core project data only', () => {
   const firebaseUser = { uid: 'auth-123', isAnonymous: false };
   const policy = createFirestoreSubscriptionPolicy({

@@ -47,7 +47,9 @@ export function createFirestoreSubscriptionPolicy({
       'bmg_projects', 'bmg_users', 'users', 'bmg_dailyReports',
       'bmg_projectSchedules',
     ],
-    daily: ['bmg_projects', 'bmg_dailyReports'],
+    // meters + utilityReadings power the daily report's 7-day water/electricity
+    // trend chart, so the daily tab must subscribe to them too.
+    daily: ['bmg_projects', 'bmg_dailyReports', 'bmg_meters', 'bmg_utilityReadings'],
     assets: ['bmg_projects', 'bmg_assets'],
     tools: ['bmg_projects', 'bmg_tools'],
     pm: ['bmg_projects', 'bmg_machines', 'bmg_pmPlans', 'bmg_pmHistoryList'],
