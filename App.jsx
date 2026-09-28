@@ -4142,6 +4142,20 @@ export default function App() {
       setProjectTab('overview');
   }, [postAuthDestination.kind, postAuthDestination.project, selectedProject?.id]);
   const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, subscriptionPolicy.userFor('bmg_contracts'), { queryPlan: queryPlanFor('bmg_contracts') });
+  // Supplier search must surface คู่สัญญา from EVERY project, regardless of the unit the module is opened from.
+  // Load contracts with selectedProject forced to null so the plan is unscoped (global access) or scoped to all
+  // accessible projects — never limited to the single selected project. Read-only + separate localKey so it never
+  // collides with, or writes back over, the project-scoped `contracts` subscription used by the Contracts tab.
+  const [allContracts] = usePersistentCollection(
+      'bmg_contracts',
+      INITIAL_CONTRACTS,
+      subscriptionPolicy.userFor('bmg_contracts'),
+      {
+          readOnly: true,
+          localKey: 'bmg_contracts_allProjects',
+          queryPlan: queryPlanFor('bmg_contracts', { selectedProject: null }),
+      },
+  );
   const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, subscriptionPolicy.userFor('bmg_audits'), { queryPlan: queryPlanFor('bmg_audits') });
   const [dailyReports, setDailyReports] = usePersistentCollection(
       'bmg_dailyReports',
@@ -10777,8 +10791,10 @@ export default function App() {
           if (c.name) combinedSuppliersMap.set(c.name.trim().toLowerCase(), { ...c });
       });
 
-      // 2. Extract from ALL contracts (ทุกหน่วยงาน)
-      contracts.forEach(ct => {
+      // 2. Extract from ALL contracts across every project (ทุกหน่วยงาน).
+      // Uses `allContracts` (unscoped / all accessible projects) rather than the project-scoped `contracts`,
+      // so the supplier list is identical no matter which unit the module is opened from.
+      allContracts.forEach(ct => {
           if (!ct.vendorName) return;
           const key = ct.vendorName.trim().toLowerCase();
           
