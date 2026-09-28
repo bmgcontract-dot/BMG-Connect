@@ -15,3 +15,12 @@ migration-output/
 # Local tooling
 .DS_Store
 *.log
+.vercel
+.env*
+
+# AI assistant / local agent tooling (not part of the app)
+.claude/
+.agents/
+CLAUDE-CODE-HANDOFF.md
+skills-lock.json
+_to_delete/

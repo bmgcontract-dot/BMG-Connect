@@ -1,0 +1,563 @@
+# Stabilization release gate — 2026-09-19
+
+Initial decision: HOLD. This historical decision is superseded by the final
+release decision at the end of this document.
+
+## Fresh verification
+
+- `npm test`: 114 passed, zero failures.
+- `npm run build`: passed; 2,122.76 kB JS, 530.52 kB gzip, existing chunk-size warning.
+- `git diff --check`: passed.
+- `npm run test:rules` with temporary Java 21: 27 passed. The first sandboxed run could not bind localhost ports; the permitted localhost rerun passed.
+- `node --test tests/schedule/roster.emulator-test.js`: one passed against synthetic local Auth/Firestore. The first sandboxed attempt could not connect; the permitted rerun passed.
+- Local browser Restricted view inspected: two synthetic staff rows, V/O cells visible, inputs and exports disabled, Save absent.
+- `npm run lint`: failed because ESLint is not installed. Do not count this gate as passed.
+
+These tests do not establish two independent browser-session acceptance or full-system safety.
+
+## Remaining gates
+
+1. Two independent browser sessions: stale concurrent save, reload, denied write, network failure/retry, approval, lock/unlock, project/month switches.
+2. Cross-module browser smoke tests for shared persistence: personnel, fees, reports, assets, PM, repairs and utilities. Verify persisted data, not just notifications.
+3. Primary Vercel project `bmg-connect`: inspect production environment names without revealing values. New roster API needs `BMG_FIREBASE_PROJECT_ID` and a usable Firebase Admin credential (`FIREBASE_SERVICE_ACCOUNT_JSON` or verified ADC). Validate credential project/IAM through an authenticated scoped request. Production must not define emulator host variables.
+4. Isolated deployment acceptance: default Preview can point at Production Firebase. Do not write test records there without verified isolation.
+5. Establish a fresh independent, access-controlled backup, successful export status, manifest, counts and isolated restore evidence. A same-document `legacyEditImports` copy is not an independent backup. The existing Bless-only backup is not evidence of full-project coverage.
+6. Restore lint tooling or explicitly document an accepted exception after targeted static review. Do not hide failures by weakening checks.
+
+## Coordinated release plan (not executed)
+
+- Record exact candidate commit, current immutable production deployment ID and currently deployed secure Rules before changes. Local HEAD alone is not proof of the deployed version.
+- Freeze the legacy source during imports. Identify older open clients/writers; the transaction guard in the new client cannot protect against old writers.
+- Confirm primary domain `bmg-connect.vercel.app`; do not replace recovery on `bmg-connect-6b24.vercel.app`.
+- Review and release the absent-month, project-scoped Rules change with the app. Test current-client compatibility before Rules-first rollout. Without this Rules support Manager's new-month transaction can fail.
+- After explicit release approval, deploy candidate and perform a limited authorized canary, then verify across roles/devices and expand. Stop on missing rows, false success, stale overwrite or widened access.
+
+## Rollback plan (not executed)
+
+- Stop affected writes through an established operational control; no new kill switch is claimed to exist.
+- Preserve post-release records and errors before rollback. Promote only the recorded compatible prior immutable deployment after assessing older-writer risk.
+- App rollback does not revert Firestore documents or Rules. Restore Rules only to a reviewed secure compatible revision; never use historical public-access Rules.
+- Reconcile only verified affected project/month records from the independent backup and post-cutover writes. Do not bulk restore over new valid writes.
+- Verify reload, permissions and server acknowledgements after recovery.
+
+Billing diagnosis is separate: SKU data identifies Firestore transfer-out as the main expense, but this release has not been shown to fix that cause.
+
+## ESLint checkpoint (supersedes the missing-tool gate above)
+
+Installed ESLint flat configuration with browser/Node scope separation, recommended JavaScript correctness rules, JSX identity/key rules and React Hooks checks. `npm run lint` now fails on warnings as well as errors. Host-injected globals are read-only only in App.jsx; generated output and private backups are excluded, not application source or tests.
+
+Removed unused imports/handlers and unused state bindings while retaining hook calls; fixed duplicate migration-object key and unnecessary escapes; kept explicit secret removal in identity sanitization. Hook dependencies use serialized query identity rather than unstable query objects; presence uses the latest setter without restarting its interval every render; logout is memoized with its auth adapter dependency.
+
+Fresh results: lint zero errors/warnings; 116 tests passed including two lint configuration regression cases; normal build passed with existing large-bundle warning. Real browser acceptance remains required after hook changes. No deploy, Rules update or migration executed.
+
+Tooling caveats: React ESLint plugin currently declares peer support through ESLint 9, so this installation uses 9 rather than forcing incompatible 10. npm marks ESLint 9 deprecated; plan a compatible upgrade. npm also reports four dependency audit findings (three moderate, one high), not remediated by forced upgrades in this change. Local Node is 23.7.0 while the project declares 22.x; repeat release checks with Node 22. None of these observations is a clean security audit.
+
+## Two-session / backup verification — subsequent continuation
+
+Only synthetic business data was changed. No Production writes, deployment, secret reveal or cloud export/import was performed.
+
+- Chrome session A on `127.0.0.1:5175` (qa-manager), session B on `localhost:5175` (admin). Different origins isolate browser storage/auth while using the same demo backend; this is two sessions on one physical device, not two physical machines.
+- A changed first PLAN V to H; B displayed H. Save transitioned both to pending area-manager approval. Admin confirmed area-manager then HR approval; both displayed complete and disabled PLAN.
+- Admin locked September: Manager had 121 textboxes, zero enabled. Admin unlocked: 121 enabled again. The approved state does not remain immutable after unlock; observe and confirm this business behavior before release.
+- Paused only verified Java `demo-bmg-browser` Firestore emulator for 45 seconds with automatic SIGCONT recovery. A Save showed disabled `รอเซิร์ฟเวอร์ยืนยัน…`, not premature success. After resume the alert completed and pending approval appeared. This tests backend nonresponse/recovery, not every offline/disconnected-network failure path.
+- Reloaded B and reopened schedule: H/O and pending approval persisted.
+- Dispatched two UI fills concurrently: A first PLAN M1, B second PLAN H. Both screens converged to M1/H. No stale rejection was forced in this run; earlier SDK transaction tests provide deterministic stale-writer coverage, not browser race coverage.
+- Opened personnel, fees, contracts, daily reports, assets, PM, repairs and utility screens as Admin: expected headings, no visible error. This is rendering smoke coverage, not full write/approval coverage for all modules.
+- Created synthetic utility meter QA-LOCAL-0919, value 100. Manager's independent session displayed the same record/value. A native success alert blocked CDP temporarily; dismissed via native UI, no duplicate Save.
+- Vercel primary project environment list shows `FIREBASE_SERVICE_ACCOUNT_JSON` for Production and Preview and `BMG_FIREBASE_PROJECT_ID` for both. Values were not revealed. No emulator host variables were listed among project variables. Shared-variable scope and authenticated deployed roster endpoint/IAM still need validation; name presence is not credential validity.
+- Cloud Console under BMG account: all-collections export Sep 15 21:32:04 to 21:33:12, 35,798 documents, 1.58 GB at `bmg-connect-3e99a.firebasestorage.app/2026-09-15T14:32:04_36710`. This is not a fresh pre-release export or verified full restore.
+- Local Bless backup checksum passed (checksum file contains bare digest, not shasum manifest syntax). `scripts/verify-bless-backup-local.mjs` restored before/after for five months into fixed `demo-bmg-restore-drill` on localhost8090, read back and deep-compared ten documents including timestamp decoding. No source or Production path was used as target. This local emulator drill does not verify managed Cloud export restore, bucket retention or full system coverage.
+
+HOLD remains: full write smoke coverage, deterministic browser stale/offline-error cases, deployed credential/IAM acceptance, fresh full backup and isolated full restore. New paid export/restore resources require owner approval before creation. Existing synthetic fixtures and local restored documents were retained, not deleted.
+
+## Release-gate continuation — 2026-09-20
+
+No Production application, Rules, data migration, or deployment was changed in this continuation.
+
+- Node 22 verification passed: `npm test` 119/119, `npm run lint` with zero errors/warnings, and `npm run build` with the existing large-chunk warning (2,123.44 kB JS, 530.66 kB gzip). `git diff --check` passed.
+- `npm run test:rules` passed 27/27 with temporary Eclipse Temurin Java 21.0.12.1. The runtime remains session-local under `/tmp`; no system Java installation was changed.
+- Schedule cells now remain in a local project/month draft until Save. Save compares the captured server baseline, including an intentionally absent month, and rejects a record created concurrently. While acknowledgement is pending, cells, note, staff dragging, and schedule click targets are disabled; a synchronous guard closes the pre-render race. Focused regression and independent spec re-review passed.
+- Deterministic two-origin browser acceptance used `127.0.0.1` and `localhost` with separate Auth/storage against the same synthetic emulator. Firestore was paused while Admin and Manager submitted stale drafts: both displayed the pending acknowledgement state, one write succeeded after resume, and the stale writer received an explicit conflict without overwriting the first write.
+- Browser approval checks passed for area-manager and HR approval. Lock disabled all schedule editing; unlock restored editing and returned the workflow to Pending HR. September values survived September → October → September navigation. Confirm this unlock workflow is the intended business behavior before release.
+- Restricted browser acceptance passed: minimal roster and existing cells were visible, schedule inputs and export actions were disabled, and Save was absent. The authenticated roster emulator test passed separately; Rules cover the denied write.
+- The deployed primary URL `https://bmg-connect.vercel.app/api/schedule-roster?projectId=qa-local-project` returned Vercel HTTP 404. Therefore the roster function is not deployed and deployed token/IAM acceptance cannot be performed. Environment-name presence from the prior check is not proof that credentials or IAM work.
+- After explicit owner confirmation, Cloud Console exported the full Production `(default)` database in `asia-southeast1` to `bmg-connect-3e99a.firebasestorage.app/2026-09-20T01:36:34_32392`. It started Sep 20, 2026 08:36:34 ICT and completed successfully at 08:37:14 with 35,932 documents and 1.59 GB.
+- Created isolated Standard/Native database `restore-drill-20260920` in `asia-southeast1` with restrictive default Rules, then imported the fresh manifest. Import started at 08:38:44 and completed successfully at 08:45:16 with 35,932 documents and 1.6 GB. Firestore Studio displayed the restored root collections and loaded a representative document's fields. No Production document was used as the restore target or modified by the drill.
+- The export files and isolated database are retained as release evidence and continue to incur storage charges. Deletion was not authorized or performed.
+- Standards review found no violation of documented repository standards. It recorded non-blocking maintainability debt in the large `App.jsx`, duplicated legacy chunk readers, raw lifecycle strings, and the legacy-import context data clump. Spec review passed the malformed-archive, runtime CSS selector, draft/save, absent-month, and in-flight-edit fixes.
+
+Decision remains **HOLD**. The fresh full export and isolated restore gate is now complete. Remaining blockers are: deploy the roster function and validate authenticated Production IAM; complete persisted cross-module write smoke coverage; confirm unlock workflow; and review the split commits before any deploy. Local work must be split into explicit product/test, audit-tooling, and evidence-documentation commits without adding local `.agents/`, `.claude/`, or `skills-lock.json` files.
+
+## Persisted-write smoke and pre-deploy baseline — 2026-09-20
+
+No Production data, Rules, application deployment, or roster IAM configuration was changed. Browser writes used only synthetic accounts and project `qa-project` against Auth/Firestore emulators on localhost.
+
+- Daily Reports passed: created the 2026-09-20 synthetic report and verified its document in `bmg_dailyReports_docs`.
+- Assets passed: created `QA-LOCAL-A-001` / `SMOKE-ASSET-20260920`, quantity 2 at `LOCAL-LAB`, and verified `bmg_assets_docs`.
+- Machines passed: created `BMG-M-001` / `SMOKE-MACHINE-20260920`, Generator, quantity 1 at `LOCAL-PLANT`, and verified `bmg_machines_docs`.
+- PM passed: created an active monthly plan for the synthetic machine, scheduled on day 1, and verified `bmg_pmPlans_docs`.
+- Repairs passed: created `QA-LOCAL-REP-001` for `LOCAL-ROOM`, confirmed the rendered request, and verified `bmg_repairs_docs`.
+- Utilities passed: created water meter `QA-W-001` / `SMOKE-METER-20260920` at `LOCAL-UTILITY` with opening value 100, recorded 125, and verified both the updated meter and reading (`prevValue: 100`, `usage: 25`) in `bmg_meters_docs` and `bmg_utilityReadings_docs`.
+- Personnel is blocked in this isolated browser setup: saving a user requires the Firebase Authentication Admin API, which is not emulated by the local Vite setup. The attempted synthetic edit showed an explicit failure and did not claim or produce a persisted write.
+- Central Fees failed the persistence gate: the settings modal's “save” control only closes the modal. `noticeThresholdDays` and `freezeThresholdMonths` are component state and are not written to shared storage. This is a release blocker if these settings are expected to survive reload or be shared across users.
+- Native `alert()` calls in Machines, PM, and Utilities temporarily blocked browser automation. Each write was accepted only after the success dialog was dismissed and the resulting Firestore document was read back; alerts alone were not counted as evidence.
+
+Pre-deploy baseline captured at 2026-09-20 09:11 ICT:
+
+- Candidate branch: `codex/schedule-legacy-read-fallback`.
+- Candidate HEAD: `41c55c49cda804ff861dc2698c9c020d71541867` before this evidence update.
+- Remote branch baseline: `origin/codex/schedule-legacy-read-fallback` at `cf40c9002916e6533bd1d3ff8d3ba4e291e3604e`; the candidate was three commits ahead.
+- Remote main baseline: `origin/main` at `eac28fde8a8dde59d608b046bd6d214be917859d`.
+- Production roster request still returned `HTTP 404`, `X-Vercel-Error: NOT_FOUND`, request ID `sin1::j2nd7-1789870284277-453577bac985`. No authenticated IAM test is possible until the function is deployed.
+- Read-only platform inspection on 2026-09-20 captured the current Production Vercel rollback anchor: deployment `7YVMfhYbWKJB1fbkMg4HiyWbFKyZ`, immutable hostname `bmg-connect-9leh7hdht-bmgcontract-6324s-projects.vercel.app`, source `cf40c9002916e6533bd1d3ff8d3ba4e291e3604e`, status Ready, serving `bmg-connect.vercel.app`.
+- The Firebase console marks the current deployed `(default)` Firestore Rules revision as `Sep 17, 2026 • 11:22 AM` (Asia/Bangkok). The production closeout associates that Rules release with commit `7e9c250`; its `firestore.rules` Git blob is `38fbef2bd73e281109a81a8fb56200de38f68702`. Together the console revision, release commit, and immutable blob identify the pre-release Rules baseline without publishing any Rules.
+- The three reviewed split commits are `99794e1` (product/tests), `28e8fcb` (audit tooling), and `41c55c4` (evidence documentation). Local `.agents/`, `.claude/`, and `skills-lock.json` remain untracked and excluded.
+
+Decision remains **HOLD**. The persisted-write gate is complete for Reports, Assets, Machines/PM, Repairs, and Utilities. The rollback anchors are now recorded. Remaining release blockers are Central Fees persistence, a production-capable Personnel/Admin-API smoke path, and deployment plus authenticated IAM validation for the roster API. Current unlock-to-Pending-HR behavior is the working release assumption; record explicit business-owner approval in the final release decision.
+
+## Central Fees, Personnel API, and roster preflight — 2026-09-20
+
+No Production application, data, Rules, user account, push, or deployment was changed.
+
+- Central Fees settings now use project-scoped `app_state/central_fee_settings_<projectId>` documents with the existing `proj_centralfee` Rules boundary. Invalid values normalize to the safe defaults of 90 notice days and 6 freeze months.
+- Browser acceptance against `demo-bmg-browser` saved 91 notice days and 7 freeze months for `qa-project`, read the exact scoped document from Firestore, reloaded the application, and displayed 91/7 again. The prior component-only persistence blocker is closed.
+- Rules acceptance covers permitted create/update/read, denial without Central Fees permission, and denial for an inaccessible project. Java 21 Rules suite remains 27/27.
+- Added `npm run test:admin-api`, which invokes the real `api/admin-users.js` handler against Auth and Firestore emulators. It created, updated, and removed a synthetic Personnel identity and profile successfully. The isolated Vite browser intentionally continues to disable this privileged endpoint; the production-capable handler path is now independently repeatable without Production writes.
+- Added `npm run verify:deployed-roster`. After a Preview deploy, provide `BMG_ROSTER_BASE_URL`, `BMG_ROSTER_PROJECT_ID`, a short-lived `BMG_ROSTER_ID_TOKEN`, and comma-separated known synthetic IDs in `BMG_ROSTER_EXPECTED_STAFF_IDS` through the process environment. The verifier never prints the token and requires HTTP 200, `no-store`, the requested project ID, every expected synthetic row, at most 500 unique staff, and exactly the minimal roster fields.
+- Node 22 verification passed: 123 application tests, lint with zero warnings/errors, and Production build with the existing large-chunk warning. The Admin API emulator test and Central Fees browser test are additional to the 123 default tests.
+
+Decision remains **HOLD**. Central Fees persistence, the Personnel/Admin-API smoke path, and both rollback anchors are closed. Before any Production promotion, create a commit-based Preview containing the roster function, then run the authenticated deployed-roster verifier and inspect Preview runtime logs. Stop if the endpoint is missing, credentials/IAM fail, caching is public, an expected synthetic row is missing, the project scope is wrong, or extra Personnel fields appear.
+
+## Final Preview/IAM and exact-candidate verification — 2026-09-20
+
+No Production application, Rules, database, or deployment was changed in this
+verification. The only Production account change was the previously authorized,
+temporary schedule-view permission on `TEST-260915`; it was removed immediately
+after the restricted-role test and the persisted final value was reopened and
+verified as disabled.
+
+- Exact candidate commit: `87df86dcd7d9939a50e6f13bcd9287e5c40c2bdc`.
+- Commit-based Vercel Preview deployment: `BtAWFdweUmSXd1j6BzM1svVPYqj2`, immutable
+  hostname `bmg-connect-fbbe6t6y0-bmgcontract-6324s-projects.vercel.app`, status
+  Ready. The tested branch alias was
+  `bmg-connect-git-codex-schedul-7303a0-bmgcontract-6324s-projects.vercel.app`.
+- Authenticated restricted-role acceptance passed against the Preview. The
+  account could not use the full Personnel directory but the schedule roster
+  returned `TEST-260915` through the minimal roster path. PLAN/ACT inputs and
+  write actions remained unavailable. Browser console errors were empty.
+- Vercel runtime logs recorded `GET /api/schedule-roster` with HTTP 200 at
+  2026-09-20 15:55:43 ICT on the tested branch alias. The selected log window
+  reported zero Warning, Error, and Fatal entries. The same window recorded the
+  two authorized `PATCH /api/admin-users` permission changes with HTTP 200.
+- The original Production permission state was restored and reopened in the
+  administrator editor: enabled permissions are only `dashboard.view`,
+  `projects.view`, and `proj_overview.view`; `proj_schedule.view` is disabled.
+- Fresh exact-HEAD local verification used Node 22.23.2: 123/123 application
+  tests, lint with zero warnings/errors, Production build passed with the known
+  large-chunk warning, and `git diff --check` passed. Firestore Rules passed
+  27/27 with temporary Java 21. The isolated Admin API emulator test passed 1/1.
+  The first parallel lint attempt raced Vite's temporary config file; the clean
+  sequential rerun passed and is the recorded result.
+
+The Preview roster/IAM blocker and stale candidate-identity blocker are closed.
+Decision remains **HOLD** for the following release-acceptance items:
+
+1. Reconcile Production and `restore-drill-20260920` per root collection and
+   record readable samples for the user, project, image, schedule, and
+   transaction categories required by `backup-and-rollback.md`. The successful
+   full export/import totals and one representative sample prove that the
+   operations completed, but do not yet satisfy those stronger runbook criteria.
+2. Obtain the business owner's explicit decision that unlocking an approved
+   schedule should return its workflow to Pending HR.
+3. Resolve or explicitly accept the rollback-standard gap found in final review:
+   the schedule storage migration has no runtime feature flag/cutover boundary;
+   current rollback relies on the recorded compatible immutable deployment.
+
+Final two-axis review against `origin/main` found one documented-standard gap
+(the schedule rollback flag/cutover requirement above) and no new implementation
+correctness failure in the release paths. Non-blocking design debt remains in the
+large `App.jsx`, duplicated legacy archive decoding, raw lifecycle strings, and
+the legacy-import context data clump. Billing analysis remains separate from the
+release decision.
+
+## Restore reconciliation and rollback-standard resolution — 2026-09-20
+
+Google Cloud CLI was authorized with the BMG project account for a read-only
+Firestore REST reconciliation. The access token was passed directly from
+`gcloud` to the process and was not printed or stored in the repository. The
+temporary reconciliation script was deleted immediately after the check.
+
+- Production `(default)` and `restore-drill-20260920` each expose the same 66
+  business collections under `artifacts/bmg-app-prod/public/data`.
+- All 66 collection names exist in both databases. Counts match exactly for 62
+  collections.
+- The isolated restore contains 35,339 business documents plus 63/63 root user
+  profiles. Current Production contains 35,368 business documents plus the same
+  63 root profiles.
+- The 29-document current-Production delta is entirely additive: Daily Reports
+  `1,739` versus `1,736`, inventory transactions `711` versus `709`, repairs
+  `480` versus `478`, and utility readings `14,228` versus `14,206`. No
+  collection is larger in the restore than current Production, and no restored
+  collection is absent. These are current-state differences after the completed
+  export; the managed export/import operation itself reported 35,932 documents
+  on both sides.
+- User, project, image-bearing announcement, project schedule, and inventory
+  transaction samples were readable in both databases. Only field names were
+  compared; record values and personal data were not written to logs or Git.
+  The field sets matched for each category, including project files/logo,
+  announcement image fields, schedule approval/month/project/cells, and
+  transaction quantity/status/type fields.
+
+The restore reconciliation and required category-sample criteria are closed.
+The rollback review finding is also resolved without reintroducing an unsafe
+global legacy writer: `backup-and-rollback.md` now records that the schedule
+cutover was accepted on 17 September 2026, identifies the compatible immutable
+rollback deployment/source, and requires project/month reconciliation. The
+current release does not perform a new schedule-storage migration.
+
+Decision remains **HOLD** only for the explicit business-owner decision on the
+unlock workflow: unlocking an approved schedule currently clears the HR
+approval and returns the workflow to Pending HR so Plan corrections require HR
+approval again.
+
+## Final unlock decision and release readiness — 2026-09-20
+
+The business owner explicitly confirmed the intended workflow: unlocking an
+approved schedule clears the HR approval, returns the schedule to `Pending HR`,
+allows Plan corrections, and requires HR to approve the corrected schedule
+again. Manager approval and the existing audit context remain preserved.
+
+The decision is now encoded in `unlockScheduleApproval` and protected by a
+regression test. Exact product/test candidate commit:
+`ac4af932ac8ec78da40043606729f8c678748cfb`.
+
+Fresh exact-candidate verification used Node 22.23.2 and Java 21:
+
+- Application tests: 125/125 passed, including the new unlock/reapproval test.
+- Firestore Rules suite: 27/27 passed.
+- Isolated Admin API emulator: 1/1 passed.
+- ESLint: zero errors and zero warnings.
+- Production build: passed; 2,125.47 kB JavaScript, 532.68 kB gzip, with the
+  accepted existing large-chunk warning.
+- `git diff --check`: passed.
+
+All release blockers recorded in this document are closed. The branch is
+**READY FOR PRODUCTION DEPLOYMENT APPROVAL**. This status is not a Production
+deployment authorization: promote only after an explicit deploy instruction,
+using the recorded rollback anchors and post-deploy role/API checks.
+
+## Production deployment closeout — 2026-09-20
+
+The owner gave an explicit deploy instruction. A coordinated Firestore Rules +
+Vercel rollout was performed with the owner Firebase account
+(`bmg.contract@gmail.com`) and the linked Vercel project
+`bmgcontract-6324s-projects/bmg-connect`. Independent gate re-run before deploy:
+`npm test` 125/125, `npm run lint` zero, `npm run build` passed (2,125.47 kB JS,
+532.68 kB gzip, accepted large-chunk warning), `git diff --check` passed,
+`npm run test:rules` 27/27, `npm run test:admin-api` 1/1.
+
+Note: the documented Java 21 runtime path `/private/tmp/bmg-java21-current` was
+gone (temp dir cleared); the Rules/admin-api suites ran and passed on the
+system Java 17 fallback. Result parity held but this differs from the recorded
+Java 21 requirement — re-provision Java 21 for future runs.
+
+### Rollout sequence and identifiers
+
+1. Firestore Rules deployed first (`firebase deploy --only firestore:rules`).
+   - Previous live ruleset (rollback anchor): `5631d288-ce9f-44d8-a507-c81ddd1b1962`
+     (updateTime 2026-09-17T04:22:51Z).
+   - New live ruleset: `6c1527fb-5c7a-43e8-b5e7-0bd48a810390`
+     (updateTime 2026-09-20T12:51:04Z). Diff vs prior baseline is additive only:
+     the `hasValidScopedStateId` Central Fee state-ID validation and the
+     absent-month get grant on `bmg_projectSchedules_docs`.
+   - Rules smoke: unauthenticated REST reads of `bmg_users_docs` and
+     `bmg_projects_docs` returned HTTP 403 (fail-closed confirmed).
+2. Vercel production deploy of source `9708570`.
+   - Rollback anchor (prior production): `dpl_7YVMfhYbWKJB1fbkMg4HiyWbFKyZ`
+     (hostname `bmg-connect-9leh7hdht-…`).
+   - New deployment: `dpl_3fkshjb4fG645YSdFnShgU2PAEpE`
+     (hostname `bmg-connect-c837dcn6r-…`), aliased to `bmg-connect.vercel.app`.
+   - Post-deploy: `bmg-connect.vercel.app` HTTP 200, served from `sin1`,
+     Rules still 403 for unauthenticated reads.
+
+### Follow-up product fix — assigned-project race
+
+Post-deploy, a Village Manager saw a false "ไม่พบข้อมูลโครงการที่สังกัด".
+Root cause (confirmed in code, not a data mismatch — every user department in the
+read-only export matched a project by exact and trimmed name):
+`resolvePostAuthDestination` received `isProjectsLoaded=true` from an empty/partial
+cache snapshot before the scoped server snapshot, resolving to
+`assigned-project-unavailable` prematurely. Fix commit `e7ab13d` gives the
+`bmg_projects` listener `requireServerSnapshot:true` (matching the `users`
+listener). Gates re-run green (125/125, lint zero, build passed, diff clean).
+
+- Second Vercel production deploy of source `e7ab13d`:
+  new deployment `dpl_9Ggyf38TjgzLsLYz9v3Zf4nYMwvV`
+  (hostname `bmg-connect-470ojavt4-…`), aliased to `bmg-connect.vercel.app`,
+  bundle `index-DKRK4aN-.js`. Rollback anchor for this step:
+  `dpl_3fkshjb4fG645YSdFnShgU2PAEpE`. Firestore Rules unchanged in this step.
+
+### Follow-up product fix — case/whitespace-sensitive department match
+
+Post-deploy, head-office / area-manager users who normally see every unit could
+no longer enter any unit ("ไม่พบข้อมูลโครงการที่สังกัด"). Confirmed against
+production data via a read-only field-masked query (department/position/username
+only, no photos):
+
+- 63 users total. Department stored as `"Head office"` (lowercase o) for 11
+  users and `"Head Office"` for 2. Example: user `2310002` (นายวิมล, Area
+  Manager) had `department: "Head office"`, `accessibleDepts: ["All", …]`, status
+  Active, and a full 25-menu `permissions` map already saved.
+- Root cause (code): `resolvePostAuthDestination` compared
+  `department === 'Head Office'` case-sensitively, so the 11 `"Head office"`
+  users failed the global-destination branch and were routed to
+  `assigned-project-unavailable`. `filterAccessibleProjects` matched project
+  names the same case-sensitive way.
+- This is why it looked like "admin-set permissions are not remembered": the
+  Admin API (`api/admin-users.js`) persisted `permissions`/`department`/
+  `accessibleDepts` correctly (verified in Firestore); the routing gate rejected
+  the users before their permissions could take effect. No permission data was
+  lost.
+
+Fix commit `5c15753`: normalize (trim + collapse internal whitespace +
+lowercase) both the head-office check and project-name matching in
+`resolvePostAuthDestination`, and apply the same normalization in
+`filterAccessibleProjects` so per-department (non-"All") users also match
+padded/cased names. Regression test covers `"Head office"`, `" head office "`,
+`"HEAD OFFICE"`, `"Head  Office"`.
+
+- Gates re-run: `npm test` 126/126 (one new case), `npm run lint` zero,
+  `npm run build` passed (accepted large-chunk warning), `git diff --check` clean.
+- Third Vercel production deploy of source `5c15753`:
+  new deployment `dpl_5AahoZ2NpArzfGRpspKdsFUWyURU`
+  (hostname `bmg-connect-dam1zmwnd-…`), aliased to `bmg-connect.vercel.app`,
+  bundle `index-CxjbsYxQ.js`, status Ready. Post-deploy: prod HTTP 200, Rules
+  still 403 for unauthenticated reads. Rollback anchor for this step:
+  `dpl_9Ggyf38TjgzLsLYz9v3Zf4nYMwvV`. Firestore Rules unchanged.
+- Data note: the underlying data inconsistency (mixed `"Head office"` /
+  `"Head Office"` casing) was left in place; the code now tolerates it. Optional
+  future cleanup: normalize the stored department values to a single canonical
+  form (separate, non-urgent task).
+- Pushed to `origin/codex/schedule-legacy-read-fallback`
+  (`e7ab13d`, `a99bb01`, `5c15753`).
+
+### Follow-up product fix — vague sign-in error on bad credentials
+
+A wrong password showed "ระบบยืนยันตัวตนขัดข้อง" (the `auth-unavailable`
+fallback) instead of "รหัสผ่านไม่ถูกต้อง". Current Firebase JS SDK / Email
+Enumeration Protection returns `auth/invalid-login-credentials` (and sometimes
+surfaces only `INVALID_LOGIN_CREDENTIALS` in the message), which
+`mapSignInError` did not recognize.
+
+Fix commit `be73f5c`: normalize the code (strip `auth/`, lowercase), match all
+bad-credential variants, and also inspect the raw message. Regression test added.
+Deployed as `dpl_… (index-Diw17ec_.js)`. Rules unchanged.
+
+### Root-cause fix — localStorage quota error bounced valid logins
+
+Users on `bmg-connect.vercel.app` with a full localStorage (large base64 profile
+photo) could not log in; the console showed `Unable to restore Firebase business
+profile. 22`. Confirmed by simulating the exact browser SDK path against
+production (temporary password reset): Firebase Auth sign-in AND the
+`users/{uid}` profile read both succeed — the failure was purely the cache write.
+
+- Root cause (code): both the `onAuthStateChanged` restore path and the
+  interactive sign-in handler wrapped `setCurrentUser(...)` and
+  `localStorage.setItem('bmg_current_user', …)` in the same `try`. A
+  `QuotaExceededError` (DOMException code 22) on `setItem` fell into the catch,
+  which called `signOut()` and cleared `currentUser`, bouncing the user back to
+  login even though auth + profile read had succeeded.
+- Fix commit `c826f96`: move each `localStorage.setItem` into its own try/catch
+  (best-effort cache) so a cache failure only skips persistence — the session
+  stays valid in React state. Deployed as `dpl_… (index-Cd6k9ig0.js)`. Rules
+  unchanged.
+- Config fix (no deploy): added `bmg-connect.vercel.app` to Firebase Auth
+  authorized domains (previously only `localhost`, `*.firebaseapp.com`,
+  `*.web.app`) — the browser SDK requires the serving domain to be authorized.
+  Rollback: remove the domain from the authorized list.
+
+### Feature — audits.view grants read-only site-wide audit access
+
+Reported: a QC/audit user granted the global `audits` module could not see the
+all-projects audit overview. Root cause (confirmed in code): site-wide totals are
+computed client-side from the loaded `audits` array, but the query plan and rules
+only delivered audits for the user's own `accessibleDepts`. The full total
+required `accessibleDepts:['All']` (which also grants broad write access) — a
+mismatch with the intended "admin ticks the module → access granted" model.
+
+Fix commit `d5c2cf1` (coordinated Rules + Vercel):
+- queryScope: `permissions.audits.view` → unscoped read of `bmg_audits` and
+  `bmg_projects` (to enumerate every unit). Drilling into a specific project
+  still narrows to it; other collections and users without the flag keep normal
+  project scoping.
+- firestore.rules: `canReadSiteWideAudits()`; `bmg_projects` read allows it, plus
+  a dedicated `bmg_audits_docs` read match so an unscoped list evaluates cleanly
+  per document against just `audits.view`. Writes are unchanged — create/update/
+  delete stay project-scoped by menu permission.
+- Scope is READ-ONLY and limited to audits + projects. Tests: unit 132/132,
+  queryScope +5, rules 28/28 (cross-project audit read incl. unscoped list
+  succeeds; all writes and foreign non-audit reads still denied), admin-api 1/1.
+- Deploy: Rules released (new ruleset), unauth read smoke still 403, then Vercel
+  `dpl_D6qsPyXY5EPL1crNr1rHBmdDtkCY` (bundle `index-BOtSBK5u.js`, served bundle
+  verified to match the local build). Note: `vercel --prod` reused a cached build
+  the first time; `--force` was required to build and promote the new bundle.
+- Admin usage: tick the `audits` module view for the user (no longer need
+  `accessibleDepts:['All']`); keep their `department` empty/"Head Office" so they
+  are not redirected into a single project.
+
+> **REVERTED by `b02a7e7` — do not rely on this behavior.** `audits.view` turned
+> out to be too broad a trigger: a Village Manager (`2410063`) scoped to a single
+> project but with `audits.view` ticked started seeing every project's audit
+> score. Site-wide visibility was returned to being governed by
+> `accessibleDepts:['All']` only. See the two sections below for the revert and the
+> correct fix.
+
+### Revert — site-wide audit tied back to accessibleDepts:['All']
+
+`b02a7e7` reverts `d5c2cf1` in full (queryScope, firestore.rules, both test
+suites → back to unit 127 / rules 27). Reason above. Confirmed in production that
+exactly one non-'All' user (`2410063`) had `audits.view` ticked and was
+over-scoped by `d5c2cf1`. Deploy: Rules re-released (dropped
+`canReadSiteWideAudits`), then Vercel — see the deploy-size fix below, which was
+required before the reverted bundle could actually ship.
+
+### Deploy blocker fixed — .vercelignore excludes large local data
+
+Deploys after the revert silently failed with **"File size limit exceeded
+(100 MB)"**: a `.vercelignore` overrides `.gitignore` entirely, so `backups/`
+(377 MB), `migration-output/`, `dist/`, and `*.log` — all git-ignored — were being
+uploaded, and the last *successful* production deploy was therefore stale (still
+serving `index-BOtSBK5u.js`). `73d0b20` adds those plus `.git/` and dev-only dirs
+(tests/scripts/docs) to `.vercelignore`. Post-fix deploy `dpl_BuTaZrgia5RX` serves
+`index-Cd6k9ig0.js` (the reverted bundle). Also learned: `vercel --prod` can reuse
+a cached build; use `--force` to guarantee a rebuild, and always verify the served
+`assets/index-*.js` hash matches the local `npm run build` output.
+
+### Fix — All-access users can read the full staff directory and site-wide audits
+
+Admin reported (with screenshots): an All-access **HR** user saw an empty
+"จัดการผู้ใช้งาน" list (could not edit/add staff), and an All-access **audit/QC**
+user saw audits one project at a time instead of the all-projects overview.
+
+- Two-layer model confirmed with the owner: layer 1 = department access
+  (`accessibleDepts`, 'All' = every unit); layer 2 = per-module permissions the
+  admin ticks. 'All' must widen *department* scope only — never auto-grant module
+  actions.
+- Confirmed the client was fine: `queryScope` already returns `unscoped` for
+  All-access users on `users` and `bmg_audits`. Reproduced with emulator tests
+  that a per-document `get()` succeeds but the unscoped `list()` is denied.
+- Root cause (Firestore rules): the `users` and project-collection read rules
+  evaluate a per-document predicate — `canAccessProjectName(resource.data.department)`
+  / `canAccessProjectId()` via `exists()`+`get()`. An unscoped list must satisfy
+  the rule for *every* returned doc; a user whose department is not a project name
+  ("Head office" — 13 users in prod) or an audit whose project was removed fails
+  the per-doc check and collapses the whole list to empty.
+- Fix commit `96bfd20` (rules only; App.jsx untouched, bundle unchanged):
+  - add `hasAllDeptAccess()` (admin or `accessibleDepts:['All']`).
+  - `users` list: allow when `hasAllDeptAccess() && hasPermission('proj_staff','view')`
+    without touching `resource.data.department`.
+  - dedicated `bmg_audits_docs` read match: `hasAllDeptAccess() &&
+    hasPermission('proj_audit','view')` so the unscoped list evaluates per-doc with
+    no projectId lookup.
+  - project-collection read also short-circuits on `hasAllDeptAccess()` for gets.
+  - Widens DEPARTMENT scope only for All users; module view still required, all
+    writes stay scoped. Non-'All' users remain limited to their own units.
+- Tests: unit 127/127, rules 29/29 (added: HR full-directory list; All-access
+  site-wide audit list — both succeed; existing scoped/denied cases still pass),
+  admin-api 1/1. Deploy: Rules released, unauth smoke 403 on `users` and
+  `bmg_audits_docs`. No Vercel deploy needed. Effective immediately.
+- Admin usage: to give a QC/audit or HR user the cross-unit view, set
+  `accessibleDepts:['All']` and tick the relevant module view (`proj_audit` /
+  `proj_staff`). Users must re-login (or hard refresh) to pick up the new rules.
+
+### Fix — All-access staff managers can manage user accounts (not only Super Admin)
+
+Admin reported an HR user could not add or edit staff: the save returned "เฉพาะ
+ผู้ดูแลระบบสูงสุดเท่านั้นที่จัดการบัญชี Firebase Authentication ได้". Root cause: the
+privileged `/api/admin-users` endpoint (creates/updates/deletes Firebase Auth
+accounts via the Admin SDK) required a Super Admin custom claim. The earlier rules
+fix let HR see the directory, but the API still blocked writes — contradicting the
+"admin ticks proj_staff → the user can manage staff" model.
+
+Owner chose policy **A2**: allow a non-Super-Admin who is an Active user with
+`proj_staff` save/edit AND `accessibleDepts:['All']`.
+
+- Fix commit `8cfda14`: new pure policy `src/auth/staffManagement.js`
+  (`canManageStaffAccounts` = Super Admin claim OR active staff manager). The
+  endpoint's `requireStaffManager` reads the caller's OWN profile from Firestore
+  server-side (never trusts client-supplied permissions); Super Admins still
+  short-circuit without a lookup.
+- Confirmed in production: HR `2610191` / `2410048` (Active, proj_staff save+edit,
+  All) gain access; a staff-write user without All (`2610200`) stays denied.
+- Tests: staffManagement 8/8, unit 135/135, admin-api emulator 1/1, lint, build.
+  Serverless API change → Vercel deploy `dpl_FXAQE8Wxwrz6vqr6mvES77AeCNcW`
+  (`8cfda14`). Verified live: `/api/admin-users` GET→405, POST no-auth→401.
+- Admin usage: HR must re-login (fresh ID token) before adding/editing users; the
+  HR user must have `accessibleDepts:['All']` and `proj_staff` save/edit.
+
+### Fix — online / last-active syncs via a dedicated bmg_presence collection
+
+The user directory's online/last-active column was blank. Root cause: the presence
+heartbeat wrote `lastLogin` through `setUsers`, but in Firebase mode the users
+collection is read-only to clients (Rules deny client writes), so heartbeats never
+persisted or synced across devices.
+
+- Fix commit `242b3e4`: presence moved to its own `bmg_presence_docs/{authUid}`
+  collection carrying only `{ id, authUid, lastActive }` (no personal data).
+  - Rules: a user may create/update ONLY their own doc (`documentId ==
+    request.auth.uid`, `authUid == uid`, `keys().hasOnly([...])`); read requires
+    `proj_staff.view`; no deletes. queryScope: unscoped read for staff viewers,
+    else blocked.
+  - Client: writes its own heartbeat via `setDoc` throttled to 5 min, subscribes
+    to presence when it may view the directory, and merges presence `lastActive`
+    onto the user list (newer wins). Legacy localStorage mode unchanged. Pure
+    logic in `src/presence/presenceState.js`.
+- Tests: presence 6/6, rules 30/30 (own-write allowed; spoofing, extra fields, and
+  read-without-proj_staff denied), unit 141/141, admin-api 1/1, lint, build.
+- Deploy: Rules released (unauth presence read smoke 403), then Vercel
+  `dpl_8u3G4iNxheQCjRXyZ5ypgLJPi7to` (`242b3e4`, bundle `index-X4wHC2p3.js`,
+  served hash verified).
+- Behavior note: status becomes accurate after each user re-logs in once (their
+  presence doc is created on the next session); until then they may still show
+  "-". Cost: ~1 write / active user / 5 min.
+
+### Rollback (code and data kept separate)
+
+- Code: Vercel Instant Rollback. Current production is
+  `dpl_8u3G4iNxheQCjRXyZ5ypgLJPi7to` (`242b3e4`, bundle `index-X4wHC2p3.js` —
+  presence). Prior anchors, newest first: `dpl_FXAQE8Wxwrz6vqr6mvES77AeCNcW`
+  (`8cfda14`, staff-manager API), `dpl_BuTaZrgia5RXSRFK6JfyjSetDvAp`
+  (`73d0b20`, `index-Cd6k9ig0.js` — post-revert app),
+  `dpl_D6qsPyXY5EPL1crNr1rHBmdDtkCY` (`d5c2cf1`, `index-BOtSBK5u.js` — reverted
+  site-wide-audit build; do NOT roll back to this), `… (index-Cd6k9ig0.js,
+  c826f96)`, `… (index-Diw17ec_.js, be73f5c)`,
+  `dpl_5AahoZ2NpArzfGRpspKdsFUWyURU` (`5c15753`),
+  `dpl_9Ggyf38TjgzLsLYz9v3Zf4nYMwvV` (`e7ab13d`),
+  `dpl_3fkshjb4fG645YSdFnShgU2PAEpE` (`9708570`), and the pre-release
+  `dpl_7YVMfhYbWKJB1fbkMg4HiyWbFKyZ` (`cf40c90`).
+  Note: `8cfda14` (API) and `242b3e4` (presence client) both carry serverless /
+  Rules behavior — a pure Vercel code rollback past them also needs the matching
+  Rules reverted (see below).
+- Rules: the live ruleset is the one deployed by `242b3e4` (adds the
+  `bmg_presence_docs` self-write/staff-read match on top of `96bfd20`'s All-access
+  directory + site-wide audit read). To roll back, re-deploy `firestore.rules` at
+  the prior commit; earlier baselines: `6c1527fb-…`, `5631d288-…`, or
+  `config-snapshots/firestore.rules.production-2026-09-15.rules`. The ruleset is
+  deployed straight from `firestore.rules` (independent of the Vercel bundle), so
+  a Vercel code rollback does NOT change the rules — revert them separately.
+- Auth config: to revert the authorized-domains change, remove
+  `bmg-connect.vercel.app` from Firebase Auth authorized domains (this would
+  re-break browser login on that domain — only do so intentionally).
+- Data: no schema/data migration was performed in this rollout. Point-in-time
+  recovery is OFF; the only data checkpoint is the managed export
+  `2026-09-20T01:36:34_32392`. An app/Rules rollback does not restore Firestore
+  documents.
+
+### Not verified by this closeout (needs an authenticated in-app check)
+
+Authenticated role behavior (admin/manager/restricted login, assigned-project
+resolution after the fix, new-month schedule create against the new absent-month
+Rules grant, Central Fee persistence) was not exercised with a real ID token from
+this environment. The Rules emulator suite covers these paths, but confirm in the
+live app with real accounts and watch Firestore permission-denied logs and Vercel
+runtime logs during the first canary window.

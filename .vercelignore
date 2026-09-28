@@ -1,0 +1,20 @@
+# Local agent/handoff/config files — never upload to Vercel
+.agents/
+.claude/
+_to_delete/
+CLAUDE-CODE-HANDOFF.md
+skills-lock.json
+
+# Large local data / build artifacts — Vercel builds from source in the cloud,
+# so none of these need to be uploaded (they also blow past the 100 MB limit).
+backups/
+migration-output/
+dist/
+*.log
+firestore-debug.log
+.git/
+
+# Dev-only, not needed by the production build
+tests/
+scripts/
+docs/

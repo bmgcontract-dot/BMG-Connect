@@ -1,0 +1,88 @@
+rules_version = '2';
+
+// Firebase Storage rules for BMG-Connect project documents.
+// Path layout: project-docs/{projectId}/{fileId}
+// Authorization mirrors Firestore: the caller's own user profile (read from
+// Firestore) must grant access to that project, and the staff/overview module
+// permission gates read vs write. No public access.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function userProfile() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isActiveBusinessUser() {
+      return request.auth != null
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && userProfile().status == 'Active'
+        && userProfile().authUid == request.auth.uid;
+    }
+
+    function isAdmin() {
+      return isActiveBusinessUser() && request.auth.token.get('admin', false) == true;
+    }
+
+    function hasAllDeptAccess() {
+      let profile = userProfile();
+      return isAdmin()
+        || (profile.accessibleDepts is list && 'All' in profile.accessibleDepts);
+    }
+
+    // Resolve the project doc and check department access, mirroring
+    // firestore.rules canAccessProjectId.
+    function canAccessProjectId(projectId) {
+      let projectPath = /databases/(default)/documents/artifacts/bmg-app-prod/public/data/bmg_projects_docs/$(projectId);
+      return isAdmin()
+        || hasAllDeptAccess()
+        || (
+          firestore.exists(projectPath)
+          && (
+            userProfile().department == firestore.get(projectPath).data.name
+            || (
+              userProfile().accessibleDepts is list
+              && firestore.get(projectPath).data.name in userProfile().accessibleDepts
+            )
+          )
+        );
+    }
+
+    function hasPermission(menuId, action) {
+      let profile = userProfile();
+      return isAdmin()
+        || (
+          profile.permissions is map
+          && profile.permissions.get(menuId, {}).get(action, false) == true
+        );
+    }
+
+    // Project document attachments.
+    match /project-docs/{projectId}/{fileId} {
+      allow read: if isActiveBusinessUser()
+        && canAccessProjectId(projectId)
+        && (hasPermission('proj_overview', 'view') || hasPermission('proj_contracts', 'view'));
+
+      allow write: if isActiveBusinessUser()
+        && canAccessProjectId(projectId)
+        && (hasPermission('proj_overview', 'save') || hasPermission('proj_overview', 'edit'))
+        // Guard rails: max 20 MB, documents/images only.
+        && request.resource.size < 20 * 1024 * 1024
+        && (
+          request.resource.contentType.matches('application/pdf')
+          || request.resource.contentType.matches('image/.*')
+          || request.resource.contentType.matches('application/vnd.*')
+          || request.resource.contentType.matches('application/msword')
+        );
+
+      allow delete: if isActiveBusinessUser()
+        && canAccessProjectId(projectId)
+        && hasPermission('proj_overview', 'delete');
+    }
+
+    // Everything else is denied.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

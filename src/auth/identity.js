@@ -28,11 +28,9 @@ export function usernameToAuthEmail(username, domain = DEFAULT_INTERNAL_AUTH_DOM
 
 export function stripUserSecrets(user) {
   if (!user || typeof user !== 'object') return user;
-  const {
-    password: _password,
-    sessionExpiry: _sessionExpiry,
-    ...safeUser
-  } = user;
+  const safeUser = { ...user };
+  delete safeUser.password;
+  delete safeUser.sessionExpiry;
   return safeUser;
 }
 

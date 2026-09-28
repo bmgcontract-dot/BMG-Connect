@@ -1,16 +1,16 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   Users, Building2, BarChart3, Settings, LogOut, 
   Plus, Search, FileText, Download, Trash2, Edit, 
   CheckCircle, AlertTriangle, Wrench, Calendar, 
   ClipboardList, Droplet, Zap, Shield, 
   Clock, ArrowRight, ClipboardCheck,
-  Briefcase, Globe, Printer, Loader2, X, Upload, User, CheckSquare, Square,
+  Briefcase, Globe, Printer, Loader2, X, Upload, User, CheckSquare,
   XCircle, Image as ImageIcon, File, Hourglass, Phone, Mail, LayoutGrid, List, ChevronDown, Save,
   ChevronLeft, ChevronRight, MousePointer2, FileCheck, DollarSign, Camera,
   MapPin, Box, PenTool, Printer as PrinterIcon, History, Folder, Lock,
   Eye, EyeOff, Hammer, Layers, Link as LinkIcon, Sun, Moon, Heart, Cloud, Unlock, BookOpen, Info, HelpCircle, Maximize2, Bell, Megaphone, Radio, Medal, Landmark, RefreshCw, QrCode,
-  Package, Archive, ShoppingCart, ArrowDownRight, ArrowUpRight, FileSpreadsheet, ListChecks, Home, MessageSquare, PieChart as PieChartIcon, Eraser
+  Package, Archive, ArrowDownRight, ArrowUpRight, FileSpreadsheet, ListChecks, Home, MessageSquare, PieChart as PieChartIcon, Eraser
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
@@ -18,14 +18,52 @@ import {
 } from 'recharts';
 
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot, getDoc, getDocs, collection, deleteDoc, writeBatch } from 'firebase/firestore';
+import {
+  browserLocalPersistence,
+  indexedDBLocalPersistence,
+  initializeAuth,
+  onAuthStateChanged,
+  signInWithCustomToken,
+  connectAuthEmulator,
+} from 'firebase/auth';
+import { getFirestore, connectFirestoreEmulator, doc, setDoc, onSnapshot, getDoc, getDocFromServer, collection, writeBatch, runTransaction, query, where } from 'firebase/firestore';
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { browserTestConfig } from './src/firebase/browserTestConfig.js';
 import { createFirebaseBusinessAuth } from './src/auth/firebaseAuthAdapter.js';
+import { initializeFirebaseBrowserAuth } from './src/auth/firebaseBrowserAuth.js';
 import { createAdminUserClient } from './src/auth/adminUserClient.js';
 import { sanitizeUsersForExport, stripUserSecrets } from './src/auth/identity.js';
+import { buildPresenceDoc, mergePresenceIntoUsers, shouldWriteHeartbeat, PRESENCE_HEARTBEAT_MS } from './src/presence/presenceState.js';
+import { fileObjectHasContent } from './src/files/fileRef.js';
+import { uploadProjectFile, getProjectFileUrl, isStorageBackedRef } from './src/files/projectFileStorage.js';
+import { startLegacyFirebaseSession } from './src/auth/firebaseSession.js';
+import { resolveAuthMode } from './src/auth/authMode.js';
+import { createFirestoreSubscriptionPolicy } from './src/firebase/subscriptionPolicy.js';
+import { createMonthScope, reconcileCollectionSnapshot, shouldApplyCollectionSnapshot } from './src/firebase/collectionSnapshot.js';
+import { createFirestoreCollectionQueryPlan, filterItemsForQueryPlan } from './src/firebase/queryScope.js';
+import { createNewUserDraft } from './src/users/userDraft.js';
+import { resolvePostAuthDestination } from './src/auth/postAuthDestination.js';
+import { filterAccessibleProjects, hasUserPermission } from './src/auth/permissions.js';
+import { validateProjectUniqueness } from './src/projects/projectValidation.js';
+import {
+  DEFAULT_FEE_SETTINGS,
+  createFeeSettingsDocument,
+  feeSettingsDocumentId,
+  readFeeSettings,
+} from './src/fees/feeSettings.js';
+import { buildAdminLegacyScheduleFallback } from './src/schedule/adminLegacyScheduleFallback.js';
+import { deriveProjectScheduleViews, upsertProjectSchedule } from './src/schedule/projectScheduleState.js';
+import { unlockScheduleApproval } from './src/schedule/scheduleApprovalWorkflow.js';
+import { scheduleDocumentEqual } from './src/schedule/scheduleDocumentEqual.js';
+import { prepareLegacyScheduleEditing, readLegacyScheduleSnapshot } from './src/schedule/legacyScheduleEditing.js';
+import { useScheduleRoster } from './src/schedule/useScheduleRoster.js';
 
 // --- Firebase Initialization ---
-let app, auth, db, appId;
+let app, auth, db, storage, appId;
+// SDK bundle passed to the projectFileStorage helpers (keeps them Firebase-free/testable).
+const STORAGE_SDK = { ref: storageRef, uploadBytes, getDownloadURL, deleteObject };
+const LOCAL_EMULATOR = import.meta.env.BMG_LOCAL_EMULATOR === true;
+const LOCAL_FIREBASE_CONFIG = browserTestConfig({ enabled: LOCAL_EMULATOR, development: import.meta.env.DEV, hostname: window.location.hostname });
 
 const MANUAL_FIREBASE_CONFIG = {
   apiKey: "AIzaSyAy03rxniCLFDYT4ztY_Ry2zh0ddzdBoPE",
@@ -37,17 +75,20 @@ const MANUAL_FIREBASE_CONFIG = {
   measurementId: "G-4B69L2731M"
 };
 
-const GOOGLE_SCRIPT_CONFIG = {
+const GOOGLE_SCRIPT_CONFIG = LOCAL_EMULATOR ? { SHEETS_URL: '', DRIVE_URL: '' } : {
   SHEETS_URL: "https://script.google.com/macros/s/AKfycbzmNdR7LVpfUossHkcNH_onBPTG2dw6GuJzh5JilthkMwW-Sdr4s0lFjPKwSsCBTg/exec", 
   DRIVE_URL: "https://script.google.com/macros/s/AKfycbzQYEwfj3xz-kACA43pNbnpcuPY9p3Vg039t-HqDaAIU7hf7WXswEf1MXlapdv3jU5tnw/exec"
 };
 
-const USE_FIREBASE_BUSINESS_AUTH = import.meta.env.VITE_AUTH_MODE === 'firebase';
-const INTERNAL_AUTH_DOMAIN = import.meta.env.VITE_INTERNAL_AUTH_DOMAIN || 'auth.bmg-connect.local';
+const USE_FIREBASE_BUSINESS_AUTH = LOCAL_EMULATOR || resolveAuthMode(import.meta.env.VITE_AUTH_MODE) === 'firebase';
+const INTERNAL_AUTH_DOMAIN = LOCAL_EMULATOR ? 'auth.bmg-connect.local' : import.meta.env.VITE_INTERNAL_AUTH_DOMAIN || 'auth.bmg-connect.local';
 
 try {
   let firebaseConfig = null;
-  if (typeof __firebase_config !== 'undefined') {
+  if (LOCAL_EMULATOR) {
+     firebaseConfig = LOCAL_FIREBASE_CONFIG;
+     appId = 'bmg-app-prod'; // Same Rules namespace; isolated by demo project and emulator host.
+  } else if (typeof __firebase_config !== 'undefined') {
      firebaseConfig = JSON.parse(__firebase_config);
      appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
   } else if (MANUAL_FIREBASE_CONFIG.apiKey && MANUAL_FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY") {
@@ -57,24 +98,27 @@ try {
 
   if (firebaseConfig) {
       app = initializeApp(firebaseConfig);
-      auth = getAuth(app);
+      auth = initializeFirebaseBrowserAuth({
+        app,
+        initializeAuth,
+        indexedDBLocalPersistence,
+        browserLocalPersistence,
+      });
       db = getFirestore(app);
+      try { storage = getStorage(app); } catch (e) { console.warn('Storage init skipped', e?.message); }
+      if (LOCAL_EMULATOR) {
+          connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+          connectFirestoreEmulator(db, '127.0.0.1', 8090);
+      }
   } else {
       console.warn("ไม่พบ Firebase Config: ระบบจะสลับไปใช้ Local Storage");
   }
 } catch (e) {
+  if (LOCAL_EMULATOR) throw e;
   console.error("Firebase init failed", e);
 }
 
 // --- Configuration & Constants ---
-const THEME = {
-  primary: '#FF4D00', 
-  secondary: '#FF7A00',
-  bg: '#F3F4F6',
-  sidebar: '#1F2937',
-  text: '#111827'
-};
-
 const PROJECT_TYPES = ['Condo', 'Village', 'Office Building'];
 const PROJECT_TYPE_CODES = {
   'Condo': 'C',
@@ -400,18 +444,7 @@ const getDefaultPermissions = () => {
     return perms;
 };
 
-const getFullPermissions = () => {
-    const perms = {};
-    AVAILABLE_MENUS.forEach(m => {
-        perms[m.id] = { view: true, save: true, edit: true, approve: true, delete: true, print: true };
-        if (m.submenus) {
-            m.submenus.forEach(sub => {
-                perms[sub.id] = { view: true, save: true, edit: true, approve: true, delete: true, print: true };
-            });
-        }
-    });
-    return perms;
-};
+
 
 const getMergedPermissions = (templatePerms) => {
     const base = getDefaultPermissions();
@@ -1027,21 +1060,7 @@ const ThreeDBar = (props) => {
     );
 };
 
-const ThreeDBarHorizontal = (props) => {
-    const { fill, x, y, width, height } = props;
-    const depth = 8;
-    if (!width || width <= 0 || height <= 0) return null;
 
-    return (
-        <g style={{ filter: 'drop-shadow(3px 6px 5px rgba(0,0,0,0.25))' }}>
-            <path d={`M${x},${y} L${x + depth},${y - depth} L${x + width + depth},${y - depth} L${x + width},${y} Z`} fill={fill} />
-            <path d={`M${x},${y} L${x + depth},${y - depth} L${x + width + depth},${y - depth} L${x + width},${y} Z`} fill="#ffffff" fillOpacity={0.3} />
-            <path d={`M${x + width},${y} L${x + width + depth},${y - depth} L${x + width + depth},${y + height - depth} L${x + width},${y + height} Z`} fill={fill} />
-            <path d={`M${x + width},${y} L${x + width + depth},${y - depth} L${x + width + depth},${y + height - depth} L${x + width},${y + height} Z`} fill="#000000" fillOpacity={0.25} />
-            <path d={`M${x},${y} L${x + width},${y} L${x + width},${y + height} L${x},${y + height} Z`} fill={fill} />
-        </g>
-    );
-};
 
 const ThreeDMedal = ({ rank }) => {
     if (rank > 3) return <span className="font-bold text-gray-500 text-base">{rank}</span>;
@@ -1167,9 +1186,9 @@ const INITIAL_READINGS = [];
 const INITIAL_DAILY_REPORTS = []; 
 const INITIAL_AUDITS = []; 
 const INITIAL_TOOLS = []; 
-const INITIAL_UTILITY_READINGS = []; 
+
 const INITIAL_ACTION_PLANS = []; 
-const INITIAL_SCHEDULES = []; 
+
 const INITIAL_CONTRACTORS = [];
 const INITIAL_INVENTORY = [];
 const INITIAL_TRANSACTIONS = [];
@@ -1242,7 +1261,7 @@ const normalizeImportedDate = (rawStr, isMDY = false) => {
     
     if (/^\d{4}-\d{2}-\d{2}$/.test(dStr)) return dStr;
     
-    const parts = dStr.split(/[\/\-]/);
+    const parts = dStr.split(/[/-]/);
     if (parts.length === 3) {
         let d, m, y;
         if (parts[0].length === 4) { 
@@ -1426,12 +1445,13 @@ const loadStateLocallyIDB = async (key) => {
             request.onsuccess = () => resolve(request.result);
             request.onerror = () => reject(request.error);
         });
-    } catch (e) {
+    } catch {
         return null;
     }
 };
 
 function usePersistentState(key, initialValue, fbUser) {
+  const expectsArray = Array.isArray(initialValue);
   const [state, setState] = useState(() => {
       if (typeof window !== 'undefined') {
           const local = localStorage.getItem(key);
@@ -1444,7 +1464,7 @@ function usePersistentState(key, initialValue, fbUser) {
                       }
                   }
                   return parsed; 
-              } catch(e) { return initialValue; }
+              } catch { return initialValue; }
           }
       }
       return initialValue;
@@ -1544,13 +1564,13 @@ function usePersistentState(key, initialValue, fbUser) {
                   console.error("Parse payload error", e);
               }
           }
-        } catch (err) {
+        } catch {
             console.warn("Download chunks info: Using local data (offline or network unavailable).");
         }
       }
       setIsLoaded(true);
       clearTimeout(fallbackTimer);
-    }, (error) => {
+    }, () => {
         console.warn("Sync info: Working offline.");
         setIsLoaded(true);
         clearTimeout(fallbackTimer);
@@ -1558,7 +1578,7 @@ function usePersistentState(key, initialValue, fbUser) {
 
     const applyData = (parsedData) => {
         let finalData = parsedData;
-        if (Array.isArray(initialValue) && !Array.isArray(parsedData)) {
+        if (expectsArray && !Array.isArray(parsedData)) {
             finalData = (parsedData && typeof parsedData === 'object') ? Object.values(parsedData) : [];
         }
 
@@ -1573,7 +1593,7 @@ function usePersistentState(key, initialValue, fbUser) {
             setState(finalData);
             saveStateLocallyIDB(key, finalData); // Save fetched data to IDB
             if (typeof window !== 'undefined') {
-                try { localStorage.setItem(key, JSON.stringify(finalData)); } catch(e){}
+                try { localStorage.setItem(key, JSON.stringify(finalData)); } catch { /* IndexedDB remains the fallback when localStorage is full. */ }
             }
         }
         setIsSynced(true);
@@ -1583,7 +1603,7 @@ function usePersistentState(key, initialValue, fbUser) {
         unsubscribe();
         clearTimeout(fallbackTimer);
     };
-  }, [db, fbUser, appId, key]);
+  }, [fbUser, key, expectsArray]);
 
   const setPersistentValue = (newValueOrUpdater) => {
       const oldValue = stateRef.current;
@@ -1595,7 +1615,7 @@ function usePersistentState(key, initialValue, fbUser) {
       saveStateLocallyIDB(key, newValue);
 
       if (typeof window !== 'undefined') {
-          try { localStorage.setItem(key, JSON.stringify(newValue)); } catch(e){}
+          try { localStorage.setItem(key, JSON.stringify(newValue)); } catch { /* IndexedDB remains the fallback when localStorage is full. */ }
       }
 
       if (!db || !fbUser || !appId) return;
@@ -1636,7 +1656,7 @@ function useUserPersistentState(key, initialValue, fbUser) {
         if (typeof window !== 'undefined') {
             const local = localStorage.getItem(userSpecificKey);
             if (local) {
-                try { return JSON.parse(local); } catch(e) { return initialValue; }
+                try { return JSON.parse(local); } catch { return initialValue; }
             }
         }
         return initialValue;
@@ -1661,7 +1681,7 @@ function useUserPersistentState(key, initialValue, fbUser) {
             if (typeof window !== 'undefined') {
                 try {
                     localStorage.setItem(userSpecificKey, JSON.stringify(newValue));
-                } catch (e) {}
+                } catch { /* IndexedDB remains the fallback when localStorage is full. */ }
             }
             return newValue;
         });
@@ -1671,14 +1691,18 @@ function useUserPersistentState(key, initialValue, fbUser) {
 }
 
 function usePersistentCollection(collectionName, initialValue, fbUser, options = {}) {
+    const guardedScheduleWrites = collectionName === 'bmg_projectSchedules';
+    const scheduleWritePending = useRef(false);
     const rootCollection = options.rootCollection === true;
     const readOnly = options.readOnly === true;
+    const requireServerSnapshot = guardedScheduleWrites || options.requireServerSnapshot === true;
     const documentIdField = options.documentIdField || 'id';
+    const dateScopeField = options.dateScope?.field;
+    const dateScopeStart = options.dateScope?.start;
+    const dateScopeEnd = options.dateScope?.endExclusive;
+    const queryPlan = options.queryPlan || { kind: 'unscoped', targets: [[]] };
+    const queryPlanKey = JSON.stringify(queryPlan);
     const localKey = options.localKey || (collectionName.startsWith('bmg_') ? collectionName : `bmg_${collectionName}`);
-
-    const getCollectionReference = () => rootCollection
-        ? collection(db, collectionName)
-        : collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
 
     const getDocumentReference = (id) => rootCollection
         ? doc(db, collectionName, id)
@@ -1693,8 +1717,10 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
                     if (Array.isArray(initialValue) && !Array.isArray(parsed)) {
                         return (parsed && typeof parsed === 'object') ? Object.values(parsed) : [...initialValue];
                     }
-                    return Array.isArray(parsed) ? parsed : initialValue;
-                } catch(e) { 
+                    return Array.isArray(parsed)
+                        ? filterItemsForQueryPlan(parsed, queryPlan)
+                        : initialValue;
+                } catch {
                     return initialValue; 
                 }
             }
@@ -1704,60 +1730,142 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
 
     const dataRef = useRef(data);
     const [isLoaded, setIsLoaded] = useState(false);
+    const readScope = JSON.stringify([collectionName, fbUser?.uid, queryPlanKey, dateScopeField, dateScopeStart, dateScopeEnd]);
+    const [readState, setReadState] = useState({ scope: null, status: 'loading' });
+    const collectionReadState = queryPlan.kind === 'blocked'
+        ? { status: 'blocked' }
+        : (!db || !appId || !fbUser)
+            ? { status: 'unavailable' }
+            : readState.scope === readScope ? readState : { status: 'loading' };
 
     useEffect(() => { dataRef.current = data; }, [data]);
 
     useEffect(() => {
-        if (!db || !appId || !fbUser) {
+        // Reconstruct from the stable key: equivalent query objects must not resubscribe.
+        const queryPlan = JSON.parse(queryPlanKey);
+        if (!db || !appId || !fbUser || queryPlan.kind === 'blocked') {
+            setReadState({ scope: null, status: 'unavailable' });
+            if (queryPlan.kind === 'blocked') {
+                setData([]);
+                dataRef.current = [];
+            }
             setIsLoaded(true);
             return;
         }
 
-        let unsubscribe = () => {};
+        let unsubscribes = [];
         let isMounted = true;
         
         const initData = async () => {
             setIsLoaded(false);
+            setReadState({ scope: readScope, status: 'loading' });
             
             try {
                 // NEW: Load from IndexedDB first for fast and large offline data
                 const idbData = await loadStateLocallyIDB(localKey);
+                if (!isMounted) return;
                 if (idbData && Array.isArray(idbData) && idbData.length > 0) {
+                    const safeIdbData = filterItemsForQueryPlan(idbData, queryPlan);
                     if (isMounted) {
-                        setData(idbData);
-                        dataRef.current = idbData;
+                        setData(safeIdbData);
+                        dataRef.current = safeIdbData;
                     }
                 }
 
-                const colRef = getCollectionReference();
-                unsubscribe = onSnapshot(colRef, (snapshot) => {
+                const colRef = rootCollection
+                    ? collection(db, collectionName)
+                    : collection(db, 'artifacts', appId, 'public', 'data', `${collectionName}_docs`);
+                const hasDateScope = dateScopeField && dateScopeStart && dateScopeEnd;
+                const targetFilters = queryPlan.targets.map((filters) => (
+                    hasDateScope
+                        ? [
+                            ...filters,
+                            { field: dateScopeField, operator: '>=', value: dateScopeStart },
+                            { field: dateScopeField, operator: '<', value: dateScopeEnd },
+                        ]
+                        : filters
+                ));
+                const targetSnapshots = new Map();
+                const receivedTargets = new Set();
+                const handleSnapshot = (targetIndex, snapshot) => {
                     if (!isMounted) return;
-                    const serverItems = [];
-                    snapshot.forEach(docSnap => serverItems.push(docSnap.data()));
-                    
-                    const serverJson = JSON.stringify(serverItems);
-                    const localJson = JSON.stringify(dataRef.current);
+                    if (guardedScheduleWrites && snapshot.metadata.hasPendingWrites) return;
+                    if (!shouldApplyCollectionSnapshot({
+                        requireServerSnapshot,
+                        fromCache: snapshot.metadata.fromCache,
+                    })) return;
+                    const targetItems = [];
+                    snapshot.forEach((docSnap) => {
+                        const item = docSnap.data();
+                        targetItems.push(item?.[documentIdField]
+                            ? item
+                            : { ...item, [documentIdField]: docSnap.id });
+                    });
+                    targetSnapshots.set(targetIndex, targetItems);
+                    receivedTargets.add(targetIndex);
+                    if (receivedTargets.size !== targetFilters.length) return;
 
-                    // Cloud is the absolute source of truth. If it differs, overwrite local data.
-                    // This permanently kills any "Zombie Data" that was kept locally after being deleted on the server.
-                    if (serverJson !== localJson) {
-                        setData(serverItems);
-                        dataRef.current = serverItems;
-                        saveStateLocallyIDB(localKey, serverItems);
-                        if (typeof window !== 'undefined') {
-                            try { localStorage.setItem(localKey, serverJson); } catch(e) {}
+                    const serverItemsById = new Map();
+                    targetSnapshots.forEach((items) => {
+                        items.forEach((item) => serverItemsById.set(item[documentIdField], item));
+                    });
+                    const serverItems = [...serverItemsById.values()];
+
+                    const nextItems = reconcileCollectionSnapshot({
+                        currentItems: dataRef.current,
+                        serverItems,
+                        scope: hasDateScope
+                            ? { field: dateScopeField, start: dateScopeStart, endExclusive: dateScopeEnd }
+                            : undefined,
+                        documentIdField,
+                    });
+                    setData(nextItems);
+                    dataRef.current = nextItems;
+                    saveStateLocallyIDB(localKey, nextItems);
+                    if (typeof window !== 'undefined') {
+                        try {
+                            localStorage.setItem(localKey, JSON.stringify(nextItems));
+                        } catch {
+                            // IndexedDB remains the large-data cache when localStorage cannot serialize the payload.
                         }
                     }
 
                     setIsLoaded(true);
-                }, (error) => {
+                    setReadState({ scope: readScope, status: 'ready' });
+                };
+                const handleSnapshotError = () => {
                     console.warn(`Sync info for ${collectionName}: Working offline.`);
-                    if (isMounted) setIsLoaded(true);
+                    if (isMounted) {
+                        setIsLoaded(true);
+                        setReadState({ scope: readScope, status: 'error' });
+                    }
+                };
+                unsubscribes = targetFilters.map((filters, targetIndex) => {
+                    const listenTarget = filters.length > 0
+                        ? query(colRef, ...filters.map((filter) => (
+                            where(filter.field, filter.operator, filter.value)
+                        )))
+                        : colRef;
+                    return requireServerSnapshot
+                        ? onSnapshot(
+                            listenTarget,
+                            { includeMetadataChanges: true },
+                            (snapshot) => handleSnapshot(targetIndex, snapshot),
+                            handleSnapshotError,
+                        )
+                        : onSnapshot(
+                            listenTarget,
+                            (snapshot) => handleSnapshot(targetIndex, snapshot),
+                            handleSnapshotError,
+                        );
                 });
 
-            } catch (err) {
+            } catch {
                 console.warn(`Init info for ${collectionName}: Working offline or network unavailable.`);
-                if (isMounted) setIsLoaded(true);
+                if (isMounted) {
+                    setIsLoaded(true);
+                    setReadState({ scope: readScope, status: 'error' });
+                }
             }
         };
 
@@ -1765,13 +1873,67 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
 
         return () => {
             isMounted = false;
-            unsubscribe();
+            unsubscribes.forEach((unsubscribe) => unsubscribe());
         };
-    }, [db, appId, fbUser, collectionName, localKey, rootCollection]);
+    }, [fbUser, collectionName, localKey, rootCollection, requireServerSnapshot, dateScopeField, dateScopeStart, dateScopeEnd, documentIdField, queryPlanKey, guardedScheduleWrites, readScope]);
 
-    const setPersistentValue = async (newValueOrUpdater, isRestore = false) => {
-        const oldValue = dataRef.current;
-        const newValue = typeof newValueOrUpdater === 'function' ? newValueOrUpdater(oldValue) : newValueOrUpdater;
+    const setPersistentValue = async (newValueOrUpdater, isRestore = false, forceDocumentIds = []) => {
+        if (guardedScheduleWrites && scheduleWritePending.current) {
+            return { ok: false, error: new Error('กำลังบันทึกตารางงาน กรุณารอแล้วลองใหม่') };
+        }
+        const originalData = dataRef.current;
+        const oldValue = filterItemsForQueryPlan(dataRef.current, queryPlan);
+        let newValue;
+        try {
+            newValue = typeof newValueOrUpdater === 'function' ? newValueOrUpdater(oldValue) : newValueOrUpdater;
+        } catch (error) {
+            return { ok: false, error };
+        }
+
+        if (guardedScheduleWrites) {
+            if (readOnly || !db || !fbUser || !appId || queryPlan.kind === 'blocked') {
+                return { ok: false, error: new Error('ยังไม่ได้บันทึกบนเซิร์ฟเวอร์ กรุณาเข้าสู่ระบบและตรวจสอบการเชื่อมต่อ') };
+            }
+            // Restore is intentionally not an escape hatch around concurrency checks.
+            if (isRestore) {
+                return { ok: false, error: new Error('การกู้คืนตารางงานต้องใช้ขั้นตอนสำรองและตรวจความขัดแย้ง ไม่สามารถเขียนทับจากหน้านี้ได้') };
+            }
+            scheduleWritePending.current = true;
+            try {
+                const before = new Map(oldValue.map(item => [item.id, item]));
+                const after = new Map(newValue.map(item => [item.id, item]));
+                const changed = [...new Set([...before.keys(), ...after.keys()])].filter(id =>
+                    forceDocumentIds.includes(id) || !scheduleDocumentEqual(before.get(id), after.get(id)));
+                await runTransaction(db, async transaction => {
+                    // All reads must precede writes; retry rechecks the original baseline.
+                    for (const id of changed) {
+                        const snapshot = await transaction.get(getDocumentReference(id));
+                        const raw = snapshot.exists() ? snapshot.data() : undefined;
+                        const current = raw ? { ...raw, id: raw.id || id } : undefined;
+                        if (!scheduleDocumentEqual(current, before.get(id))) {
+                            const error = new Error('ตารางงานถูกเปลี่ยนจากอีกเครื่องแล้ว การแก้ไขครั้งนี้ยังไม่ได้บันทึก กรุณาตรวจข้อมูลล่าสุดแล้วลองใหม่');
+                            error.code = 'schedule/conflict';
+                            throw error;
+                        }
+                    }
+                    for (const id of changed) {
+                        if (after.has(id)) transaction.set(getDocumentReference(id), after.get(id));
+                        else transaction.delete(getDocumentReference(id));
+                    }
+                });
+                // Do not replace a newer listener snapshot that arrived while awaiting the server.
+                if (dataRef.current === originalData) {
+                    setData(newValue);
+                    dataRef.current = newValue;
+                    saveStateLocallyIDB(localKey, newValue);
+                }
+                return { ok: true };
+            } catch (error) {
+                return { ok: false, error };
+            } finally {
+                scheduleWritePending.current = false;
+            }
+        }
         
         setData(newValue);
         dataRef.current = newValue;
@@ -1781,12 +1943,14 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
         if (typeof window !== 'undefined') {
             try {
                 localStorage.setItem(localKey, JSON.stringify(newValue));
-            } catch (e) {
+            } catch {
                 // Silently ignore quota exceeded, IDB handles it
             }
         }
 
-        if (readOnly || !db || !fbUser || !appId) return;
+        if (readOnly || !db || !fbUser || !appId) {
+            return { ok: false, error: new Error('ยังไม่ได้บันทึกบนเซิร์ฟเวอร์: กรุณาตรวจสอบการเชื่อมต่อและเข้าสู่ระบบ') };
+        }
 
         if (isRestore && Array.isArray(newValue)) {
             try {
@@ -1845,8 +2009,11 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
                     if (opCount >= 50) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
                 }
                 if (opCount > 0) await batch.commit();
-            } catch (e) { console.error("Restore error", e); }
-            return;
+            } catch (e) {
+                console.error("Restore error", e);
+                return { ok: false, error: e };
+            }
+            return { ok: true };
         }
 
         const oldMap = new Map(Array.isArray(oldValue) ? oldValue.map(i => [i[documentIdField], i]) : []);
@@ -1859,7 +2026,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
             const documentId = newItem[documentIdField];
             if (!documentId) return;
             const oldItem = oldMap.get(documentId);
-            if (!oldItem || JSON.stringify(oldItem) !== JSON.stringify(newItem)) {
+            if (forceDocumentIds.includes(documentId) || !oldItem || JSON.stringify(oldItem) !== JSON.stringify(newItem)) {
                 toSet.push(newItem);
             }
         });
@@ -1933,10 +2100,12 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
             }
         } catch (e) {
             console.error(`Save error ${collectionName}:`, e);
+            return { ok: false, error: e };
         }
+        return { ok: true };
     };
 
-    return [data, setPersistentValue, isLoaded, true];
+    return [filterItemsForQueryPlan(data, queryPlan), setPersistentValue, isLoaded, true, collectionReadState];
 }
 
 const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
@@ -1952,9 +2121,10 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
   const [reportDate, setReportDate] = useState('บริหารจัดการโดย บริษัท เบสท์ มิลเลี่ยน กรุ๊ป จำกัด');
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [encoding, setEncoding] = useState('windows-874'); 
-  const [freezeThresholdMonths, setFreezeThresholdMonths] = useState(6); 
-  const [noticeThresholdDays, setNoticeThresholdDays] = useState(90); 
+  const [freezeThresholdMonths, setFreezeThresholdMonths] = useState(DEFAULT_FEE_SETTINGS.freezeThresholdMonths);
+  const [noticeThresholdDays, setNoticeThresholdDays] = useState(DEFAULT_FEE_SETTINGS.noticeThresholdDays);
 
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -1982,10 +2152,31 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
   useEffect(() => {
     if (!db || !appId || !selectedProject) return;
 
+    setNoticeThresholdDays(DEFAULT_FEE_SETTINGS.noticeThresholdDays);
+    setFreezeThresholdMonths(DEFAULT_FEE_SETTINGS.freezeThresholdMonths);
+
+    const settingsRef = doc(
+      db,
+      'artifacts',
+      appId,
+      'public',
+      'data',
+      'app_state',
+      feeSettingsDocumentId(selectedProject.id),
+    );
+    const unsubscribeSettings = onSnapshot(settingsRef, (settingsSnapshot) => {
+      const settings = readFeeSettings(settingsSnapshot.exists() ? settingsSnapshot.data() : null);
+      setNoticeThresholdDays(settings.noticeThresholdDays);
+      setFreezeThresholdMonths(settings.freezeThresholdMonths);
+    }, (error) => {
+      console.error('Firestore central-fee settings sync error:', error);
+    });
+
     // Use a unique collection for each project's central fee data to prevent mixing
     const statusColRef = collection(db, 'artifacts', appId, 'public', 'data', `house_statuses_${selectedProject.id}`);
+    const statusQuery = query(statusColRef, where('projectId', '==', selectedProject.id));
     
-    const unsubscribeStatuses = onSnapshot(statusColRef, (snapshot) => {
+    const unsubscribeStatuses = onSnapshot(statusQuery, (snapshot) => {
       const loadedStatuses = {};
       const loadedNotes = {};
       const loadedHistories = {};
@@ -2031,7 +2222,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
             if (fullJson) {
                 // ซ่อมแซม JSON กรณี Chunk หาย
                 let safeJson = fullJson;
-                try { JSON.parse(safeJson); } catch (e) {
+                try { JSON.parse(safeJson); } catch {
                     if (safeJson.startsWith('{')) safeJson += '}';
                 }
                 try {
@@ -2056,6 +2247,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
     });
 
     return () => {
+      unsubscribeSettings();
       unsubscribeStatuses();
       unsubscribeRawData();
     };
@@ -2165,12 +2357,21 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
                 for (let i = 0; i < totalChunks; i++) {
                     const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `central_fee_raw_${selectedProject.id}_${i}`);
                     const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                    await setDoc(chunkRef, { chunk: chunkData });
+                    await setDoc(chunkRef, {
+                        chunk: chunkData,
+                        projectId: selectedProject.id,
+                        menuId: 'proj_centralfee',
+                    });
                     await new Promise(r => setTimeout(r, 10)); // พัก UI
                 }
 
                 const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', `central_fee_raw_${selectedProject.id}`);
-                await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
+                await setDoc(metaRef, {
+                    totalChunks,
+                    timestamp: Date.now(),
+                    projectId: selectedProject.id,
+                    menuId: 'proj_centralfee',
+                });
             };
 
             syncData().then(() => {
@@ -2405,6 +2606,7 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
           
           await setDoc(docRef, {
             houseNo: selectedHouse.houseNo,
+            projectId: selectedProject.id,
             status: finalStatusToSave,
             note: tempNote,
             history: historyToSave,
@@ -2422,6 +2624,39 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
       }
     }
     setIsModalOpen(false);
+  };
+
+  const handleSaveFeeSettings = async () => {
+    if (!db || !appId || !selectedProject) {
+      alert('ไม่สามารถบันทึกการตั้งค่าได้ เนื่องจากยังไม่ได้เชื่อมต่อฐานข้อมูล');
+      return;
+    }
+
+    setIsSavingSettings(true);
+    try {
+      const settingsRef = doc(
+        db,
+        'artifacts',
+        appId,
+        'public',
+        'data',
+        'app_state',
+        feeSettingsDocumentId(selectedProject.id),
+      );
+      await setDoc(settingsRef, createFeeSettingsDocument({
+        projectId: selectedProject.id,
+        noticeThresholdDays,
+        freezeThresholdMonths,
+        updatedAt: new Date().toISOString(),
+        updatedBy: currentUser?.username || currentUser?.firstName || 'System',
+      }));
+      setIsSettingsOpen(false);
+    } catch (error) {
+      console.error('Error saving central-fee settings:', error);
+      alert('ไม่สามารถบันทึกการตั้งค่าได้ กรุณาตรวจสอบสิทธิ์และลองใหม่');
+    } finally {
+      setIsSavingSettings(false);
+    }
   };
 
   const loadScript = (src) => {
@@ -3311,10 +3546,11 @@ const CentralFeeManagerTab = ({ selectedProject, currentUser, db, appId }) => {
             </div>
             <div className="bg-gray-50 px-6 py-4 flex justify-end gap-3 border-t border-gray-200">
               <button 
-                onClick={() => setIsSettingsOpen(false)}
-                className="px-6 py-2.5 rounded-lg text-white bg-gray-800 hover:bg-gray-900 transition font-bold shadow-sm flex items-center gap-2 text-sm"
+                onClick={handleSaveFeeSettings}
+                disabled={isSavingSettings}
+                className="px-6 py-2.5 rounded-lg text-white bg-gray-800 hover:bg-gray-900 transition font-bold shadow-sm flex items-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <CheckCircle size={16}/> ปิดและบันทึกการตั้งค่า
+                {isSavingSettings ? <Loader2 size={16} className="animate-spin"/> : <CheckCircle size={16}/>} {isSavingSettings ? 'กำลังบันทึก...' : 'ปิดและบันทึกการตั้งค่า'}
               </button>
             </div>
           </div>
@@ -3345,7 +3581,7 @@ export default function App() {
                   }
 
                   return parsed;
-              } catch(e) { return null; }
+              } catch { return null; }
           }
       }
       return null;
@@ -3384,7 +3620,14 @@ export default function App() {
                 const restoredUser = await firebaseBusinessAuth.restore(user);
                 if (!isMounted) return;
                 setCurrentUser(restoredUser);
-                localStorage.setItem('bmg_current_user', JSON.stringify(restoredUser));
+                // Persisting to localStorage is best-effort: a QuotaExceededError
+                // (e.g. a large base64 profile photo when storage is full) must NOT
+                // sign the user out — the session already lives in React state.
+                try {
+                    localStorage.setItem('bmg_current_user', JSON.stringify(restoredUser));
+                } catch (cacheError) {
+                    console.warn('Could not cache profile to localStorage (login still valid).', cacheError?.name || cacheError);
+                }
             } catch (error) {
                 console.warn('Unable to restore Firebase business profile.', error?.code || error);
                 if (isMounted) setCurrentUser(null);
@@ -3397,34 +3640,39 @@ export default function App() {
         };
     }
 
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (e) {
+    const customToken = typeof __initial_auth_token !== 'undefined'
+        ? __initial_auth_token
+        : null;
+    const session = startLegacyFirebaseSession({
+      auth,
+      customToken,
+      observeAuth: onAuthStateChanged,
+      signInWithCustomToken,
+      onUser: setFbUser,
+      onError: () => {
         console.warn("Auth info: falling back to local storage (offline mode).");
-        db = null;
-        setFbUser({ uid: 'local-fallback-user' });
-      }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-        if (user) setFbUser(user);
+        setFbUser(null);
+      },
     });
-    return () => unsubscribe();
+    return session.unsubscribe;
   }, [firebaseBusinessAuth]);
 
-  // Only the user and project lists are needed to complete app login.
-  // Other cloud subscriptions start after login and stop again on logout.
-  const isLoggedIn = Boolean(currentUser);
-  const businessFbUser = isLoggedIn ? fbUser : null;
-  
   const [activeMenu, setActiveMenu] = useState('dashboard');
   const [selectedProject, setSelectedProject] = useState(null);
   const [projectTab, setProjectTab] = useState('overview');
+  const subscriptionPolicy = useMemo(() => createFirestoreSubscriptionPolicy({
+      firebaseUser: fbUser,
+      currentUser,
+      activeMenu,
+      selectedProject,
+      projectTab,
+  }), [fbUser, currentUser, activeMenu, selectedProject, projectTab]);
+  const currentMonthScope = useMemo(
+      () => createMonthScope('date', new Date().toISOString().slice(0, 7)),
+      [],
+  );
+  const shouldScopeHeavyHistory = activeMenu === 'dashboard'
+      || Boolean(selectedProject && projectTab === 'overview');
   const [contractFilter, setContractFilter] = useState('All'); // NEW: State สำหรับตัวกรองสัญญา
   const [contractSortOrder, setContractSortOrder] = useState('expiry_asc'); // NEW: State สำหรับเรียงลำดับวันหมดอายุสัญญา
   const [actionPlanFilter, setActionPlanFilter] = useState('All'); // NEW: State สำหรับตัวกรอง Action Plan
@@ -3457,11 +3705,9 @@ export default function App() {
   // ----------------------------------------------
   const [isEditingUser, setIsEditingUser] = useState(false);
   const [scheduleNote, setScheduleNote] = useState(''); // NEW: State สำหรับเก็บ Note ในตารางงาน
-  const [scheduleNotes, setScheduleNotes] = usePersistentState('bmg_scheduleNotes', {}, businessFbUser); // NEW: Persistent state for schedule notes
-  const [scheduleApprovals, setScheduleApprovals] = usePersistentState('bmg_scheduleApprovals', {}, businessFbUser); // NEW: State สำหรับเก็บสถานะการอนุมัติตารางงาน
   const [hoScheduleModal, setHoScheduleModal] = useState(null); // NEW: Modal สำหรับเลือกหน่วยงานหลายแห่ง
   const [hoSelectedProjects, setHoSelectedProjects] = useState([]); // NEW: รายการหน่วยงานที่ถูกเลือก
-  const [selectedKpiDetail, setSelectedKpiDetail] = useState(null); // NEW: State สำหรับเปิด Modal รายละเอียด KPI
+  const [, setSelectedKpiDetail] = useState(null); // NEW: State สำหรับเปิด Modal รายละเอียด KPI
   const [isSyncingSheets, setIsSyncingSheets] = useState(false); // NEW: State สำหรับสถานะกำลังส่งข้อมูลไป Google Sheets
   const [isBackingUpToDrive, setIsBackingUpToDrive] = useState(false); // NEW: State สำหรับสถานะกำลังส่งไฟล์ไป Google Drive
 
@@ -3479,9 +3725,9 @@ export default function App() {
   const [projectViewMode, setProjectViewMode] = useState('grid');
 
   // Company Info State
-  const [companyInfo, setCompanyInfo] = usePersistentState('bmg_companyInfo', INITIAL_COMPANY_INFO, businessFbUser);
-  const [showEditCompanyModal, setShowEditCompanyModal] = useState(false);
-  const [editCompanyForm, setEditCompanyForm] = useState({ ...INITIAL_COMPANY_INFO });
+  const [companyInfo, setCompanyInfo] = usePersistentState('bmg_companyInfo', INITIAL_COMPANY_INFO, subscriptionPolicy.userFor('bmg_companyInfo'));
+  const [, setShowEditCompanyModal] = useState(false);
+  const [, setEditCompanyForm] = useState({ ...INITIAL_COMPANY_INFO });
 
   // Add Contract Modal State
   const [showAddContractModal, setShowAddContractModal] = useState(false);
@@ -3703,10 +3949,10 @@ export default function App() {
   });
 
   // Meetings State
-  const [showAddMeetingModal, setShowAddMeetingModal] = useState(false);
-  const [isEditingMeeting, setIsEditingMeeting] = useState(false);
-  const [selectedMeetingView, setSelectedMeetingView] = useState(null);
-  const [newMeeting, setNewMeeting] = useState({
+  const [, setShowAddMeetingModal] = useState(false);
+  const [, setIsEditingMeeting] = useState(false);
+  const [, setSelectedMeetingView] = useState(null);
+  const [, setNewMeeting] = useState({
       id: null,
       title: '',
       type: 'AGM', // AGM, EGM, Committee
@@ -3742,7 +3988,21 @@ export default function App() {
 
   // --- NEW: Meeting Gantt Plans State ---
   const INITIAL_GANTT_PLANS = [];
-  const [meetingGanttPlans, setMeetingGanttPlans] = usePersistentCollection('bmg_meeting_gantt_plans', INITIAL_GANTT_PLANS, businessFbUser);
+  const [meetingGanttPlans, setMeetingGanttPlans] = usePersistentCollection(
+      'bmg_meeting_gantt_plans',
+      INITIAL_GANTT_PLANS,
+      subscriptionPolicy.userFor('bmg_meeting_gantt_plans'),
+      {
+          queryPlan: USE_FIREBASE_BUSINESS_AUTH
+              ? createFirestoreCollectionQueryPlan({
+                  collectionName: 'bmg_meeting_gantt_plans',
+                  currentUser,
+                  selectedProject,
+                  accessibleProjects: selectedProject ? [selectedProject] : [],
+              })
+              : { kind: 'unscoped', targets: [[]] },
+      },
+  );
   const [editingGanttPlan, setEditingGanttPlan] = useState(null);
   const [ganttPaintMode, setGanttPaintMode] = useState(null); // 'add', 'remove', null
   const [ganttSelectedColor, setGanttSelectedColor] = useState('bg-orange-500');
@@ -3796,7 +4056,10 @@ export default function App() {
   });
 
   const [showAddUserModal, setShowAddUserModal] = useState(false);
-  const [newUser, setNewUser] = useState({ employeeId: '', firstName: '', lastName: '', position: EMPLOYEE_POSITIONS[0], otherPosition: '', department: '', accessibleDepts: [], phone: '', username: '', password: '', photo: null, permissions: getDefaultPermissions() });
+  const [newUser, setNewUser] = useState(() => createNewUserDraft({
+      position: EMPLOYEE_POSITIONS[0],
+      permissions: getDefaultPermissions(),
+  }));
 
   const [showAddProjectModal, setShowAddProjectModal] = useState(false);
   const [isEditingProject, setIsEditingProject] = useState(false);
@@ -3805,41 +4068,135 @@ export default function App() {
 
   // อัปเกรดเป็น usePersistentCollection สำหรับข้อมูลที่เป็น Array (รายการ) ป้องกันข้อมูลสูญหาย/ทับกัน
   // โดยใช้ชื่อ Collection คงเดิมทั้งหมด เพื่อให้ระบบกู้ข้อมูลเก่าขึ้นมาเซฟเป็น Document ให้อัตโนมัติ!
-  const [users, setUsers, isUsersLoaded, isUsersSynced] = usePersistentCollection(
+  const [users, setUsers, isUsersLoaded, isUsersSynced, usersReadState] = usePersistentCollection(
       USE_FIREBASE_BUSINESS_AUTH ? 'users' : 'bmg_users',
       USE_FIREBASE_BUSINESS_AUTH ? [] : INITIAL_USERS,
-      fbUser,
+      subscriptionPolicy.userFor(USE_FIREBASE_BUSINESS_AUTH ? 'users' : 'bmg_users'),
       USE_FIREBASE_BUSINESS_AUTH
-          ? { rootCollection: true, documentIdField: 'authUid', localKey: 'bmg_user_profiles_v2', readOnly: true }
+          ? {
+              rootCollection: true,
+              documentIdField: 'authUid',
+              localKey: 'bmg_user_profiles_v2',
+              readOnly: true,
+              requireServerSnapshot: true,
+              queryPlan: createFirestoreCollectionQueryPlan({
+                  collectionName: 'users',
+                  currentUser,
+              }),
+          }
           : {},
   );
-  const [projects, setProjects] = usePersistentCollection('bmg_projects', INITIAL_PROJECTS, fbUser);
-  const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, businessFbUser);
-  const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, businessFbUser);
-  const [dailyReports, setDailyReports] = usePersistentCollection('bmg_dailyReports', INITIAL_DAILY_REPORTS, businessFbUser);
-  const [repairs, setRepairs] = usePersistentCollection('bmg_repairs', INITIAL_REPAIRS, businessFbUser);
-  const [contractors, setContractors] = usePersistentCollection('bmg_contractors', INITIAL_CONTRACTORS, businessFbUser);
-  const [assets, setAssets] = usePersistentCollection('bmg_assets', INITIAL_ASSETS, businessFbUser);
-  const [tools, setTools] = usePersistentCollection('bmg_tools', INITIAL_TOOLS, businessFbUser);
-  const [machines, setMachines] = usePersistentCollection('bmg_machines', INITIAL_MACHINES, businessFbUser);
-  const [pmPlans, setPmPlans] = usePersistentCollection('bmg_pmPlans', INITIAL_PM_PLANS, businessFbUser);
-  const [pmHistoryList, setPmHistoryList] = usePersistentCollection('bmg_pmHistoryList', INITIAL_PM_HISTORY, businessFbUser);
-  const [meters, setMeters] = usePersistentCollection('bmg_meters', INITIAL_METERS, businessFbUser);
-  const [utilityReadings, setUtilityReadings] = usePersistentCollection('bmg_utilityReadings', INITIAL_READINGS, businessFbUser);
-  const [actionPlans, setActionPlans] = usePersistentCollection('bmg_actionPlans', INITIAL_ACTION_PLANS, businessFbUser);
-  const [othersData, setOthersData] = usePersistentCollection('bmg_othersData', INITIAL_OTHERS, businessFbUser);
-  const [formsList, setFormsList] = usePersistentCollection('bmg_forms_list', STANDARD_FORMS, businessFbUser);
-  const [meetingsList, setMeetingsList] = usePersistentCollection('bmg_meetings', INITIAL_MEETINGS, businessFbUser);
-  const [announcements, setAnnouncements] = usePersistentCollection('bmg_announcements', INITIAL_ANNOUNCEMENTS, businessFbUser);
-  const [deposits, setDeposits] = usePersistentCollection('bmg_deposits', INITIAL_DEPOSITS, businessFbUser);
-  const [inventoryList, setInventoryList] = usePersistentCollection('bmg_inventory', INITIAL_INVENTORY, businessFbUser);
-  const [inventoryTransactions, setInventoryTransactions] = usePersistentCollection('bmg_inventory_transactions', INITIAL_TRANSACTIONS, businessFbUser);
+  const dashboardDailyReportScope = useMemo(
+      () => createMonthScope('date', reportRankingMonth),
+      [reportRankingMonth],
+  );
+  const dailyReportScope = activeMenu === 'dashboard'
+      ? dashboardDailyReportScope
+      : currentMonthScope;
+  const [projects, setProjects, isProjectsLoaded] = usePersistentCollection(
+      'bmg_projects',
+      INITIAL_PROJECTS,
+      subscriptionPolicy.userFor('bmg_projects'),
+      USE_FIREBASE_BUSINESS_AUTH
+          ? {
+              // Wait for the authoritative server snapshot before treating projects as
+              // "loaded". Otherwise a restricted user's post-auth destination can resolve
+              // to "assigned-project-unavailable" from an empty/partial cache snapshot
+              // that arrives before the scoped server result, showing a false
+              // "ไม่พบข้อมูลโครงการที่สังกัด" until the next render.
+              requireServerSnapshot: true,
+              queryPlan: createFirestoreCollectionQueryPlan({
+                  collectionName: 'bmg_projects',
+                  currentUser,
+              }),
+          }
+          : { queryPlan: { kind: 'unscoped', targets: [[]] } },
+  );
+  const postAuthDestination = useMemo(() => resolvePostAuthDestination({
+      user: currentUser,
+      projects,
+      projectsLoaded: isProjectsLoaded,
+  }), [currentUser, projects, isProjectsLoaded]);
+  const accessibleProjects = useMemo(() => filterAccessibleProjects({
+      user: currentUser,
+      projects,
+  }), [currentUser, projects]);
+  const queryPlanFor = (collectionName, extra = {}) => (
+      USE_FIREBASE_BUSINESS_AUTH
+          ? createFirestoreCollectionQueryPlan({
+              collectionName,
+              currentUser,
+              selectedProject,
+              accessibleProjects,
+              ...extra,
+          })
+          : { kind: 'unscoped', targets: [[]] }
+  );
+
+  useEffect(() => {
+      if (postAuthDestination.kind !== 'assigned-project') return;
+      if (selectedProject?.id === postAuthDestination.project.id) return;
+
+      setSelectedProject(postAuthDestination.project);
+      setActiveMenu('projects');
+      setProjectTab('overview');
+  }, [postAuthDestination.kind, postAuthDestination.project, selectedProject?.id]);
+  const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, subscriptionPolicy.userFor('bmg_contracts'), { queryPlan: queryPlanFor('bmg_contracts') });
+  // Supplier search must surface คู่สัญญา from EVERY project, regardless of the unit the module is opened from.
+  // Load contracts with selectedProject forced to null so the plan is unscoped (global access) or scoped to all
+  // accessible projects — never limited to the single selected project. Read-only + separate localKey so it never
+  // collides with, or writes back over, the project-scoped `contracts` subscription used by the Contracts tab.
+  const [allContracts] = usePersistentCollection(
+      'bmg_contracts',
+      INITIAL_CONTRACTS,
+      subscriptionPolicy.userFor('bmg_contracts'),
+      {
+          readOnly: true,
+          localKey: 'bmg_contracts_allProjects',
+          queryPlan: queryPlanFor('bmg_contracts', { selectedProject: null }),
+      },
+  );
+  const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, subscriptionPolicy.userFor('bmg_audits'), { queryPlan: queryPlanFor('bmg_audits') });
+  const [dailyReports, setDailyReports] = usePersistentCollection(
+      'bmg_dailyReports',
+      INITIAL_DAILY_REPORTS,
+      subscriptionPolicy.userFor('bmg_dailyReports'),
+      {
+          ...(shouldScopeHeavyHistory ? { dateScope: dailyReportScope } : {}),
+          queryPlan: queryPlanFor('bmg_dailyReports'),
+      },
+  );
+  const [repairs, setRepairs] = usePersistentCollection('bmg_repairs', INITIAL_REPAIRS, subscriptionPolicy.userFor('bmg_repairs'), { queryPlan: queryPlanFor('bmg_repairs') });
+  const [contractors, setContractors] = usePersistentCollection('bmg_contractors', INITIAL_CONTRACTORS, subscriptionPolicy.userFor('bmg_contractors'), { queryPlan: queryPlanFor('bmg_contractors') });
+  const [assets, setAssets] = usePersistentCollection('bmg_assets', INITIAL_ASSETS, subscriptionPolicy.userFor('bmg_assets'), { queryPlan: queryPlanFor('bmg_assets') });
+  const [tools, setTools] = usePersistentCollection('bmg_tools', INITIAL_TOOLS, subscriptionPolicy.userFor('bmg_tools'), { queryPlan: queryPlanFor('bmg_tools') });
+  const [machines, setMachines] = usePersistentCollection('bmg_machines', INITIAL_MACHINES, subscriptionPolicy.userFor('bmg_machines'), { queryPlan: queryPlanFor('bmg_machines') });
+  const [pmPlans, setPmPlans] = usePersistentCollection('bmg_pmPlans', INITIAL_PM_PLANS, subscriptionPolicy.userFor('bmg_pmPlans'), { queryPlan: queryPlanFor('bmg_pmPlans') });
+  const [pmHistoryList, setPmHistoryList] = usePersistentCollection(
+      'bmg_pmHistoryList',
+      INITIAL_PM_HISTORY,
+      subscriptionPolicy.userFor('bmg_pmHistoryList'),
+      {
+          ...(shouldScopeHeavyHistory ? { dateScope: currentMonthScope } : {}),
+          queryPlan: queryPlanFor('bmg_pmHistoryList'),
+      },
+  );
+  const [meters, setMeters] = usePersistentCollection('bmg_meters', INITIAL_METERS, subscriptionPolicy.userFor('bmg_meters'), { queryPlan: queryPlanFor('bmg_meters') });
+  const [utilityReadings, setUtilityReadings] = usePersistentCollection('bmg_utilityReadings', INITIAL_READINGS, subscriptionPolicy.userFor('bmg_utilityReadings'), { queryPlan: queryPlanFor('bmg_utilityReadings', { meters }) });
+  const [actionPlans, setActionPlans] = usePersistentCollection('bmg_actionPlans', INITIAL_ACTION_PLANS, subscriptionPolicy.userFor('bmg_actionPlans'), { queryPlan: queryPlanFor('bmg_actionPlans') });
+  const [othersData, setOthersData] = usePersistentCollection('bmg_othersData', INITIAL_OTHERS, subscriptionPolicy.userFor('bmg_othersData'), { queryPlan: queryPlanFor('bmg_othersData') });
+  const [formsList, setFormsList] = usePersistentCollection('bmg_forms_list', STANDARD_FORMS, subscriptionPolicy.userFor('bmg_forms_list'), { queryPlan: queryPlanFor('bmg_forms_list') });
+  const [meetingsList, setMeetingsList] = usePersistentCollection('bmg_meetings', INITIAL_MEETINGS, subscriptionPolicy.userFor('bmg_meetings'), { queryPlan: queryPlanFor('bmg_meetings') });
+  const [announcements, setAnnouncements] = usePersistentCollection('bmg_announcements', INITIAL_ANNOUNCEMENTS, subscriptionPolicy.userFor('bmg_announcements'), { queryPlan: queryPlanFor('bmg_announcements') });
+  const [deposits, setDeposits] = usePersistentCollection('bmg_deposits', INITIAL_DEPOSITS, subscriptionPolicy.userFor('bmg_deposits'), { queryPlan: queryPlanFor('bmg_deposits') });
+  const [inventoryList, setInventoryList] = usePersistentCollection('bmg_inventory', INITIAL_INVENTORY, subscriptionPolicy.userFor('bmg_inventory'), { queryPlan: queryPlanFor('bmg_inventory') });
+  const [inventoryTransactions, setInventoryTransactions] = usePersistentCollection('bmg_inventory_transactions', INITIAL_TRANSACTIONS, subscriptionPolicy.userFor('bmg_inventory_transactions'), { queryPlan: queryPlanFor('bmg_inventory_transactions') });
 
   // --- NEW: Meeting Invitations State ---
-  const [meetingInvitations, setMeetingInvitations] = usePersistentCollection('bmg_meeting_invitations', [], businessFbUser);
-  const [showAddInvitationModal, setShowAddInvitationModal] = useState(false);
-  const [selectedInvitationView, setSelectedInvitationView] = useState(null); // NEW: State สำหรับเก็บข้อมูลหนังสือเชิญที่ถูกเลือกดู
-  const [newInvitation, setNewInvitation] = useState({
+  const [meetingInvitations, setMeetingInvitations] = usePersistentCollection('bmg_meeting_invitations', [], subscriptionPolicy.userFor('bmg_meeting_invitations'), { queryPlan: queryPlanFor('bmg_meeting_invitations') });
+  const [, setShowAddInvitationModal] = useState(false);
+  const [, setSelectedInvitationView] = useState(null); // NEW: State สำหรับเก็บข้อมูลหนังสือเชิญที่ถูกเลือกดู
+  const [, setNewInvitation] = useState({
       id: null,
       meetingId: '',
       title: 'ขอเชิญเข้าร่วมประชุม',
@@ -3850,10 +4207,10 @@ export default function App() {
   });
 
   // --- NEW: Meeting Proxies State ---
-  const [meetingProxies, setMeetingProxies] = usePersistentCollection('bmg_meeting_proxies', [], businessFbUser);
-  const [showAddProxyModal, setShowAddProxyModal] = useState(false);
-  const [selectedProxyView, setSelectedProxyView] = useState(null);
-  const [newProxy, setNewProxy] = useState({
+  const [meetingProxies, setMeetingProxies] = usePersistentCollection('bmg_meeting_proxies', [], subscriptionPolicy.userFor('bmg_meeting_proxies'), { queryPlan: queryPlanFor('bmg_meeting_proxies') });
+  const [, setShowAddProxyModal] = useState(false);
+  const [, setSelectedProxyView] = useState(null);
+  const [, setNewProxy] = useState({
       id: null,
       meetingId: '',
       date: new Date().toISOString().split('T')[0],
@@ -3865,10 +4222,10 @@ export default function App() {
   });
 
   // --- NEW: Meetings Tab ---
-  const [meetingBallots, setMeetingBallots] = usePersistentCollection('bmg_meeting_ballots', [], businessFbUser);
-  const [showAddBallotModal, setShowAddBallotModal] = useState(false);
-  const [selectedBallotView, setSelectedBallotView] = useState(null);
-  const [newBallot, setNewBallot] = useState({
+  const [meetingBallots, setMeetingBallots] = usePersistentCollection('bmg_meeting_ballots', [], subscriptionPolicy.userFor('bmg_meeting_ballots'), { queryPlan: queryPlanFor('bmg_meeting_ballots') });
+  const [, setShowAddBallotModal] = useState(false);
+  const [, setSelectedBallotView] = useState(null);
+  const [, setNewBallot] = useState({
       id: null,
       meetingId: '',
       date: new Date().toISOString().split('T')[0],
@@ -3881,14 +4238,14 @@ export default function App() {
 
   // --- NEW: Extended Meeting States ---
   const [selectedMeetingManageId, setSelectedMeetingManageId] = useState('');
-  const [meetingAttendances, setMeetingAttendances] = usePersistentCollection('bmg_meeting_attendances', [], businessFbUser);
-  const [meetingAgendas, setMeetingAgendas] = usePersistentCollection('bmg_meeting_agendas', [], businessFbUser);
-  const [landDocsChecklist, setLandDocsChecklist] = usePersistentState('bmg_meeting_land_docs', {}, businessFbUser);
+  const [meetingAttendances, setMeetingAttendances] = usePersistentCollection('bmg_meeting_attendances', [], subscriptionPolicy.userFor('bmg_meeting_attendances'), { queryPlan: queryPlanFor('bmg_meeting_attendances') });
+  const [meetingAgendas, setMeetingAgendas] = usePersistentCollection('bmg_meeting_agendas', [], subscriptionPolicy.userFor('bmg_meeting_agendas'), { queryPlan: queryPlanFor('bmg_meeting_agendas') });
+  const [landDocsChecklist, setLandDocsChecklist] = usePersistentState('bmg_meeting_land_docs', {}, subscriptionPolicy.userFor('bmg_meeting_land_docs'));
   const [newAttendance, setNewAttendance] = useState({ unitNo: '', ownerName: '', attendeeName: '', type: 'เจ้าของร่วม', weight: 1 });
   const [newAgendaTitle, setNewAgendaTitle] = useState('');
 
   // --- NEW: Project Events (Calendar) State ---
-  const [projectEvents, setProjectEvents] = usePersistentCollection('bmg_project_events', [], businessFbUser);
+  const [projectEvents, setProjectEvents] = usePersistentCollection('bmg_project_events', [], subscriptionPolicy.userFor('bmg_project_events'), { queryPlan: queryPlanFor('bmg_project_events') });
   const [showAddEventModal, setShowAddEventModal] = useState(false);
   const [currentEventMonth, setCurrentEventMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [selectedEventDate, setSelectedEventDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -3902,106 +4259,6 @@ export default function App() {
       projectId: ''
   });
 
-  // คงใช้ usePersistentState สำหรับข้อมูลที่เป็น Object เดี่ยวๆ
-  // --- FIX: เปลี่ยนวิธีเก็บ schedules ให้ฉลาดขึ้น ลดภาระการโหลด ---
-  const [schedules, setSchedules] = useState(() => {
-      if (typeof window !== 'undefined') {
-          try {
-              const local = localStorage.getItem('bmg_schedules_v2');
-              if (local) return JSON.parse(local);
-              // Migrate old data if v2 doesn't exist
-              const oldLocal = localStorage.getItem('bmg_schedules');
-              if (oldLocal) return JSON.parse(oldLocal);
-          } catch(e) { return {}; }
-      }
-      return {};
-  });
-
-  const schedulesRef = useRef(schedules);
-  const syncScheduleTimeoutRef = useRef(null);
-  
-  useEffect(() => {
-      schedulesRef.current = schedules;
-  }, [schedules]);
-
-  // NEW: โหลดข้อมูลจาก IndexedDB เพื่อป้องกันปัญหา LocalStorage เต็ม (5MB Limit) ทำให้ข้อมูลหาย
-  useEffect(() => {
-      let isMounted = true;
-      const loadIDB = async () => {
-          const idbData = await loadStateLocallyIDB('bmg_schedules_v2');
-          if (idbData && Object.keys(idbData).length > 0 && isMounted) {
-              // อัปเดตข้อมูลหากใน IDB มีข้อมูลมากกว่าหรือสมบูรณ์กว่า LocalStorage
-              setSchedules(idbData);
-              schedulesRef.current = idbData;
-          }
-      };
-      loadIDB();
-      return () => { isMounted = false; };
-  }, []);
-
-  // Defer schedule cloud sync until app login.
-  useEffect(() => {
-      if (!isLoggedIn || !db || !fbUser || !appId) return;
-
-      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', 'bmg_schedules_v2');
-      
-      const unsubscribe = onSnapshot(docRef, async (docSnap) => {
-          if (docSnap.exists()) {
-              const data = docSnap.data();
-              if (data.totalChunks !== undefined) {
-                  let fullJson = '';
-                  let hasChunkError = false;
-                  for (let i = 0; i < data.totalChunks; i++) {
-                      const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `bmg_schedules_v2_${i}`);
-                      const chunkSnap = await getDoc(chunkRef);
-                      if (chunkSnap.exists()) {
-                          fullJson += chunkSnap.data().chunk;
-                      } else {
-                          hasChunkError = true;
-                      }
-                  }
-                  
-                  if (!hasChunkError && fullJson) {
-                      try {
-                          const parsedData = JSON.parse(fullJson);
-                          
-                          // FIX: ป้องกันข้อมูลหายจากกรณีโหลด Cloud มาเป็นค่าว่าง แต่ในเครื่องมีข้อมูลอยู่
-                          const isParsedEmpty = Object.keys(parsedData || {}).length === 0;
-                          const isCurrentNotEmpty = Object.keys(schedulesRef.current || {}).length > 0;
-                          
-                          if (isParsedEmpty && isCurrentNotEmpty) {
-                              console.warn("Prevented overwriting local schedules with empty cloud data.");
-                              return;
-                          }
-
-                          if (JSON.stringify(schedulesRef.current) !== JSON.stringify(parsedData)) {
-                              setSchedules(parsedData);
-                              schedulesRef.current = parsedData;
-                              
-                              // บันทึกลง IndexedDB เป็นหลัก (ไม่จำกัดขนาด ไม่สูญหายง่าย)
-                              saveStateLocallyIDB('bmg_schedules_v2', parsedData);
-                              
-                              if (typeof window !== 'undefined') {
-                                  try {
-                                      localStorage.setItem('bmg_schedules_v2', JSON.stringify(parsedData));
-                                  } catch(e) {
-                                      console.warn("LocalStorage Quota Exceeded for schedules. Relying on IndexedDB.");
-                                  }
-                              }
-                          }
-                      } catch (e) {
-                          console.error("Parse error for schedules v2", e);
-                      }
-                  }
-              }
-          }
-      }, (err) => {
-          console.error("Sync error for schedules", err);
-      });
-
-      return () => unsubscribe();
-  }, [db, fbUser, appId, isLoggedIn]);
-  
   const getLocalMonthStr = () => {
       const d = new Date();
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -4009,7 +4266,216 @@ export default function App() {
   const [currentMonth, setCurrentMonth] = useState(getLocalMonthStr());
   const [pmMonth, setPmMonth] = useState(getLocalMonthStr());
 
-  const [projectStaffOrder, setProjectStaffOrder] = usePersistentState('bmg_projectStaffOrder', {}, businessFbUser); // NEW: State สำหรับเก็บลำดับพนักงานในตารางงาน
+  const isLegacyScheduleArchiveAdmin = currentUser?.username === 'admin'
+      || currentUser?.position === 'Super Admin';
+  const shouldLoadLegacyScheduleArchive = Boolean(
+      isLegacyScheduleArchiveAdmin && selectedProject && projectTab === 'schedule',
+  );
+  const [legacyScheduleArchive] = usePersistentState(
+      'bmg_schedules_v2',
+      {},
+      shouldLoadLegacyScheduleArchive ? fbUser : null,
+  );
+
+  const [projectScheduleRecords, setProjectScheduleRecords, , , schedulesReadState] = usePersistentCollection(
+      'bmg_projectSchedules',
+      [],
+      subscriptionPolicy.userFor('bmg_projectSchedules'),
+      { queryPlan: queryPlanFor('bmg_projectSchedules') },
+  );
+  const scheduleViews = useMemo(
+      () => deriveProjectScheduleViews(projectScheduleRecords, selectedProject?.id),
+      [projectScheduleRecords, selectedProject?.id],
+  );
+  const needsScheduleRoster = usersReadState.status === 'blocked';
+  const minimalScheduleRoster = useScheduleRoster({
+      auth, user: fbUser, projectId: selectedProject?.id,
+      enabled: USE_FIREBASE_BUSINESS_AUTH && needsScheduleRoster && projectTab === 'schedule' && Boolean(selectedProject),
+  });
+  const scheduleRosterReadState = needsScheduleRoster ? minimalScheduleRoster : usersReadState;
+  const selectedProjectScheduleStaff = useMemo(
+      () => needsScheduleRoster ? minimalScheduleRoster.staff : users.filter((user) => user?.department === selectedProject?.name),
+      [needsScheduleRoster, minimalScheduleRoster.staff, users, selectedProject?.name],
+  );
+  const scheduleStaffIds = useMemo(
+      () => selectedProjectScheduleStaff
+          .map((user) => user?.id || user?.authUid)
+          .filter((id) => typeof id === 'string' && id.length > 0),
+      [selectedProjectScheduleStaff],
+  );
+  const scheduleStaffAliases = useMemo(
+      () => Object.fromEntries(selectedProjectScheduleStaff.map((user) => {
+          const canonicalId = user?.id || user?.authUid;
+          const aliases = [...new Set([user?.legacyId, user?.authUid, user?.id]
+              .filter((id) => typeof id === 'string' && id.length > 0 && id !== canonicalId))];
+          return [canonicalId, aliases];
+      }).filter(([canonicalId]) => typeof canonicalId === 'string' && canonicalId.length > 0)),
+      [selectedProjectScheduleStaff],
+  );
+  const legacyScheduleFallback = useMemo(
+      () => buildAdminLegacyScheduleFallback({
+          isAdmin: shouldLoadLegacyScheduleArchive,
+          month: currentMonth,
+          staffIds: scheduleStaffIds,
+          staffAliases: scheduleStaffAliases,
+          migratedStaffIds: projectScheduleRecords.find((record) =>
+              record.projectId === selectedProject?.id && record.month === currentMonth
+              && record.legacyCellMigration?.status === 'complete')?.legacyCellMigration?.staffIds ?? [],
+          projectSchedules: scheduleViews.schedules,
+          legacySchedules: legacyScheduleArchive,
+      }),
+      [
+          shouldLoadLegacyScheduleArchive,
+          currentMonth,
+          scheduleStaffIds,
+          scheduleStaffAliases,
+          scheduleViews.schedules,
+          legacyScheduleArchive,
+          projectScheduleRecords,
+          selectedProject?.id,
+      ],
+  );
+  const serverSchedules = legacyScheduleFallback.schedules;
+  const scheduleScopeKey = selectedProject?.id && currentMonth ? `${selectedProject.id}_${currentMonth}` : null;
+  const [scheduleDraft, setScheduleDraft] = useState(null);
+  const scheduleDraftRef = useRef(null);
+  const schedules = scheduleDraft?.scope === scheduleScopeKey ? scheduleDraft.cells : serverSchedules;
+  const isLegacyScheduleReadOnly = legacyScheduleFallback.isReadOnlyFallback;
+  const scheduleNotes = scheduleViews.scheduleNotes;
+  const scheduleApprovals = scheduleViews.scheduleApprovals;
+  const projectStaffOrder = scheduleViews.projectStaffOrder;
+  const schedulesRef = useRef(schedules);
+  const legacyEditInFlight = useRef(false);
+  const [isImportingLegacySchedule, setIsImportingLegacySchedule] = useState(false);
+  const legacyEditContext = { projectId: selectedProject?.id, month: currentMonth, actorUid: fbUser?.uid,
+      staffIds: scheduleStaffIds, staffAliases: scheduleStaffAliases, isAdmin: isLegacyScheduleArchiveAdmin };
+  const legacyEditContextRef = useRef(legacyEditContext);
+  legacyEditContextRef.current = legacyEditContext;
+
+  const handleEnableLegacyScheduleEditing = async () => {
+      if (legacyEditInFlight.current || !isLegacyScheduleArchiveAdmin || !selectedProject || !fbUser) return;
+      legacyEditInFlight.current = true;
+      setIsImportingLegacySchedule(true);
+      const context = legacyEditContext;
+      const targetId = `${context.projectId}_${context.month}`;
+      const expected = projectScheduleRecords.find(record => record.id === targetId);
+      const importedAt = new Date().toISOString();
+      const readArchive = () => readLegacyScheduleSnapshot(async (type, index) => {
+          const ref = type === 'metadata'
+              ? doc(db, 'artifacts', appId, 'public', 'data', 'app_state', 'bmg_schedules_v2')
+              : doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `bmg_schedules_v2_${index}`);
+          const snapshot = await getDocFromServer(ref);
+          return snapshot.exists() ? snapshot.data() : undefined;
+      });
+      try {
+          const archive = await readArchive();
+          const args = { ...context, legacySchedules: archive, confirmed: true, importedAt };
+          const preview = prepareLegacyScheduleEditing({ ...args, records: projectScheduleRecords });
+          const serverView = buildAdminLegacyScheduleFallback({
+              isAdmin: true, month: context.month, staffIds: context.staffIds, staffAliases: context.staffAliases,
+              migratedStaffIds: expected?.legacyCellMigration?.status === 'complete' ? expected.legacyCellMigration.staffIds : [],
+              projectSchedules: scheduleViews.schedules, legacySchedules: archive,
+          });
+          if (!scheduleDocumentEqual(serverView.schedules, schedules)) throw new Error('คลังบนเซิร์ฟเวอร์ไม่ตรงกับตารางที่แสดง กรุณาโหลดหน้าใหม่และตรวจข้อมูลก่อนนำเข้า');
+          if (!scheduleDocumentEqual(context, legacyEditContextRef.current)) throw new Error('โครงการ เดือน หรือผู้ใช้งานเปลี่ยน กรุณาเริ่มใหม่');
+          showConfirm('นำเข้าตารางเดิมเพื่อแก้ไข',
+              `${selectedProject.name} เดือน ${context.month}: พบ ${preview.cellCount} ช่องที่จับคู่ได้ โดยจะคงค่าชุดใหม่ไว้ ${preview.preservedConflicts} ช่องที่ต่างกัน กรุณายืนยันว่าพนักงานและกะที่แสดงเป็นของโครงการนี้ในเดือนนี้จริง (พนักงานที่เคยย้ายโครงการต้องตรวจสอบก่อน) ระบบเก็บสำเนาก่อนนำเข้าและไม่ลบคลังเดิม รายการนอกกลุ่มรหัสที่เลือกจะไม่นำเข้า การล็อกและสถานะอนุมัติเดิมยังคงอยู่`,
+              async () => {
+                  if (legacyEditInFlight.current) return;
+                  legacyEditInFlight.current = true;
+                  setIsImportingLegacySchedule(true);
+                  try {
+                      if (!scheduleDocumentEqual(context, legacyEditContextRef.current)) throw new Error('โครงการ เดือน หรือผู้ใช้งานเปลี่ยน กรุณาเริ่มใหม่');
+                      const latestArchive = await readArchive();
+                      if (!scheduleDocumentEqual(archive, latestArchive)) throw new Error('คลังตารางเดิมเปลี่ยนหลังตรวจ กรุณาตรวจและยืนยันใหม่');
+                      if (!scheduleDocumentEqual(context, legacyEditContextRef.current)) throw new Error('ข้อมูลผู้ใช้งานหรือโครงการเปลี่ยน กรุณาเริ่มใหม่');
+                      const result = await setProjectScheduleRecords(records => {
+                          if (!scheduleDocumentEqual(expected, records.find(record => record.id === targetId))) throw new Error('ตารางชุดใหม่เปลี่ยนแล้ว กรุณาตรวจและยืนยันใหม่');
+                          return prepareLegacyScheduleEditing({ ...args, records }).records;
+                      }, false, [targetId]);
+                      if (!result?.ok) throw result?.error || new Error('เซิร์ฟเวอร์ยังไม่ยืนยันการนำเข้า');
+                      alert('นำเข้าตารางเดิมสำเร็จ เก็บสำเนาค่าก่อนนำเข้าแล้ว สามารถแก้ไขตามสิทธิ์และสถานะล็อกของตาราง');
+                  } catch (error) {
+                      alert(`ยังไม่นำเข้าตารางเดิม: ${error.message}`);
+                  } finally {
+                      legacyEditInFlight.current = false;
+                      setIsImportingLegacySchedule(false);
+                  }
+              }, 'ยืนยันข้อมูลและนำเข้า', 'warning');
+      } catch (error) {
+          alert(`ยังไม่นำเข้าตารางเดิม: ${error.message}`);
+      } finally {
+          legacyEditInFlight.current = false;
+          setIsImportingLegacySchedule(false);
+      }
+  };
+
+  useEffect(() => {
+      schedulesRef.current = schedules;
+  }, [schedules]);
+
+  const setScheduleDraftCells = (newValueOrUpdater) => {
+      if (!scheduleScopeKey) return;
+      const currentDraft = scheduleDraftRef.current?.scope === scheduleScopeKey
+          ? scheduleDraftRef.current
+          : {
+              scope: scheduleScopeKey,
+              cells: serverSchedules,
+              baseline: projectScheduleRecords.find(record => record.id === scheduleScopeKey),
+          };
+      const nextCells = typeof newValueOrUpdater === 'function'
+          ? newValueOrUpdater(currentDraft.cells)
+          : newValueOrUpdater;
+      const nextDraft = { ...currentDraft, cells: nextCells };
+      scheduleDraftRef.current = nextDraft;
+      setScheduleDraft(nextDraft);
+  };
+
+  const updateProjectScheduleField = async (field, newValueOrUpdater) => {
+      const projectId = selectedProject?.id;
+      if (!projectId || !currentMonth) return;
+
+      const result = await setProjectScheduleRecords((records) => {
+          const id = `${projectId}_${currentMonth}`;
+          if (!scheduleDocumentEqual(projectScheduleRecords.find(record => record.id === id), records.find(record => record.id === id))) {
+              throw new Error('ข้อมูลตารางงานเพิ่งเปลี่ยน กรุณาตรวจหน้าจอล่าสุดแล้วลองใหม่');
+          }
+          const currentViews = deriveProjectScheduleViews(records, projectId);
+          const currentValue = field === 'schedules'
+              ? currentViews.schedules
+              : field === 'note'
+                  ? currentViews.scheduleNotes[`${projectId}_${currentMonth}`] || ''
+                  : field === 'approval'
+                      ? currentViews.scheduleApprovals[`${projectId}_${currentMonth}`] || {}
+                      : currentViews.projectStaffOrder;
+          const nextValue = typeof newValueOrUpdater === 'function'
+              ? newValueOrUpdater(currentValue)
+              : newValueOrUpdater;
+          let valueForDocument = nextValue;
+
+          if (field === 'schedules') {
+              valueForDocument = Object.fromEntries(Object.entries(nextValue || {})
+                  .filter(([key]) => key.includes(`_${currentMonth}-`)));
+          } else if (field === 'staffOrder') {
+              valueForDocument = nextValue?.[projectId] || [];
+          }
+
+          return upsertProjectSchedule(records, {
+              projectId,
+              month: currentMonth,
+              update: { [field]: valueForDocument },
+          });
+      });
+      if (!result?.ok) alert(result?.error?.message || 'ยังไม่ได้บันทึกตารางงาน กรุณาลองใหม่');
+      return result;
+  };
+
+  const setScheduleApprovals = (value) => updateProjectScheduleField('approval', (currentApproval) => {
+      const currentMap = { [`${selectedProject?.id}_${currentMonth}`]: currentApproval };
+      const nextMap = typeof value === 'function' ? value(currentMap) : value;
+      return nextMap?.[`${selectedProject?.id}_${currentMonth}`] || {};
+  });
+  const setProjectStaffOrder = (value) => updateProjectScheduleField('staffOrder', value);
   const dragItem = useRef(null); // NEW: Ref สำหรับจดจำ index ที่ถูกลาก
   const dragOverItem = useRef(null); // NEW: Ref สำหรับจดจำ index เป้าหมายที่จะวาง
 
@@ -4026,7 +4492,7 @@ export default function App() {
   const [theme, setTheme] = useUserPersistentState('bmg_theme', 'light', fbUser);
 
   // NEW: Role Permissions State
-  const [rolePermissions, setRolePermissions] = usePersistentState('bmg_rolePermissions', {}, businessFbUser);
+  const [rolePermissions, setRolePermissions] = usePersistentState('bmg_rolePermissions', {}, subscriptionPolicy.userFor('bmg_rolePermissions'));
   const [showRolePermModal, setShowRolePermModal] = useState(false);
   const [editingRole, setEditingRole] = useState(EMPLOYEE_POSITIONS[0]);
   const [editingRolePerms, setEditingRolePerms] = useState(getDefaultPermissions());
@@ -4128,42 +4594,75 @@ export default function App() {
               }
           }
       }
-  }, [users]);
+  }, [users, currentUser]);
 
-  // --- NEW: ตรวจจับและบันทึกเวลาล่าสุดเมื่อเปิดระบบ (Refresh/Auto-login) เพื่อให้ซิงค์ข้ามเครื่อง ---
+  // --- Presence / last-active. Stored in its own bmg_presence collection because
+  // the users collection is read-only to clients. Each client writes ONLY its own
+  // presence doc (keyed by auth uid), throttled, so online status syncs across
+  // devices without needing write access to the users directory. ---
+  const [presenceDocs, setPresenceDocs] = useState([]);
+  const presenceUserId = currentUser?.id; // legacy-mode key
+  const presenceWriter = useRef(setUsers);
+  useEffect(() => { presenceWriter.current = setUsers; }, [setUsers]);
+
+  // Subscribe to presence (only when we may view the staff directory).
+  const canViewStaffDirectory = hasUserPermission(currentUser, 'proj_staff', 'view');
   useEffect(() => {
-      // 🛡️ ป้องกันการใช้ข้อมูลเก่าจาก LocalStorage ไปทับข้อมูลบน Server โดยการรอให้ Sync ข้อมูลจาก Server ให้เสร็จก่อนเสมอ!
-      if (!currentUser || !isUsersSynced) return; 
+      if (!USE_FIREBASE_BUSINESS_AUTH || !db || !appId || !fbUser) return;
+      if (!canViewStaffDirectory) return;
+      const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'bmg_presence_docs');
+      const unsub = onSnapshot(colRef, (snap) => {
+          const docs = [];
+          snap.forEach((d) => docs.push(d.data()));
+          setPresenceDocs(docs);
+      }, () => { /* offline: keep last known presence */ });
+      return () => unsub();
+      // db/appId are module-level and set once at init; not reactive deps.
+  }, [fbUser, canViewStaffDirectory]);
 
-      // ฟังก์ชันสำหรับอัปเดตเวลาล่าสุด
+  // Write our own heartbeat.
+  useEffect(() => {
+      if (USE_FIREBASE_BUSINESS_AUTH) {
+          const authUid = currentUser?.authUid || fbUser?.uid;
+          if (!db || !appId || !authUid) return;
+          const ref = doc(db, 'artifacts', appId, 'public', 'data', 'bmg_presence_docs', authUid);
+          let lastWrite = 0;
+          const beat = async () => {
+              const nowMs = Date.now();
+              if (!shouldWriteHeartbeat(new Date(lastWrite).toISOString(), nowMs)) return;
+              lastWrite = nowMs;
+              try { await setDoc(ref, buildPresenceDoc(authUid, new Date(nowMs).toISOString())); }
+              catch (e) { console.warn('presence heartbeat skipped', e?.code || e); }
+          };
+          beat();
+          const intervalId = setInterval(beat, 60 * 1000);
+          return () => clearInterval(intervalId);
+      }
+      // Legacy (localStorage) mode: keep updating lastLogin on the in-memory users.
+      if (!presenceUserId || !isUsersSynced) return;
       const updatePresence = () => {
-          setUsers(prevUsers => {
+          presenceWriter.current(prevUsers => {
               if (!Array.isArray(prevUsers)) return prevUsers;
-              const foundUser = prevUsers.find(u => u.id === currentUser.id);
+              const foundUser = prevUsers.find(u => u.id === presenceUserId);
               if (!foundUser) return prevUsers;
-              
               const lastLoginTime = new Date(foundUser.lastLogin || 0).getTime();
-              const nowTime = new Date().getTime();
-              
-              // อัปเดตเวลาลงฐานข้อมูลทุกๆ 5 นาที (300,000 ms) เพื่อให้สถานะไม่หมดอายุ (15 นาที)
-              if (nowTime - lastLoginTime > 5 * 60 * 1000) { 
-                  return prevUsers.map(u => 
-                      u.id === currentUser.id ? { ...u, lastLogin: new Date().toISOString() } : u
-                  );
+              if (Date.now() - lastLoginTime > PRESENCE_HEARTBEAT_MS) {
+                  return prevUsers.map(u => u.id === presenceUserId ? { ...u, lastLogin: new Date().toISOString() } : u);
               }
-              return prevUsers; // ถ้าสียังไม่ถึง 5 นาที ไม่ต้องสั่งอัปเดต State (ลดการดึงเครือข่าย)
+              return prevUsers;
           });
       };
-
-      // รันเช็คครั้งแรกเมื่อระบบโหลดเสร็จ
       updatePresence();
-
-      // ตั้งเวลาเช็คซ้ำทุกๆ 1 นาทีตราบใดที่เปิดหน้าเว็บอยู่
       const intervalId = setInterval(updatePresence, 60 * 1000);
-
-      // ยกเลิกการตั้งเวลาเมื่อผู้ใช้ออกจากระบบหรือปิดหน้าต่าง
       return () => clearInterval(intervalId);
-  }, [currentUser?.id, isUsersSynced]); // ผูกกับ Dependency 2 ตัวนี้
+      // db/appId are module-level and set once at init; not reactive deps.
+  }, [presenceUserId, isUsersSynced, currentUser?.authUid, fbUser?.uid]);
+
+  // Merge cross-device presence onto the directory for display.
+  const usersWithPresence = useMemo(
+      () => (USE_FIREBASE_BUSINESS_AUTH ? mergePresenceIntoUsers(users, presenceDocs) : users),
+      [users, presenceDocs],
+  );
 
   // --- NEW: Auto-Sync State (สถานะการซิงค์อัตโนมัติ) ---
   const [autoSyncMessage, setAutoSyncMessage] = useState('');
@@ -4174,7 +4673,7 @@ export default function App() {
           try {
               const parsed = JSON.parse(localStorage.getItem('bmg_dismissed_announcements') || '[]');
               return Array.isArray(parsed) ? parsed : [];
-          } catch(e) { return []; }
+          } catch { return []; }
       }
       return [];
   });
@@ -4418,9 +4917,29 @@ export default function App() {
           let fileName = fileObj?.name || defaultName;
           let fileData = null;
 
-          const GOOGLE_SCRIPT_GET_FILE_URL = GOOGLE_SCRIPT_CONFIG.DRIVE_URL; 
+          const GOOGLE_SCRIPT_GET_FILE_URL = GOOGLE_SCRIPT_CONFIG.DRIVE_URL;
 
-          // --- 1. ลองดึงข้อมูลจาก Local (IndexedDB) ของเครื่องนี้ก่อน ---
+          // --- 0. ไฟล์ที่อยู่บน Firebase Storage (แนวทางใหม่: เปิดได้จากทุกเครื่อง) ---
+          if (storage && isStorageBackedRef(fileObj)) {
+              try {
+                  const url = await getProjectFileUrl({ storage, sdk: STORAGE_SDK, fileObj });
+                  if (url) {
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.target = '_blank';
+                      a.rel = 'noopener';
+                      a.download = fileName;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      return;
+                  }
+              } catch (err) {
+                  console.error('Storage download failed, trying local/Drive fallback', err);
+              }
+          }
+
+          // --- 1. ลองดึงข้อมูลจาก Local (IndexedDB) ของเครื่องนี้ก่อน (ไฟล์เก่า) ---
           if (fileObj?.isLocal && fileObj?.fileId) {
               fileData = await getFileLocally(fileObj.fileId);
           }
@@ -4519,24 +5038,7 @@ export default function App() {
 
   // ฟังก์ชันตรวจสอบสิทธิ์การเข้าถึง (Permission Checker)
   const hasPerm = (menuId, action = 'view') => {
-      if (!currentUser) return false;
-      if (currentUser.username === 'admin' || currentUser.position === 'Super Admin') return true; // Admin เข้าถึงได้ทุกอย่าง
-      
-      const perms = currentUser.permissions || {};
-      
-      // Backward Compatibility: ถ้าเป็นเมนูย่อยของหน่วยงาน และไม่มีข้อมูลสิทธิ์เดิมในระบบ ให้ถือว่าดูได้ไปก่อน (ป้องกันเมนูหาย)
-      if (menuId.startsWith('proj_') && action === 'view' && (!perms[menuId] || perms[menuId].view === undefined)) {
-          return true;
-      }
-      
-      // FIX: บังคับให้เห็นเมนู "โครงการ" ทันที หากมีการระบุ "หน่วยงานที่เข้าถึงได้" ไว้ (ป้องกัน Admin ลืมติ๊กสิทธิ์)
-      if (menuId === 'projects' && action === 'view') {
-          const depts = currentUser.accessibleDepts;
-          const deptsArray = Array.isArray(depts) ? depts : (typeof depts === 'string' ? depts.split(', ').filter(Boolean) : []);
-          if (deptsArray.length > 0) return true;
-      }
-      
-      return !!perms[menuId]?.[action];
+      return hasUserPermission(currentUser, menuId, action);
   };
 
   // NEW: ฟังก์ชันตรวจสอบว่าผู้ใช้สามารถเข้าถึงได้หลายโครงการหรือไม่
@@ -4688,25 +5190,57 @@ export default function App() {
   const t = (key) => TRANSLATIONS[lang][key] || key;
   const changeMonth = (increment) => { const [year, month] = currentMonth.split('-').map(Number); const date = new Date(year, month - 1 + increment, 1); const newYear = date.getFullYear(); const newMonth = String(date.getMonth() + 1).padStart(2, '0'); setCurrentMonth(`${newYear}-${newMonth}`); }; const getDaysInMonth = (year, month) => { const numDays = new Date(year, month, 0).getDate(); return Array.from({ length: numDays }, (_, i) => i + 1); }; 
   
-  const handleSaveSchedule = () => { 
+  const scheduleSaveInFlight = useRef(false);
+  const [isSavingSchedule, setIsSavingSchedule] = useState(false);
+  const handleSaveSchedule = async () => {
+      if (scheduleSaveInFlight.current) return;
+      scheduleSaveInFlight.current = true;
+      setIsSavingSchedule(true);
       try {
+          if (isLegacyScheduleReadOnly) {
+              alert('ตารางนี้กำลังแสดงข้อมูลจากคลังเดิมแบบอ่านอย่างเดียว กรุณาย้ายและตรวจสอบข้อมูลก่อนแก้ไข');
+              return;
+          }
           if (selectedProject) {
-              const noteKey = `${selectedProject.id}_${currentMonth}`;
-              setScheduleNotes(prev => ({ ...prev, [noteKey]: scheduleNote }));
-              
-              // --- FIX: แยกการเซฟ Schedules ออกมาทำแบบมีระบบป้องกัน ---
-              const scheduleData = schedulesRef.current;
-              
-              // 1. บันทึกลง IndexedDB เป็นหลัก (เพื่อป้องกัน LocalStorage เต็มแล้วแอปค้าง)
-              saveStateLocallyIDB('bmg_schedules_v2', scheduleData);
-
-              // 2. ลองบันทึกลง LocalStorage (ดัก Error ไว้ไม่ให้แอปพังถ้าเกิน 5MB)
-              if (typeof window !== 'undefined') {
-                  try {
-                      localStorage.setItem('bmg_schedules_v2', JSON.stringify(scheduleData));
-                  } catch (e) {
-                      console.warn("LocalStorage full, schedule saved to IndexedDB instead.");
+              const approvalKey = `${selectedProject.id}_${currentMonth}`;
+              const activeDraft = scheduleDraftRef.current?.scope === approvalKey ? scheduleDraftRef.current : null;
+              const scheduleData = activeDraft?.cells || schedulesRef.current;
+              const expectedRecord = activeDraft
+                  ? activeDraft.baseline
+                  : projectScheduleRecords.find(record => record.id === approvalKey);
+              const currentApproval = scheduleApprovals[approvalKey] || {};
+              const isManager = (currentUser?.position || '').includes('ผู้จัดการอาคาร') || (currentUser?.position || '').includes('ผู้จัดการหมู่บ้าน');
+              const isAreaManager = (currentUser?.position || '').includes('ผู้จัดการพื้นที่');
+              const isAdmin = currentUser?.username === 'admin';
+              const nextStatus = isAreaManager || isAdmin ? 'Pending HR' : isManager ? 'Pending Area Manager' : 'Pending Manager';
+              // Cells, note and submission status belong to the same acknowledged write.
+              // Force this document on retries even when the optimistic local cache is identical.
+              const result = await setProjectScheduleRecords((records) => {
+                  if (!scheduleDocumentEqual(expectedRecord, records.find(record => record.id === approvalKey))) {
+                      throw new Error('ข้อมูลตารางงานเพิ่งเปลี่ยน กรุณาตรวจหน้าจอล่าสุดแล้วลองใหม่');
                   }
+                  return upsertProjectSchedule(records, {
+                  projectId: selectedProject.id,
+                  month: currentMonth,
+                  update: {
+                      schedules: Object.fromEntries(Object.entries(scheduleData).filter(([key]) => key.includes(`_${currentMonth}-`))),
+                      note: scheduleNote,
+                      approval: {
+                          ...currentApproval,
+                          status: nextStatus,
+                          preparedBy: `${currentUser.firstName} ${currentUser.lastName}`,
+                          preparedByRole: currentUser.position,
+                          managerApprovedBy: (isAreaManager || isAdmin) ? `${currentUser.firstName} ${currentUser.lastName}` : null,
+                          managerApprovedByRole: (isAreaManager || isAdmin) ? currentUser.position : null,
+                          updatedAt: new Date().toISOString(),
+                      },
+                  },
+                  });
+              }, false, [approvalKey]);
+              if (!result?.ok) throw result?.error || new Error('เซิร์ฟเวอร์ยังไม่ยืนยันการบันทึก');
+              if (scheduleDraftRef.current?.scope === approvalKey) {
+                  scheduleDraftRef.current = null;
+                  setScheduleDraft(null);
               }
 
               // --- NEW: ส่ง Backup ของ Schedule ขึ้น Google Drive เป็นไฟล์ JSON ด้วย ---
@@ -4796,81 +5330,19 @@ export default function App() {
                   }
               }
 
-              if (db && fbUser && appId) {
-                  if (syncScheduleTimeoutRef.current) clearTimeout(syncScheduleTimeoutRef.current);
-                  
-                  // แจ้งผู้ใช้ว่ากำลังบันทึก (เพราะข้อมูลอาจจะใหญ่)
-                  setAutoSyncMessage('กำลังบันทึกข้อมูลตารางงาน...');
-
-                  syncScheduleTimeoutRef.current = setTimeout(async () => {
-                      try {
-                          const jsonStr = JSON.stringify(scheduleData);
-                          const CHUNK_SIZE = 250000; // FIX: ลดขนาด Chunk ลงเพื่อป้องกันขีดจำกัด
-                          const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
-                          
-                          for (let i = 0; i < totalChunks; i++) {
-                              const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `bmg_schedules_v2_${i}`);
-                              const chunkData = jsonStr.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                              await setDoc(chunkRef, { chunk: chunkData });
-                          }
-                          
-                          const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'app_state', 'bmg_schedules_v2');
-                          await setDoc(metaRef, { totalChunks, timestamp: Date.now() });
-                          
-                          setAutoSyncMessage('บันทึกตารางงานสำเร็จ');
-                          setTimeout(() => setAutoSyncMessage(''), 3000);
-                      } catch (err) {
-                          console.error(`Firestore Schedule Save Error:`, err);
-                          alert('เกิดข้อผิดพลาดในการบันทึกตารางงาน (กรุณาลองอีกครั้ง)');
-                          setAutoSyncMessage('');
-                      } finally {
-                          syncScheduleTimeoutRef.current = null;
-                      }
-                  }, 1000);
-              }
-              
-              // --- NEW: Workflow Logic ---
-              const approvalKey = `${selectedProject.id}_${currentMonth}`;
-              const currentApproval = scheduleApprovals[approvalKey] || {};
-              
-              const isManager = (currentUser?.position || '').includes('ผู้จัดการอาคาร') || (currentUser?.position || '').includes('ผู้จัดการหมู่บ้าน');
-              const isAreaManager = (currentUser?.position || '').includes('ผู้จัดการพื้นที่');
-              const isAdmin = currentUser?.username === 'admin';
-              
-              let nextStatus = 'Pending Manager';
-              
-              // ถ้าเป็น Area Manager หรือ Admin ทำเอง ให้ไปรอ HR อนุมัติเลย
-              if (isAreaManager || isAdmin) {
-                  nextStatus = 'Pending HR';
-              } 
-              // ถ้าเป็น Manager ทำเอง ให้ส่งไปรอ Area Manager อนุมัติ
-              else if (isManager) {
-                  nextStatus = 'Pending Area Manager';
-              }
-              
-              setScheduleApprovals(prev => ({
-                  ...prev,
-                  [approvalKey]: {
-                      ...currentApproval,
-                      status: nextStatus,
-                      preparedBy: `${currentUser.firstName} ${currentUser.lastName}`,
-                      preparedByRole: currentUser.position,
-                      managerApprovedBy: (isAreaManager || isAdmin) ? `${currentUser.firstName} ${currentUser.lastName}` : null,
-                      managerApprovedByRole: (isAreaManager || isAdmin) ? currentUser.position : null,
-                      updatedAt: new Date().toISOString()
-                  }
-              }));
-
               alert(`บันทึกตารางงานสำเร็จ! ระบบได้ส่งข้อมูลให้ ${nextStatus === 'Pending Area Manager' ? 'ผู้จัดการพื้นที่' : nextStatus === 'Pending HR' ? 'เจ้าหน้าที่ฝ่ายบุคคล (HR)' : 'ผู้จัดการ'} อนุมัติตามลำดับแล้ว`); 
           }
       } catch (error) {
           console.error("Critical error in handleSaveSchedule:", error);
           alert(`เกิดข้อผิดพลาดระหว่างการบันทึก: ${error.message}`);
+      } finally {
+          scheduleSaveInFlight.current = false;
+          setIsSavingSchedule(false);
       }
   }; 
 
   // --- NEW: Handle Schedule Approval ---
-  const handleApproveSchedule = () => {
+  const handleApproveSchedule = async () => {
       if (!selectedProject) return;
       const approvalKey = `${selectedProject.id}_${currentMonth}`;
       const currentApproval = scheduleApprovals[approvalKey];
@@ -4882,26 +5354,27 @@ export default function App() {
 
       let nextStatus = currentApproval.status;
       let updates = {};
+      let successMessage;
 
       if (currentApproval.status === 'Pending Manager' && isManager) {
           // หากคนอนุมัติเป็น Manager ปกติให้ส่งไป HR ได้เลย (กรณีลูกน้องเป็นคนทำ)
           nextStatus = 'Pending HR';
           updates.managerApprovedBy = `${currentUser.firstName} ${currentUser.lastName}`;
           updates.managerApprovedByRole = currentUser.position;
-          alert('อนุมัติตารางงานระดับ "ผู้จัดการ" สำเร็จ! ระบบส่งต่อให้เจ้าหน้าที่ฝ่ายบุคคลตรวจสอบ');
+          successMessage = 'อนุมัติตารางงานระดับ "ผู้จัดการ" สำเร็จ! ระบบส่งต่อให้เจ้าหน้าที่ฝ่ายบุคคลตรวจสอบ';
       } else if (currentApproval.status === 'Pending Area Manager' && isAreaManager) {
           nextStatus = 'Pending HR';
           // ลงชื่อในฐานะผู้ตรวจสอบ
           updates.managerApprovedBy = `${currentUser.firstName} ${currentUser.lastName}`;
           updates.managerApprovedByRole = currentUser.position;
-          alert('อนุมัติตารางงานระดับ "ผู้จัดการพื้นที่" สำเร็จ! ระบบส่งต่อให้เจ้าหน้าที่ฝ่ายบุคคลตรวจสอบ');
+          successMessage = 'อนุมัติตารางงานระดับ "ผู้จัดการพื้นที่" สำเร็จ! ระบบส่งต่อให้เจ้าหน้าที่ฝ่ายบุคคลตรวจสอบ';
       } else if (currentApproval.status === 'Pending HR' && isHR) {
           nextStatus = 'Approved';
           updates.hrApprovedBy = `${currentUser.firstName} ${currentUser.lastName}`;
-          alert('อนุมัติตารางงานระดับ "ฝ่ายบุคคล" สำเร็จ! ตารางงานเสร็จสมบูรณ์');
+          successMessage = 'อนุมัติตารางงานระดับ "ฝ่ายบุคคล" สำเร็จ! ตารางงานเสร็จสมบูรณ์';
       }
-
-      setScheduleApprovals(prev => ({
+      if (!successMessage) return;
+      const result = await setScheduleApprovals(prev => ({
           ...prev,
           [approvalKey]: {
               ...currentApproval,
@@ -4910,15 +5383,16 @@ export default function App() {
               updatedAt: new Date().toISOString()
           }
       }));
+      if (result?.ok) alert(successMessage);
   };
 
-  const handleLockSchedule = () => {
+  const handleLockSchedule = async () => {
       if (!selectedProject) return;
       const approvalKey = `${selectedProject.id}_${currentMonth}`;
       const currentApproval = scheduleApprovals[approvalKey];
       if (!currentApproval) return;
       
-      setScheduleApprovals(prev => ({
+      const result = await setScheduleApprovals(prev => ({
           ...prev,
           [approvalKey]: {
               ...currentApproval,
@@ -4927,26 +5401,20 @@ export default function App() {
               updatedAt: new Date().toISOString()
           }
       }));
-      alert('ล็อคตารางงานสมบูรณ์แล้ว พนักงานจะไม่สามารถแก้ไขข้อมูล(ทั้ง Plan และ Act) ได้จนกว่าจะปลดล็อค');
+      if (result?.ok) alert('ล็อคตารางงานสมบูรณ์แล้ว พนักงานจะไม่สามารถแก้ไขข้อมูล(ทั้ง Plan และ Act) ได้จนกว่าจะปลดล็อค');
   };
 
-  const handleUnlockSchedule = () => {
+  const handleUnlockSchedule = async () => {
       if (!selectedProject) return;
       const approvalKey = `${selectedProject.id}_${currentMonth}`;
       const currentApproval = scheduleApprovals[approvalKey];
       if (!currentApproval) return;
       
-      setScheduleApprovals(prev => ({
+      const result = await setScheduleApprovals(prev => ({
           ...prev,
-          [approvalKey]: {
-              ...currentApproval,
-              isLocked: false,
-              status: 'Pending HR', // ย้อนสถานะกลับเพื่อให้สามารถแก้ Plan ได้ด้วย
-              hrApprovedBy: null,
-              updatedAt: new Date().toISOString()
-          }
+          [approvalKey]: unlockScheduleApproval(currentApproval, new Date().toISOString())
       }));
-      alert('ปลดล็อคตารางงานสำเร็จ สถานะกลับไปเป็นรอฝ่ายบุคคลอนุมัติ');
+      if (result?.ok) alert('ปลดล็อคตารางงานสำเร็จ สถานะกลับไปเป็นรอฝ่ายบุคคลอนุมัติ');
   };
 
   const Badge = ({ status }) => { 
@@ -5260,33 +5728,9 @@ export default function App() {
       e.currentTarget.setPointerCapture(e.pointerId);
   };
 
-  const handleBellPointerMove = (e) => {
-      if (!isDraggingBell) return;
-      const dx = dragRef.current.startX - e.clientX; 
-      const dy = dragRef.current.startY - e.clientY;
-      
-      // ป้องกันการคลิกปกติกลายเป็นการลาก (ต้องลากเกิน 3px ถึงจะถือว่าขยับ)
-      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
-          dragRef.current.isDragging = true;
-      }
 
-      if (dragRef.current.isDragging) {
-          // ควบคุมไม่ให้ลากหลุดออกนอกจอ
-          const newRight = Math.max(0, Math.min(window.innerWidth - 60, dragRef.current.startRight + dx));
-          const newBottom = Math.max(0, Math.min(window.innerHeight - 60, dragRef.current.startBottom + dy));
-          setBellPos({ right: newRight, bottom: newBottom });
-      }
-  };
 
-  const handleBellPointerUp = (e) => {
-      setIsDraggingBell(false);
-      e.currentTarget.releasePointerCapture(e.pointerId);
-      
-      // ถ้าไม่ได้เป็นการลาก (เป็นการคลิก) ให้เปิดหน้าต่างแจ้งเตือน
-      if (!dragRef.current.isDragging) {
-          setShowNotificationModal(true);
-      }
-  };
+
 
   const handleLogin = async (e) => {
       e.preventDefault(); 
@@ -5313,27 +5757,18 @@ export default function App() {
               );
               setFbUser(firebaseUser);
               setCurrentUser(authenticatedUser);
-              localStorage.setItem('bmg_current_user', JSON.stringify(authenticatedUser));
+              // Best-effort cache: a QuotaExceededError must not fail an otherwise
+              // successful login (the session lives in React state).
+              try {
+                  localStorage.setItem('bmg_current_user', JSON.stringify(authenticatedUser));
+              } catch (cacheError) {
+                  console.warn('Could not cache profile to localStorage (login still valid).', cacheError?.name || cacheError);
+              }
               setNewDailyReport(prev => ({
                   ...prev,
                   reporter: `${authenticatedUser.firstName} ${authenticatedUser.lastName}`,
               }));
               setLoginError('');
-
-              if (authenticatedUser.department && authenticatedUser.department !== 'Head Office') {
-                  const assignedProject = (projects || []).find(p => p.name === authenticatedUser.department);
-                  if (assignedProject) {
-                      setSelectedProject(assignedProject);
-                      setActiveMenu('projects');
-                      setProjectTab('overview');
-                  } else {
-                      setSelectedProject(null);
-                      setActiveMenu('dashboard');
-                  }
-              } else {
-                  setSelectedProject(null);
-                  setActiveMenu('dashboard');
-              }
           } catch (error) {
               const messages = {
                   'invalid-credentials': 'ชื่อผู้ใช้งาน หรือ รหัสผ่านไม่ถูกต้อง',
@@ -5389,24 +5824,6 @@ export default function App() {
               setUsers(updatedUsers);
           }
           
-          // ตรวจสอบหน่วยงานประจำของผู้ใช้
-          if (updatedUser.department && updatedUser.department !== 'Head Office') {
-              // ค้นหาข้อมูลโปรเจกต์จากชื่อ department
-              const assignedProject = (projects || []).find(p => p.name === updatedUser.department);
-              if (assignedProject) {
-                  setSelectedProject(assignedProject); // เปิดหน้าโครงการนั้นทันที
-                  setActiveMenu('projects');
-                  setProjectTab('overview');
-              } else {
-                  // กรณีไม่พบชื่อโครงการให้กลับไปหน้าหลัก
-                  setSelectedProject(null);
-                  setActiveMenu('dashboard');
-              }
-          } else {
-              // หากเป็น Head Office หรือไม่ได้ระบุ ให้ไปที่หน้า Dashboard หลัก
-              setSelectedProject(null);
-              setActiveMenu('dashboard');
-          }
       } else { 
           // เพิ่มการตรวจสอบ: ถ้ารายชื่อพนักงานในเครื่องยังมีแค่แอดมินคนเดียว แสดงว่าเน็ตอาจจะช้าและโหลดข้อมูลยังไม่เสร็จ
           if (userList.length <= 1) {
@@ -5417,7 +5834,7 @@ export default function App() {
       } 
   };
   
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
       if (USE_FIREBASE_BUSINESS_AUTH && firebaseBusinessAuth) {
           await firebaseBusinessAuth.signOut().catch((error) => {
               console.warn('Firebase sign out failed.', error);
@@ -5430,8 +5847,8 @@ export default function App() {
       }
       setLoginForm({ username: '', password: '' }); 
       setActiveMenu('dashboard'); 
-      setSelectedProject(null); 
-  };
+      setSelectedProject(null);
+  }, [firebaseBusinessAuth]);
 
   // --- NEW: ระบบ Auto Logout เมื่อถึงเวลาเที่ยงคืน (00:00 น.) ขณะที่ผู้ใช้ยังเปิดแอปพลิเคชันค้างไว้ ---
   useEffect(() => {
@@ -5453,9 +5870,9 @@ export default function App() {
       const intervalId = setInterval(checkSessionExpiry, 60000); 
       
       return () => clearInterval(intervalId);
-  }, [currentUser]);
+  }, [currentUser, handleLogout]);
+
   
-  const getKPIs = () => ({ projects: projects.length, employees: users.length, pendingTasks: 0, pmDue: 0 });
   const exportToCSV = (data, filename) => { 
       if (!data || data.length === 0) return alert('No data to export'); 
       
@@ -5789,7 +6206,7 @@ export default function App() {
       const csvData = [];
 
       // สร้างรายชื่อพนักงานและตารางกะ
-      const projectStaffForSchedule = users.filter(u => u.department === selectedProject.name);
+      const projectStaffForSchedule = selectedProjectScheduleStaff;
       const rawOrder = projectStaffOrder[selectedProject.id];
       const currentOrder = Array.isArray(rawOrder) ? rawOrder : [];
       const sortedStaff = [...projectStaffForSchedule].sort((a, b) => {
@@ -5879,7 +6296,7 @@ export default function App() {
               const buffer = e.target.result;
               let text = '';
               try { text = new TextDecoder('utf-8', { fatal: true }).decode(buffer); } 
-              catch (err) { text = new TextDecoder('windows-874').decode(buffer); }
+              catch { text = new TextDecoder('windows-874').decode(buffer); }
 
               const lines = text.split(/\r?\n/);
               if (lines.length < 2) return alert('ไฟล์ CSV ไม่มีข้อมูล หรือมีแค่หัวตาราง');
@@ -5977,7 +6394,7 @@ export default function App() {
               const buffer = e.target.result;
               let text = '';
               try { text = new TextDecoder('utf-8', { fatal: true }).decode(buffer); } 
-              catch (err) { text = new TextDecoder('windows-874').decode(buffer); }
+              catch { text = new TextDecoder('windows-874').decode(buffer); }
 
               const lines = text.split(/\r?\n/);
               if (lines.length < 2) return alert('ไฟล์ CSV ไม่มีข้อมูล หรือมีแค่หัวตาราง');
@@ -6696,7 +7113,7 @@ export default function App() {
               const buffer = e.target.result;
               let text = '';
               try { text = new TextDecoder('utf-8', { fatal: true }).decode(buffer); } 
-              catch (err) { text = new TextDecoder('windows-874').decode(buffer); }
+              catch { text = new TextDecoder('windows-874').decode(buffer); }
 
               const lines = text.split(/\r?\n/);
               if (lines.length < 2) return alert('ไฟล์ CSV ไม่มีข้อมูล หรือมีแค่หัวตาราง');
@@ -6777,7 +7194,7 @@ export default function App() {
               const buffer = e.target.result;
               let text = '';
               try { text = new TextDecoder('utf-8', { fatal: true }).decode(buffer); } 
-              catch (err) { text = new TextDecoder('windows-874').decode(buffer); }
+              catch { text = new TextDecoder('windows-874').decode(buffer); }
 
               const lines = text.split(/\r?\n/);
               if (lines.length < 2) return alert('ไฟล์ CSV ไม่มีข้อมูล หรือมีแค่หัวตาราง');
@@ -6818,7 +7235,7 @@ export default function App() {
                   for (let row of dataLines) {
                       const dStr = row[dateIdx]?.trim();
                       if (dStr) {
-                          const parts = dStr.split(/[\/\-]/);
+                          const parts = dStr.split(/[/-]/);
                           if (parts.length === 3) {
                               const p0 = parseInt(parts[0], 10);
                               const p1 = parseInt(parts[1], 10);
@@ -6974,7 +7391,7 @@ export default function App() {
               let text = '';
               try {
                   text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
-              } catch (err) {
+              } catch {
                   text = new TextDecoder('windows-874').decode(buffer);
               }
 
@@ -7267,12 +7684,7 @@ export default function App() {
       alert('บันทึกกิจกรรม/นัดหมายสำเร็จ');
   };
 
-  const handleSaveCompanyInfo = (e) => {
-      e.preventDefault();
-      setCompanyInfo(editCompanyForm);
-      setShowEditCompanyModal(false);
-      alert(t('saveSuccess'));
-  };
+
 
   const handleEditActionPlan = (ap) => {
       let resp = ap.responsible || '';
@@ -7306,13 +7718,7 @@ export default function App() {
       }
   };
 
-  const handleCompanyLogoUpload = async (e) => {
-      const file = e.target.files[0];
-      if (file) {
-          const compressedBase64 = await compressImage(file);
-          setEditCompanyForm(prev => ({ ...prev, logo: compressedBase64 }));
-      }
-  };
+
   
   // Others Handlers
   const handleSaveOther = (e) => {
@@ -7329,81 +7735,9 @@ export default function App() {
   };
 
   // Meetings Handlers
-  const handleMeetingFileUpload = (e) => {
-      const file = e.target.files[0];
-      if (file) {
-          const reader = new FileReader();
-          reader.onloadend = async () => {
-              const fileId = generateId();
-              await saveFileLocally(fileId, reader.result);
-              setNewMeeting(prev => ({ ...prev, minutesFile: { name: file.name, fileId: fileId, isLocal: true, data: reader.result } }));
-          };
-          reader.readAsDataURL(file);
-      }
-  };
 
-  const handleSaveMeeting = async (e) => {
-      e.preventDefault();
-      
-      try {
-          let nextList;
-          let savedMeeting = JSON.parse(JSON.stringify(newMeeting));
-          
-          if (!isEditingMeeting) {
-              savedMeeting.id = generateId();
-              savedMeeting.projectId = selectedProject.id;
-          }
 
-          // --- อัปโหลดไฟล์รายงานการประชุมเข้า Drive อัตโนมัติ ---
-          if (savedMeeting.minutesFile && savedMeeting.minutesFile.data && savedMeeting.minutesFile.data.startsWith('data:')) {
-              setAutoSyncMessage('กำลังอัปโหลดไฟล์รายงานการประชุมลง Google Drive...');
-              const GOOGLE_SCRIPT_DRIVE_URL = GOOGLE_SCRIPT_CONFIG.DRIVE_URL;
-              
-              const match = savedContract.minutesFile.data.match(/^data:(.+);base64,(.+)$/);
-              if (match) {
-                  const payload = {
-                      filename: `Meeting_${savedMeeting.id}_${savedMeeting.minutesFile.name}`,
-                      mimeType: match[1],
-                      data: match[2],
-                      folderName: `Meetings_${selectedProject.code}`
-                  };
-                  
-                  try {
-                      await fetch(GOOGLE_SCRIPT_DRIVE_URL, {
-                          method: 'POST',
-                          mode: 'no-cors',
-                          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                          body: JSON.stringify(payload)
-                      });
-                  } catch (err) {
-                      console.error("Auto-upload to Drive failed", err);
-                  }
-              }
-              // ลบ base64 ออกจาก object ที่จะเซฟลง Firestore เพื่อป้องกัน 1MB Limit Error
-              delete savedMeeting.minutesFile.data;
-          }
 
-          if (isEditingMeeting) {
-              nextList = meetingsList.map(m => m.id === savedMeeting.id ? savedMeeting : m);
-              if (selectedMeetingView?.id === savedMeeting.id) setSelectedMeetingView(savedMeeting);
-          } else {
-              nextList = [...meetingsList, savedMeeting];
-          }
-          
-          setMeetingsList(nextList);
-          triggerAutoSync('Meetings_ประชุม', nextList, []);
-          
-          setShowAddMeetingModal(false);
-          setIsEditingMeeting(false);
-          setNewMeeting({ id: null, title: '', type: 'AGM', date: new Date().toISOString().split('T')[0], time: '09:00', location: '', agenda: '', status: 'Scheduled', minutesFile: null });
-          alert('บันทึกข้อมูลการประชุมเรียบร้อยแล้ว');
-      } catch (error) {
-          console.error(error);
-          alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
-      } finally {
-          setTimeout(() => setAutoSyncMessage(''), 3000);
-      }
-  };
 
   const handleEditMeeting = (meeting) => {
       setSelectedMeetingView(null);
@@ -7413,70 +7747,13 @@ export default function App() {
   };
 
   // --- NEW: Meeting Invitation Handlers ---
-  const handleSaveInvitation = (e) => {
-      e.preventDefault();
-      let nextList;
-      const dataToSave = { ...newInvitation };
-      
-      if (!dataToSave.signatory && currentUser) {
-          dataToSave.signatory = `${currentUser.firstName} ${currentUser.lastName}`;
-      }
 
-      if (dataToSave.id) {
-          nextList = meetingInvitations.map(inv => inv.id === dataToSave.id ? dataToSave : inv);
-      } else {
-          const id = generateId();
-          nextList = [{ ...dataToSave, id, projectId: selectedProject.id }, ...meetingInvitations];
-      }
-      
-      setMeetingInvitations(nextList);
-      triggerAutoSync('Meeting_Invitations_หนังสือเชิญ', nextList, []);
-      setShowAddInvitationModal(false);
-      alert('บันทึกหนังสือเชิญประชุมเรียบร้อยแล้ว');
-  };
 
   // --- NEW: Meeting Proxy Handlers ---
-  const handleSaveProxy = (e) => {
-      e.preventDefault();
-      let nextList;
-      const dataToSave = { ...newProxy };
 
-      if (dataToSave.id) {
-          nextList = meetingProxies.map(p => p.id === dataToSave.id ? dataToSave : p);
-      } else {
-          const id = generateId();
-          nextList = [{ ...dataToSave, id, projectId: selectedProject.id }, ...meetingProxies];
-      }
-      
-      setMeetingProxies(nextList);
-      triggerAutoSync('Meeting_Proxies_ใบมอบฉันทะ', nextList, []);
-      setShowAddProxyModal(false);
-      alert('บันทึกใบมอบฉันทะเรียบร้อยแล้ว');
-  };
 
   // --- NEW: Meeting Ballot Handlers ---
-  const handleSaveBallot = (e) => {
-      e.preventDefault();
-      let nextList;
-      const dataToSave = { ...newBallot };
 
-      // ถ้าเป็นเจ้าของร่วม ให้ชื่อผู้ลงคะแนนตรงกับชื่อเจ้าของโดยอัตโนมัติ (ถ้าไม่ได้กรอก)
-      if (dataToSave.voterType === 'เจ้าของร่วม' && !dataToSave.voterName) {
-          dataToSave.voterName = dataToSave.ownerName;
-      }
-
-      if (dataToSave.id) {
-          nextList = meetingBallots.map(b => b.id === dataToSave.id ? dataToSave : b);
-      } else {
-          const id = generateId();
-          nextList = [{ ...dataToSave, id, projectId: selectedProject.id }, ...meetingBallots];
-      }
-      
-      setMeetingBallots(nextList);
-      triggerAutoSync('Meeting_Ballots_ใบลงคะแนน', nextList, []);
-      setShowAddBallotModal(false);
-      alert('บันทึกข้อมูลใบลงคะแนนเรียบร้อยแล้ว');
-  };
 
   // Audit Handlers
   const handleAuditScoreChange = (catIdx, itemIdx, score) => {
@@ -7720,10 +7997,7 @@ export default function App() {
           if (backupModules.audits) dataToBackup.audits = audits;
           if (backupModules.dailyReports) dataToBackup.dailyReports = dailyReports;
           if (backupModules.schedules) {
-              dataToBackup.schedules = schedules;
-              dataToBackup.scheduleNotes = scheduleNotes;
-              dataToBackup.scheduleApprovals = scheduleApprovals;
-              dataToBackup.projectStaffOrder = projectStaffOrder;
+              dataToBackup.projectScheduleRecords = projectScheduleRecords;
           }
           if (backupModules.othersData) dataToBackup.othersData = othersData;
           if (backupModules.announcements) dataToBackup.announcements = announcements;
@@ -7745,7 +8019,7 @@ export default function App() {
 
           const backupData = {
               timestamp: new Date().toISOString(),
-              version: '1.5', // Updated Version for Selective Backup
+              version: '1.6', // Project-owned schedule records
               data: dataToBackup
           };
           
@@ -7816,7 +8090,7 @@ export default function App() {
                   meetingsList: !!importedData.data.meetingsList,
                   audits: !!importedData.data.audits,
                   dailyReports: !!importedData.data.dailyReports,
-                  schedules: !!importedData.data.schedules,
+                  schedules: Array.isArray(importedData.data.projectScheduleRecords),
                   othersData: !!importedData.data.othersData,
                   announcements: !!importedData.data.announcements,
                   deposits: !!importedData.data.deposits,
@@ -7909,11 +8183,8 @@ export default function App() {
                   }
                   if (restoreModules.audits && d.audits) stateSetters.push({ key: 'ผลการประเมิน (Audit)', setter: setAudits, data: d.audits });
                   if (restoreModules.dailyReports && d.dailyReports) stateSetters.push({ key: 'รายงานประจำวัน', setter: setDailyReports, data: d.dailyReports });
-                  if (restoreModules.schedules && d.schedules) {
-                      stateSetters.push({ key: 'ตารางงาน', setter: setSchedules, data: d.schedules });
-                      if (d.scheduleNotes) stateSetters.push({ key: 'หมายเหตุตารางงาน', setter: setScheduleNotes, data: d.scheduleNotes });
-                      if (d.scheduleApprovals) stateSetters.push({ key: 'สถานะอนุมัติตารางงาน', setter: setScheduleApprovals, data: d.scheduleApprovals });
-                      if (d.projectStaffOrder) stateSetters.push({ key: 'ลำดับพนักงาน', setter: setProjectStaffOrder, data: d.projectStaffOrder });
+                  if (restoreModules.schedules && Array.isArray(d.projectScheduleRecords)) {
+                      stateSetters.push({ key: 'ตารางงานแยกโครงการ', setter: setProjectScheduleRecords, data: d.projectScheduleRecords });
                   }
                   if (restoreModules.othersData && d.othersData) stateSetters.push({ key: 'ข้อมูลอื่นๆ', setter: setOthersData, data: d.othersData });
                   if (restoreModules.announcements && d.announcements) stateSetters.push({ key: 'ประกาศและข่าวสาร', setter: setAnnouncements, data: d.announcements });
@@ -7925,6 +8196,10 @@ export default function App() {
 
                   const totalTables = stateSetters.length;
                   let currentTable = 0;
+
+                  if (restoreModules.schedules && Array.isArray(d.projectScheduleRecords)) {
+                      throw new Error('กรุณายกเลิกการเลือกตารางงาน การกู้คืนตารางงานต้องตรวจความขัดแย้งก่อนเขียนทับ');
+                  }
 
                   for (const item of stateSetters) {
                       currentTable++;
@@ -8312,23 +8587,49 @@ export default function App() {
       }
   };
 
-  const handleProjectFileUpload = (e, key) => {
+  const handleProjectFileUpload = async (e, key) => {
       const file = e.target.files[0];
-      if (file) {
-          const reader = new FileReader();
-          reader.onloadend = async () => {
-              const fileId = generateId();
-              await saveFileLocally(fileId, reader.result);
-              setNewProject(prev => ({ 
-                  ...prev, 
-                  files: { 
-                      ...(prev.files || {}), 
-                      [key]: { name: file.name, fileId: fileId, isLocal: true, data: reader.result } 
-                  } 
+      if (!file) return;
+      const fileId = generateId();
+      const projectId = newProject?.id || selectedProject?.id;
+
+      // Preferred path: upload to Firebase Storage so every device can download it.
+      // Requires a known projectId (edit mode) and an initialized storage client.
+      if (storage && projectId) {
+          try {
+              setIsSavingProject(true);
+              const fileRef = await uploadProjectFile({
+                  storage, sdk: STORAGE_SDK, projectId, fileId, file,
+                  name: file.name, nowIso: new Date().toISOString(),
+              });
+              setNewProject(prev => ({
+                  ...prev,
+                  files: { ...(prev.files || {}), [key]: fileRef },
               }));
-          };
-          reader.readAsDataURL(file);
+              return;
+          } catch (err) {
+              console.error('Storage upload failed, falling back to local cache', err);
+              alert('อัปโหลดขึ้นระบบไม่สำเร็จ ไฟล์จะถูกเก็บไว้ในเครื่องนี้ชั่วคราว: ' + (err?.message || ''));
+              // fall through to local cache below
+          } finally {
+              setIsSavingProject(false);
+          }
       }
+
+      // Fallback (new project without an id yet, or storage unavailable): keep the
+      // legacy local-only behavior so the flow never breaks.
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+          await saveFileLocally(fileId, reader.result);
+          setNewProject(prev => ({
+              ...prev,
+              files: {
+                  ...(prev.files || {}),
+                  [key]: { name: file.name, fileId, isLocal: true, data: reader.result },
+              },
+          }));
+      };
+      reader.readAsDataURL(file);
   };
 
   const handleEditProjectClick = () => {
@@ -8339,6 +8640,18 @@ export default function App() {
 
   const handleSaveProject = async (e) => {
       e.preventDefault();
+
+      const uniqueness = validateProjectUniqueness({
+          candidate: newProject,
+          projects,
+      });
+      if (!uniqueness.valid) {
+          alert(uniqueness.duplicateField === 'name'
+              ? 'ไม่สามารถบันทึกได้: มีชื่อโครงการ/หน่วยงานนี้อยู่แล้ว'
+              : 'ไม่สามารถบันทึกได้: มีรหัสโครงการ/หน่วยงานนี้อยู่แล้ว');
+          return;
+      }
+
       setIsSavingProject(true);
       
       try {
@@ -8476,15 +8789,12 @@ export default function App() {
       setShowAddContractModal(true);
   };
 
-  const handleAddStaffToProject = () => {
-      setIsEditingUser(false);
-      setNewUser({ employeeId: '', firstName: '', lastName: '', position: EMPLOYEE_POSITIONS[0], otherPosition: '', department: selectedProject.name, accessibleDepts: [], phone: '', username: '', password: '', photo: null, permissions: getDefaultPermissions() });
-      setShowAddUserModal(true);
-  };
+
 
   const updateSchedule = (userId, dateString, shiftId, type = 'plan') => {
+      if (isLegacyScheduleReadOnly || scheduleSaveInFlight.current) return;
       const key = type === 'plan' ? `${userId}_${dateString}` : `${userId}_${dateString}_act`;
-      setSchedules(prev => ({ ...prev, [key]: shiftId }));
+      setScheduleDraftCells(prev => ({ ...prev, [key]: shiftId }));
   };
 
   // ... (View Components) ...
@@ -8793,13 +9103,7 @@ export default function App() {
       const pendingApprovalCount = pendingItems.length;
 
       // ดึงข้อมูลโครงการเฉพาะที่ผู้ใช้มีสิทธิ์เข้าถึง สำหรับแสดงผลแดชบอร์ดให้สอดคล้องกับสิทธิ์
-      const visibleProjectsDashboard = projects.filter(p => {
-          if (currentUser?.username === 'admin') return true;
-          const accessibleDeptsStr = currentUser?.accessibleDepts;
-          const accessibleArray = Array.isArray(accessibleDeptsStr) ? accessibleDeptsStr : (typeof accessibleDeptsStr === 'string' ? accessibleDeptsStr.split(', ').filter(Boolean) : []);
-          if (accessibleArray.includes('All')) return true;
-          return p.name === currentUser?.department || accessibleArray.includes(p.name);
-      });
+      const visibleProjectsDashboard = accessibleProjects;
 
       // 1. โครงการทั้งหมด แยกตามประเภท
       const projectTypesCount = PROJECT_TYPES.map(type => {
@@ -9398,7 +9702,8 @@ export default function App() {
 
   const UserManagement = () => {
       // Logic สำหรับการกรองและการเรียงลำดับ
-      const safeUsers = Array.isArray(users) ? users.filter(Boolean) : [];
+      // usersWithPresence merges cross-device online/last-active from bmg_presence.
+      const safeUsers = Array.isArray(usersWithPresence) ? usersWithPresence.filter(Boolean) : [];
       const filteredUsers = safeUsers
           .filter(u => userDeptFilter ? u.department === userDeptFilter : true)
           .filter(u => userRoleFilter ? u.position === userRoleFilter : true)
@@ -9432,7 +9737,7 @@ export default function App() {
                   try {
                       // พยายามถอดรหัสเป็นแบบ UTF-8 (มาตรฐาน) ก่อน โดยตั้ง fatal: true เพื่อให้เกิด Error ทันทีหากอ่านภาษาไทยไม่ออก
                       text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
-                  } catch (err) {
+                  } catch {
                       // หากเกิด Error (มักจะเกิดจากไฟล์ CSV ที่เซฟจาก Excel ภาษาไทย) ให้สลับไปใช้ windows-874 / tis-620 อัตโนมัติ
                       text = new TextDecoder('windows-874').decode(buffer);
                   }
@@ -9520,20 +9825,10 @@ export default function App() {
                               <Button icon={Plus} onClick={() => { 
                                   setIsEditingUser(false); 
                                   // แก้ไข: ล้างข้อมูล State ให้เป็นค่าเริ่มต้นทุกครั้งที่กดเพิ่มผู้ใช้ใหม่ ป้องกันข้อมูลคนเก่าค้าง
-                                  setNewUser({ 
-                                      employeeId: '', 
-                                      firstName: '', 
-                                      lastName: '', 
+                                  setNewUser(createNewUserDraft({
                                       position: EMPLOYEE_POSITIONS[0], 
-                                      otherPosition: '', 
-                                      department: '', 
-                                      accessibleDepts: [], 
-                                      phone: '', 
-                                      username: '', 
-                                      password: '',
-                                      photo: null, 
                                       permissions: getMergedPermissions(rolePermissions[EMPLOYEE_POSITIONS[0]]) 
-                                  });
+                                  }));
                                   setShowAddUserModal(true); 
                               }}>{t('addUser')}</Button>
                           </>
@@ -10496,8 +10791,10 @@ export default function App() {
           if (c.name) combinedSuppliersMap.set(c.name.trim().toLowerCase(), { ...c });
       });
 
-      // 2. Extract from ALL contracts (ทุกหน่วยงาน)
-      contracts.forEach(ct => {
+      // 2. Extract from ALL contracts across every project (ทุกหน่วยงาน).
+      // Uses `allContracts` (unscoped / all accessible projects) rather than the project-scoped `contracts`,
+      // so the supplier list is identical no matter which unit the module is opened from.
+      allContracts.forEach(ct => {
           if (!ct.vendorName) return;
           const key = ct.vendorName.trim().toLowerCase();
           
@@ -10721,7 +11018,7 @@ export default function App() {
     const remainingDays = calculateDaysRemaining(selectedProject.contractEndDate);
 
     // --- NEW: Drag & Drop Logic for Schedule ---
-    const projectStaffForSchedule = users.filter(u => u.department === selectedProject.name);
+    const projectStaffForSchedule = selectedProjectScheduleStaff;
     const rawOrder = projectStaffOrder[selectedProject.id];
     const currentOrder = Array.isArray(rawOrder) ? rawOrder : [];
     
@@ -10735,6 +11032,7 @@ export default function App() {
     });
 
     const handleDragEnd = () => {
+        if (isLegacyScheduleReadOnly) return;
         if (dragItem.current !== null && dragOverItem.current !== null && dragItem.current !== dragOverItem.current) {
             const newStaffOrder = [...sortedStaff];
             const draggedItemContent = newStaffOrder[dragItem.current];
@@ -10845,18 +11143,22 @@ export default function App() {
                       แก้ไขข้อมูลโครงการ
                   </Button>
               )}
-              <Button variant="outline" onClick={() => exportToCSV([selectedProject], 'project_detail')}>{t('exportInfo')}</Button>
-              <Button variant="outline" icon={isExporting ? Loader2 : Printer} onClick={() => {
-                  let orientation = 'portrait';
-                  let filename = 'Project_Overview.pdf';
-                  if (projectTab === 'staff' && staffViewMode === 'chart') {
-                      orientation = 'landscape';
-                      filename = `Organization_Chart_${selectedProject.code}.pdf`;
-                  } else if (projectTab === 'staff') {
-                      filename = `Staff_List_${selectedProject.code}.pdf`;
-                  }
-                  handleExportPDF('print-area', filename, orientation);
-              }} disabled={isExporting}>{isExporting ? t('downloading') : t('printPDF')}</Button>
+              {hasPerm(`proj_${projectTab}`, 'print') && (
+                  <>
+                      <Button variant="outline" onClick={() => exportToCSV([selectedProject], 'project_detail')}>{t('exportInfo')}</Button>
+                      <Button variant="outline" icon={isExporting ? Loader2 : Printer} onClick={() => {
+                          let orientation = 'portrait';
+                          let filename = 'Project_Overview.pdf';
+                          if (projectTab === 'staff' && staffViewMode === 'chart') {
+                              orientation = 'landscape';
+                              filename = `Organization_Chart_${selectedProject.code}.pdf`;
+                          } else if (projectTab === 'staff') {
+                              filename = `Staff_List_${selectedProject.code}.pdf`;
+                          }
+                          handleExportPDF('print-area', filename, orientation);
+                      }} disabled={isExporting}>{isExporting ? t('downloading') : t('printPDF')}</Button>
+                  </>
+              )}
           </div>
         </div>
         
@@ -10909,7 +11211,7 @@ export default function App() {
                       const missingReportDays = Math.max(0, daysPassedInMonth - uniqueReportDays);
 
                       // คำนวณอันดับการส่งรายงานเทียบกับทุกโครงการ
-                      const reportRankDataAll = projects.map(p => {
+                      const reportRankDataAll = accessibleProjects.map(p => {
                           const pReports = dailyReports.filter(r => r.projectId === p.id && r.date.startsWith(currentMonthStr));
                           const uniqueDays = new Set(pReports.map(r => r.date)).size;
                           return { id: p.id, name: p.name, submittedDays: uniqueDays };
@@ -10917,7 +11219,7 @@ export default function App() {
 
                       const reportRankIndex = reportRankDataAll.findIndex(p => p.id === selectedProject.id);
                       const reportRankStr = reportRankIndex >= 0 ? reportRankIndex + 1 : '-';
-                      const totalProjectsForReportRank = projects.length;
+                      const totalProjectsForReportRank = accessibleProjects.length;
 
                       // --- 4. PM Status Summary ---
                       const activePmPlans = pmPlans.filter(p => p.projectId === selectedProject.id && p.status === 'Active');
@@ -10946,7 +11248,7 @@ export default function App() {
                       const avgScore = projAudits.length > 0 ? (projAudits.reduce((sum, a) => sum + a.score, 0) / projAudits.length).toFixed(1) : 0;
                       
                       // Calculate rank across all projects
-                      const projectAvgScores = projects.map(p => {
+                      const projectAvgScores = accessibleProjects.map(p => {
                           const pAudits = audits.filter(a => a.projectId === p.id);
                           const avg = pAudits.length > 0 ? (pAudits.reduce((sum, a) => sum + a.score, 0) / pAudits.length) : 0;
                           return { id: p.id, avg };
@@ -11561,7 +11863,9 @@ export default function App() {
                                           { key: 'resident_rules', label: t('doc_resident_rules') }
                                       ].map((doc) => {
                                           const fileObj = selectedProject.files && selectedProject.files[doc.key];
-                                          const hasFile = !!fileObj;
+                                          // An empty slot is stored as {}; only show the download
+                                          // button when the reference actually points to a file.
+                                          const hasFile = fileObjectHasContent(fileObj);
                                           const fileName = typeof fileObj === 'string' ? fileObj : fileObj?.name;
 
                                           return (
@@ -11861,18 +12165,33 @@ export default function App() {
           )}
 
           {projectTab === 'schedule' && (() => {
+            // Do not render an empty/editable grid from a blocked roster or unconfirmed cache.
+            const rosterBlocked = scheduleRosterReadState.status === 'blocked';
+            const scheduleBlocked = schedulesReadState.status === 'blocked';
+            const readFailed = [scheduleRosterReadState, schedulesReadState].some(state => ['error', 'unavailable'].includes(state.status));
+            const dataReady = scheduleRosterReadState.status === 'ready' && schedulesReadState.status === 'ready';
+            if (!dataReady) return (
+                <Card className="p-6" role="status">
+                    <h3 className="font-bold text-lg">{rosterBlocked || scheduleBlocked ? 'ยังไม่สามารถแสดงตารางตามสิทธิ์บัญชีนี้' : readFailed ? 'โหลดข้อมูลตารางไม่สำเร็จ' : 'กำลังโหลดตารางและรายชื่อพนักงานจากเซิร์ฟเวอร์'}</h3>
+                    <p className="mt-2 text-gray-600">{rosterBlocked
+                        ? 'บัญชีนี้ไม่มีสิทธิ์อ่านทะเบียนพนักงานที่ใช้สร้างแถวตาราง จึงยังแสดงตารางไม่ได้ ไม่ได้หมายความว่าข้อมูลตารางถูกลบ กรุณาติดต่อผู้ดูแลเพื่อตรวจสอบสิทธิ์'
+                        : scheduleBlocked ? 'บัญชีนี้ไม่มีสิทธิ์อ่านตารางของโครงการที่เลือก กรุณาติดต่อผู้ดูแล'
+                        : readFailed ? 'ระบบยังยืนยันข้อมูลไม่ได้ กรุณาตรวจสอบการเชื่อมต่อและสิทธิ์ แล้วโหลดหน้าใหม่ ระบบปิดการแก้ไขไว้เพื่อป้องกันการบันทึกทับข้อมูล'
+                        : 'กรุณารอให้ข้อมูลพร้อมก่อนแก้ไขหรือส่งออก หากรอนานให้ตรวจสอบการเชื่อมต่อและโหลดหน้าใหม่'}</p>
+                </Card>
+            );
             // --- NEW: Logic for Schedule Deadlines and Approvals ---
             const approval = scheduleApprovals[`${selectedProject.id}_${currentMonth}`] || {};
             const isApproved = approval.status === 'Approved';
             const isLocked = approval.isLocked === true;
 
-            const isHR = currentUser?.position?.includes('เจ้าหน้าที่ฝ่ายบุคคล') || currentUser?.username === 'admin';
+
             
             // Plan จะแก้ไขได้ก็ต่อเมื่อ ยังไม่ล็อค และ ยังไม่อนุมัติ (ปลดล็อคข้อจำกัดวันที่ 22 ออก)
-            const canEditPlan = !isLocked && !isApproved;
+            const canEditPlan = hasPerm('proj_schedule', 'save') && !isLegacyScheduleReadOnly && !isSavingSchedule && !isLocked && !isApproved;
             
             // ACT จะแก้ไขได้ก็ต่อเมื่อ ยังไม่ถูกล็อค
-            const canEditAct = !isLocked;
+            const canEditAct = hasPerm('proj_schedule', 'save') && !isLegacyScheduleReadOnly && !isSavingSchedule && !isLocked;
 
             // ตรวจสอบว่าเป็นหน่วยงาน Head Office หรือไม่
             const isHeadOffice = selectedProject?.name === 'Head Office';
@@ -11888,6 +12207,7 @@ export default function App() {
                         </h3>
                         {/* Status Badge */}
                         {(() => {
+                            if (isLegacyScheduleReadOnly) return <span className={`bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold border border-amber-300 shadow-sm flex items-center gap-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}><Archive size={isExporting ? 10 : 12}/> ข้อมูลเดิม — รอนำเข้าเพื่อแก้ไข ({legacyScheduleFallback.legacyCellCount} ช่อง)</span>;
                             if (!approval.status) return <span className={`bg-gray-100 text-gray-500 px-2 py-0.5 rounded font-bold border ${isExporting ? 'text-[9px]' : 'text-xs'}`}>ฉบับร่าง (ยังไม่บันทึก)</span>;
                             if (approval.isLocked) return <span className={`bg-red-100 text-red-700 px-2 py-0.5 rounded font-bold border border-red-200 shadow-sm flex items-center gap-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}><Lock size={isExporting ? 10 : 12}/> ล็อคตารางแล้ว</span>;
                             if (approval.status === 'Pending Manager') return <span className={`bg-orange-100 text-orange-700 px-2 py-0.5 rounded font-bold border border-orange-200 shadow-sm flex items-center gap-1 ${isExporting ? 'text-[9px]' : 'text-xs'}`}><Clock size={isExporting ? 10 : 12}/> รอผู้จัดการอนุมัติ</span>;
@@ -11907,18 +12227,19 @@ export default function App() {
                             <button onClick={() => changeMonth(1)} className={`p-1 hover:bg-white rounded shadow-sm transition ${isExporting ? 'hidden' : ''}`}><ChevronRight size={18}/></button>
                         </div>
                         <div className={`flex gap-2 ${isExporting ? 'hidden' : ''}`}>
-                            <Button variant="outline" size="sm" icon={Download} onClick={exportScheduleCSV} disabled={isExporting} className="border-green-500 text-green-600 hover:bg-green-50">
+                            <Button variant="outline" size="sm" icon={Download} onClick={exportScheduleCSV} disabled={isExporting || !hasPerm('proj_schedule', 'print')} className="border-green-500 text-green-600 hover:bg-green-50">
                                 ดาวน์โหลด CSV
                             </Button>
-                            <Button variant="outline" size="sm" icon={isExporting ? Loader2 : ImageIcon} onClick={exportScheduleImage} disabled={isExporting} className="border-blue-500 text-blue-600 hover:bg-blue-50">
+                            <Button variant="outline" size="sm" icon={isExporting ? Loader2 : ImageIcon} onClick={exportScheduleImage} disabled={isExporting || !hasPerm('proj_schedule', 'print')} className="border-blue-500 text-blue-600 hover:bg-blue-50">
                                 {isExporting ? 'กำลังประมวลผล...' : 'ดาวน์โหลดรูปภาพ'}
                             </Button>
-                            <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={exportSchedulePDF} disabled={isExporting}>
+                            <Button variant="outline" size="sm" icon={isExporting ? Loader2 : PrinterIcon} onClick={exportSchedulePDF} disabled={isExporting || !hasPerm('proj_schedule', 'print')}>
                                 {isExporting ? 'กำลังประมวลผล...' : t('printPDF')}
                             </Button>
                             
                             {/* Approval Action Buttons */}
                             {(() => {
+                                if (isLegacyScheduleReadOnly) return null;
                                 const approval = scheduleApprovals[`${selectedProject.id}_${currentMonth}`];
                                 if (!approval) return null; // ยังไม่มีการบันทึก
                                 
@@ -11947,10 +12268,21 @@ export default function App() {
                                 return null;
                             })()}
 
-                            {hasPerm('proj_schedule', 'save') && <Button size="sm" icon={Save} onClick={handleSaveSchedule}>{t('save')}</Button>}
+                            {hasPerm('proj_schedule', 'save') && <Button size="sm" icon={Save} onClick={handleSaveSchedule} disabled={isLegacyScheduleReadOnly || isSavingSchedule} title={isLegacyScheduleReadOnly ? 'ข้อมูลเดิมเปิดให้อ่านและส่งออกเท่านั้น' : undefined}>{isSavingSchedule ? 'รอเซิร์ฟเวอร์ยืนยัน…' : t('save')}</Button>}
                         </div>
                     </div>
                 </div>
+
+                {isLegacyScheduleReadOnly && !isExporting && (
+                    <div className="mx-4 mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-start gap-2">
+                        <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+                        <div>
+                            <div className="font-bold">ตรวจสอบตารางเดิมก่อนนำเข้าเพื่อแก้ไข</div>
+                            <div className="text-xs mt-1">ตรวจสอบว่ารายชื่อและกะงานเป็นของโครงการนี้ในเดือนที่เลือก เมื่อยืนยัน ระบบจะเก็บสำเนาและนำเข้าเฉพาะรหัสที่จับคู่ได้ โดยไม่ทับค่าชุดใหม่และไม่ปลดล็อกตารางอัตโนมัติ</div>
+                            {isLegacyScheduleArchiveAdmin && <Button size="sm" icon={Archive} onClick={handleEnableLegacyScheduleEditing} disabled={isImportingLegacySchedule || isSavingSchedule} className="mt-2">{isImportingLegacySchedule ? 'กำลังตรวจและนำเข้าข้อมูล…' : 'นำเข้าตารางเดิมเพื่อแก้ไข'}</Button>}
+                        </div>
+                    </div>
+                )}
                 
                 <div id="schedule-table-container" className={`w-full bg-white rounded-b-lg ${isExporting ? 'px-0 pb-2 overflow-visible block' : 'overflow-hidden pb-4'}`}>
                     {(() => {
@@ -11988,22 +12320,22 @@ export default function App() {
                                 {sortedStaff.map((user, index) => (
                                     <tbody 
                                         key={user.id} 
-                                        className={`border-b-2 border-gray-400 transition-all ${!isExporting ? 'cursor-move' : ''}`}
-                                        draggable={!isExporting}
+                                        className={`border-b-2 border-gray-400 transition-all ${!isExporting && !isLegacyScheduleReadOnly ? 'cursor-move' : ''}`}
+                                        draggable={!isExporting && canEditAct}
                                         onDragStart={(e) => { 
                                             dragItem.current = index; 
                                             e.currentTarget.style.opacity = '0.5';
                                             e.dataTransfer.effectAllowed = 'move';
                                         }}
-                                        onDragEnter={(e) => { 
+                                        onDragEnter={() => {
                                             dragOverItem.current = index; 
                                         }}
                                         onDragEnd={(e) => {
                                             e.currentTarget.style.opacity = '1';
-                                            handleDragEnd();
+                                            if (canEditAct) handleDragEnd();
                                         }}
                                         onDragOver={(e) => e.preventDefault()}
-                                        title={!isExporting ? "คลิกค้างที่แถวแล้วลากเพื่อสลับตำแหน่ง (Drag & Drop)" : ""}
+                                        title={!isExporting && !isLegacyScheduleReadOnly ? "คลิกค้างที่แถวแล้วลากเพื่อสลับตำแหน่ง (Drag & Drop)" : ""}
                                     >
                                         <tr className="hover:bg-gray-50 border-b border-gray-200">
                                             <td className={`border-r border-gray-300 text-center text-gray-500 truncate ${isExporting ? 'p-0.5 text-[7px]' : 'p-1'}`} rowSpan="2">
@@ -12076,7 +12408,7 @@ export default function App() {
                                                                 onChange={(e) => canEditPlan && updateSchedule(user.id, dateString, e.target.value.toUpperCase(), 'plan')}
                                                                 readOnly={!canEditPlan || !!selectedShift}
                                                                 disabled={!canEditPlan}
-                                                                title={!canEditPlan ? "ตาราง Plan ถูกอนุมัติหรือล็อคแล้ว" : "ตารางแผนงาน (Plan)"}
+                                                                title={!hasPerm('proj_schedule', 'save') ? "ตารางแผนงาน (Plan) — อ่านอย่างเดียวตามสิทธิ์" : !canEditPlan ? "ตาราง Plan ถูกอนุมัติหรือล็อคแล้ว" : "ตารางแผนงาน (Plan)"}
                                                             />
                                                         )}
                                                     </td>
@@ -12138,7 +12470,7 @@ export default function App() {
                                                                 onChange={(e) => canEditAct && updateSchedule(user.id, dateString, e.target.value.toUpperCase(), 'act')}
                                                                 readOnly={!canEditAct || !!selectedShift}
                                                                 disabled={!canEditAct}
-                                                                title={!canEditAct ? "ตารางถูกล็อคแล้วโดยฝ่ายบุคคล" : "แก้ไขตารางตามการเข้างานจริง (Actual)"}
+                                                                title={!hasPerm('proj_schedule', 'save') ? "ตารางตามจริง (Actual) — อ่านอย่างเดียวตามสิทธิ์" : !canEditAct ? "ตารางถูกล็อคแล้วโดยฝ่ายบุคคล" : "แก้ไขตารางตามการเข้างานจริง (Actual)"}
                                                             />
                                                         )}
                                                     </td>
@@ -12173,8 +12505,8 @@ export default function App() {
                             {SHIFTS.map(shift => (
                                 <div 
                                     key={shift.id} 
-                                    onClick={() => !isExporting && setSelectedShift(selectedShift === shift.id ? null : shift.id)}
-                                    className={`flex items-center gap-1.5 transition-all select-none ${isExporting ? 'text-[9px]' : 'text-xs cursor-pointer hover:bg-gray-200 p-1 rounded'} ${selectedShift === shift.id && !isExporting ? 'ring-2 ring-orange-500 bg-white shadow-md scale-105' : ''}`}
+                                    onClick={() => !isExporting && !isLegacyScheduleReadOnly && setSelectedShift(selectedShift === shift.id ? null : shift.id)}
+                                    className={`flex items-center gap-1.5 transition-all select-none ${isExporting ? 'text-[9px]' : `text-xs p-1 rounded ${isLegacyScheduleReadOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-gray-200'}`} ${selectedShift === shift.id && !isExporting && !isLegacyScheduleReadOnly ? 'ring-2 ring-orange-500 bg-white shadow-md scale-105' : ''}`}
                                 >
                                     <span className={`inline-block text-center rounded font-bold border ${shift.color} ${isExporting ? 'w-5 py-0 text-[7px]' : 'w-8 py-0.5'}`}>
                                         {shift.id}
@@ -12187,8 +12519,8 @@ export default function App() {
                             {/* ยางลบ (Eraser) */}
                             {!isExporting && (
                                 <div 
-                                    onClick={() => setSelectedShift(selectedShift === 'ERASE' ? null : 'ERASE')}
-                                    className={`flex items-center gap-1.5 transition-all select-none text-xs cursor-pointer hover:bg-gray-200 p-1 rounded ${selectedShift === 'ERASE' ? 'ring-2 ring-red-500 bg-white shadow-md scale-105' : ''}`}
+                                    onClick={() => !isLegacyScheduleReadOnly && setSelectedShift(selectedShift === 'ERASE' ? null : 'ERASE')}
+                                    className={`flex items-center gap-1.5 transition-all select-none text-xs p-1 rounded ${isLegacyScheduleReadOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-gray-200'} ${selectedShift === 'ERASE' && !isLegacyScheduleReadOnly ? 'ring-2 ring-red-500 bg-white shadow-md scale-105' : ''}`}
                                 >
                                     <span className={`inline-block text-center rounded font-bold border bg-red-50 text-red-600 border-red-200 w-8 py-0.5`}>
                                         <Eraser size={14} className="mx-auto" />
@@ -12212,6 +12544,7 @@ export default function App() {
                             className="w-full border border-gray-300 rounded-md p-3 text-sm h-20 focus:ring-1 focus:ring-orange-500 outline-none resize-none bg-gray-50 focus:bg-white transition-colors"
                             placeholder="พิมพ์รายละเอียดเพิ่มเติมที่นี่..."
                             value={scheduleNote}
+                            disabled={!canEditAct}
                             onChange={(e) => setScheduleNote(e.target.value)}
                         ></textarea>
                     )}
@@ -14160,7 +14493,7 @@ export default function App() {
                                                   {/* Filter */}
                                                   <div className="flex flex-wrap gap-2 mb-6 bg-gray-50 p-3 rounded-lg border border-gray-100">
                                                       <div className="text-xs font-bold text-gray-500 mr-2 flex items-center"><Search size={14} className="mr-1"/> ตัวกรองมิเตอร์:</div>
-                                                      {waterMeters.map((m, idx) => (
+                                                      {waterMeters.map((m) => (
                                                           <label key={m.id} className={`flex items-center gap-1.5 text-xs cursor-pointer px-2.5 py-1 rounded-md border transition-all ${!hiddenAnalysisMeters.has(m.id) ? 'bg-blue-100 border-blue-300 text-blue-800 font-medium shadow-sm' : 'bg-white border-gray-200 text-gray-400 hover:bg-gray-50'}`}>
                                                               <input type="checkbox" checked={!hiddenAnalysisMeters.has(m.id)} onChange={() => toggleMeterVisibility(m.id)} className="accent-blue-600 w-3.5 h-3.5" />
                                                               <span className="truncate max-w-[150px]" title={`${m.name} (${m.code})`}>{m.name}</span>
@@ -14253,7 +14586,7 @@ export default function App() {
                                                   {/* Filter */}
                                                   <div className="flex flex-wrap gap-2 mb-6 bg-gray-50 p-3 rounded-lg border border-gray-100">
                                                       <div className="text-xs font-bold text-gray-500 mr-2 flex items-center"><Search size={14} className="mr-1"/> ตัวกรองมิเตอร์:</div>
-                                                      {elecMeters.map((m, idx) => (
+                                                      {elecMeters.map((m) => (
                                                           <label key={m.id} className={`flex items-center gap-1.5 text-xs cursor-pointer px-2.5 py-1 rounded-md border transition-all ${!hiddenAnalysisMeters.has(m.id) ? 'bg-orange-100 border-orange-300 text-orange-800 font-medium shadow-sm' : 'bg-white border-gray-200 text-gray-400 hover:bg-gray-50'}`}>
                                                               <input type="checkbox" checked={!hiddenAnalysisMeters.has(m.id)} onChange={() => toggleMeterVisibility(m.id)} className="accent-orange-600 w-3.5 h-3.5" />
                                                               <span className="truncate max-w-[150px]" title={`${m.name} (${m.code})`}>{m.name}</span>
@@ -14684,7 +15017,7 @@ export default function App() {
                               { name: 'ยกเลิก', value: statusCounts['Cancelled'], color: 'url(#colorGray)' }
                           ].filter(d => d.value > 0);
 
-                          const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, index }) => {
+                          const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
                               const RADIAN = Math.PI / 180;
                               const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
                               const x = cx + radius * Math.cos(-midAngle * RADIAN);
@@ -17279,7 +17612,7 @@ export default function App() {
                                       {Object.keys(restoreModules).map(key => {
                                           const hasData = importDataPreview?.data?.[key] !== undefined || 
                                               (key === 'inventory' && importDataPreview?.data?.inventoryList) ||
-                                              (key === 'schedules' && importDataPreview?.data?.schedules) ||
+                                              (key === 'schedules' && Array.isArray(importDataPreview?.data?.projectScheduleRecords)) ||
                                               (key === 'meetingsList' && importDataPreview?.data?.meetingsList);
 
                                           if (!hasData) return null;
@@ -17768,6 +18101,14 @@ export default function App() {
 
   if (!currentUser) return renderLoginView();
 
+  const isAssignedProjectBlocked = postAuthDestination.kind === 'assigned-project-pending'
+      || postAuthDestination.kind === 'assigned-project-unavailable'
+      || (
+          postAuthDestination.kind === 'assigned-project'
+          && selectedProject?.id !== postAuthDestination.project.id
+      );
+  const assignedProjectUnavailable = postAuthDestination.kind === 'assigned-project-unavailable';
+
   return (
     <div className={`flex min-h-screen font-sans transition-colors duration-300 w-full overflow-x-hidden ${!isExporting ? (theme === 'dark' ? 'dark-theme' : theme === 'sweet' ? 'sweet-theme' : theme === 'crimson' ? 'crimson-theme' : theme === 'sunset' ? 'sunset-theme' : 'bg-gray-100 text-gray-900') : 'bg-gray-100 text-gray-900'}`}>
       {/* ซ่อนลูกศรขึ้น-ลง ของ input type="number" ทั้งระบบ และเพิ่ม Dark Mode Styles */}
@@ -17899,9 +18240,9 @@ export default function App() {
         .sweet-theme .bg-gray-900 .text-white { color: #5C434B !important; } 
         .sweet-theme .bg-gray-900 .text-gray-400 { color: #997B86 !important; }
         .sweet-theme .bg-gray-900 .text-gray-500 { color: #8C6D78 !important; }
-        .sweet-theme .bg-gray-900 .hover\:text-white:hover { color: #D4758B !important; }
+        .sweet-theme .bg-gray-900 .hover\\:text-white:hover { color: #D4758B !important; }
         .sweet-theme .border-gray-800 { border-color: #F4C4D0 !important; }
-        .sweet-theme .bg-gray-800, .sweet-theme .hover\:bg-gray-800:hover, .sweet-theme .group:hover .group-hover\:bg-gray-800 { background-color: #F4C4D0 !important; }
+        .sweet-theme .bg-gray-800, .sweet-theme .hover\\:bg-gray-800:hover, .sweet-theme .group:hover .group-hover\\:bg-gray-800 { background-color: #F4C4D0 !important; }
         
         /* Inputs in Sweet Theme */
         .sweet-theme input:not([type="radio"]):not([type="checkbox"]), .sweet-theme select, .sweet-theme textarea {
@@ -17919,7 +18260,7 @@ export default function App() {
         .sweet-theme .bg-orange-50 { background-color: #FFF5F8 !important; }
         .sweet-theme .bg-orange-100 { background-color: #FFEDF1 !important; }
         .sweet-theme .bg-orange-500, .sweet-theme .bg-orange-600 { background-color: #F4A6B7 !important; color: white !important; }
-        .sweet-theme .hover\:bg-orange-700:hover { background-color: #E88FA4 !important; }
+        .sweet-theme .hover\\:bg-orange-700:hover { background-color: #E88FA4 !important; }
         
         .sweet-theme .text-orange-400, .sweet-theme .text-orange-500, .sweet-theme .text-orange-600, .sweet-theme .text-orange-700 { color: #D4758B !important; }
         .sweet-theme .border-orange-200, .sweet-theme .border-orange-300, .sweet-theme .border-orange-500 { border-color: #F4A6B7 !important; }
@@ -17951,9 +18292,9 @@ export default function App() {
         .crimson-theme .bg-gray-900 .text-white { color: #FFFFFF !important; } 
         .crimson-theme .bg-gray-900 .text-gray-400 { color: #FCA5A5 !important; }
         .crimson-theme .bg-gray-900 .text-gray-500 { color: #F87171 !important; }
-        .crimson-theme .bg-gray-900 .hover\:text-white:hover { color: #FFFFFF !important; }
+        .crimson-theme .bg-gray-900 .hover\\:text-white:hover { color: #FFFFFF !important; }
         .crimson-theme .border-gray-800 { border-color: #7F1D1D !important; }
-        .crimson-theme .bg-gray-800, .crimson-theme .hover\:bg-gray-800:hover, .crimson-theme .group:hover .group-hover\:bg-gray-800 { background-color: #7F1D1D !important; }
+        .crimson-theme .bg-gray-800, .crimson-theme .hover\\:bg-gray-800:hover, .crimson-theme .group:hover .group-hover\\:bg-gray-800 { background-color: #7F1D1D !important; }
         
         /* Inputs in Crimson Theme */
         .crimson-theme input:not([type="radio"]):not([type="checkbox"]), .crimson-theme select, .crimson-theme textarea {
@@ -17971,7 +18312,7 @@ export default function App() {
         /* Accents in Crimson Theme */
         .crimson-theme .bg-orange-50, .crimson-theme .bg-orange-100 { background-color: rgba(220, 38, 38, 0.15) !important; border-color: rgba(220, 38, 38, 0.3) !important; color: #FCA5A5 !important; }
         .crimson-theme .bg-orange-500, .crimson-theme .bg-orange-600 { background-color: #DC2626 !important; color: white !important; }
-        .crimson-theme .hover\:bg-orange-700:hover { background-color: #B91C1C !important; }
+        .crimson-theme .hover\\:bg-orange-700:hover { background-color: #B91C1C !important; }
         
         .crimson-theme .text-orange-400, .crimson-theme .text-orange-500, .crimson-theme .text-orange-600, .crimson-theme .text-orange-700 { color: #FCA5A5 !important; }
         .crimson-theme .border-orange-200, .crimson-theme .border-orange-300, .crimson-theme .border-orange-500 { border-color: rgba(220, 38, 38, 0.4) !important; }
@@ -18039,9 +18380,9 @@ export default function App() {
         .sunset-theme .bg-gray-900 .text-white { color: #FFFDE7 !important; } 
         .sunset-theme .bg-gray-900 .text-gray-400 { color: #FDE047 !important; }
         .sunset-theme .bg-gray-900 .text-gray-500 { color: #FEF08A !important; }
-        .sunset-theme .bg-gray-900 .hover\:text-white:hover { color: #FFFFFF !important; }
+        .sunset-theme .bg-gray-900 .hover\\:text-white:hover { color: #FFFFFF !important; }
         .sunset-theme .border-gray-800 { border-color: #C23A1D !important; }
-        .sunset-theme .bg-gray-800, .sunset-theme .hover\:bg-gray-800:hover, .sunset-theme .group:hover .group-hover\:bg-gray-800 { background-color: #C23A1D !important; }
+        .sunset-theme .bg-gray-800, .sunset-theme .hover\\:bg-gray-800:hover, .sunset-theme .group:hover .group-hover\\:bg-gray-800 { background-color: #C23A1D !important; }
         
         /* Inputs in Sunset Theme */
         .sunset-theme input:not([type="radio"]):not([type="checkbox"]), .sunset-theme select, .sunset-theme textarea {
@@ -18058,7 +18399,7 @@ export default function App() {
         .sunset-theme .bg-orange-50 { background-color: #FFEDD5 !important; }
         .sunset-theme .bg-orange-100 { background-color: #FED7AA !important; }
         .sunset-theme .bg-orange-500, .sunset-theme .bg-orange-600 { background-color: #EA580C !important; color: white !important; }
-        .sunset-theme .hover\:bg-orange-700:hover { background-color: #C2410C !important; }
+        .sunset-theme .hover\\:bg-orange-700:hover { background-color: #C2410C !important; }
         
         .sunset-theme .text-orange-400, .sunset-theme .text-orange-500, .sunset-theme .text-orange-600, .sunset-theme .text-orange-700 { color: #EA580C !important; }
         .sunset-theme .border-orange-200, .sunset-theme .border-orange-300, .sunset-theme .border-orange-500 { border-color: #EA580C !important; }
@@ -18109,7 +18450,21 @@ export default function App() {
         )}
 
         <div id="print-area" className={`${isExporting ? 'w-full max-w-none px-[10mm]' : 'max-w-7xl mx-auto w-full p-4 md:p-6 lg:p-8 h-full flex flex-col'}`}>
-          {selectedProject ? ProjectDetail() : (
+          {isAssignedProjectBlocked ? (
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-8 text-center max-w-2xl mx-auto mt-8">
+              {assignedProjectUnavailable
+                ? <AlertTriangle className="mx-auto mb-4 text-amber-500" size={36} />
+                : <Loader2 className="mx-auto mb-4 text-orange-500 animate-spin" size={36} />}
+              <h2 className="text-lg font-bold text-gray-800">
+                {assignedProjectUnavailable ? 'ไม่พบข้อมูลโครงการที่สังกัด' : 'กำลังโหลดโครงการที่คุณสังกัด'}
+              </h2>
+              <p className="text-sm text-gray-500 mt-2">
+                {assignedProjectUnavailable
+                  ? `บัญชีนี้ถูกกำหนดให้สังกัด ${postAuthDestination.department} แต่ไม่พบโครงการนี้ กรุณาติดต่อผู้ดูแลระบบ`
+                  : 'ระบบจะเปิดหน้าโครงการให้อัตโนมัติเมื่อข้อมูลพร้อม'}
+              </p>
+            </div>
+          ) : selectedProject ? ProjectDetail() : (
             <>
               {activeMenu === 'dashboard' && DashboardView()}
               {activeMenu === 'users' && UserManagement()}
@@ -19018,7 +19373,7 @@ export default function App() {
                                                     a.download = `QR_Asset_${selectedAssetView.code}.png`;
                                                     a.click();
                                                     URL.revokeObjectURL(url);
-                                                } catch (e) {
+                                                } catch {
                                                     window.open(qrUrl, '_blank');
                                                 }
                                             }}><Download size={12}/> โหลด QR</Button>
@@ -19393,7 +19748,7 @@ export default function App() {
                                                     a.download = `QR_Machine_${selectedMachineDetails.code}.png`;
                                                     a.click();
                                                     URL.revokeObjectURL(url);
-                                                } catch (e) {
+                                                } catch {
                                                     window.open(qrUrl, '_blank');
                                                 }
                                             }}><Download size={12}/> โหลด QR</Button>
@@ -21631,7 +21986,7 @@ export default function App() {
                         <tbody className="divide-y divide-gray-100">
                             {(() => {
                                 const targetMonthStr = auditRankingMonth || new Date().toISOString().slice(0, 7);
-                                const rankData = projects.map(p => {
+                                const rankData = accessibleProjects.map(p => {
                                     const pAudits = audits.filter(a => a.projectId === p.id && a.date && a.date.startsWith(targetMonthStr));
                                     const avg = pAudits.length > 0 ? (pAudits.reduce((sum, a) => sum + a.score, 0) / pAudits.length) : 0;
                                     return { id: p.id, name: p.name, avgScore: parseFloat(avg.toFixed(1)) };
@@ -21723,7 +22078,7 @@ export default function App() {
                                     passedDays = today.getDate();
                                 }
 
-                                const rankData = projects.map(p => {
+                                const rankData = accessibleProjects.map(p => {
                                     const pReports = dailyReports.filter(r => r.projectId === p.id && r.date && r.date.startsWith(targetMonthStr));
                                     const uniqueDays = new Set(pReports.map(r => r.date)).size;
                                     const percentage = passedDays > 0 ? Math.round((uniqueDays / passedDays) * 100) : 0;

@@ -18,22 +18,36 @@ function assertActiveProfile(profile) {
 }
 
 function mapSignInError(error) {
-  const code = error?.code || '';
+  // Normalize across Firebase SDK versions and Email-Enumeration-Protection:
+  // strip the "auth/" prefix and lowercase, and also inspect the raw message
+  // (the SDK sometimes surfaces "INVALID_LOGIN_CREDENTIALS" only in the message).
+  const rawCode = String(error?.code || '');
+  const code = rawCode.replace(/^auth\//i, '').toLowerCase();
+  const message = String(error?.message || '').toLowerCase();
+
+  const credentialCodes = new Set([
+    'invalid-credential',
+    'invalid-login-credentials',
+    'invalid_login_credentials',
+    'user-not-found',
+    'wrong-password',
+    'invalid-email',
+    'invalid-password',
+  ]);
   if (
-    code === 'auth/invalid-credential' ||
-    code === 'auth/user-not-found' ||
-    code === 'auth/wrong-password' ||
-    code === 'auth/invalid-email'
+    credentialCodes.has(code)
+    || message.includes('invalid_login_credentials')
+    || message.includes('invalid login credentials')
   ) {
     return new BusinessAuthError('invalid-credentials', error);
   }
-  if (code === 'auth/user-disabled') {
+  if (code === 'user-disabled') {
     return new BusinessAuthError('account-inactive', error);
   }
-  if (code === 'auth/too-many-requests') {
+  if (code === 'too-many-requests') {
     return new BusinessAuthError('too-many-attempts', error);
   }
-  if (code === 'auth/network-request-failed') {
+  if (code === 'network-request-failed') {
     return new BusinessAuthError('network-error', error);
   }
   return new BusinessAuthError('auth-unavailable', error);

@@ -70,3 +70,30 @@ test('maps Firebase credential failures to a stable error', async () => {
     (error) => error.code === 'invalid-credentials',
   );
 });
+
+test('maps every wrong-password/unknown-user variant to invalid-credentials', async () => {
+  // Firebase JS SDK has used several codes/messages for a bad password across
+  // versions and with Email-Enumeration-Protection on. All of them must show the
+  // user "wrong username or password", never the vague "auth unavailable".
+  const variants = [
+    'auth/wrong-password',
+    'auth/user-not-found',
+    'auth/invalid-email',
+    'auth/invalid-login-credentials',
+    'auth/INVALID_LOGIN_CREDENTIALS',
+  ];
+  for (const code of variants) {
+    const { auth } = makeAuth({
+      signInWithEmail: async () => {
+        const error = new Error('INVALID_LOGIN_CREDENTIALS');
+        error.code = code;
+        throw error;
+      },
+    });
+    await assert.rejects(
+      auth.signIn('2310002', 'wrong'),
+      (error) => error.code === 'invalid-credentials',
+      `expected invalid-credentials for ${code}`,
+    );
+  }
+});
