@@ -83,6 +83,13 @@ const GOOGLE_SCRIPT_CONFIG = LOCAL_EMULATOR ? { SHEETS_URL: '', DRIVE_URL: '' } 
 const USE_FIREBASE_BUSINESS_AUTH = LOCAL_EMULATOR || resolveAuthMode(import.meta.env.VITE_AUTH_MODE) === 'firebase';
 const INTERNAL_AUTH_DOMAIN = LOCAL_EMULATOR ? 'auth.bmg-connect.local' : import.meta.env.VITE_INTERNAL_AUTH_DOMAIN || 'auth.bmg-connect.local';
 
+// HOTFIX (data-loss): ตารางงานเก่ายังอยู่ใน app_state/bmg_schedules_v2 และยังไม่ถูก
+// migrate ขึ้น bmg_projectSchedules_docs. ระหว่างนี้ผู้ใช้ที่ไม่ใช่ admin จะเห็นตาราง
+// ว่าง/ไม่ครบ แล้ว save ทับทำให้ของคนอื่นหายจากการแสดงผล. ปิดการบันทึกทั้งระบบชั่วคราว
+// จนกว่าจะรัน migration เสร็จ แล้วค่อยตั้งกลับเป็น false + deploy.
+// ดูรายละเอียดใน docs: scripts/migrate-project-schedule-metadata.mjs
+const SCHEDULE_SAVE_LOCKED = true;
+
 try {
   let firebaseConfig = null;
   if (LOCAL_EMULATOR) {
@@ -5193,6 +5200,10 @@ export default function App() {
   const scheduleSaveInFlight = useRef(false);
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
   const handleSaveSchedule = async () => {
+      if (SCHEDULE_SAVE_LOCKED) {
+          alert('ขณะนี้ระบบปิดการบันทึกตารางงานชั่วคราวเพื่อป้องกันข้อมูลสูญหายระหว่างการย้ายข้อมูล ตารางยังดูและพิมพ์ได้ตามปกติ กรุณาติดต่อผู้ดูแลระบบ');
+          return;
+      }
       if (scheduleSaveInFlight.current) return;
       scheduleSaveInFlight.current = true;
       setIsSavingSchedule(true);
@@ -12188,10 +12199,10 @@ export default function App() {
 
             
             // Plan จะแก้ไขได้ก็ต่อเมื่อ ยังไม่ล็อค และ ยังไม่อนุมัติ (ปลดล็อคข้อจำกัดวันที่ 22 ออก)
-            const canEditPlan = hasPerm('proj_schedule', 'save') && !isLegacyScheduleReadOnly && !isSavingSchedule && !isLocked && !isApproved;
+            const canEditPlan = !SCHEDULE_SAVE_LOCKED && hasPerm('proj_schedule', 'save') && !isLegacyScheduleReadOnly && !isSavingSchedule && !isLocked && !isApproved;
             
             // ACT จะแก้ไขได้ก็ต่อเมื่อ ยังไม่ถูกล็อค
-            const canEditAct = hasPerm('proj_schedule', 'save') && !isLegacyScheduleReadOnly && !isSavingSchedule && !isLocked;
+            const canEditAct = !SCHEDULE_SAVE_LOCKED && hasPerm('proj_schedule', 'save') && !isLegacyScheduleReadOnly && !isSavingSchedule && !isLocked;
 
             // ตรวจสอบว่าเป็นหน่วยงาน Head Office หรือไม่
             const isHeadOffice = selectedProject?.name === 'Head Office';
@@ -12268,7 +12279,7 @@ export default function App() {
                                 return null;
                             })()}
 
-                            {hasPerm('proj_schedule', 'save') && <Button size="sm" icon={Save} onClick={handleSaveSchedule} disabled={isLegacyScheduleReadOnly || isSavingSchedule} title={isLegacyScheduleReadOnly ? 'ข้อมูลเดิมเปิดให้อ่านและส่งออกเท่านั้น' : undefined}>{isSavingSchedule ? 'รอเซิร์ฟเวอร์ยืนยัน…' : t('save')}</Button>}
+                            {hasPerm('proj_schedule', 'save') && <Button size="sm" icon={Save} onClick={handleSaveSchedule} disabled={SCHEDULE_SAVE_LOCKED || isLegacyScheduleReadOnly || isSavingSchedule} title={SCHEDULE_SAVE_LOCKED ? 'ปิดการบันทึกชั่วคราวระหว่างย้ายข้อมูลตารางงาน' : isLegacyScheduleReadOnly ? 'ข้อมูลเดิมเปิดให้อ่านและส่งออกเท่านั้น' : undefined}>{isSavingSchedule ? 'รอเซิร์ฟเวอร์ยืนยัน…' : t('save')}</Button>}
                         </div>
                     </div>
                 </div>

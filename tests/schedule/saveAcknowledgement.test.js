@@ -12,6 +12,9 @@ function screen(persist, overrides = {}) {
   const messages = [];
   const busy = [];
   const scope = {
+    // Default false so the existing suite exercises the post-migration save path.
+    // The hotfix flag is covered explicitly by its own test below.
+    SCHEDULE_SAVE_LOCKED: false,
     scheduleSaveInFlight: { current: false }, setIsSavingSchedule: value => busy.push(value),
     isLegacyScheduleReadOnly: false, selectedProject: { id: 'p' }, currentMonth: '2026-09',
     schedulesRef: { current: { 'u_2026-09-01': 'M3', 'u_2026-08-01': 'O' } },
@@ -131,4 +134,22 @@ test('a draft for an absent month cannot overwrite a record created concurrently
   await ui.save();
   assert.equal(written, false);
   assert.doesNotMatch(ui.messages[0], /สำเร็จ/);
+});
+
+// HOTFIX regression (data-loss): while SCHEDULE_SAVE_LOCKED is true, saving must be
+// blocked before it can touch the server, so a client that loaded an incomplete
+// schedule cannot overwrite another user's cells. Flip the flag back to false only
+// after the legacy archive is migrated into bmg_projectSchedules_docs.
+test('save is blocked and never reaches the server while the schedule save lock is on', async () => {
+  let reachedServer = false;
+  const ui = screen(async () => { reachedServer = true; return { ok: true }; }, {
+    SCHEDULE_SAVE_LOCKED: true,
+    scheduleDraftRef: {
+      current: { scope: 'p_2026-09', cells: { 'u_2026-09-02': 'A' }, baseline: undefined },
+    },
+    projectScheduleRecords: [],
+  });
+  await ui.save();
+  assert.equal(reachedServer, false, 'persist must not be called while locked');
+  assert.match(ui.messages[0] || '', /ปิดการบันทึก/);
 });
