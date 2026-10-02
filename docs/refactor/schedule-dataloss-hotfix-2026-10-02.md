@@ -27,6 +27,23 @@
 
 **ขั้นถัดไป:** review + deploy branch นี้ขึ้น production เพื่อหยุดเลือดจริง.
 
+## ผล audit จริง (2026-10-02, read-only)
+รัน `node scripts/audit-legacy-schedule-cells.mjs` บน production:
+- 27 โครงการ, 72 users, legacyCells รวม **12,201 ช่อง**
+- `already-identical: 6,247` (51%) — ย้าย/ตรงกันแล้ว ไม่ต้องทำ
+- `unknown-identity: 4,148` (34%) — key พนักงานจับคู่ user ปัจจุบันไม่ได้
+  (ส่วนใหญ่เดือน ก.พ.–มิ.ย. น่าจะจาก auth id migration) → **ต้นเหตุ "บางคนหาย"**
+- `needs-historical-project-confirmation: 1,614` (13%) — Head office + เดอะเบลส
+- `cross-project-target: 103` — แอสปายลาดพร้าว 113 (พนักงานข้ามโครงการ)
+- `value-conflict: 89` — **ข้อมูลที่ถูก save ทับจริง**, กระจุกที่ **ก.ย.–ต.ค. 2026**
+  (เดอะมาร์ค 40, เลอร์โคซี่ 24, ศุภาลัยเพชรเกษม 12, เดอะทรัสต์ 10, ฯลฯ)
+- `authorizedWrites: 0` — script ไม่ย้ายอัตโนมัติ, ต้องยืนยัน ownership รายกรณี
+- report: `migration-output/schedule-audit-<ts>/report.md` + `details.json`
+
+**ตีความ:** คลังเก่า 12,201 ช่องยังอยู่ครบ. value-conflict 89 ช่อง = cells ที่ผู้ใช้
+ใหม่เขียนทับ (ของเดิมยังอยู่ในคลังเก่า กู้ได้). unknown-identity 4,148 = พนักงานที่
+id เปลี่ยน → ต้อง map id เก่า→ใหม่ ก่อนย้าย.
+
 ## แผนกู้คืน (หลัง deploy hotfix)
 
 Production project: `bmg-connect-3e99a`, appId `bmg-app-prod`.
