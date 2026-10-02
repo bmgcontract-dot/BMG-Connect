@@ -44,6 +44,14 @@
 ใหม่เขียนทับ (ของเดิมยังอยู่ในคลังเก่า กู้ได้). unknown-identity 4,148 = พนักงานที่
 id เปลี่ยน → ต้อง map id เก่า→ใหม่ ก่อนย้าย.
 
+## Production deploy (เสร็จแล้ว)
+- 2026-10-02: merge PR #3 → `main` (merge commit `5f3560a`)
+- Vercel auto-deploy Production = `5f3560a`, state: **success**
+- Verify: emulator ✅, Vercel Preview (ปุ่ม Save สีเทา) ✅,
+  **Production `bmg-connect.vercel.app` (ตารางงาน) ปุ่มบันทึกสีเทา disabled ✅**
+- **หยุดเลือดสำเร็จ** — ผู้ใช้ save ตารางทับไม่ได้อีก; ดู/พิมพ์/export ยังปกติ
+- rollback: ถ้าต้องย้อน ให้ revert `5f3560a` บน main แล้ว Vercel redeploy
+
 ## แผนกู้คืน (หลัง deploy hotfix)
 
 Production project: `bmg-connect-3e99a`, appId `bmg-app-prod`.
