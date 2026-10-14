@@ -17,6 +17,7 @@ function ui({ ok = true, admin = true, visible = 'M3' } = {}) {
   const context = { projectId: 'p', month: '2026-09', actorUid: 'admin', staffIds: ['u'], staffAliases: {}, isAdmin: admin };
   const contextRef = { current: context };
   const scope = {
+    canWriteScheduleNow: () => true,
     legacyEditInFlight: { current: false }, isLegacyScheduleArchiveAdmin: admin,
     selectedProject: { id: 'p', name: 'Project' }, fbUser: { uid: 'admin' },
     setIsImportingLegacySchedule() {}, legacyEditContext: context, legacyEditContextRef: contextRef,

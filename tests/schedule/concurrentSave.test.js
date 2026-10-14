@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { scheduleWriteAccess } from '../../src/schedule/scheduleWritePolicy.js';
 import { scheduleDocumentEqual } from '../../src/schedule/scheduleDocumentEqual.js';
 
 const source = readFileSync(new URL('../../App.jsx', import.meta.url), 'utf8');
@@ -9,7 +10,7 @@ const end = source.indexOf('    return [filterItemsForQueryPlan', start);
 const initial = { id: 'p_2026-09', projectId: 'p', month: '2026-09', schedules: { a: 'M3', b: 'O' } };
 const clone = value => structuredClone(value);
 
-function harness() {
+function harness({ locked = false, month = '2026-09' } = {}) {
   const store = new Map([[initial.id, clone(initial)]]);
   let fail = false;
   let onRetry;
@@ -31,7 +32,8 @@ function harness() {
       documentIdField: 'id', collectionName: 'bmg_projectSchedules',
       getDocumentReference: id => id, writeBatch: batch,
       guardedScheduleWrites: true, scheduleWritePending: { current: false },
-      scheduleDocumentEqual,
+      scheduleDocumentEqual, SCHEDULE_WRITE_POLICY: { emergencyLocked: locked },
+      scheduleWriteAccess: args => scheduleWriteAccess({ ...args, currentMonth: month, verifiedScopes: [{ projectId: 'p', month: '2026-09' }] }),
       runTransaction: async (_db, operation) => {
         let tx = batch(); await operation(tx);
         if (onRetry) {
@@ -126,4 +128,32 @@ test('rapid second edits are rejected explicitly rather than silently dropped', 
   assert.equal((await a.save([{ ...initial, note: 'second' }])).ok, false);
   assert.equal((await pending).ok, true);
   assert.equal(h.store.get(initial.id).note, 'first');
+});
+
+for (const update of [
+  records => records.map(r => ({ ...r, schedules: { a: 'H' } })),
+  records => records.map(r => ({ ...r, approval: { status: 'Approved' } })),
+  records => records.map(r => ({ ...r, staffOrder: ['b', 'a'] })),
+  records => records.map(r => ({ ...r, legacyCellMigration: { status: 'complete' } })),
+  () => [],
+]) {
+  test(`emergency lock blocks transaction mutation ${update.toString()}`, async () => {
+    const h = harness({ locked: true });
+    const result = await h.client().save(update);
+    assert.equal(result.ok, false);
+    assert.deepEqual(h.store.get(initial.id), initial);
+  });
+}
+
+test('previously verified scope closes when the business month changes', async () => {
+  const h = harness({ month: '2026-10' });
+  assert.equal((await h.client().save([{ ...initial, note: 'closed' }])).ok, false);
+  assert.deepEqual(h.store.get(initial.id), initial);
+});
+
+test('unverified project cannot be created through the shared writer', async () => {
+  const h = harness();
+  const result = await h.client().save(records => [...records, { ...initial, id: 'other_2026-09', projectId: 'other' }]);
+  assert.equal(result.ok, false);
+  assert.equal(h.store.has('other_2026-09'), false);
 });

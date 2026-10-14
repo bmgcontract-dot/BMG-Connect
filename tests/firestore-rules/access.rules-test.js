@@ -21,19 +21,22 @@ import {
   where,
 } from 'firebase/firestore';
 import { createFirestoreCollectionQueryPlan } from '../../src/firebase/queryScope.js';
+import { scheduleWriteAccess } from '../../src/schedule/scheduleWritePolicy.js';
 import { scheduleDocumentEqual } from '../../src/schedule/scheduleDocumentEqual.js';
+import { clock } from '../../src/platform/clock.js';
 import { prepareLegacyScheduleEditing } from '../../src/schedule/legacyScheduleEditing.js';
 
 // Actual schedule setter with real Firebase transaction and Rules, isolated from React rendering.
 const appSource = await readFile('App.jsx', 'utf8');
 const setterStart = appSource.indexOf('    const setPersistentValue = async');
 const setterEnd = appSource.indexOf('    return [filterItemsForQueryPlan', setterStart);
-function scheduleWriter(database, records) {
+function scheduleWriter(database, records, month = clock.thisMonth()) {
   const scope = {
     guardedScheduleWrites: true, scheduleWritePending: { current: false },
     dataRef: { current: structuredClone(records) }, filterItemsForQueryPlan: items => items,
     queryPlan: { kind: 'unscoped' }, readOnly: false, db: database, fbUser: { uid: 'test' }, appId: 'bmg-app-prod',
-    scheduleDocumentEqual, runTransaction,
+    scheduleDocumentEqual, runTransaction, SCHEDULE_WRITE_POLICY: { emergencyLocked: false },
+    scheduleWriteAccess: args => scheduleWriteAccess({ ...args, currentMonth: month, verifiedScopes: [{ projectId: 'project-a', month }] }),
     getDocumentReference: id => domainDocument(database, 'bmg_projectSchedules', id),
     setData() {}, saveStateLocallyIDB() {}, localKey: 'isolated-test',
   };
@@ -46,6 +49,7 @@ const APP_ID = 'bmg-app-prod';
 setLogLevel('silent');
 
 let environment;
+const CURRENT_MONTH = clock.thisMonth();
 
 function projectDocument(database, projectId) {
   return projectDocumentForApp(database, APP_ID, projectId);
@@ -105,6 +109,7 @@ before(async () => {
   });
 
   await environment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), 'artifacts', APP_ID, 'public', 'data', 'bmg_scheduleWritePolicy', 'current'), { enabled: true, verifiedScopes: [`project-a_${CURRENT_MONTH}`, `project-b_${CURRENT_MONTH}`] });
     await setDoc(projectDocument(context.firestore(), 'project-a'), {
       id: 'project-a',
       name: 'โครงการ A',
@@ -714,22 +719,22 @@ test('project schedule documents require schedule permission and an accessible p
   await assertSucceeds(setDoc(domainDocument(
     managerDatabase,
     'bmg_projectSchedules',
-    'project-b_2026-09',
+    `project-b_${CURRENT_MONTH}`,
   ), {
-    id: 'project-b_2026-09',
+    id: `project-b_${CURRENT_MONTH}`,
     projectId: 'project-b',
-    month: '2026-09',
+    month: `${CURRENT_MONTH}`,
     schemaVersion: 1,
     schedules: {},
   }));
   await assertFails(setDoc(domainDocument(
     managerDatabase,
     'bmg_projectSchedules',
-    'project-c_2026-10',
+    `project-c_${CURRENT_MONTH}`,
   ), {
-    id: 'project-c_2026-10',
+    id: `project-c_${CURRENT_MONTH}`,
     projectId: 'project-c',
-    month: '2026-10',
+    month: `${CURRENT_MONTH}`,
     schemaVersion: 1,
     schedules: {},
   }));
@@ -738,46 +743,48 @@ test('project schedule documents require schedule permission and an accessible p
 test('actual schedule transaction preserves the first client edit and rejects the stale second client', async () => {
   const admin = environment.authenticatedContext('admin-user', { admin: true }).firestore();
   const manager = environment.authenticatedContext('manager-user').firestore();
-  const baseline = { id: 'project-a_2026-11', projectId: 'project-a', month: '2026-11', schemaVersion: 1,
-    schedules: { 'u_2026-11-01': 'M3', 'u_2026-11-02': 'O' } };
+  const baseline = { id: `project-a_${CURRENT_MONTH}`, projectId: 'project-a', month: `${CURRENT_MONTH}`, schemaVersion: 1,
+    schedules: { [`u_${CURRENT_MONTH}-01`]: 'M3', [`u_${CURRENT_MONTH}-02`]: 'O' } };
   await assertSucceeds(setDoc(domainDocument(admin, 'bmg_projectSchedules', baseline.id), baseline));
   const first = scheduleWriter(manager, [baseline]);
   const stale = scheduleWriter(admin, [baseline]);
-  assert.equal((await first([{ ...baseline, schedules: { ...baseline.schedules, 'u_2026-11-01': 'H' } }])).ok, true);
-  const rejected = await stale([{ ...baseline, schedules: { ...baseline.schedules, 'u_2026-11-02': 'M3' } }]);
+  assert.equal((await first([{ ...baseline, schedules: { ...baseline.schedules, [`u_${CURRENT_MONTH}-01`]: 'H' } }])).ok, true);
+  const rejected = await stale([{ ...baseline, schedules: { ...baseline.schedules, [`u_${CURRENT_MONTH}-02`]: 'M3' } }]);
   assert.equal(rejected.ok, false);
   assert.equal(rejected.error.code, 'schedule/conflict');
   const saved = (await getDoc(domainDocument(admin, 'bmg_projectSchedules', baseline.id))).data();
-  assert.equal(saved.schedules['u_2026-11-01'], 'H');
-  assert.equal(saved.schedules['u_2026-11-02'], 'O');
+  assert.equal(saved.schedules[`u_${CURRENT_MONTH}-01`], 'H');
+  assert.equal(saved.schedules[`u_${CURRENT_MONTH}-02`], 'O');
 });
 
 test('Admin imports a legacy test month, Manager reads and edits it, Restricted cannot write it', async () => {
+  await environment.withSecurityRulesDisabled(context => deleteDoc(domainDocument(context.firestore(), 'bmg_projectSchedules', `project-a_${CURRENT_MONTH}`)));
   const admin = environment.authenticatedContext('admin-user', { admin: true }).firestore();
   const manager = environment.authenticatedContext('manager-user').firestore();
   const restricted = environment.authenticatedContext('restricted-user').firestore();
-  const args = { records: [], projectId: 'project-a', month: '2026-12', staffIds: ['u'], staffAliases: { u: ['old'] },
-    legacySchedules: { 'old_2026-12-01': 'M3' }, actorUid: 'admin-user', confirmed: true, importedAt: '2026-09-19T00:00:00Z' };
+  const args = { records: [], projectId: 'project-a', month: `${CURRENT_MONTH}`, staffIds: ['u'], staffAliases: { u: ['old'] },
+    legacySchedules: { [`old_${CURRENT_MONTH}-01`]: 'M3' }, actorUid: 'admin-user', confirmed: true, importedAt: `${CURRENT_MONTH}-19T00:00:00Z` };
   const prepared = prepareLegacyScheduleEditing(args).records;
   assert.equal((await scheduleWriter(admin, [])(prepared)).ok, true);
   const managerRecord = (await getDoc(domainDocument(manager, 'bmg_projectSchedules', prepared[0].id))).data();
-  assert.equal(managerRecord.schedules['u_2026-12-01'], 'M3');
-  assert.equal(managerRecord.legacyEditImports[0].sourceCells['old_2026-12-01'], 'M3');
-  const changed = { ...managerRecord, schedules: { 'u_2026-12-01': '' } };
+  assert.equal(managerRecord.schedules[`u_${CURRENT_MONTH}-01`], 'M3');
+  assert.equal(managerRecord.legacyEditImports[0].sourceCells[`old_${CURRENT_MONTH}-01`], 'M3');
+  const changed = { ...managerRecord, schedules: { [`u_${CURRENT_MONTH}-01`]: '' } };
   assert.equal((await scheduleWriter(manager, [managerRecord])([changed])).ok, true);
   const denied = await scheduleWriter(restricted, [changed])([{ ...changed, note: 'unauthorized' }]);
   assert.equal(denied.ok, false);
   assert.equal(denied.error.code, 'permission-denied');
   const actual = (await getDoc(domainDocument(admin, 'bmg_projectSchedules', changed.id))).data();
-  assert.equal(actual.schedules['u_2026-12-01'], '');
+  assert.equal(actual.schedules[`u_${CURRENT_MONTH}-01`], '');
   assert.equal(actual.note, '');
   assert.deepEqual(actual.legacyEditImports, managerRecord.legacyEditImports);
 });
 
 test('Manager can create a previously absent month through the guarded schedule transaction', async () => {
+  await environment.withSecurityRulesDisabled(context => deleteDoc(domainDocument(context.firestore(), 'bmg_projectSchedules', `project-a_${CURRENT_MONTH}`)));
   const manager = environment.authenticatedContext('manager-user').firestore();
-  const record = { id: 'project-a_2027-01', projectId: 'project-a', month: '2027-01', schemaVersion: 1, schedules: {} };
-  const result = await scheduleWriter(manager, [])([record]);
+  const record = { id: `project-a_${CURRENT_MONTH}`, projectId: 'project-a', month: `${CURRENT_MONTH}`, schemaVersion: 1, schedules: {} };
+  const result = await scheduleWriter(manager, [], record.month)([record]);
   assert.equal(result.ok, true, result.error?.message);
 });
 

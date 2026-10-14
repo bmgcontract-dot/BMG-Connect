@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
+import { clock } from '../src/platform/clock.js';
 import { usernameToAuthEmail } from '../src/auth/identity.js';
 
 // Never use ADC or a configurable project here. Refuse all non-local emulator hosts.
@@ -28,8 +29,16 @@ for (const [uid, username, position, permissions] of [
     lastName: 'ข้อมูลจำลอง', position, status: 'Active', department: uid === 'qa-admin' ? 'Head Office' : name,
     accessibleDepts: uid === 'qa-admin' ? ['All'] : [name], permissions });
 }
+const month = clock.thisMonth();
+await root.collection('bmg_scheduleWritePolicy').doc('current').set({ enabled: true, verifiedScopes: [`qa-project_${month}`] });
+await root.collection('bmg_projects_docs').doc('qa-unverified').set({ ...project, id: 'qa-unverified', name: 'โครงการยังไม่ยืนยัน LOCAL เท่านั้น', code: 'QA-CLOSED' });
+await root.collection('bmg_projectSchedules_docs').doc(`qa-project_${month}`).set({
+  id: `qa-project_${month}`, projectId: 'qa-project', month, schemaVersion: 1,
+  schedules: { [`qa-manager_${month}-01`]: 'M3', [`qa-restricted_${month}-01`]: 'O' },
+  note: '', approval: {}, staffOrder: ['qa-manager', 'qa-restricted'],
+});
 const legacy = {};
-for (const month of ['2026-08', '2026-09']) {
+for (const month of ['2026-08', '2026-09'].filter(value => value !== clock.thisMonth())) {
   for (const uid of ['qa-manager', 'qa-restricted']) {
     legacy[`${uid}_${month}-01`] = 'M3';
     legacy[`${uid}_${month}-02`] = 'O';

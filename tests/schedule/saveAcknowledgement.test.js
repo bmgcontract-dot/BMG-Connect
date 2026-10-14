@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { upsertProjectSchedule } from '../../src/schedule/projectScheduleState.js';
+import { scheduleWriteAccess } from '../../src/schedule/scheduleWritePolicy.js';
 import { scheduleDocumentEqual } from '../../src/schedule/scheduleDocumentEqual.js';
 
 // Exercise the actual UI handler until it can be extracted from the monolithic component.
@@ -26,6 +27,9 @@ function screen(persist, overrides = {}) {
     alert: message => messages.push(message), console: { error() {} },
     ...overrides,
   };
+  scope.scheduleWriteAccess = args => scheduleWriteAccess({ ...args, currentMonth: '2026-09', verifiedScopes: [{ projectId: 'p', month: '2026-09' }] });
+  scope.SCHEDULE_WRITE_POLICY = { emergencyLocked: scope.SCHEDULE_SAVE_LOCKED };
+  scope.canWriteScheduleNow = () => scope.scheduleWriteAccess({ projectId: scope.selectedProject.id, month: scope.currentMonth, emergencyLocked: scope.SCHEDULE_SAVE_LOCKED }).allowed;
   const save = new Function(...Object.keys(scope), `${source.slice(start, end)}; return handleSaveSchedule;`)(...Object.values(scope));
   return { save, messages, busy };
 }
@@ -59,9 +63,9 @@ test('editing a schedule cell stays in a local draft until Save', () => {
   const updateEnd = source.indexOf('\n\n  // ... (View Components)', updateStart);
   let draft;
   const update = new Function(
-    'isLegacyScheduleReadOnly', 'scheduleSaveInFlight', 'setScheduleDraftCells',
+    'isLegacyScheduleReadOnly', 'scheduleSaveInFlight', 'setScheduleDraftCells', 'canWriteScheduleNow',
     `${source.slice(updateStart, updateEnd)}; return updateSchedule;`,
-  )(false, { current: false }, updater => { draft = updater({ 'u_2026-09-01': 'M3' }); });
+  )(false, { current: false }, updater => { draft = updater({ 'u_2026-09-01': 'M3' }); }, () => true);
   update('u', '2026-09-01', 'H');
   assert.deepEqual(draft, { 'u_2026-09-01': 'H' });
 });
@@ -71,9 +75,9 @@ test('editing is ignored while a schedule save is awaiting acknowledgement', () 
   const updateEnd = source.indexOf('\n\n  // ... (View Components)', updateStart);
   let calls = 0;
   const update = new Function(
-    'isLegacyScheduleReadOnly', 'scheduleSaveInFlight', 'setScheduleDraftCells',
+    'isLegacyScheduleReadOnly', 'scheduleSaveInFlight', 'setScheduleDraftCells', 'canWriteScheduleNow',
     `${source.slice(updateStart, updateEnd)}; return updateSchedule;`,
-  )(false, { current: true }, () => { calls++; });
+  )(false, { current: true }, () => { calls++; }, () => true);
   update('u', '2026-09-01', 'H');
   assert.equal(calls, 0);
 });
@@ -152,4 +156,37 @@ test('save is blocked and never reaches the server while the schedule save lock 
   await ui.save();
   assert.equal(reachedServer, false, 'persist must not be called while locked');
   assert.match(ui.messages[0] || '', /ปิดการบันทึก/);
+});
+
+for (const currentMonth of ['2026-08', '2026-10']) {
+  test(`direct Save handler refuses closed month ${currentMonth}`, async () => {
+    let writes = 0;
+    const ui = screen(async () => { writes++; return { ok: true }; }, { currentMonth });
+    await ui.save();
+    assert.equal(writes, 0);
+    assert.match(ui.messages[0], /อ่านและส่งออก|ยังไม่ผ่านการยืนยัน/);
+  });
+}
+
+test('direct cell handler cannot edit while scope policy is closed', () => {
+  const updateStart = source.indexOf('  const updateSchedule = ');
+  const updateEnd = source.indexOf('\n\n  // ... (View Components)', updateStart);
+  let calls = 0;
+  const update = new Function('isLegacyScheduleReadOnly', 'scheduleSaveInFlight',
+    'setScheduleDraftCells', 'canWriteScheduleNow',
+    `${source.slice(updateStart, updateEnd)}; return updateSchedule;`,
+  )(false, { current: false }, () => { calls++; }, () => false);
+  update('u', '2026-09-01', 'H');
+  assert.equal(calls, 0);
+});
+
+
+test('direct Save cannot resubmit a closed approval', async () => {
+  let writes = 0;
+  const ui = screen(async () => { writes++; return { ok: true }; }, {
+    scheduleApprovals: { 'p_2026-09': { status: 'Approved', isLocked: true } },
+  });
+  await ui.save();
+  assert.equal(writes, 0);
+  assert.match(ui.messages[0], /ล็อคปิดยอด/);
 });

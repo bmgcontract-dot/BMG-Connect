@@ -1,3 +1,5 @@
+import { useSupplierDirectory } from './src/suppliers/useSupplierDirectory.js';
+import { mergeSupplierDirectory } from './src/suppliers/directory.js';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   Users, Building2, BarChart3, Settings, LogOut, 
@@ -57,6 +59,8 @@ import { unlockScheduleApproval } from './src/schedule/scheduleApprovalWorkflow.
 import { scheduleDocumentEqual } from './src/schedule/scheduleDocumentEqual.js';
 import { prepareLegacyScheduleEditing, readLegacyScheduleSnapshot } from './src/schedule/legacyScheduleEditing.js';
 import { useScheduleRoster } from './src/schedule/useScheduleRoster.js';
+import { scheduleWriteAccess } from './src/schedule/scheduleWritePolicy.js';
+import { clock } from './src/platform/clock.js';
 
 // --- Firebase Initialization ---
 let app, auth, db, storage, appId;
@@ -88,7 +92,11 @@ const INTERNAL_AUTH_DOMAIN = LOCAL_EMULATOR ? 'auth.bmg-connect.local' : import.
 // ว่าง/ไม่ครบ แล้ว save ทับทำให้ของคนอื่นหายจากการแสดงผล. ปิดการบันทึกทั้งระบบชั่วคราว
 // จนกว่าจะรัน migration เสร็จ แล้วค่อยตั้งกลับเป็น false + deploy.
 // ดูรายละเอียดใน docs: scripts/migrate-project-schedule-metadata.mjs
-const SCHEDULE_SAVE_LOCKED = true;
+const SCHEDULE_SAVE_LOCKED = false;
+// Synthetic pilot is available only in loopback-only, non-buildable emulator mode.
+const SCHEDULE_WRITE_POLICY = LOCAL_EMULATOR
+    ? { emergencyLocked: false, verifiedScopes: [{ projectId: 'qa-project', month: clock.thisMonth() }] }
+    : { emergencyLocked: SCHEDULE_SAVE_LOCKED };
 
 try {
   let firebaseConfig = null;
@@ -1912,6 +1920,14 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
                 const changed = [...new Set([...before.keys(), ...after.keys()])].filter(id =>
                     forceDocumentIds.includes(id) || !scheduleDocumentEqual(before.get(id), after.get(id)));
                 await runTransaction(db, async transaction => {
+                    // Re-evaluate on retries and at month rollover. Covers every writer,
+                    // including imports, approvals, staff ordering, and deletions.
+                    for (const id of changed) {
+                        const record = after.get(id) || before.get(id);
+                        const access = scheduleWriteAccess({ projectId: record?.projectId, month: record?.month, ...SCHEDULE_WRITE_POLICY });
+                        if (!access.allowed) throw new Error(access.reason);
+                        if (id !== `${record.projectId}_${record.month}`) throw new Error('รหัสตารางไม่ตรงกับโครงการและเดือน');
+                    }
                     // All reads must precede writes; retry rechecks the original baseline.
                     for (const id of changed) {
                         const snapshot = await transaction.get(getDocumentReference(id));
@@ -4149,20 +4165,12 @@ export default function App() {
       setProjectTab('overview');
   }, [postAuthDestination.kind, postAuthDestination.project, selectedProject?.id]);
   const [contracts, setContracts] = usePersistentCollection('bmg_contracts', INITIAL_CONTRACTS, subscriptionPolicy.userFor('bmg_contracts'), { queryPlan: queryPlanFor('bmg_contracts') });
-  // Supplier search must surface คู่สัญญา from EVERY project, regardless of the unit the module is opened from.
-  // Load contracts with selectedProject forced to null so the plan is unscoped (global access) or scoped to all
-  // accessible projects — never limited to the single selected project. Read-only + separate localKey so it never
-  // collides with, or writes back over, the project-scoped `contracts` subscription used by the Contracts tab.
-  const [allContracts] = usePersistentCollection(
-      'bmg_contracts',
-      INITIAL_CONTRACTS,
-      subscriptionPolicy.userFor('bmg_contracts'),
-      {
-          readOnly: true,
-          localKey: 'bmg_contracts_allProjects',
-          queryPlan: queryPlanFor('bmg_contracts', { selectedProject: null }),
-      },
-  );
+  const supplierDirectory = useSupplierDirectory({
+      auth,
+      user: fbUser,
+      enabled: Boolean(currentUser?.status === 'Active' && currentUser.authUid === fbUser?.uid
+          && activeMenu === 'projects' && selectedProject && projectTab === 'contractors'),
+  });
   const [audits, setAudits] = usePersistentCollection('bmg_audits', INITIAL_AUDITS, subscriptionPolicy.userFor('bmg_audits'), { queryPlan: queryPlanFor('bmg_audits') });
   const [dailyReports, setDailyReports] = usePersistentCollection(
       'bmg_dailyReports',
@@ -4270,7 +4278,7 @@ export default function App() {
       const d = new Date();
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   };
-  const [currentMonth, setCurrentMonth] = useState(getLocalMonthStr());
+  const [currentMonth, setCurrentMonth] = useState(() => clock.thisMonth());
   const [pmMonth, setPmMonth] = useState(getLocalMonthStr());
 
   const isLegacyScheduleArchiveAdmin = currentUser?.username === 'admin'
@@ -4359,7 +4367,11 @@ export default function App() {
   const legacyEditContextRef = useRef(legacyEditContext);
   legacyEditContextRef.current = legacyEditContext;
 
+  const scheduleAccess = scheduleWriteAccess({ projectId: selectedProject?.id, month: currentMonth, ...SCHEDULE_WRITE_POLICY });
+  const canWriteScheduleNow = () => scheduleWriteAccess({ projectId: selectedProject?.id, month: currentMonth, ...SCHEDULE_WRITE_POLICY }).allowed;
+
   const handleEnableLegacyScheduleEditing = async () => {
+      if (!canWriteScheduleNow()) return;
       if (legacyEditInFlight.current || !isLegacyScheduleArchiveAdmin || !selectedProject || !fbUser) return;
       legacyEditInFlight.current = true;
       setIsImportingLegacySchedule(true);
@@ -4439,6 +4451,7 @@ export default function App() {
   };
 
   const updateProjectScheduleField = async (field, newValueOrUpdater) => {
+      if (!canWriteScheduleNow()) return { ok: false, error: new Error(scheduleAccess.reason) };
       const projectId = selectedProject?.id;
       if (!projectId || !currentMonth) return;
 
@@ -5200,8 +5213,8 @@ export default function App() {
   const scheduleSaveInFlight = useRef(false);
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
   const handleSaveSchedule = async () => {
-      if (SCHEDULE_SAVE_LOCKED) {
-          alert('ขณะนี้ระบบปิดการบันทึกตารางงานชั่วคราวเพื่อป้องกันข้อมูลสูญหายระหว่างการย้ายข้อมูล ตารางยังดูและพิมพ์ได้ตามปกติ กรุณาติดต่อผู้ดูแลระบบ');
+      if (!canWriteScheduleNow()) {
+          alert(scheduleWriteAccess({ projectId: selectedProject?.id, month: currentMonth, ...SCHEDULE_WRITE_POLICY }).reason);
           return;
       }
       if (scheduleSaveInFlight.current) return;
@@ -5220,6 +5233,7 @@ export default function App() {
                   ? activeDraft.baseline
                   : projectScheduleRecords.find(record => record.id === approvalKey);
               const currentApproval = scheduleApprovals[approvalKey] || {};
+              if (currentApproval.isLocked === true) throw new Error('ตารางถูกล็อคปิดยอดแล้ว กรุณาให้ฝ่ายบุคคลปลดล็อคก่อนบันทึก');
               const isManager = (currentUser?.position || '').includes('ผู้จัดการอาคาร') || (currentUser?.position || '').includes('ผู้จัดการหมู่บ้าน');
               const isAreaManager = (currentUser?.position || '').includes('ผู้จัดการพื้นที่');
               const isAdmin = currentUser?.username === 'admin';
@@ -8803,7 +8817,7 @@ export default function App() {
 
 
   const updateSchedule = (userId, dateString, shiftId, type = 'plan') => {
-      if (isLegacyScheduleReadOnly || scheduleSaveInFlight.current) return;
+      if (!canWriteScheduleNow() || isLegacyScheduleReadOnly || scheduleSaveInFlight.current) return;
       const key = type === 'plan' ? `${userId}_${dateString}` : `${userId}_${dateString}_act`;
       setScheduleDraftCells(prev => ({ ...prev, [key]: shiftId }));
   };
@@ -10794,43 +10808,7 @@ export default function App() {
   };
 
   const ContractorVendorList = () => {
-      // --- NEW: Aggregate suppliers from both manual list and all recorded contracts across all units ---
-      const combinedSuppliersMap = new Map();
-      
-      // 1. Base contractors (Manual list)
-      contractors.forEach(c => {
-          if (c.name) combinedSuppliersMap.set(c.name.trim().toLowerCase(), { ...c });
-      });
-
-      // 2. Extract from ALL contracts across every project (ทุกหน่วยงาน).
-      // Uses `allContracts` (unscoped / all accessible projects) rather than the project-scoped `contracts`,
-      // so the supplier list is identical no matter which unit the module is opened from.
-      allContracts.forEach(ct => {
-          if (!ct.vendorName) return;
-          const key = ct.vendorName.trim().toLowerCase();
-          
-          if (!combinedSuppliersMap.has(key)) {
-              // ถ้ายังไม่มีในระบบ ให้เพิ่มเข้าไปใหม่
-              combinedSuppliersMap.set(key, {
-                  id: `auto_${ct.id}`,
-                  name: ct.vendorName,
-                  type: ct.type.split(' (')[0], // ใช้ประเภทจากสัญญา เช่น สัญญาจ่าย
-                  category: ct.category,
-                  contact: ct.contactPerson || '-',
-                  phone: ct.contactPhone || '-',
-                  email: '-',
-                  status: 'Active',
-                  isAuto: true // แฟล็กบอกว่าเป็นข้อมูลที่ดึงมาจากสัญญา
-              });
-          } else {
-              // ถ้ามีอยู่แล้ว ให้อัปเดตข้อมูลผู้ติดต่อหากของเดิมไม่มี
-              const existing = combinedSuppliersMap.get(key);
-              if ((!existing.contact || existing.contact === '-') && ct.contactPerson) existing.contact = ct.contactPerson;
-              if ((!existing.phone || existing.phone === '-') && ct.contactPhone) existing.phone = ct.contactPhone;
-          }
-      });
-
-      const allSuppliersList = Array.from(combinedSuppliersMap.values());
+      const allSuppliersList = mergeSupplierDirectory(contractors, supplierDirectory.suppliers);
 
       // ดึงข้อมูลประเภททั้งหมดที่มีในระบบแบบไม่ซ้ำกัน
       const availableTypes = [...new Set(allSuppliersList.map(c => c.type))].filter(Boolean);
@@ -10863,6 +10841,16 @@ export default function App() {
                           {hasPerm('proj_contractors', 'save') && <Button size="sm" icon={Plus}>{t('addNew')}</Button>}
                       </div>
                   </div>
+
+                  {supplierDirectory.status === 'loading' && (
+                      <div role="status" className="p-4 text-sm text-gray-600">กำลังโหลดรายชื่อ Supplier จากทุกโครงการ...</div>
+                  )}
+                  {(supplierDirectory.status === 'error' || supplierDirectory.status === 'unavailable') && (
+                      <div role="alert" className="p-4 bg-amber-50 text-amber-800 text-sm flex items-center justify-between gap-3">
+                          <span>โหลดรายชื่อ Supplier จากสัญญาไม่สำเร็จ รายการที่แสดงอาจยังไม่ครบ</span>
+                          <Button variant="outline" size="sm" onClick={supplierDirectory.retry}>ลองใหม่</Button>
+                      </div>
+                  )}
 
                   {/* ค้นหาและตัวกรอง */}
                   <div className={`p-4 bg-gray-50 border-b border-gray-200 ${isExporting ? 'hidden' : ''}`}>
@@ -11011,8 +10999,8 @@ export default function App() {
                                       <td colSpan="7" className="p-12 text-center">
                                           <div className="flex flex-col items-center text-gray-400">
                                               <Search size={40} className="mb-2 text-gray-300"/>
-                                              <div className="font-medium text-gray-500 text-base">ไม่พบข้อมูล Supplier ที่ค้นหา</div>
-                                              <div className="text-xs mt-1">ลองปรับเปลี่ยนคำค้นหา หรือตัวกรองของคุณ</div>
+                                              <div className="font-medium text-gray-500 text-base">{supplierDirectory.status === 'ready' ? 'ไม่พบข้อมูล Supplier ที่ค้นหา' : 'รายชื่อ Supplier ยังโหลดไม่ครบ'}</div>
+                                              {supplierDirectory.status === 'ready' && <div className="text-xs mt-1">ลองปรับเปลี่ยนคำค้นหา หรือตัวกรองของคุณ</div>}
                                           </div>
                                       </td>
                                   </tr>
@@ -11043,7 +11031,7 @@ export default function App() {
     });
 
     const handleDragEnd = () => {
-        if (isLegacyScheduleReadOnly) return;
+        if (!canWriteScheduleNow() || isLegacyScheduleReadOnly) return;
         if (dragItem.current !== null && dragOverItem.current !== null && dragItem.current !== dragOverItem.current) {
             const newStaffOrder = [...sortedStaff];
             const draggedItemContent = newStaffOrder[dragItem.current];
@@ -12199,10 +12187,10 @@ export default function App() {
 
             
             // Plan จะแก้ไขได้ก็ต่อเมื่อ ยังไม่ล็อค และ ยังไม่อนุมัติ (ปลดล็อคข้อจำกัดวันที่ 22 ออก)
-            const canEditPlan = !SCHEDULE_SAVE_LOCKED && hasPerm('proj_schedule', 'save') && !isLegacyScheduleReadOnly && !isSavingSchedule && !isLocked && !isApproved;
+            const canEditPlan = scheduleAccess.allowed && hasPerm('proj_schedule', 'save') && !isLegacyScheduleReadOnly && !isSavingSchedule && !isLocked && !isApproved;
             
             // ACT จะแก้ไขได้ก็ต่อเมื่อ ยังไม่ถูกล็อค
-            const canEditAct = !SCHEDULE_SAVE_LOCKED && hasPerm('proj_schedule', 'save') && !isLegacyScheduleReadOnly && !isSavingSchedule && !isLocked;
+            const canEditAct = scheduleAccess.allowed && hasPerm('proj_schedule', 'save') && !isLegacyScheduleReadOnly && !isSavingSchedule && !isLocked;
 
             // ตรวจสอบว่าเป็นหน่วยงาน Head Office หรือไม่
             const isHeadOffice = selectedProject?.name === 'Head Office';
@@ -12250,7 +12238,7 @@ export default function App() {
                             
                             {/* Approval Action Buttons */}
                             {(() => {
-                                if (isLegacyScheduleReadOnly) return null;
+                                if (!scheduleAccess.allowed || isLegacyScheduleReadOnly) return null;
                                 const approval = scheduleApprovals[`${selectedProject.id}_${currentMonth}`];
                                 if (!approval) return null; // ยังไม่มีการบันทึก
                                 
@@ -12279,18 +12267,23 @@ export default function App() {
                                 return null;
                             })()}
 
-                            {hasPerm('proj_schedule', 'save') && <Button size="sm" icon={Save} onClick={handleSaveSchedule} disabled={SCHEDULE_SAVE_LOCKED || isLegacyScheduleReadOnly || isSavingSchedule} title={SCHEDULE_SAVE_LOCKED ? 'ปิดการบันทึกชั่วคราวระหว่างย้ายข้อมูลตารางงาน' : isLegacyScheduleReadOnly ? 'ข้อมูลเดิมเปิดให้อ่านและส่งออกเท่านั้น' : undefined}>{isSavingSchedule ? 'รอเซิร์ฟเวอร์ยืนยัน…' : t('save')}</Button>}
+                            {hasPerm('proj_schedule', 'save') && <Button size="sm" icon={Save} onClick={handleSaveSchedule} disabled={!scheduleAccess.allowed || isLegacyScheduleReadOnly || isSavingSchedule || isLocked} title={SCHEDULE_SAVE_LOCKED ? 'ปิดการบันทึกชั่วคราวระหว่างย้ายข้อมูลตารางงาน' : isLegacyScheduleReadOnly ? 'ข้อมูลเดิมเปิดให้อ่านและส่งออกเท่านั้น' : undefined}>{isSavingSchedule ? 'รอเซิร์ฟเวอร์ยืนยัน…' : t('save')}</Button>}
                         </div>
                     </div>
                 </div>
 
+                {!scheduleAccess.allowed && !isExporting && (
+                    <div role="status" className="mx-4 mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                        {scheduleAccess.reason} — ยังดู พิมพ์ และส่งออกได้ตามสิทธิ์
+                    </div>
+                )}
                 {isLegacyScheduleReadOnly && !isExporting && (
                     <div className="mx-4 mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-start gap-2">
                         <AlertTriangle size={18} className="mt-0.5 shrink-0" />
                         <div>
                             <div className="font-bold">ตรวจสอบตารางเดิมก่อนนำเข้าเพื่อแก้ไข</div>
                             <div className="text-xs mt-1">ตรวจสอบว่ารายชื่อและกะงานเป็นของโครงการนี้ในเดือนที่เลือก เมื่อยืนยัน ระบบจะเก็บสำเนาและนำเข้าเฉพาะรหัสที่จับคู่ได้ โดยไม่ทับค่าชุดใหม่และไม่ปลดล็อกตารางอัตโนมัติ</div>
-                            {isLegacyScheduleArchiveAdmin && <Button size="sm" icon={Archive} onClick={handleEnableLegacyScheduleEditing} disabled={isImportingLegacySchedule || isSavingSchedule} className="mt-2">{isImportingLegacySchedule ? 'กำลังตรวจและนำเข้าข้อมูล…' : 'นำเข้าตารางเดิมเพื่อแก้ไข'}</Button>}
+                            {isLegacyScheduleArchiveAdmin && <Button size="sm" icon={Archive} onClick={handleEnableLegacyScheduleEditing} disabled={!scheduleAccess.allowed || isImportingLegacySchedule || isSavingSchedule} className="mt-2">{isImportingLegacySchedule ? 'กำลังตรวจและนำเข้าข้อมูล…' : 'นำเข้าตารางเดิมเพื่อแก้ไข'}</Button>}
                         </div>
                     </div>
                 )}

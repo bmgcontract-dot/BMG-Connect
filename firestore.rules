@@ -58,6 +58,36 @@ service cloud.firestore {
       return appId == 'bmg-app-prod';
     }
 
+    // Trusted server policy; absent/malformed/disabled policy closes all writes.
+    // Even admin clients cannot edit this document or bypass the schedule gate.
+    function scheduleMonthAllowed(policy, data, businessTime) {
+      let selected = int(data.month[0:4]) * 12 + int(data.month[5:7]);
+      let current = businessTime.year() * 12 + businessTime.month();
+      let from = policy.get('rollingFromMonth', '');
+      return (selected == current
+          && policy.get('verifiedScopes', []) is list
+          && data.id in policy.get('verifiedScopes', []))
+        || (selected >= current && selected <= current + 1
+          && policy.get('rollingProjectIds', []) is list
+          && data.projectId in policy.get('rollingProjectIds', [])
+          && from is string && from.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+          && selected >= int(from[0:4]) * 12 + int(from[5:7]));
+    }
+
+    function canWriteSchedule(appId, documentId, data) {
+      let policyPath = /databases/$(database)/documents/artifacts/$(appId)/public/data/bmg_scheduleWritePolicy/current;
+      let businessTime = request.time + duration.value(7, 'h');
+      return data.get('projectId', '') is string
+        && data.projectId != ''
+        && data.get('month', '') is string
+        && data.month.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+        && documentId == data.projectId + '_' + data.month
+        && data.get('id', '') == documentId
+        && exists(policyPath)
+        && get(policyPath).data.get('enabled', false) == true
+        && scheduleMonthAllowed(get(policyPath).data, data, businessTime);
+    }
+
     function hasPermission(menuId, action) {
       let profile = userProfile();
       return isAdmin()
@@ -281,6 +311,8 @@ service cloud.firestore {
       allow create: if isBmgApp(appId)
         && isActiveBusinessUser()
         && isProjectCollection(collectionName)
+        && (collectionName != 'bmg_projectSchedules_docs'
+          || canWriteSchedule(appId, documentId, request.resource.data))
         && request.resource.data.get('projectId', '') is string
         && request.resource.data.get('projectId', '') != ''
         && canAccessProjectReference(collectionName, request.resource.data.get('projectId', ''))
@@ -289,6 +321,11 @@ service cloud.firestore {
       allow update: if isBmgApp(appId)
         && isActiveBusinessUser()
         && isProjectCollection(collectionName)
+        && (collectionName != 'bmg_projectSchedules_docs'
+          || (resource.data.get('projectId', '') == request.resource.data.get('projectId', '')
+            && resource.data.get('month', '') == request.resource.data.get('month', '')
+            && resource.data.get('id', '') == request.resource.data.get('id', '')
+            && canWriteSchedule(appId, documentId, request.resource.data)))
         && resource.data.get('projectId', '') is string
         && request.resource.data.get('projectId', '') is string
         && resource.data.get('projectId', '') != ''
@@ -300,6 +337,8 @@ service cloud.firestore {
       allow delete: if isBmgApp(appId)
         && isActiveBusinessUser()
         && isProjectCollection(collectionName)
+        && (collectionName != 'bmg_projectSchedules_docs'
+          || canWriteSchedule(appId, documentId, resource.data))
         && resource.data.get('projectId', '') is string
         && resource.data.get('projectId', '') != ''
         && canAccessProjectReference(collectionName, resource.data.get('projectId', ''))
@@ -396,8 +435,11 @@ service cloud.firestore {
         && canWriteScopedState(resource.data, 'delete');
     }
 
-    match /artifacts/{appId}/public/data/{document=**} {
-      allow read, write: if isAdmin();
+    match /artifacts/{appId}/public/data/{collectionName}/{document=**} {
+      allow read: if isAdmin();
+      allow write: if isAdmin()
+        && collectionName != 'bmg_projectSchedules_docs'
+        && collectionName != 'bmg_scheduleWritePolicy';
     }
 
     match /{document=**} {
