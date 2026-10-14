@@ -16,12 +16,77 @@ test('only the explicitly verified project in the current month can write', () =
   ]) assert.equal(access(overrides).allowed, false);
 });
 
-test('production expansion is limited to three reviewed October scopes', () => {
+test('production expansion is limited to seventeen reviewed projects', () => {
   assert.deepEqual(VERIFIED_SCHEDULE_SCOPES, [
-    { projectId: 'r7n92q0md', month: '2026-10' },
-    { projectId: 'nasqxexpr', month: '2026-10' },
-    { projectId: 'vg0zs4rlr', month: '2026-10' },
-  ]);
+  {
+    "projectId": "r7n92q0md",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "nasqxexpr",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "vg0zs4rlr",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "063hu1m48",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "0hk7hi6gv",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "4j2oss0xy",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "8xyoxaz5g",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "bwzljr0j8",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "flco5wcsi",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "iiyoz3luw",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "jm8gbol9b",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "o7unooeq8",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "t22w7g8jc",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "tmpkcdb86",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "x39fybz83",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "xdkpztgl6",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "z9laf9hrh",
+    "month": "2026-10"
+  }
+]);
   for (const projectId of ['nasqxexpr', 'vg0zs4rlr']) {
     assert.equal(scheduleWriteAccess({ projectId, month: '2026-10', emergencyLocked: false, currentMonth: '2026-10' }).allowed, true);
     assert.equal(scheduleWriteAccess({ projectId, month: '2026-10', emergencyLocked: false, currentMonth: '2026-11' }).allowed, false);
@@ -50,4 +115,14 @@ test('reviewed projects can plan next month and roll across November and year en
   assert.equal(allowed('2026-10', '2026-11'), false);
   assert.equal(allowed('2026-11', '2026-10', 'unreviewed'), false);
   assert.equal(scheduleWriteAccess({ projectId: 'r7n92q0md', month: '2026-11', currentMonth: '2026-10' }).allowed, false);
+});
+
+test('all seventeen projects allow November while the seven held projects remain closed', () => {
+  for (const scope of VERIFIED_SCHEDULE_SCOPES) {
+    assert.equal(scheduleWriteAccess({ projectId: scope.projectId, month: '2026-11', currentMonth: '2026-10', emergencyLocked: false }).allowed, true);
+  }
+  for (const projectId of ['ioblbvq9p', 'vivwmaynf', 'vzdknz8j1', 'z8z448en8', 'e0uggx84s', 'endmmc2ms', 'vx1tm89oi']) {
+    assert.equal(scheduleWriteAccess({ projectId, month: '2026-10', currentMonth: '2026-10', emergencyLocked: false }).allowed, false);
+    assert.equal(scheduleWriteAccess({ projectId, month: '2026-11', currentMonth: '2026-10', emergencyLocked: false }).allowed, false);
+  }
 });

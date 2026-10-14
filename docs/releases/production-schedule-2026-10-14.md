@@ -8,8 +8,10 @@ Supplier search uses the authorized server directory to include suppliers across
 projects while keeping contract details under their existing permissions.
 
 Schedule writes require both the reviewed client project list and the trusted
-server policy. Tawan, Life in the Garden Ban Chang and Head office support the
-current Bangkok month and next month, starting November 2026. The existing exact
+server policy. Seventeen reviewed projects (the original Tawan, Life in the Garden
+Ban Chang and Head office plus fourteen existing-table projects) support the
+current Bangkok month and next month, starting November 2026. Seven projects
+awaiting identity or table-coverage answers remain excluded. The existing exact
 October scopes are retained. Prior months and months beyond next remain read-only.
 The month window advances automatically without monthly deployment. Permission,
 legacy read-only and approval/HR-lock conditions remain in place. Transactions
@@ -22,11 +24,14 @@ leave entries intentionally retained. Neither data backups nor migration evidenc
 are included in this branch. Do not rerun migration/activation commands to merge
 this source synchronization.
 
-Validation: 186 client tests, lint/build, and 38 Firestore Rules emulator tests
-passed for the deployed source. Production admin UI checks passed for all three
-projects: November editing enabled, September/December Save disabled on October
-14; entered test values were cleared without saving. User-account save/reload
-testing is explicitly deferred, not reported as completed.
+Validation: 187 client tests and lint/build passed for the seventeen-project
+client. Rules are unchanged from the earlier release (38 emulator tests passed).
+The expansion transaction's unit/emulator checks passed: existing tables and
+metadata stay untouched and later data/policy changes refuse activation. The
+operator activated the fourteen additions and verified policy readback, with
+zero schedule/profile writes. Production admin UI checks passed for the original
+three projects; checks for fourteen additions remain pending. User-account
+save/reload testing is explicitly deferred, not reported as completed.
 
 The Phase 5 refactor remains in its separate dirty checkout. This branch must be
 reviewed/merged independently so a future main deployment retains the supplier
