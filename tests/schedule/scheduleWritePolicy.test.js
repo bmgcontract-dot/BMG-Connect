@@ -16,7 +16,7 @@ test('only the explicitly verified project in the current month can write', () =
   ]) assert.equal(access(overrides).allowed, false);
 });
 
-test('production expansion is limited to seventeen reviewed projects', () => {
+test('production expansion is limited to twenty reviewed projects with preserved unknown gaps', () => {
   assert.deepEqual(VERIFIED_SCHEDULE_SCOPES, [
   {
     "projectId": "r7n92q0md",
@@ -85,6 +85,18 @@ test('production expansion is limited to seventeen reviewed projects', () => {
   {
     "projectId": "z9laf9hrh",
     "month": "2026-10"
+  },
+  {
+    "projectId": "e0uggx84s",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "endmmc2ms",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "vx1tm89oi",
+    "month": "2026-10"
   }
 ]);
   for (const projectId of ['nasqxexpr', 'vg0zs4rlr']) {
@@ -117,11 +129,11 @@ test('reviewed projects can plan next month and roll across November and year en
   assert.equal(scheduleWriteAccess({ projectId: 'r7n92q0md', month: '2026-11', currentMonth: '2026-10' }).allowed, false);
 });
 
-test('all seventeen projects allow November while the seven held projects remain closed', () => {
+test('all twenty projects allow November while the four identity-held projects remain closed', () => {
   for (const scope of VERIFIED_SCHEDULE_SCOPES) {
     assert.equal(scheduleWriteAccess({ projectId: scope.projectId, month: '2026-11', currentMonth: '2026-10', emergencyLocked: false }).allowed, true);
   }
-  for (const projectId of ['ioblbvq9p', 'vivwmaynf', 'vzdknz8j1', 'z8z448en8', 'e0uggx84s', 'endmmc2ms', 'vx1tm89oi']) {
+  for (const projectId of ['ioblbvq9p', 'vivwmaynf', 'vzdknz8j1', 'z8z448en8']) {
     assert.equal(scheduleWriteAccess({ projectId, month: '2026-10', currentMonth: '2026-10', emergencyLocked: false }).allowed, false);
     assert.equal(scheduleWriteAccess({ projectId, month: '2026-11', currentMonth: '2026-10', emergencyLocked: false }).allowed, false);
   }

@@ -1,10 +1,8 @@
 import { clock } from '../platform/clock.js';
 
-// Add a project/month only after a fresh audit confirms its ownership and cells.
-// October 13: Tawan pilot plus reviewed empty October months for Life in the
-// Garden Ban Chang and Head office. Evidence reviewed locally; server
-// activation remains operator-controlled. Never populate this from current
-// employee departments or from the absence of a legacy fallback.
+// Reviewed local release: seventeen existing projects plus three October tables
+// with explicitly accepted unknown historical gaps. Never infer or fill missing
+// cells. Activation remains operator-controlled with full backup/drift guards.
 export const VERIFIED_SCHEDULE_SCOPES = Object.freeze([
   {
     "projectId": "r7n92q0md",
@@ -73,10 +71,22 @@ export const VERIFIED_SCHEDULE_SCOPES = Object.freeze([
   {
     "projectId": "z9laf9hrh",
     "month": "2026-10"
+  },
+  {
+    "projectId": "e0uggx84s",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "endmmc2ms",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "vx1tm89oi",
+    "month": "2026-10"
   }
 ]);
 
-export const ROLLING_SCHEDULE_PROJECTS = Object.freeze(["r7n92q0md","nasqxexpr","vg0zs4rlr","063hu1m48","0hk7hi6gv","4j2oss0xy","8xyoxaz5g","bwzljr0j8","flco5wcsi","iiyoz3luw","jm8gbol9b","o7unooeq8","t22w7g8jc","tmpkcdb86","x39fybz83","xdkpztgl6","z9laf9hrh"]);
+export const ROLLING_SCHEDULE_PROJECTS = Object.freeze(["r7n92q0md","nasqxexpr","vg0zs4rlr","063hu1m48","0hk7hi6gv","4j2oss0xy","8xyoxaz5g","bwzljr0j8","flco5wcsi","iiyoz3luw","jm8gbol9b","o7unooeq8","t22w7g8jc","tmpkcdb86","x39fybz83","xdkpztgl6","z9laf9hrh","e0uggx84s","endmmc2ms","vx1tm89oi"]);
 export const ROLLING_SCHEDULE_FROM_MONTH = '2026-11';
 const monthIndex = month => Number(month.slice(0, 4)) * 12 + Number(month.slice(5, 7)) - 1;
 
