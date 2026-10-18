@@ -51,3 +51,17 @@ test('allows assigned additional department but not a comma-string wildcard', as
   assert.equal((await h.reader({ token: 'valid', projectId: 'p' })).staff.length, 1);
   await assert.rejects(fixture({ profile: { department: 'B', accessibleDepts: 'All' } }).reader({ token: 'valid', projectId: 'p' }));
 });
+
+test('historical context is only queried after scoped schedule authorization and requires reviewed config', async () => {
+  let reads = 0;
+  const deps = {
+    verifyToken: async () => ({ uid: 'u' }), getProfile: async () => ({ authUid: 'u', status: 'Active', department: 'A', permissions: { proj_schedule: { view: true } } }),
+    getProject: async () => ({ name: 'A' }), getStaff: async () => [{ id: 'current', firstName: 'Local' }],
+    getHistoricalContext: async () => { reads++; return { config: { projectId: 'ioblbvq9p', month: '2026-10', status: 'reviewed', rows: [] }, schedule: { projectId: 'ioblbvq9p', month: '2026-10', schedules: { 'unknown_2026-10-01': 'M3' } } }; },
+  };
+  const result = await createScheduleRosterReader(deps)({ token: 'valid', projectId: 'ioblbvq9p', month: '2026-10' });
+  assert.equal(result.month, '2026-10'); assert.equal(result.staff.find(r => r.id === 'unknown').scheduleReadOnly, true); assert.equal(reads, 1);
+  const denied = createScheduleRosterReader({ ...deps, getProfile: async () => ({ authUid: 'u', status: 'Active', department: 'B', permissions: { proj_schedule: { view: true } } }) });
+  await assert.rejects(denied({ token: 'valid', projectId: 'ioblbvq9p', month: '2026-10' }), e => e.status === 403); assert.equal(reads, 1);
+  await assert.rejects(createScheduleRosterReader({ ...deps, getHistoricalContext: async () => ({ config: null, schedule: null }) })({ token: 'valid', projectId: 'ioblbvq9p', month: '2026-10' }), e => e.status === 422);
+});

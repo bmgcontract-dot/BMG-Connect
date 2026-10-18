@@ -1,8 +1,9 @@
+import { historicalRosterScope, buildHistoricalScheduleRoster } from './historicalScheduleRoster.js';
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
 // Server-only authorization and projection. Never return or spread a full user profile.
-export function createScheduleRosterReader({ verifyToken, getProfile, getProject, getStaff }) {
-  return async ({ token, projectId }) => {
+export function createScheduleRosterReader({ verifyToken, getProfile, getProject, getStaff, getHistoricalContext }) {
+  return async ({ token, projectId, month }) => {
     if (!token) throw fail(401, 'unauthorized');
     if (typeof projectId !== 'string' || !projectId || projectId.length > 200 || /[/\\]/.test(projectId) || projectId === '.' || projectId === '..') throw fail(400, 'invalid-project');
     let identity;
@@ -26,6 +27,13 @@ export function createScheduleRosterReader({ verifyToken, getProfile, getProject
         typeof record[key] === 'string' ? record[key] : key === 'employeeId' && Number.isSafeInteger(record[key]) ? String(record[key]) : '',
       ])) };
     });
+    if (month !== undefined) {
+      if (!historicalRosterScope(projectId, month) || typeof getHistoricalContext !== 'function') throw fail(400, 'invalid-historical-scope');
+      try {
+        const context = await getHistoricalContext(projectId, month);
+        return { projectId, month, staff: buildHistoricalScheduleRoster({ projectId, month, currentStaff: staff, ...context }) };
+      } catch { throw fail(422, 'historical-roster-unavailable'); }
+    }
     return { projectId, staff };
   };
 }
