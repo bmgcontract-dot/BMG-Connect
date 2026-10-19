@@ -1,3 +1,6 @@
+import LegacyCellReviewPanel from './src/schedule/LegacyCellReviewPanel.jsx';
+import { legacyReviewCells, prepareLegacyCellReview, applyReviewedCellDraft, assertReviewIsCurrent } from './src/schedule/legacyCellReview.js';
+import { historicalRosterScope, assertProtectedScheduleRowsUnchanged } from './src/schedule/historicalScheduleRoster.js';
 import { useSupplierDirectory } from './src/suppliers/useSupplierDirectory.js';
 import { mergeSupplierDirectory } from './src/suppliers/directory.js';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
@@ -57,7 +60,7 @@ import { buildAdminLegacyScheduleFallback } from './src/schedule/adminLegacySche
 import { deriveProjectScheduleViews, upsertProjectSchedule } from './src/schedule/projectScheduleState.js';
 import { unlockScheduleApproval } from './src/schedule/scheduleApprovalWorkflow.js';
 import { scheduleDocumentEqual } from './src/schedule/scheduleDocumentEqual.js';
-import { prepareLegacyScheduleEditing, readLegacyScheduleSnapshot } from './src/schedule/legacyScheduleEditing.js';
+import { readLegacyScheduleSnapshot } from './src/schedule/legacyScheduleEditing.js';
 import { useScheduleRoster } from './src/schedule/useScheduleRoster.js';
 import { scheduleWriteAccess } from './src/schedule/scheduleWritePolicy.js';
 import { clock } from './src/platform/clock.js';
@@ -1707,6 +1710,7 @@ function useUserPersistentState(key, initialValue, fbUser) {
 
 function usePersistentCollection(collectionName, initialValue, fbUser, options = {}) {
     const guardedScheduleWrites = collectionName === 'bmg_projectSchedules';
+    const protectedScheduleIds = options.protectedScheduleIds;
     const scheduleWritePending = useRef(false);
     const rootCollection = options.rootCollection === true;
     const readOnly = options.readOnly === true;
@@ -1896,6 +1900,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
         if (guardedScheduleWrites && scheduleWritePending.current) {
             return { ok: false, error: new Error('กำลังบันทึกตารางงาน กรุณารอแล้วลองใหม่') };
         }
+        const protectedIds = typeof protectedScheduleIds === 'undefined' ? [] : [...(protectedScheduleIds?.current || [])];
         const originalData = dataRef.current;
         const oldValue = filterItemsForQueryPlan(dataRef.current, queryPlan);
         let newValue;
@@ -1926,6 +1931,7 @@ function usePersistentCollection(collectionName, initialValue, fbUser, options =
                         const record = after.get(id) || before.get(id);
                         const access = scheduleWriteAccess({ projectId: record?.projectId, month: record?.month, ...SCHEDULE_WRITE_POLICY });
                         if (!access.allowed) throw new Error(access.reason);
+                        if (protectedIds.length) assertProtectedScheduleRowsUnchanged(before.get(id), after.get(id), protectedIds);
                         if (id !== `${record.projectId}_${record.month}`) throw new Error('รหัสตารางไม่ตรงกับโครงการและเดือน');
                     }
                     // All reads must precede writes; retry rechecks the original baseline.
@@ -4292,19 +4298,22 @@ export default function App() {
       shouldLoadLegacyScheduleArchive ? fbUser : null,
   );
 
+  const historicalProtectedRef = useRef([]);
+  const selectedHistoricalProtectedIds = historicalProtectedRef;
   const [projectScheduleRecords, setProjectScheduleRecords, , , schedulesReadState] = usePersistentCollection(
       'bmg_projectSchedules',
       [],
       subscriptionPolicy.userFor('bmg_projectSchedules'),
-      { queryPlan: queryPlanFor('bmg_projectSchedules') },
+      { queryPlan: queryPlanFor('bmg_projectSchedules'), protectedScheduleIds: selectedHistoricalProtectedIds },
   );
   const scheduleViews = useMemo(
       () => deriveProjectScheduleViews(projectScheduleRecords, selectedProject?.id),
       [projectScheduleRecords, selectedProject?.id],
   );
-  const needsScheduleRoster = usersReadState.status === 'blocked';
+  const needsHistoricalRoster = historicalRosterScope(selectedProject?.id, currentMonth);
+  const needsScheduleRoster = usersReadState.status === 'blocked' || needsHistoricalRoster;
   const minimalScheduleRoster = useScheduleRoster({
-      auth, user: fbUser, projectId: selectedProject?.id,
+      auth, user: fbUser, projectId: selectedProject?.id, month: needsHistoricalRoster ? currentMonth : undefined,
       enabled: USE_FIREBASE_BUSINESS_AUTH && needsScheduleRoster && projectTab === 'schedule' && Boolean(selectedProject),
   });
   const scheduleRosterReadState = needsScheduleRoster ? minimalScheduleRoster : usersReadState;
@@ -4312,6 +4321,7 @@ export default function App() {
       () => needsScheduleRoster ? minimalScheduleRoster.staff : users.filter((user) => user?.department === selectedProject?.name),
       [needsScheduleRoster, minimalScheduleRoster.staff, users, selectedProject?.name],
   );
+  historicalProtectedRef.current = selectedProjectScheduleStaff.filter(row => row.scheduleReadOnly).map(row => row.id);
   const scheduleStaffIds = useMemo(
       () => selectedProjectScheduleStaff
           .map((user) => user?.id || user?.authUid)
@@ -4327,6 +4337,19 @@ export default function App() {
       }).filter(([canonicalId]) => typeof canonicalId === 'string' && canonicalId.length > 0)),
       [selectedProjectScheduleStaff],
   );
+  const legacyCellReviewState = useMemo(() => {
+      if (!shouldLoadLegacyScheduleArchive) return { cells: [], error: null };
+      try {
+          return { cells: legacyReviewCells({ record: projectScheduleRecords.find(r => r.id === `${selectedProject?.id}_${currentMonth}`),
+              month: currentMonth, staff: selectedProjectScheduleStaff, staffAliases: scheduleStaffAliases, legacySchedules: legacyScheduleArchive }), error: null };
+      } catch (error) { return { cells: [], error: error.message }; }
+  }, [shouldLoadLegacyScheduleArchive, projectScheduleRecords, selectedProject?.id, currentMonth, selectedProjectScheduleStaff, scheduleStaffAliases, legacyScheduleArchive]);
+  const activeLegacyRecord = projectScheduleRecords.find(r => r.id === `${selectedProject?.id}_${currentMonth}`);
+  const reviewedLegacyKeys = useMemo(() => shouldLoadLegacyScheduleArchive
+      ? legacyCellReviewState.cells.filter(c => c.status === 'reviewed').map(c => c.key)
+      : Object.keys(activeLegacyRecord?.legacyCellReviews || {}).filter(key => !(activeLegacyRecord?.legacyCellReviewPendingKeys || []).includes(key)),
+      [shouldLoadLegacyScheduleArchive, legacyCellReviewState.cells, activeLegacyRecord]);
+  const canEditLegacyCell = key => !isLegacyScheduleReadOnly || reviewedLegacyKeys.includes(key);
   const legacyScheduleFallback = useMemo(
       () => buildAdminLegacyScheduleFallback({
           isAdmin: shouldLoadLegacyScheduleArchive,
@@ -4337,10 +4360,12 @@ export default function App() {
               record.projectId === selectedProject?.id && record.month === currentMonth
               && record.legacyCellMigration?.status === 'complete')?.legacyCellMigration?.staffIds ?? [],
           projectSchedules: scheduleViews.schedules,
+          reviewedCellKeys: reviewedLegacyKeys,
           legacySchedules: legacyScheduleArchive,
       }),
       [
           shouldLoadLegacyScheduleArchive,
+          reviewedLegacyKeys,
           currentMonth,
           scheduleStaffIds,
           scheduleStaffAliases,
@@ -4355,13 +4380,12 @@ export default function App() {
   const [scheduleDraft, setScheduleDraft] = useState(null);
   const scheduleDraftRef = useRef(null);
   const schedules = scheduleDraft?.scope === scheduleScopeKey ? scheduleDraft.cells : serverSchedules;
-  const isLegacyScheduleReadOnly = legacyScheduleFallback.isReadOnlyFallback;
+  const isLegacyScheduleReadOnly = legacyScheduleFallback.isReadOnlyFallback || Boolean(activeLegacyRecord?.legacyCellReviewPendingKeys?.length);
   const scheduleNotes = scheduleViews.scheduleNotes;
   const scheduleApprovals = scheduleViews.scheduleApprovals;
   const projectStaffOrder = scheduleViews.projectStaffOrder;
   const schedulesRef = useRef(schedules);
   const legacyEditInFlight = useRef(false);
-  const [isImportingLegacySchedule, setIsImportingLegacySchedule] = useState(false);
   const legacyEditContext = { projectId: selectedProject?.id, month: currentMonth, actorUid: fbUser?.uid,
       staffIds: scheduleStaffIds, staffAliases: scheduleStaffAliases, isAdmin: isLegacyScheduleArchiveAdmin };
   const legacyEditContextRef = useRef(legacyEditContext);
@@ -4370,63 +4394,29 @@ export default function App() {
   const scheduleAccess = scheduleWriteAccess({ projectId: selectedProject?.id, month: currentMonth, ...SCHEDULE_WRITE_POLICY });
   const canWriteScheduleNow = () => scheduleWriteAccess({ projectId: selectedProject?.id, month: currentMonth, ...SCHEDULE_WRITE_POLICY }).allowed;
 
-  const handleEnableLegacyScheduleEditing = async () => {
-      if (!canWriteScheduleNow()) return;
-      if (legacyEditInFlight.current || !isLegacyScheduleArchiveAdmin || !selectedProject || !fbUser) return;
+  const handleConfirmLegacyCells = async decisions => {
+      if (!isLegacyScheduleArchiveAdmin || !hasPerm('proj_schedule', 'save') || !canWriteScheduleNow() || !fbUser || legacyEditInFlight.current) throw new Error('ยังไม่พร้อมยืนยันตาราง');
+      if (scheduleDraftRef.current?.scope === scheduleScopeKey) throw new Error('กรุณาบันทึกการแก้ไขช่องที่ยืนยันแล้วก่อนตรวจช่องอื่น');
       legacyEditInFlight.current = true;
-      setIsImportingLegacySchedule(true);
       const context = legacyEditContext;
-      const targetId = `${context.projectId}_${context.month}`;
-      const expected = projectScheduleRecords.find(record => record.id === targetId);
-      const importedAt = new Date().toISOString();
-      const readArchive = () => readLegacyScheduleSnapshot(async (type, index) => {
-          const ref = type === 'metadata'
-              ? doc(db, 'artifacts', appId, 'public', 'data', 'app_state', 'bmg_schedules_v2')
-              : doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `bmg_schedules_v2_${index}`);
-          const snapshot = await getDocFromServer(ref);
-          return snapshot.exists() ? snapshot.data() : undefined;
-      });
+      const expected = projectScheduleRecords.find(record => record.id === `${context.projectId}_${context.month}`);
       try {
-          const archive = await readArchive();
-          const args = { ...context, legacySchedules: archive, confirmed: true, importedAt };
-          const preview = prepareLegacyScheduleEditing({ ...args, records: projectScheduleRecords });
-          const serverView = buildAdminLegacyScheduleFallback({
-              isAdmin: true, month: context.month, staffIds: context.staffIds, staffAliases: context.staffAliases,
-              migratedStaffIds: expected?.legacyCellMigration?.status === 'complete' ? expected.legacyCellMigration.staffIds : [],
-              projectSchedules: scheduleViews.schedules, legacySchedules: archive,
+          const archive = await readLegacyScheduleSnapshot(async (type, index) => {
+              const ref = type === 'metadata'
+                  ? doc(db, 'artifacts', appId, 'public', 'data', 'app_state', 'bmg_schedules_v2')
+                  : doc(db, 'artifacts', appId, 'public', 'data', 'app_state_chunks', `bmg_schedules_v2_${index}`);
+              const snapshot = await getDocFromServer(ref);
+              return snapshot.exists() ? snapshot.data() : undefined;
           });
-          if (!scheduleDocumentEqual(serverView.schedules, schedules)) throw new Error('คลังบนเซิร์ฟเวอร์ไม่ตรงกับตารางที่แสดง กรุณาโหลดหน้าใหม่และตรวจข้อมูลก่อนนำเข้า');
-          if (!scheduleDocumentEqual(context, legacyEditContextRef.current)) throw new Error('โครงการ เดือน หรือผู้ใช้งานเปลี่ยน กรุณาเริ่มใหม่');
-          showConfirm('นำเข้าตารางเดิมเพื่อแก้ไข',
-              `${selectedProject.name} เดือน ${context.month}: พบ ${preview.cellCount} ช่องที่จับคู่ได้ โดยจะคงค่าชุดใหม่ไว้ ${preview.preservedConflicts} ช่องที่ต่างกัน กรุณายืนยันว่าพนักงานและกะที่แสดงเป็นของโครงการนี้ในเดือนนี้จริง (พนักงานที่เคยย้ายโครงการต้องตรวจสอบก่อน) ระบบเก็บสำเนาก่อนนำเข้าและไม่ลบคลังเดิม รายการนอกกลุ่มรหัสที่เลือกจะไม่นำเข้า การล็อกและสถานะอนุมัติเดิมยังคงอยู่`,
-              async () => {
-                  if (legacyEditInFlight.current) return;
-                  legacyEditInFlight.current = true;
-                  setIsImportingLegacySchedule(true);
-                  try {
-                      if (!scheduleDocumentEqual(context, legacyEditContextRef.current)) throw new Error('โครงการ เดือน หรือผู้ใช้งานเปลี่ยน กรุณาเริ่มใหม่');
-                      const latestArchive = await readArchive();
-                      if (!scheduleDocumentEqual(archive, latestArchive)) throw new Error('คลังตารางเดิมเปลี่ยนหลังตรวจ กรุณาตรวจและยืนยันใหม่');
-                      if (!scheduleDocumentEqual(context, legacyEditContextRef.current)) throw new Error('ข้อมูลผู้ใช้งานหรือโครงการเปลี่ยน กรุณาเริ่มใหม่');
-                      const result = await setProjectScheduleRecords(records => {
-                          if (!scheduleDocumentEqual(expected, records.find(record => record.id === targetId))) throw new Error('ตารางชุดใหม่เปลี่ยนแล้ว กรุณาตรวจและยืนยันใหม่');
-                          return prepareLegacyScheduleEditing({ ...args, records }).records;
-                      }, false, [targetId]);
-                      if (!result?.ok) throw result?.error || new Error('เซิร์ฟเวอร์ยังไม่ยืนยันการนำเข้า');
-                      alert('นำเข้าตารางเดิมสำเร็จ เก็บสำเนาค่าก่อนนำเข้าแล้ว สามารถแก้ไขตามสิทธิ์และสถานะล็อกของตาราง');
-                  } catch (error) {
-                      alert(`ยังไม่นำเข้าตารางเดิม: ${error.message}`);
-                  } finally {
-                      legacyEditInFlight.current = false;
-                      setIsImportingLegacySchedule(false);
-                  }
-              }, 'ยืนยันข้อมูลและนำเข้า', 'warning');
-      } catch (error) {
-          alert(`ยังไม่นำเข้าตารางเดิม: ${error.message}`);
-      } finally {
-          legacyEditInFlight.current = false;
-          setIsImportingLegacySchedule(false);
-      }
+          if (!scheduleDocumentEqual(archive, legacyScheduleArchive) || !scheduleDocumentEqual(context, legacyEditContextRef.current)) throw new Error('ข้อมูลหรือโครงการเปลี่ยน กรุณาโหลดและตรวจใหม่');
+          const cells = legacyReviewCells({ record: expected, month: context.month, staff: selectedProjectScheduleStaff, staffAliases: context.staffAliases, legacySchedules: archive });
+          const next = prepareLegacyCellReview({ record: expected, cells, decisions, actorUid: fbUser.uid, reviewedAt: new Date().toISOString() });
+          const result = await setProjectScheduleRecords(records => {
+              assertReviewIsCurrent(expected, records.find(record => record.id === expected.id));
+              return records.map(record => record.id === expected.id ? next : record);
+          }, false, [expected.id]);
+          if (!result?.ok) throw result?.error || new Error('เซิร์ฟเวอร์ยังไม่ยืนยัน');
+      } finally { legacyEditInFlight.current = false; }
   };
 
   useEffect(() => {
@@ -5222,7 +5212,19 @@ export default function App() {
       setIsSavingSchedule(true);
       try {
           if (isLegacyScheduleReadOnly) {
-              alert('ตารางนี้กำลังแสดงข้อมูลจากคลังเดิมแบบอ่านอย่างเดียว กรุณาย้ายและตรวจสอบข้อมูลก่อนแก้ไข');
+              if (!reviewedLegacyKeys.length) throw new Error('กรุณายืนยันข้อมูลเป็นรายช่องก่อนแก้ไข');
+              const expected = scheduleDraftRef.current?.scope === scheduleScopeKey ? scheduleDraftRef.current.baseline
+                  : projectScheduleRecords.find(record => record.id === scheduleScopeKey);
+              if (expected?.approval?.isLocked || expected?.approval?.status === 'Approved') throw new Error('ตารางถูกอนุมัติหรือล็อกแล้ว');
+              const draft = scheduleDraftRef.current?.scope === scheduleScopeKey ? scheduleDraftRef.current.cells : schedulesRef.current;
+              const next = applyReviewedCellDraft(expected, draft, reviewedLegacyKeys);
+              const result = await setProjectScheduleRecords(records => {
+                  assertReviewIsCurrent(expected, records.find(record => record.id === scheduleScopeKey));
+                  return records.map(record => record.id === scheduleScopeKey ? next : record);
+              }, false, [scheduleScopeKey]);
+              if (!result?.ok) throw result?.error || new Error('เซิร์ฟเวอร์ยังไม่ยืนยัน');
+              scheduleDraftRef.current = null; setScheduleDraft(null);
+              alert('บันทึกเฉพาะช่องที่ยืนยันแล้ว ช่องที่พักตรวจและสถานะอนุมัติยังคงเดิม');
               return;
           }
           if (selectedProject) {
@@ -5313,7 +5315,7 @@ export default function App() {
                       const daysInMonth = Array.from({ length: numDays }, (_, i) => i + 1);
                       
                       // จัดเรียงพนักงานตามที่แสดงผลในหน้าจอ
-                      const projectStaff = users.filter(u => u.department === selectedProject.name);
+                      const projectStaff = selectedProjectScheduleStaff;
                       const currentOrder = projectStaffOrder[selectedProject.id] || [];
                       const staffToExport = [...projectStaff].sort((a, b) => {
                           let idxA = currentOrder.indexOf(a.id);
@@ -8817,7 +8819,7 @@ export default function App() {
 
 
   const updateSchedule = (userId, dateString, shiftId, type = 'plan') => {
-      if (!canWriteScheduleNow() || isLegacyScheduleReadOnly || scheduleSaveInFlight.current) return;
+      if (!canWriteScheduleNow() || !canEditLegacyCell(`${userId}_${dateString}${type === 'act' ? '_act' : ''}`) || scheduleSaveInFlight.current || selectedProjectScheduleStaff.find(row => row.id === userId)?.scheduleReadOnly) return;
       const key = type === 'plan' ? `${userId}_${dateString}` : `${userId}_${dateString}_act`;
       setScheduleDraftCells(prev => ({ ...prev, [key]: shiftId }));
   };
@@ -12187,7 +12189,7 @@ export default function App() {
 
             
             // Plan จะแก้ไขได้ก็ต่อเมื่อ ยังไม่ล็อค และ ยังไม่อนุมัติ (ปลดล็อคข้อจำกัดวันที่ 22 ออก)
-            const canEditPlan = scheduleAccess.allowed && hasPerm('proj_schedule', 'save') && !isLegacyScheduleReadOnly && !isSavingSchedule && !isLocked && !isApproved;
+
             
             // ACT จะแก้ไขได้ก็ต่อเมื่อ ยังไม่ถูกล็อค
             const canEditAct = scheduleAccess.allowed && hasPerm('proj_schedule', 'save') && !isLegacyScheduleReadOnly && !isSavingSchedule && !isLocked;
@@ -12267,7 +12269,7 @@ export default function App() {
                                 return null;
                             })()}
 
-                            {hasPerm('proj_schedule', 'save') && <Button size="sm" icon={Save} onClick={handleSaveSchedule} disabled={!scheduleAccess.allowed || isLegacyScheduleReadOnly || isSavingSchedule || isLocked} title={SCHEDULE_SAVE_LOCKED ? 'ปิดการบันทึกชั่วคราวระหว่างย้ายข้อมูลตารางงาน' : isLegacyScheduleReadOnly ? 'ข้อมูลเดิมเปิดให้อ่านและส่งออกเท่านั้น' : undefined}>{isSavingSchedule ? 'รอเซิร์ฟเวอร์ยืนยัน…' : t('save')}</Button>}
+                            {hasPerm('proj_schedule', 'save') && <Button size="sm" icon={Save} onClick={handleSaveSchedule} disabled={!scheduleAccess.allowed || (isLegacyScheduleReadOnly && !reviewedLegacyKeys.length) || isSavingSchedule || isLocked} title={SCHEDULE_SAVE_LOCKED ? 'ปิดการบันทึกชั่วคราวระหว่างย้ายข้อมูลตารางงาน' : isLegacyScheduleReadOnly ? 'ข้อมูลเดิมเปิดให้อ่านและส่งออกเท่านั้น' : undefined}>{isSavingSchedule ? 'รอเซิร์ฟเวอร์ยืนยัน…' : t('save')}</Button>}
                         </div>
                     </div>
                 </div>
@@ -12281,13 +12283,18 @@ export default function App() {
                     <div className="mx-4 mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-start gap-2">
                         <AlertTriangle size={18} className="mt-0.5 shrink-0" />
                         <div>
-                            <div className="font-bold">ตรวจสอบตารางเดิมก่อนนำเข้าเพื่อแก้ไข</div>
-                            <div className="text-xs mt-1">ตรวจสอบว่ารายชื่อและกะงานเป็นของโครงการนี้ในเดือนที่เลือก เมื่อยืนยัน ระบบจะเก็บสำเนาและนำเข้าเฉพาะรหัสที่จับคู่ได้ โดยไม่ทับค่าชุดใหม่และไม่ปลดล็อกตารางอัตโนมัติ</div>
-                            {isLegacyScheduleArchiveAdmin && <Button size="sm" icon={Archive} onClick={handleEnableLegacyScheduleEditing} disabled={!scheduleAccess.allowed || isImportingLegacySchedule || isSavingSchedule} className="mt-2">{isImportingLegacySchedule ? 'กำลังตรวจและนำเข้าข้อมูล…' : 'นำเข้าตารางเดิมเพื่อแก้ไข'}</Button>}
+                            <div className="font-bold">ตรวจสอบตารางเดิมเป็นรายช่อง</div>
+                            <div className="text-xs mt-1">ช่องที่พักตรวจยังอ่านอย่างเดียว ช่องที่ยืนยันแล้วเปิดแก้ไขได้ตามสิทธิ์ โดยคงสถานะอนุมัติและการล็อกเดิม</div>
+
                         </div>
                     </div>
                 )}
                 
+                {isLegacyScheduleArchiveAdmin && !isExporting && (legacyCellReviewState.error || legacyCellReviewState.cells.length > 0) && (legacyCellReviewState.error
+                    ? <p role="alert">{legacyCellReviewState.error}</p>
+                    : <LegacyCellReviewPanel key={scheduleScopeKey} projectName={selectedProject.name} month={currentMonth}
+                        cells={legacyCellReviewState.cells} disabled={!scheduleAccess.allowed || isSavingSchedule || isLocked || isApproved}
+                        onConfirm={handleConfirmLegacyCells} />)}
                 <div id="schedule-table-container" className={`w-full bg-white rounded-b-lg ${isExporting ? 'px-0 pb-2 overflow-visible block' : 'overflow-hidden pb-4'}`}>
                     {(() => {
                         const [year, month] = currentMonth.split('-').map(Number);
@@ -12321,11 +12328,15 @@ export default function App() {
                                         })}
                                     </tr>
                                 </thead>
-                                {sortedStaff.map((user, index) => (
+                                {sortedStaff.map((user, index) => {
+                                    const rowWritable = !user.scheduleReadOnly;
+                                    const rowCanEditPlan = rowWritable && scheduleAccess.allowed && hasPerm('proj_schedule', 'save') && !isSavingSchedule && !isLocked && !isApproved;
+                                    const rowCanEditAct = rowWritable && scheduleAccess.allowed && hasPerm('proj_schedule', 'save') && !isSavingSchedule && !isLocked;
+                                    return (
                                     <tbody 
                                         key={user.id} 
                                         className={`border-b-2 border-gray-400 transition-all ${!isExporting && !isLegacyScheduleReadOnly ? 'cursor-move' : ''}`}
-                                        draggable={!isExporting && canEditAct}
+                                        draggable={!isExporting && rowCanEditAct && !isLegacyScheduleReadOnly}
                                         onDragStart={(e) => { 
                                             dragItem.current = index; 
                                             e.currentTarget.style.opacity = '0.5';
@@ -12370,6 +12381,7 @@ export default function App() {
                                                 const dateString = `${year}-${mm}-${dd}`;
                                                 
                                                 const key = `${user.id}_${dateString}`;
+                                                const canEditPlan = rowCanEditPlan && canEditLegacyCell(key);
                                                 const val = schedules[key] || '';
                                                 const shiftData = !isHeadOffice ? SHIFTS.find(s => s.id === val) : null;
                                                 
@@ -12430,6 +12442,7 @@ export default function App() {
                                                 
                                                 const planKey = `${user.id}_${dateString}`;
                                                 const actKey = `${user.id}_${dateString}_act`;
+                                                const canEditAct = rowCanEditAct && canEditLegacyCell(actKey);
                                                 const planVal = schedules[planKey] || '';
                                                 // หากยังไม่ได้กรอก ACT จะดึงข้อมูล PLAN มาเป็นตัวตั้งต้น
                                                 const actVal = schedules[actKey] !== undefined ? schedules[actKey] : planVal;
@@ -12482,7 +12495,7 @@ export default function App() {
                                             })}
                                         </tr>
                                     </tbody>
-                                ))}
+                                ); })}
                             </table>
                         );
                     })()}
@@ -12509,7 +12522,7 @@ export default function App() {
                             {SHIFTS.map(shift => (
                                 <div 
                                     key={shift.id} 
-                                    onClick={() => !isExporting && !isLegacyScheduleReadOnly && setSelectedShift(selectedShift === shift.id ? null : shift.id)}
+                                    onClick={() => !isExporting && setSelectedShift(selectedShift === shift.id ? null : shift.id)}
                                     className={`flex items-center gap-1.5 transition-all select-none ${isExporting ? 'text-[9px]' : `text-xs p-1 rounded ${isLegacyScheduleReadOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-gray-200'}`} ${selectedShift === shift.id && !isExporting && !isLegacyScheduleReadOnly ? 'ring-2 ring-orange-500 bg-white shadow-md scale-105' : ''}`}
                                 >
                                     <span className={`inline-block text-center rounded font-bold border ${shift.color} ${isExporting ? 'w-5 py-0 text-[7px]' : 'w-8 py-0.5'}`}>
@@ -12523,7 +12536,7 @@ export default function App() {
                             {/* ยางลบ (Eraser) */}
                             {!isExporting && (
                                 <div 
-                                    onClick={() => !isLegacyScheduleReadOnly && setSelectedShift(selectedShift === 'ERASE' ? null : 'ERASE')}
+                                    onClick={() => setSelectedShift(selectedShift === 'ERASE' ? null : 'ERASE')}
                                     className={`flex items-center gap-1.5 transition-all select-none text-xs p-1 rounded ${isLegacyScheduleReadOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-gray-200'} ${selectedShift === 'ERASE' && !isLegacyScheduleReadOnly ? 'ring-2 ring-red-500 bg-white shadow-md scale-105' : ''}`}
                                 >
                                     <span className={`inline-block text-center rounded font-bold border bg-red-50 text-red-600 border-red-200 w-8 py-0.5`}>

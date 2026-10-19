@@ -19,6 +19,7 @@ export function buildAdminLegacyScheduleFallback({
   staffIds = [],
   staffAliases = {},
   migratedStaffIds = [],
+  reviewedCellKeys = [],
   projectSchedules = {},
   legacySchedules = {},
 }) {
@@ -39,7 +40,7 @@ export function buildAdminLegacyScheduleFallback({
       staffIds: allowedStaffIds,
       staffAliases,
     });
-    if (canonicalKey) legacy[canonicalKey] = value;
+    if (canonicalKey && !reviewedCellKeys.includes(canonicalKey)) legacy[canonicalKey] = value;
   }
 
   return {

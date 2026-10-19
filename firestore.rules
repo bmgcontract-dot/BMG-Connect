@@ -88,6 +88,26 @@ service cloud.firestore {
         && scheduleMonthAllowed(get(policyPath).data, data, businessTime);
     }
 
+    // Historical configuration is server-controlled; protect every day of unknown rows.
+    function legacyReviewUpdateAllowed(before, after) {
+      let reviewFields = ['legacyCellReviews', 'legacyCellReviewHistory', 'legacyCellReviewPendingKeys'];
+      return (request.auth.token.get('admin', false) == true || !after.diff(before).affectedKeys().hasAny(reviewFields))
+        && (before.get('legacyCellReviewPendingKeys', []).size() == 0
+          || after.get('schedules', {}).diff(before.get('schedules', {})).affectedKeys()
+            .hasOnly(after.get('legacyCellReviews', {}).keys()));
+    }
+
+    function historicalCellsUnchanged(appId, documentId, before, after) {
+      let path = /databases/$(database)/documents/artifacts/$(appId)/public/data/bmg_scheduleHistoricalRoster/$(documentId);
+      return !exists(path) || (get(path).data.get('protectedCellKeys', []) is list
+        && !after.get('schedules', {}).diff(before.get('schedules', {})).affectedKeys()
+          .hasAny(get(path).data.get('protectedCellKeys', [])));
+    }
+    function historicalTableCanDelete(appId, documentId) {
+      let path = /databases/$(database)/documents/artifacts/$(appId)/public/data/bmg_scheduleHistoricalRoster/$(documentId);
+      return !exists(path) || get(path).data.get('protectedCellKeys', []).size() == 0;
+    }
+
     function hasPermission(menuId, action) {
       let profile = userProfile();
       return isAdmin()
@@ -312,7 +332,8 @@ service cloud.firestore {
         && isActiveBusinessUser()
         && isProjectCollection(collectionName)
         && (collectionName != 'bmg_projectSchedules_docs'
-          || canWriteSchedule(appId, documentId, request.resource.data))
+          || (canWriteSchedule(appId, documentId, request.resource.data)
+            && (isAdmin() || !request.resource.data.keys().hasAny(['legacyCellReviews', 'legacyCellReviewHistory', 'legacyCellReviewPendingKeys']))))
         && request.resource.data.get('projectId', '') is string
         && request.resource.data.get('projectId', '') != ''
         && canAccessProjectReference(collectionName, request.resource.data.get('projectId', ''))
@@ -325,20 +346,26 @@ service cloud.firestore {
           || (resource.data.get('projectId', '') == request.resource.data.get('projectId', '')
             && resource.data.get('month', '') == request.resource.data.get('month', '')
             && resource.data.get('id', '') == request.resource.data.get('id', '')
-            && canWriteSchedule(appId, documentId, request.resource.data)))
+            && canWriteSchedule(appId, documentId, request.resource.data)
+            && historicalCellsUnchanged(appId, documentId, resource.data, request.resource.data)
+            && legacyReviewUpdateAllowed(resource.data, request.resource.data)))
         && resource.data.get('projectId', '') is string
         && request.resource.data.get('projectId', '') is string
         && resource.data.get('projectId', '') != ''
         && request.resource.data.get('projectId', '') != ''
         && canAccessProjectReference(collectionName, resource.data.get('projectId', ''))
-        && canAccessProjectReference(collectionName, request.resource.data.get('projectId', ''))
+        // Schedule projectId is immutable above; its project access was already checked.
+        && (collectionName == 'bmg_projectSchedules_docs'
+          || canAccessProjectReference(collectionName, request.resource.data.get('projectId', '')))
         && hasPermission(menuForCollection(collectionName), 'edit');
 
       allow delete: if isBmgApp(appId)
         && isActiveBusinessUser()
         && isProjectCollection(collectionName)
         && (collectionName != 'bmg_projectSchedules_docs'
-          || canWriteSchedule(appId, documentId, resource.data))
+          || (canWriteSchedule(appId, documentId, resource.data)
+            && historicalTableCanDelete(appId, documentId)
+            && resource.data.get('legacyCellReviewPendingKeys', []).size() == 0))
         && resource.data.get('projectId', '') is string
         && resource.data.get('projectId', '') != ''
         && canAccessProjectReference(collectionName, resource.data.get('projectId', ''))
@@ -377,27 +404,27 @@ service cloud.firestore {
 
     match /artifacts/{appId}/public/data/{statusCollection}/{statusId} {
       allow read: if isBmgApp(appId)
-        && isActiveBusinessUser()
         && isCentralFeeStatusCollection(statusCollection)
+        && isActiveBusinessUser()
         && resource.data.projectId is string
         && canAccessProjectId(resource.data.projectId)
         && hasPermission('proj_centralfee', 'view');
       allow create: if isBmgApp(appId)
-        && isActiveBusinessUser()
         && isCentralFeeStatusCollection(statusCollection)
+        && isActiveBusinessUser()
         && request.resource.data.projectId is string
         && canAccessProjectId(request.resource.data.projectId)
         && hasPermission('proj_centralfee', 'save');
       allow update: if isBmgApp(appId)
-        && isActiveBusinessUser()
         && isCentralFeeStatusCollection(statusCollection)
+        && isActiveBusinessUser()
         && resource.data.projectId is string
         && request.resource.data.projectId == resource.data.projectId
         && canAccessProjectId(resource.data.projectId)
         && hasPermission('proj_centralfee', 'edit');
       allow delete: if isBmgApp(appId)
-        && isActiveBusinessUser()
         && isCentralFeeStatusCollection(statusCollection)
+        && isActiveBusinessUser()
         && resource.data.projectId is string
         && canAccessProjectId(resource.data.projectId)
         && hasPermission('proj_centralfee', 'delete');
@@ -436,10 +463,11 @@ service cloud.firestore {
     }
 
     match /artifacts/{appId}/public/data/{collectionName}/{document=**} {
-      allow read: if isAdmin();
-      allow write: if isAdmin()
-        && collectionName != 'bmg_projectSchedules_docs'
-        && collectionName != 'bmg_scheduleWritePolicy';
+      allow read: if isAdmin() && collectionName != 'bmg_scheduleHistoricalRoster';
+      allow write: if collectionName != 'bmg_projectSchedules_docs'
+        && collectionName != 'bmg_scheduleWritePolicy'
+        && collectionName != 'bmg_scheduleHistoricalRoster'
+        && isAdmin();
     }
 
     match /{document=**} {

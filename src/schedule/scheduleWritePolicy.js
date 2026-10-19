@@ -83,10 +83,26 @@ export const VERIFIED_SCHEDULE_SCOPES = Object.freeze([
   {
     "projectId": "vx1tm89oi",
     "month": "2026-10"
+  },
+  {
+    "projectId": "ioblbvq9p",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "vivwmaynf",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "vzdknz8j1",
+    "month": "2026-10"
+  },
+  {
+    "projectId": "z8z448en8",
+    "month": "2026-10"
   }
 ]);
 
-export const ROLLING_SCHEDULE_PROJECTS = Object.freeze(["r7n92q0md","nasqxexpr","vg0zs4rlr","063hu1m48","0hk7hi6gv","4j2oss0xy","8xyoxaz5g","bwzljr0j8","flco5wcsi","iiyoz3luw","jm8gbol9b","o7unooeq8","t22w7g8jc","tmpkcdb86","x39fybz83","xdkpztgl6","z9laf9hrh","e0uggx84s","endmmc2ms","vx1tm89oi"]);
+export const ROLLING_SCHEDULE_PROJECTS = Object.freeze(["r7n92q0md","nasqxexpr","vg0zs4rlr","063hu1m48","0hk7hi6gv","4j2oss0xy","8xyoxaz5g","bwzljr0j8","flco5wcsi","iiyoz3luw","jm8gbol9b","o7unooeq8","t22w7g8jc","tmpkcdb86","x39fybz83","xdkpztgl6","z9laf9hrh","e0uggx84s","endmmc2ms","vx1tm89oi","ioblbvq9p","vivwmaynf","vzdknz8j1","z8z448en8"]);
 export const ROLLING_SCHEDULE_FROM_MONTH = '2026-11';
 const monthIndex = month => Number(month.slice(0, 4)) * 12 + Number(month.slice(5, 7)) - 1;
 

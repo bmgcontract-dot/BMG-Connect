@@ -15,6 +15,12 @@ export function scheduleRosterServer({ emulator = false } = {}) {
     verifyToken: token => getAuth(app).verifyIdToken(token, true),
     getProfile: async uid => (await db.collection('users').doc(uid).get()).data(),
     getProject: async id => (await db.doc(`artifacts/bmg-app-prod/public/data/bmg_projects_docs/${id}`).get()).data(),
+    getHistoricalContext: async (projectId, month) => db.runTransaction(async tx => {
+      const root = 'artifacts/bmg-app-prod/public/data';
+      const schedule = await tx.get(db.doc(`${root}/bmg_projectSchedules_docs/${projectId}_${month}`));
+      const config = await tx.get(db.doc(`${root}/bmg_scheduleHistoricalRoster/${projectId}_${month}`));
+      return { schedule: schedule.exists ? schedule.data() : null, config: config.exists ? config.data() : null };
+    }, { readOnly: true }),
     getStaff: async department => (await db.collection('users').where('department', '==', department)
       .select('id', 'employeeId', 'firstName', 'lastName', 'position').limit(501).get()).docs
       .map(doc => ({ ...doc.data(), id: doc.data().id || doc.id })),
@@ -31,7 +37,8 @@ export async function handleScheduleRoster(request, response, reader) {
   try {
     const token = /^Bearer (.+)$/.exec(request.headers.authorization || '')?.[1];
     const projectId = new URL(request.url, 'http://localhost').searchParams.get('projectId');
-    const result = await reader({ token, projectId });
+    const month = new URL(request.url, 'http://localhost').searchParams.get('month') || undefined;
+    const result = await reader({ token, projectId, month });
     response.statusCode = 200; response.end(JSON.stringify(result));
   } catch (error) {
     response.statusCode = error.status || 500;

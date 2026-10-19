@@ -1,3 +1,4 @@
+import { applyReviewedCellDraft, assertReviewIsCurrent } from '../../src/schedule/legacyCellReview.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -23,7 +24,7 @@ function screen(persist, overrides = {}) {
     scheduleDraftRef: { current: null }, setScheduleDraft() {},
     currentUser: { username: 'admin', firstName: 'Test', lastName: 'Admin', position: 'Admin' },
     setProjectScheduleRecords: persist, upsertProjectSchedule, GOOGLE_SCRIPT_CONFIG: {},
-    projectScheduleRecords: [], scheduleDocumentEqual,
+    projectScheduleRecords: [], scheduleDocumentEqual, applyReviewedCellDraft, assertReviewIsCurrent,
     alert: message => messages.push(message), console: { error() {} },
     ...overrides,
   };
@@ -63,9 +64,9 @@ test('editing a schedule cell stays in a local draft until Save', () => {
   const updateEnd = source.indexOf('\n\n  // ... (View Components)', updateStart);
   let draft;
   const update = new Function(
-    'isLegacyScheduleReadOnly', 'scheduleSaveInFlight', 'setScheduleDraftCells', 'canWriteScheduleNow',
+    'canEditLegacyCell', 'scheduleSaveInFlight', 'setScheduleDraftCells', 'canWriteScheduleNow', 'selectedProjectScheduleStaff',
     `${source.slice(updateStart, updateEnd)}; return updateSchedule;`,
-  )(false, { current: false }, updater => { draft = updater({ 'u_2026-09-01': 'M3' }); }, () => true);
+  )(() => true, { current: false }, updater => { draft = updater({ 'u_2026-09-01': 'M3' }); }, () => true, []);
   update('u', '2026-09-01', 'H');
   assert.deepEqual(draft, { 'u_2026-09-01': 'H' });
 });
@@ -75,9 +76,9 @@ test('editing is ignored while a schedule save is awaiting acknowledgement', () 
   const updateEnd = source.indexOf('\n\n  // ... (View Components)', updateStart);
   let calls = 0;
   const update = new Function(
-    'isLegacyScheduleReadOnly', 'scheduleSaveInFlight', 'setScheduleDraftCells', 'canWriteScheduleNow',
+    'canEditLegacyCell', 'scheduleSaveInFlight', 'setScheduleDraftCells', 'canWriteScheduleNow', 'selectedProjectScheduleStaff',
     `${source.slice(updateStart, updateEnd)}; return updateSchedule;`,
-  )(false, { current: true }, () => { calls++; }, () => true);
+  )(() => true, { current: true }, () => { calls++; }, () => true, []);
   update('u', '2026-09-01', 'H');
   assert.equal(calls, 0);
 });
@@ -172,10 +173,10 @@ test('direct cell handler cannot edit while scope policy is closed', () => {
   const updateStart = source.indexOf('  const updateSchedule = ');
   const updateEnd = source.indexOf('\n\n  // ... (View Components)', updateStart);
   let calls = 0;
-  const update = new Function('isLegacyScheduleReadOnly', 'scheduleSaveInFlight',
-    'setScheduleDraftCells', 'canWriteScheduleNow',
+  const update = new Function('canEditLegacyCell', 'scheduleSaveInFlight',
+    'setScheduleDraftCells', 'canWriteScheduleNow', 'selectedProjectScheduleStaff',
     `${source.slice(updateStart, updateEnd)}; return updateSchedule;`,
-  )(false, { current: false }, () => { calls++; }, () => false);
+  )(() => true, { current: false }, () => { calls++; }, () => false);
   update('u', '2026-09-01', 'H');
   assert.equal(calls, 0);
 });
@@ -189,4 +190,31 @@ test('direct Save cannot resubmit a closed approval', async () => {
   await ui.save();
   assert.equal(writes, 0);
   assert.match(ui.messages[0], /ล็อคปิดยอด/);
+});
+
+
+test('actual partial Save persists only reviewed draft keys and retains deferred absence and approval', async () => {
+  const accepted = 'u_2026-09-01', deferred = 'u_2026-09-02_act';
+  const record = { id: 'p_2026-09', projectId: 'p', month: '2026-09', schedules: { [accepted]: 'M3' },
+    note: 'original', approval: { status: 'Pending Manager' }, legacyCellReviewPendingKeys: [deferred],
+    legacyCellReviews: { [accepted]: { decision: 'keep-current' } } };
+  let saved;
+  const ui = screen(async update => { saved = update([record])[0]; return { ok: true }; }, {
+    isLegacyScheduleReadOnly: true, reviewedLegacyKeys: [accepted], scheduleScopeKey: record.id,
+    projectScheduleRecords: [record], schedulesRef: { current: { [accepted]: 'V', [deferred]: 'O' } },
+  });
+  await ui.save();
+  assert.deepEqual(saved.schedules, { [accepted]: 'V' });
+  assert.deepEqual(saved.approval, record.approval); assert.equal(saved.note, 'original');
+  assert.match(ui.messages[0], /เฉพาะช่องที่ยืนยัน/);
+});
+
+test('actual cell handler ignores unreviewed keys while allowing accepted keys', () => {
+  const updateStart = source.indexOf('  const updateSchedule = ');
+  const updateEnd = source.indexOf('\n\n  // ... (View Components)', updateStart);
+  let cells = {};
+  const update = new Function('canEditLegacyCell', 'scheduleSaveInFlight', 'setScheduleDraftCells', 'canWriteScheduleNow', 'selectedProjectScheduleStaff',
+    `${source.slice(updateStart, updateEnd)}; return updateSchedule;`)(key => key === 'u_2026-09-01', { current: false }, fn => { cells = fn(cells); }, () => true, []);
+  update('u', '2026-09-02', 'O', 'act'); assert.deepEqual(cells, {});
+  update('u', '2026-09-01', 'V', 'plan'); assert.deepEqual(cells, { 'u_2026-09-01': 'V' });
 });
